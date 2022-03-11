@@ -1,5 +1,5 @@
 from numpy.testing import assert_almost_equal
-from ..djimaging.utils.scanm_utils import get_pixel_size_um
+from djimaging.utils.scanm_utils import get_pixel_size_um
 
 
 def test_get_pixel_size_um_64_default_scan1():
@@ -42,7 +42,7 @@ def test_get_pixel_size_um_128_wide_scan1():
     setupid = 1
     nypix = 128
     zoom = 0.15
-    exp = 1.4583333333333335
+    exp = 5.833333333333334
     obs = get_pixel_size_um(setupid=setupid, nypix=nypix, zoom=zoom)
     assert_almost_equal(obs, exp, decimal=4)
 
