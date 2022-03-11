@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def get_pixel_size_um(setupid, nypix, zoom):
+def get_pixel_size_um(setupid: int, nypix: int, zoom: float) -> float:
     """Get width / height of a pixel in um"""
     setupid = int(setupid)
 
@@ -18,7 +18,7 @@ def get_pixel_size_um(setupid, nypix, zoom):
     return pixel_size
 
 
-def get_retinal_position(rel_xcoord_um, rel_ycoord_um, rotation, eye):
+def get_retinal_position(rel_xcoord_um: float, rel_ycoord_um: float, rotation: float, eye: str) -> (float, float):
     """Get retinal position based on XCoord_um and YCoord_um relative to optic disk"""
     relx_rot = rel_xcoord_um * np.cos(np.deg2rad(rotation)) + rel_ycoord_um * np.sin(np.deg2rad(rotation))
     rely_rot = - rel_xcoord_um * np.sin(np.deg2rad(rotation)) + rel_ycoord_um * np.cos(np.deg2rad(rotation))
