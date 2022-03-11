@@ -106,3 +106,9 @@ ENV/
 # PyCharm Files
 .idea/
 *events.
+
+# DJ Config
+djconfig/
+*.json
+!djimaging/djconfig/README.md
+!djimaging/djconfig/djconf_template.json

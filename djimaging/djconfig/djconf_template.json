@@ -1,0 +1,19 @@
+{
+    "database.host": "",
+    "database.password": "",
+    "database.user": "",
+    "database.port": 0,
+    "database.reconnect": true,
+    "connection.init_function": null,
+    "connection.charset": "",
+    "loglevel": "INFO",
+    "safemode": true,
+    "fetch_format": "array",
+    "display.limit": 20,
+    "display.width": 14,
+    "display.show_tuple_count": true,
+    "database.use_tls": null,
+    "enable_python_native_blobs": true,
+    "stores": null,
+    "schema_name": ""
+}
