@@ -1,2 +1,4 @@
-numpy
 datajoint
+numpy
+h5py
+scipy
