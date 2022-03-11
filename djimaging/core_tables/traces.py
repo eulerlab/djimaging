@@ -1,9 +1,9 @@
 import numpy as np
 import datajoint as dj
 from copy import deepcopy
-import h5py
-import tqdm
 from scipy import signal
+
+from djimaging.utils.scanm_utils import load_traces_from_h5_file
 
 
 class Traces(dj.Computed):
@@ -32,71 +32,36 @@ class Traces(dj.Computed):
 
     @property
     def key_source(self):
-        return self.presentation_table & (self.field_table & 'loc_flag=0 & od_flag=0')
+        return self.presentation_table & (self.field_table & 'loc_flag=0 and od_flag=0')
 
     def make(self, key):
 
         # get all params we need for creating traces
         filepath = (self.presentation_table & key).fetch1("h5_header")
-        triggertimes, rois = (self.presentation_table * self.roi_table & key).fetch("triggertimes", "roi_id")
+        triggertimes = (self.presentation_table & key).fetch1("triggertimes")
+        roi_ids = (self.roi_table & key).fetch("roi_id")
 
-        with h5py.File(filepath, "r", driver="stdio") as h5_file:
+        roi2trace = load_traces_from_h5_file(filepath, roi_ids)
 
-            # read all traces and their times from file
-            if "Traces0_raw" in h5_file.keys() and "Tracetimes0" in h5_file.keys():
-                traces = h5_file["Traces0_raw"][()]
-                traces_times = h5_file["Tracetimes0"][()]
-                traces_dim = len(traces.shape)
+        for roi_id, roi_data in roi2trace.items():
+            trace_key = key.copy()
+            trace_key['roi_id'] = roi_id
+            trace_key['traces'] = roi_data['trace']
+            trace_key['traces_times'] = roi_data['trace_times']
+            trace_key['traces_flag'] = roi_data['trace_flag']
+
+            if trace_key['traces_flag']:
+                if triggertimes[0] < trace_key['traces_times'][0]:
+                    trace_key["trigger_flag"] = 0
+                elif trace_key['traces_flag'] and triggertimes[-1] > trace_key['traces_times'][-1]:
+                    trace_key["trigger_flag"] = 0
             else:
-                # set dim = -1 if traces couldn't be read
-                traces_dim = -1
+                trace_key["trigger_flag"] = 0
 
-            for roi_id in tqdm.tqdm(rois, desc=f"{filepath}"):
-                idx = roi_id - 1
-
-                # Defautl values
-                out_of_bounds = False  # if idx not valid skip file without of bound error
-                trigger_flag = 1
-                trace_flag = 0
-                trace = np.zeros(0)
-                trace_times = np.zeros(0)
-
-                # copy traces and their times to key if their dimension is valid...
-                # TODO: Check, why can this be out of range?!
-                if traces_dim == 3:
-                    if len(traces[0, 0, :]) <= idx:
-                        out_of_bounds = True  # if idx not valid skip file without of bound error
-                        trace_flag = 0
-                    else:
-                        trace = traces[:, :, idx]
-                        trace_times = traces_times[:, :, idx]
-                        trace_flag = 1
-                elif traces_dim == 2:
-                    if len(traces[0, :]) <= idx:
-                        out_of_bounds = True  # if idx not valid skip file without of bound error
-                        trace_flag = 0
-                    else:
-                        trace = traces[:, idx]
-                        trace_times = traces_times[:, idx]
-                        trace_flag = 1
-
-                if not out_of_bounds:
-                    if triggertimes[0] < trace_times[0]:
-                        trigger_flag = 0
-                        print(f'WARNING: Stimulus onset is before trace onset!\n{key}')
-
-                    if triggertimes[-1] > trace_times[-1]:
-                        trigger_flag = 0
-                        print(f'WARNING: Stimulus offset is after trace offset!\n{key}')
-
-                self.insert1(dict(
-                    **key, trigger_flag=trigger_flag, traces_flag=trace_flag,
-                    traces=trace, traces_times=trace_times, roi_id=roi_id))
+            self.insert1(trace_key)
 
 
 class DetrendParams(dj.Lookup):
-    # TODO: Add default set
-
     database = ""  # hack to suppress DJ error
 
     @property

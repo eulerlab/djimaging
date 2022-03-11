@@ -53,6 +53,7 @@ class RelativeFieldLocation(location.RelativeFieldLocation):
 
 @schema
 class RetinalFieldLocation(location.RetinalFieldLocation):
+    relativefieldlocalation_table = RelativeFieldLocation
     expinfo_table = Experiment.ExpInfo
 
 
@@ -86,3 +87,9 @@ class DetrendSnippets(traces.DetrendSnippets):
 @schema
 class Averages(traces.Averages):
     detrendsnippets_table = DetrendSnippets
+
+
+
+
+
+

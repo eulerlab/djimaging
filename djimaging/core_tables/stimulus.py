@@ -3,6 +3,7 @@ import numpy as np
 import datajoint as dj
 from copy import deepcopy
 import h5py
+import tqdm
 
 from ..utils.data_utils import list_h5_files, extract_h5_table
 
@@ -10,41 +11,47 @@ from ..utils.data_utils import list_h5_files, extract_h5_table
 class Stimulus(dj.Manual):
     database = ""  # hack to suppress DJ error
 
-    definition = """
-    # Light stimuli
-
-    stim_id             :tinyint            # Unique integer identifier
-    ---
-    framerate           :float              # framerate in hz
-    stimulusname        :varchar(255)       # string identifier
-    stimulus_trace      :longblob           # 2d or 3d array of the stimulus
-    stimulus_info       :longblob           # dict of additional stimulus info
-    is_colour           :tinyint            # is stimulus coloured (eg, noise X cnoise )
-    stim_path           :varchar(255)       # Path to hdf5 file containing numerical array and info about stim
-    commit_id           :varchar(255)       # Commit id corresponding to stimulus entry in Github repo
-    alias               :varchar(9999)      # Strings (_ seperator) used to identify this stimulus
-    isrepeated          :tinyint unsigned   # Is the stimilus repeated? Used for snippets
-    ntrigger_rep = 0    :int unsigned       # Number of triggers per repetition  
-    """
+    @property
+    def definition(self):
+        definition = """
+        # Light stimuli
+    
+        stim_id             :tinyint            # Unique integer identifier
+        ---
+        framerate           :float              # framerate in hz
+        stimulusname        :varchar(255)       # string identifier
+        stimulus_trace      :longblob           # 2d or 3d array of the stimulus
+        stimulus_info       :varchar(9999)      # additional stimulus info in string format
+        is_colour           :tinyint            # is stimulus coloured (eg, noise X cnoise )
+        stim_path           :varchar(255)       # Path to hdf5 file containing numerical array and info about stim
+        commit_id           :varchar(255)       # Commit id corresponding to stimulus entry in Github repo
+        alias               :varchar(9999)      # Strings (_ seperator) used to identify this stimulus
+        isrepeated          :tinyint unsigned   # Is the stimilus repeated? Used for snippets
+        ntrigger_rep = 0    :int unsigned       # Number of triggers per repetition  
+        """
+        return definition
 
 
 class Presentation(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     # TODO: Add Pharamcology?
-    definition = """
-    # information about each stimulus presentation
-    -> self.field_table
-    -> self.stimulus_table
-    ---
-    h5_header             :varchar(255)     # path to h5 file
-    triggertimes          :longblob         # triggertimes in each presentation
-    triggervalues         :longblob         # values of the recorded triggers
-    ntriggers             :int              # number  of triggers
-    scan_line_duration=-1 :float            # duration of one line scan
-    scan_num_lines=-1     :float            # number of scan lines (in XZ scan)
-    scan_frequency=-1     :float            # effective sampling frequency for each pixel in the scan field
-    """
+    @property
+    def definition(self):
+        definition = """
+        # information about each stimulus presentation
+        -> self.field_table
+        -> self.stimulus_table
+        ---
+        h5_header             :varchar(255)     # path to h5 file
+        triggertimes          :longblob         # triggertimes in each presentation
+        triggervalues         :longblob         # values of the recorded triggers
+        ntriggers             :int              # number  of triggers
+        scan_line_duration=-1 :float            # duration of one line scan
+        scan_num_lines=-1     :float            # number of scan lines (in XZ scan)
+        scan_frequency=-1     :float            # effective sampling frequency for each pixel in the scan field
+        """
+        return definition
 
     field_table = None
     stimulus_table = None
@@ -52,92 +59,95 @@ class Presentation(dj.Computed):
     experiment_table = None
 
     class ScanInfo(dj.Part):
-        definition = """
-        #meta data recorded in scamM header file
-        -> master
-        ---
-
-        hdrleninvaluepairs         :float                      #
-        hdrleninbytes              :float                      #
-        minvolts_ao                :float                      #
-        maxvolts_ao                :float                      #
-        stimchanmask               :float                      #
-        maxstimbufmaplen           :float                      #
-        numberofstimbufs           :float                      #
-        targetedpixdur_us          :float                      #
-        minvolts_ai                :float                      #
-        maxvolts_ai                :float                      #
-        inputchanmask              :float                      #
-        numberofinputchans         :float                      #
-        pixsizeinbytes             :float                      #
-        numberofpixbufsset         :float                      #
-        pixeloffs                  :float                      #
-        pixbufcounter              :float                      #
-        user_scanmode              :float                      #
-        user_dxpix                 :float                      #
-        user_dypix                 :float                      #
-        user_npixretrace           :float                      #
-        user_nxpixlineoffs         :float                      #
-        user_nypixlineoffs=0       :float                      # update 20171113
-        user_divframebufreq        :float                      #
-        user_scantype              :float                      #
-        user_scanpathfunc          :varchar(255)               #
-        user_nsubpixoversamp       :float                      #
-        user_nfrperstep            :float                      #
-        user_xoffset_v             :float                      #
-        user_yoffset_v             :float                      #
-        user_offsetz_v=0           :float                      #
-        user_zoomz=0               :float                      # update 20171113
-        user_noyscan=0             :float                      # update 20171113
-        realpixdur                 :float                      #
-        oversampfactor             :float                      #
-        xcoord_um                  :float                      #
-        ycoord_um                  :float                      #
-        zcoord_um                  :float                      #
-        zstep_um=0                 :float                      #
-        zoom                       :float                      #
-        angle_deg                  :float                      #
-        datestamp_d_m_y            :varchar(255)               #
-        timestamp_h_m_s_ms         :varchar(255)               #
-        inchan_pixbuflenlist       :varchar(255)               #
-        username                   :varchar(255)               #
-        guid                       :varchar(255)               #
-        origpixdatafilename        :varchar(255)               #
-        stimbuflenlist             :varchar(255)               #
-        callingprocessver          :varchar(255)               #
-        callingprocesspath         :varchar(255)               #
-        targetedstimdurlist        :varchar(255)               #
-        computername               :varchar(255)               #
-        scanm_pver_targetos        :varchar(255)               #
-        user_zlensscaler=0         :float                      #
-        user_stimbufperfr=0        :float                      #
-        user_aspectratiofr=0       :float                      #
-        user_zforfastscan=0        :float                      #
-        user_zlensshifty=0         :float                      #
-        user_nzpixlineoff=0        :float                      #
-        user_dzpix=0               :float                      #
-        user_setupid=0             :float                      #
-        user_nzpixretrace=0        :float                      #
-        user_laserwavelen_nm=0     :float                      #
-        user_scanpathfunc          :varchar(255)               #
-        user_dzfrdecoded=0         :float                      #
-        user_dxfrdecoded=0         :float                      # update 20171113
-        user_dyfrdecoded=0         :float                      # update 20171113
-        user_zeroz_v=0             :float                      #
-        igorguiver                 :varchar(255)               #
-        user_comment=''            :varchar(255)               #
-        user_objective=''          :varchar(255)               #
-        realstimdurlist=""         :varchar(255)               # update 20180529
-        user_ichfastscan=0         :float                      # update 20171113
-        user_trajdefvrange_v=0     :float                      # update 20171113
-        user_ntrajparams=0         :float                      # update 20171113
-        user_offset_v=0            :float                      # update 20180529
-        user_etl_polarity_v=0      :float                      # update 20180529
-        user_etl_min_v=0           :float                      # update 20180529
-        user_etl_max_v=0           :float                      # update 20180529
-        user_etl_neutral_v=0       :float                      # update 20180529
-        user_nimgperfr=0           :float                      # update 20180529
-        """
+        @property
+        def definition(self):
+            definition = """
+            #meta data recorded in scamM header file
+            -> master
+            ---
+    
+            hdrleninvaluepairs         :float                      #
+            hdrleninbytes              :float                      #
+            minvolts_ao                :float                      #
+            maxvolts_ao                :float                      #
+            stimchanmask               :float                      #
+            maxstimbufmaplen           :float                      #
+            numberofstimbufs           :float                      #
+            targetedpixdur_us          :float                      #
+            minvolts_ai                :float                      #
+            maxvolts_ai                :float                      #
+            inputchanmask              :float                      #
+            numberofinputchans         :float                      #
+            pixsizeinbytes             :float                      #
+            numberofpixbufsset         :float                      #
+            pixeloffs                  :float                      #
+            pixbufcounter              :float                      #
+            user_scanmode              :float                      #
+            user_dxpix                 :float                      #
+            user_dypix                 :float                      #
+            user_npixretrace           :float                      #
+            user_nxpixlineoffs         :float                      #
+            user_nypixlineoffs=0       :float                      # update 20171113
+            user_divframebufreq        :float                      #
+            user_scantype              :float                      #
+            user_scanpathfunc          :varchar(255)               #
+            user_nsubpixoversamp       :float                      #
+            user_nfrperstep            :float                      #
+            user_xoffset_v             :float                      #
+            user_yoffset_v             :float                      #
+            user_offsetz_v=0           :float                      #
+            user_zoomz=0               :float                      # update 20171113
+            user_noyscan=0             :float                      # update 20171113
+            realpixdur                 :float                      #
+            oversampfactor             :float                      #
+            xcoord_um                  :float                      #
+            ycoord_um                  :float                      #
+            zcoord_um                  :float                      #
+            zstep_um=0                 :float                      #
+            zoom                       :float                      #
+            angle_deg                  :float                      #
+            datestamp_d_m_y            :varchar(255)               #
+            timestamp_h_m_s_ms         :varchar(255)               #
+            inchan_pixbuflenlist       :varchar(255)               #
+            username                   :varchar(255)               #
+            guid                       :varchar(255)               #
+            origpixdatafilename        :varchar(255)               #
+            stimbuflenlist             :varchar(255)               #
+            callingprocessver          :varchar(255)               #
+            callingprocesspath         :varchar(255)               #
+            targetedstimdurlist        :varchar(255)               #
+            computername               :varchar(255)               #
+            scanm_pver_targetos        :varchar(255)               #
+            user_zlensscaler=0         :float                      #
+            user_stimbufperfr=0        :float                      #
+            user_aspectratiofr=0       :float                      #
+            user_zforfastscan=0        :float                      #
+            user_zlensshifty=0         :float                      #
+            user_nzpixlineoff=0        :float                      #
+            user_dzpix=0               :float                      #
+            user_setupid=0             :float                      #
+            user_nzpixretrace=0        :float                      #
+            user_laserwavelen_nm=0     :float                      #
+            user_scanpathfunc          :varchar(255)               #
+            user_dzfrdecoded=0         :float                      #
+            user_dxfrdecoded=0         :float                      # update 20171113
+            user_dyfrdecoded=0         :float                      # update 20171113
+            user_zeroz_v=0             :float                      #
+            igorguiver                 :varchar(255)               #
+            user_comment=''            :varchar(255)               #
+            user_objective=''          :varchar(255)               #
+            realstimdurlist=""         :varchar(255)               # update 20180529
+            user_ichfastscan=0         :float                      # update 20171113
+            user_trajdefvrange_v=0     :float                      # update 20171113
+            user_ntrajparams=0         :float                      # update 20171113
+            user_offset_v=0            :float                      # update 20180529
+            user_etl_polarity_v=0      :float                      # update 20180529
+            user_etl_min_v=0           :float                      # update 20180529
+            user_etl_max_v=0           :float                      # update 20180529
+            user_etl_neutral_v=0       :float                      # update 20180529
+            user_nimgperfr=0           :float                      # update 20180529
+            """
+            return definition
 
     def make(self, key):
         field = (self.field_table & key).fetch1("field")
@@ -147,8 +157,7 @@ class Presentation(dj.Computed):
         assert os.path.exists(pre_data_path), f"Could not read path: {pre_data_path}"
 
         h5_files = list_h5_files(folder=pre_data_path, hidden=False, field=field, field_loc=field_loc)
-
-        stim_alias = (Stimulus() & key).fetch1("alias").split('_')
+        stim_alias = (self.stimulus_table & key).fetch1("alias").split('_')
 
         for h5_file in h5_files:
             split_string = h5_file[:h5_file.find(".h5")].split("_")
@@ -207,6 +216,5 @@ class Presentation(dj.Computed):
         for k in remove_list:
             scaninfo_key.pop(k, None)
 
-        print("Added new Presentation for: " + filepath)
         self.insert1(pres_key)
-        (Presentation().ScanInfo() & key).insert1(scaninfo_key)
+        (self.ScanInfo() & key).insert1(scaninfo_key)

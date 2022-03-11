@@ -2,6 +2,12 @@ import h5py
 import os
 
 
+def load_h5_data(filename):
+    """Helper function to load h5 file."""
+    with h5py.File(filename, 'r') as f:
+        return {key: f[key][:] for key in list(f.keys())}
+
+
 def load_h5_table(*tablename, filename, lower_keys=False):
     """Load h5 tables from a filename"""
     with h5py.File(filename, 'r', driver="stdio") as f:
@@ -41,3 +47,4 @@ def list_h5_files(folder, hidden=False, field=None, field_loc=None):
                 continue
         h5_files.append(file)
     return h5_files
+

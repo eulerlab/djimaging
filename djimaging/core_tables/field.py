@@ -63,6 +63,8 @@ class Field(dj.Computed):
             absz: float  # absolute position in the z axis as recorded by ScanM
             nxpix: int  # number of pixels in x
             nypix: int  # number of pixels in y
+            nxpix_offset: int  # number of offset pixels in x
+            nxpix_retrace: int  # number of retrace pixels in x
             pixel_size_um :float  # width / height of a pixel in um
             recording_depth :float  # XY-scan: single element list with IPL depth, XZ: list of ROI depths
             fromfile: varchar(255)  # info extracted from which file?
@@ -170,7 +172,9 @@ class Field(dj.Computed):
         zstack = w_params_num['User_ScanType']
 
         setupid = (self.experiment_table.ExpInfo() & key).fetch1('setupid')
-        nxpix = w_params_num["User_dxPix"] - w_params_num["User_nPixRetrace"] - w_params_num["User_nXPixLineOffs"]
+        nxpix_offset = w_params_num["User_nXPixLineOffs"]
+        nxpix_retrace = w_params_num["User_nPixRetrace"]
+        nxpix = w_params_num["User_dxPix"] - nxpix_retrace - nxpix_offset
         nypix = w_params_num["User_dyPix"]
         pixel_size_um = get_pixel_size_um(zoom=w_params_num["Zoom"], setupid=setupid, nypix=nypix)
 
@@ -180,6 +184,8 @@ class Field(dj.Computed):
         fieldinfo_key["absy"] = absy
         fieldinfo_key["absz"] = absz
         fieldinfo_key["nxpix"] = nxpix
+        fieldinfo_key["nxpix_offset"] = nxpix_offset
+        fieldinfo_key["nxpix_retrace"] = nxpix_retrace
         fieldinfo_key["nypix"] = nypix
         fieldinfo_key["pixel_size_um"] = pixel_size_um
         fieldinfo_key["fromfile"] = file
@@ -196,9 +202,9 @@ class Field(dj.Computed):
         roimask_key["roi_mask"] = roi_mask
 
         self.insert1(field_key, allow_direct_insert=True)
-        (Field.RoiMask & field_key).insert1(roimask_key, allow_direct_insert=True)
-        (Field.Zstack & field_key).insert1(zstack_key, allow_direct_insert=True)
-        (Field.FieldInfo & field_key).insert1(fieldinfo_key, allow_direct_insert=True)
+        (self.RoiMask & field_key).insert1(roimask_key, allow_direct_insert=True)
+        (self.Zstack & field_key).insert1(zstack_key, allow_direct_insert=True)
+        (self.FieldInfo & field_key).insert1(fieldinfo_key, allow_direct_insert=True)
 
 
 class Roi(dj.Computed):

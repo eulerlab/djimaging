@@ -23,10 +23,15 @@ class UserInfo(dj.Manual):
         """
         return definition
 
-    def upload_user(self, userdict=None):
-        uploaded = self.fetch("experimenter")
-        for item in userdict:
-            if item["experimenter"] not in uploaded:
-                self.insert([item])  # more than one user can be uploaded at a time
+    def upload_user(self, *userdicts):
+        for userdict in userdicts:
+            assert "experimenter" in userdict, 'Set username'
+            if userdict["experimenter"] not in self.fetch("experimenter"):
+                self.insert([userdict])
             else:
-                print("Information for that user already uploaded")
+                entry = (self & dict(experimenter=userdict["experimenter"])).fetch1()
+                if entry != userdict:
+                    print(f"WARNING: Different information for `{userdict['experimenter']}` already uploaded.")
+                else:
+                    print(f"Information for `{userdict['experimenter']}` already uploaded")
+
