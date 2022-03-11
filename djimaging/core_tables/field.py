@@ -225,10 +225,11 @@ class Roi(dj.Computed):
 
     field_table = None
 
+    @property
+    def key_source(self):
+        return self.field_table & 'od_flag=0 and loc_flag=0'
+
     def make(self, key):
-
-        print(key)
-
         # load roi_mask for insert roi for a specific experiment and field
         roi_mask = (Field.RoiMask & key).fetch1("roi_mask")
         pixel_size_um = (Field.FieldInfo & key).fetch1("pixel_size_um")
