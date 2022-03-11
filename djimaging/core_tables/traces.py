@@ -8,20 +8,23 @@ from scipy import signal
 
 class Traces(dj.Computed):
     database = ""  # hack to suppress DJ error
+
+    @property
+    def definition(self):
+        definition = """
+        # Raw Traces for each roi under a specific presentation
     
-    definition = """
-    # Raw Traces for each roi under a specific presentation
-
-    -> self.field_table
-    -> self.presentation_table
-    -> self.roi_table
-
-    ---
-    traces                  :longblob              # array of raw traces
-    traces_times            :longblob              # numerical array of trace times
-    traces_flag             :tinyint unsigned      # flag if values in traces are correct(1) or not(0)
-    trigger_flag = 1        :tinyint unsigned      # flag if triggertimes aren't outside tracetimes
-    """
+        -> self.field_table
+        -> self.presentation_table
+        -> self.roi_table
+    
+        ---
+        traces                  :longblob              # array of raw traces
+        traces_times            :longblob              # numerical array of trace times
+        traces_flag             :tinyint unsigned      # flag if values in traces are correct(1) or not(0)
+        trigger_flag = 1        :tinyint unsigned      # flag if triggertimes aren't outside tracetimes
+        """
+        return definition
 
     presentation_table = None
     field_table = None
@@ -92,34 +95,40 @@ class Traces(dj.Computed):
 
 
 class DetrendParams(dj.Lookup):
+    # TODO: Add default set
+
     database = ""  # hack to suppress DJ error
-    
-    # TODO: Add default
-    definition = """
-    detrend_param_set_id:           int         #unique param set id
-    ---
-    window_length=60:               int       #window length for SavGol filter in seconds
-    poly_order=3:                   int         # order of polynomial for savgol filter
-    non_negative=0:                 tinyint unsigned
-    subtract_baseline=0:            tinyint unsigned
-    standardize=1:                  tinyint unsigned  # whether to standardize (divide by sd)
-    """
+
+    @property
+    def definition(self):
+        definition = """
+        detrend_param_set_id:           int         #unique param set id
+        ---
+        window_length=60:               int       #window length for SavGol filter in seconds
+        poly_order=3:                   int         # order of polynomial for savgol filter
+        non_negative=0:                 tinyint unsigned
+        subtract_baseline=0:            tinyint unsigned
+        standardize=1:                  tinyint unsigned  # whether to standardize (divide by sd)
+        """
+        return definition
 
 
 class DetrendTraces(dj.Computed):
     database = ""  # hack to suppress DJ error
-    
-    definition = """
-    # performs basic preprocessing on raw traces
-    -> DetrendParams
-    -> Traces
-    -> Presentation
-    ---
-    detrend_traces:         longblob        #detrended traces
-    smoothed_traces:        longblob        #output of savgol filter which is
-                                            #subtracted from the raw traces to
-                                            #yield detrended traces
-    """
+
+    @property
+    def definition(self):
+        definition = """
+        # performs basic preprocessing on raw traces
+        -> self.detrendparams_table
+        -> self.traces_table
+        ---
+        detrend_traces:         longblob        #detrended traces
+        smoothed_traces:        longblob        #output of savgol filter which is
+                                                #subtracted from the raw traces to
+                                                #yield detrended traces
+        """
+        return definition
 
     presentation_table = None
     detrendparams_table = None
@@ -186,21 +195,24 @@ class DetrendTraces(dj.Computed):
 
 class DetrendSnippets(dj.Computed):
     database = ""  # hack to suppress DJ error
-    
-    definition = """
-    # Snippets created from slicing filtered traces using the triggertimes. 
 
-    -> Stimulus
-    -> Presentation
-    -> Traces
-    -> DetrendTraces
-    ---
-    detrend_snippets             :longblob     # array of snippets (time x repetitions)
-    detrend_snippets_times       :longblob     # array of snippet times (time x repetitions)
-    smoothed_snippets            :longblob     # snippeted, smoothed signal (time x repetitions)
-    triggertimes_snippets        :longblob     # snippeted triggertimes (ntrigger_rep x repetitions)
-    droppedlastrep_flag          :tinyint unsigned 
-    """
+    @property
+    def definition(self):
+        definition = """
+        # Snippets created from slicing filtered traces using the triggertimes. 
+    
+        -> self.stimulus_table
+        -> self.presentation_table
+        -> self.traces_table
+        -> self.detrendtraces_table
+        ---
+        detrend_snippets             :longblob     # array of snippets (time x repetitions)
+        detrend_snippets_times       :longblob     # array of snippet times (time x repetitions)
+        smoothed_snippets            :longblob     # snippeted, smoothed signal (time x repetitions)
+        triggertimes_snippets        :longblob     # snippeted triggertimes (ntrigger_rep x repetitions)
+        droppedlastrep_flag          :tinyint unsigned 
+        """
+        return definition
 
     stimulus_table = None
     presentation_table = None
@@ -261,17 +273,20 @@ class DetrendSnippets(dj.Computed):
 
 class Averages(dj.Computed):
     database = ""  # hack to suppress DJ error
-    
-    definition = """
-    # Snippets created from slicing filtered traces using the triggertimes. 
 
-    -> DetrendSnippets
-    ---
-    average             :longblob  # array of snippet average (time)
-    average_norm        :longblob  # normalized array of snippet average (time)
-    average_times       :longblob  # array of average time, starting at t=0 (time)
-    triggertimes_rel    :longblob  # array of relative triggertimes 
-    """
+    @property
+    def definition(self):
+        definition = """
+        # Snippets created from slicing filtered traces using the triggertimes. 
+    
+        -> self.detrendsnippets_table
+        ---
+        average             :longblob  # array of snippet average (time)
+        average_norm        :longblob  # normalized array of snippet average (time)
+        average_times       :longblob  # array of average time, starting at t=0 (time)
+        triggertimes_rel    :longblob  # array of relative triggertimes 
+        """
+        return definition
 
     detrendsnippets_table = None
 

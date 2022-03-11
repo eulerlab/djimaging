@@ -60,18 +60,19 @@ class RetinalFieldLocation(dj.Computed):
     # location of the recorded fields relative to the optic disk
     # XCoord_um is the relative position from back towards curtain, i.e. larger XCoord_um means closer curtain
     # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
-    -> RelativeFieldLocation
+    -> self.relativefieldlocalation_table
     -> self.expinfo_table
     ---
     ventral_dorsal_pos_um       :float      # position on the ventral-dorsal axis, greater 0 means dorsal
     temporal_nasal_pos_um       :float      # position on the temporal-nasal axis, greater 0 means nasal
     """
 
+    relativefieldlocalation_table = None
     expinfo_table = None
 
     def make(self, key):
-        relx, rely = (RelativeFieldLocation() & key).fetch1('relx', 'rely')
-        eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
+        relx, rely = (self.relativefieldlocalation_table & key).fetch1('relx', 'rely')
+        eye, prepwmorient = (self.expinfo_table & key).fetch1('eye', 'prepwmorient')
 
         ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(
             rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)

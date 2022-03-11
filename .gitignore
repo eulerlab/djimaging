@@ -112,3 +112,6 @@ djconfig/
 *.json
 !djimaging/djconfig/README.md
 !djimaging/djconfig/djconf_template.json
+
+# Experimental stuff
+experimental/
