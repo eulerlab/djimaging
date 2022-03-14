@@ -1,9 +1,10 @@
 import datajoint as dj
 
-from ..utils.scanm_utils import get_retinal_position
+from djimaging.utils.scanm_utils import get_retinal_position
+from djimaging.utils.dj_utils import PlaceholderTable
 
 
-class RelativeFieldLocation(dj.Computed):
+class RelativeFieldLocationTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     @property
@@ -22,8 +23,8 @@ class RelativeFieldLocation(dj.Computed):
         """
         return definition
 
-    field_table = None
-    expinfo_table = None
+    field_table = PlaceholderTable
+    expinfo_table = PlaceholderTable
 
     @property
     def key_source(self):
@@ -66,7 +67,7 @@ class RelativeFieldLocation(dj.Computed):
         self.insert1(loc_key)
 
 
-class RetinalFieldLocation(dj.Computed):
+class RetinalFieldLocationTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     @property
@@ -84,8 +85,8 @@ class RetinalFieldLocation(dj.Computed):
         """
         return definition
 
-    relativefieldlocalation_table = None
-    expinfo_table = None
+    relativefieldlocalation_table = PlaceholderTable
+    expinfo_table = PlaceholderTable
 
     def make(self, key):
         relx, rely = (self.relativefieldlocalation_table & key).fetch1('relx', 'rely')

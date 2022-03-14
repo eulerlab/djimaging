@@ -5,10 +5,11 @@ from copy import deepcopy
 import h5py
 import tqdm
 
-from ..utils.data_utils import list_h5_files, extract_h5_table
+from djimaging.utils.data_utils import list_h5_files, extract_h5_table
+from djimaging.utils.dj_utils import PlaceholderTable
 
 
-class Stimulus(dj.Manual):
+class StimulusTemplate(dj.Manual):
     database = ""  # hack to suppress DJ error
 
     @property
@@ -32,7 +33,7 @@ class Stimulus(dj.Manual):
         return definition
 
 
-class Presentation(dj.Computed):
+class PresentationTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     # TODO: Add Pharamcology?
@@ -53,10 +54,10 @@ class Presentation(dj.Computed):
         """
         return definition
 
-    field_table = None
-    stimulus_table = None
-    userinfo_table = None
-    experiment_table = None
+    field_table = PlaceholderTable
+    stimulus_table = PlaceholderTable
+    userinfo_table = PlaceholderTable
+    experiment_table = PlaceholderTable
 
     class ScanInfo(dj.Part):
         @property

@@ -4,9 +4,10 @@ from copy import deepcopy
 from scipy import signal
 
 from djimaging.utils.scanm_utils import load_traces_from_h5_file
+from djimaging.utils.dj_utils import PlaceholderTable
 
 
-class Traces(dj.Computed):
+class TracesTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     @property
@@ -26,9 +27,9 @@ class Traces(dj.Computed):
         """
         return definition
 
-    presentation_table = None
-    field_table = None
-    roi_table = None
+    presentation_table = PlaceholderTable
+    field_table = PlaceholderTable
+    roi_table = PlaceholderTable
 
     @property
     def key_source(self):
@@ -61,7 +62,7 @@ class Traces(dj.Computed):
             self.insert1(trace_key)
 
 
-class DetrendParams(dj.Lookup):
+class DetrendParamsTemplate(dj.Lookup):
     database = ""  # hack to suppress DJ error
 
     @property
@@ -70,7 +71,7 @@ class DetrendParams(dj.Lookup):
         detrend_param_set_id:           int         #unique param set id
         ---
         window_length=60:               int       #window length for SavGol filter in seconds
-        poly_order=3:                   int         # order of polynomial for savgol filter
+        poly_order=3:                   int             # order of polynomial for savgol filter
         non_negative=0:                 tinyint unsigned
         subtract_baseline=0:            tinyint unsigned
         standardize=1:                  tinyint unsigned  # whether to standardize (divide by sd)
@@ -78,7 +79,7 @@ class DetrendParams(dj.Lookup):
         return definition
 
 
-class DetrendTraces(dj.Computed):
+class DetrendTracesTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     @property
@@ -95,9 +96,9 @@ class DetrendTraces(dj.Computed):
         """
         return definition
 
-    presentation_table = None
-    detrendparams_table = None
-    traces_table = None
+    presentation_table = PlaceholderTable
+    detrendparams_table = PlaceholderTable
+    traces_table = PlaceholderTable
 
     def make(self, key):
 
@@ -158,7 +159,7 @@ class DetrendTraces(dj.Computed):
         self.insert1(dict(key, detrend_traces=detrend_traces, smoothed_traces=smoothed_traces))
 
 
-class DetrendSnippets(dj.Computed):
+class DetrendSnippetsTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     @property
@@ -179,10 +180,10 @@ class DetrendSnippets(dj.Computed):
         """
         return definition
 
-    stimulus_table = None
-    presentation_table = None
-    traces_table = None
-    detrendtraces_table = None
+    stimulus_table = PlaceholderTable
+    presentation_table = PlaceholderTable
+    traces_table = PlaceholderTable
+    detrendtraces_table = PlaceholderTable
 
     @property
     def key_source(self):
@@ -236,7 +237,7 @@ class DetrendSnippets(dj.Computed):
         ))
 
 
-class Averages(dj.Computed):
+class AveragesTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     @property
@@ -253,7 +254,7 @@ class Averages(dj.Computed):
         """
         return definition
 
-    detrendsnippets_table = None
+    detrendsnippets_table = PlaceholderTable
 
     def make(self, key):
         snippets, times = (self.detrendsnippets_table & key).fetch1('detrend_snippets', 'detrend_snippets_times')

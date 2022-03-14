@@ -4,12 +4,13 @@ import datajoint as dj
 import numpy as np
 import h5py
 
-from ..utils.data_utils import load_h5_table
-from ..utils.filename_utils import get_file_info
-from ..utils.scanm_utils import get_pixel_size_um
+from djimaging.utils.data_utils import load_h5_table
+from djimaging.utils.filename_utils import get_file_info
+from djimaging.utils.scanm_utils import get_pixel_size_um
+from djimaging.utils.dj_utils import PlaceholderTable
 
 
-class Field(dj.Computed):
+class FieldTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     @property
@@ -24,8 +25,8 @@ class Field(dj.Computed):
         """
         return definition
 
-    experiment_table = None
-    userinfo_table = None
+    experiment_table = PlaceholderTable
+    userinfo_table = PlaceholderTable
 
     class Zstack(dj.Part):
         @property
@@ -207,7 +208,7 @@ class Field(dj.Computed):
         (self.FieldInfo & field_key).insert1(fieldinfo_key, allow_direct_insert=True)
 
 
-class Roi(dj.Computed):
+class RoiTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     @property
@@ -223,7 +224,7 @@ class Roi(dj.Computed):
         """
         return definition
 
-    field_table = None
+    field_table = PlaceholderTable
 
     @property
     def key_source(self):

@@ -1,7 +1,7 @@
 import datajoint as dj
 
 
-class UserInfo(dj.Manual):
+class UserInfoTemplate(dj.Manual):
     database = ""  # hack to suppress DJ error
 
     @property

@@ -12,33 +12,33 @@ schema = dj.Schema()
 
 
 @schema
-class UserInfo(userinfo.UserInfo):
+class UserInfo(userinfo.UserInfoTemplate):
     pass
 
 
 @schema
-class Experiment(experiment.Experiment):
+class Experiment(experiment.ExperimentTemplate):
     userinfo_table = UserInfo
 
 
 @schema
-class Field(field.Field):
+class Field(field.FieldTemplate):
     userinfo_table = UserInfo
     experiment_table = Experiment
 
 
 @schema
-class Roi(field.Roi):
+class Roi(field.RoiTemplate):
     field_table = Field
 
 
 @schema
-class Stimulus(stimulus.Stimulus):
+class Stimulus(stimulus.StimulusTemplate):
     pass
 
 
 @schema
-class Presentation(stimulus.Presentation):
+class Presentation(stimulus.PresentationTemplate):
     experiment_table = Experiment
     userinfo_table = UserInfo
     field_table = Field
@@ -46,38 +46,38 @@ class Presentation(stimulus.Presentation):
 
 
 @schema
-class RelativeFieldLocation(location.RelativeFieldLocation):
+class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
     field_table = Field
     expinfo_table = Experiment.ExpInfo
 
 
 @schema
-class RetinalFieldLocation(location.RetinalFieldLocation):
+class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
     relativefieldlocalation_table = RelativeFieldLocation
     expinfo_table = Experiment.ExpInfo
 
 
 @schema
-class Traces(traces.Traces):
+class Traces(traces.TracesTemplate):
     presentation_table = Presentation
     field_table = Field
     roi_table = Roi
 
 
 @schema
-class DetrendParams(traces.DetrendParams):
+class DetrendParams(traces.DetrendParamsTemplate):
     pass
 
 
 @schema
-class DetrendTraces(traces.DetrendTraces):
+class DetrendTraces(traces.DetrendTracesTemplate):
     presentation_table = Presentation
     detrendparams_table = DetrendParams
     traces_table = Traces
 
 
 @schema
-class DetrendSnippets(traces.DetrendSnippets):
+class DetrendSnippets(traces.DetrendSnippetsTemplate):
     stimulus_table = Stimulus
     presentation_table = Presentation
     traces_table = Traces
@@ -85,5 +85,5 @@ class DetrendSnippets(traces.DetrendSnippets):
 
 
 @schema
-class Averages(traces.Averages):
+class Averages(traces.AveragesTemplate):
     detrendsnippets_table = DetrendSnippets

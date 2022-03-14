@@ -1,6 +1,11 @@
 import datajoint as dj
 
 
+class PlaceholderTable:
+    def __and__(self, other):
+        return True
+
+
 def get_class_attributes(class_):
     class_attrs = [attr for attr in class_.__dict__.keys() if attr[:2] != '__']
     return class_attrs

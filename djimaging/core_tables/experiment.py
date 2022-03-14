@@ -5,8 +5,10 @@ from configparser import ConfigParser
 from copy import deepcopy
 from datetime import datetime
 
+from djimaging.utils.dj_utils import PlaceholderTable
 
-class Experiment(dj.Computed):
+
+class ExperimentTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     @property
@@ -24,7 +26,7 @@ class Experiment(dj.Computed):
         """
         return definition
 
-    userinfo_table = None
+    userinfo_table = PlaceholderTable
 
     def make(self, key):
         data_dir, pre_data_dir, raw_data_dir = (self.userinfo_table & key).fetch1(
