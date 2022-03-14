@@ -115,3 +115,6 @@ djconfig/
 
 # Experimental stuff
 experimental/
+!djimaging/experimental/README.md
+my_tables/
+!djimaging/my_tables/README.md
