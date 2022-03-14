@@ -8,7 +8,7 @@ from djimaging.core_tables import stimulus
 from djimaging.core_tables import traces
 
 
-schema = dj.schema(dj.config["schema_name"], locals())
+schema = dj.Schema()
 
 
 @schema
@@ -87,9 +87,3 @@ class DetrendSnippets(traces.DetrendSnippets):
 @schema
 class Averages(traces.Averages):
     detrendsnippets_table = DetrendSnippets
-
-
-
-
-
-

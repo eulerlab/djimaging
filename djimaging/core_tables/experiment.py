@@ -192,21 +192,21 @@ class Experiment(dj.Computed):
                # General preparation details set by user in preprocessing
                -> master
                ---
-               eye                         :enum("left", "right", "unknown") # left or right eye of the animal
-               projname                    :varchar(255)                   # name of experimental project
-               setupid                     :varchar(255)                   # setup 1-3
-               prep="wholemount"           :enum("wholemount", "slice")    # preparation type of the retina
-               preprem                     :varchar(255)                   # comments on the preparation
-               darkadapt_hrs               :varchar(255)                   # time spent dark adapting animal before disection
-               slicethickness_um           :varchar(255)                   # thickness of each slice in slice preparation
-               bathtemp_degc               :varchar(255)                   # temperature of bath chamber
-               prepwmorient                :smallint                       # retina orientation in chamber (0° = dorsal away from experimenter)
-               odx                         :float                          # x location of optic disk as read in from .ini file (if available)
-               ody                         :float                          # y location of optic disk as read in from .ini file (if available)
-               odz                         :float                          # z location of optic disk as read in from .ini file (if available)
-               od_ini_flag                 :tinyint unsigned               # flag (0, 1) indicating whether (1) or whether not (0)
-                                                                           # the optic disk position was documented in .ini file and
-                                                                           # is valid to use
+               eye                :enum("left", "right", "unknown") # left or right eye of the animal
+               projname           :varchar(255)                     # name of experimental project
+               setupid            :varchar(255)                     # setup 1-3
+               prep="wholemount"  :enum("wholemount", "slice")      # preparation type of the retina
+               preprem            :varchar(255)                     # comments on the preparation
+               darkadapt_hrs      :varchar(255)                     # time spent dark adapting animal before disection
+               slicethickness_um  :varchar(255)                     # thickness of each slice in slice preparation
+               bathtemp_degc      :varchar(255)                     # temperature of bath chamber
+               prepwmorient       :smallint         # retina orientation in chamber (0° = dorsal away from experimenter)
+               odx                :float            # x location of optic disk as read in from .ini file
+               ody                :float            # y location of optic disk as read in from .ini file (if available)
+               odz                :float            # z location of optic disk as read in from .ini file (if available)
+               od_ini_flag        :tinyint unsigned # flag (0, 1) indicating whether (1) or whether not (0)
+                                                    # the optic disk position was documented in .ini file and
+                                                    # is valid to use
                """
             return definition
 
@@ -235,19 +235,19 @@ class Experiment(dj.Computed):
                # Indicator used for imaging set by user in preprocessing
                -> master
                ---
-               isepored                    :varchar(255)                   # whether the retina was electroporated
-               eporrem                     :varchar(255)                   # comments about the electroporation
-               epordye                     :varchar(255)                   # which dye was used for the electroporation
-               isvirusinject               :varchar(5)                     # whether the retina was injected
-               virusvect                   :varchar(255)                   # what vector was used in the injection
-               virusserotype               :varchar(255)                   # what serotype was used in the injection
-               virustransprotein           :varchar(255)                   # the viral transprotein
-               virusinjectrem              :varchar(255)                   # comments about the injection
-               virusinjectq                :varchar(255)                   # numerical rating of the injection quality
-               isbraininject               :varchar(5)                     # whether the retina was injected
-               tracer                      :varchar(255)                   # which tracer has been used in the brain injection
-               braininjectq                :varchar(255)                   # numerical rating of the brain injection quality
-               braininjectrem              :varchar(255)                   # comments on the brain injection
+               isepored                    :varchar(255)     # whether the retina was electroporated
+               eporrem                     :varchar(255)     # comments about the electroporation
+               epordye                     :varchar(255)     # which dye was used for the electroporation
+               isvirusinject               :varchar(5)       # whether the retina was injected
+               virusvect                   :varchar(255)     # what vector was used in the injection
+               virusserotype               :varchar(255)     # what serotype was used in the injection
+               virustransprotein           :varchar(255)     # the viral transprotein
+               virusinjectrem              :varchar(255)     # comments about the injection
+               virusinjectq                :varchar(255)     # numerical rating of the injection quality
+               isbraininject               :varchar(5)       # whether the retina was injected
+               tracer                      :varchar(255)     # which tracer has been used in the brain injection
+               braininjectq                :varchar(255)     # numerical rating of the brain injection quality
+               braininjectrem              :varchar(255)     # comments on the brain injection
                """
             return definition
 

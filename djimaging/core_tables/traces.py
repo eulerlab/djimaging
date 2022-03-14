@@ -186,7 +186,7 @@ class DetrendSnippets(dj.Computed):
 
     @property
     def key_source(self):
-        return super().key_source * (self.stimulus_table & "isrepeated=1")
+        return self.stimulus_table & "isrepeated=1"
 
     def make(self, key):
         ntrigger_rep = (self.stimulus_table & key).fetch1('ntrigger_rep')
@@ -262,7 +262,7 @@ class Averages(dj.Computed):
         times = times - times[0, :]
 
         if np.any(np.std(times, axis=1) > 1e-4):
-            print(f'failed to compute average for {key}, tracetimes cannot be aligned without interpolation')
+            print(f'ERROR: Failed to compute average for {key}, tracetimes cannot be aligned without interpolation')
             return
 
         average_times = np.mean(times, axis=1)

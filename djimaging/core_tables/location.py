@@ -54,6 +54,7 @@ class RelativeFieldLocation(dj.Computed):
         absx, absy, absz, nxpix, nxpix_offset, nypix, pixel_size_um = (self.field_table.FieldInfo & key).fetch1(
             'absx', 'absy', 'absz', 'nxpix', 'nxpix_offset', 'nypix', 'pixel_size_um')
 
+        # Get center of scan field
         cabsx = absx + (nxpix_offset + nxpix / 2.) * pixel_size_um
         cabsy = absy + (nxpix_offset + nypix / 2.) * pixel_size_um
 
