@@ -29,7 +29,7 @@ class ExperimentTemplate(dj.Computed):
     userinfo_table = PlaceholderTable
 
     def make(self, key):
-        data_dir, pre_data_dir, raw_data_dir = (self.userinfo_table & key).fetch1(
+        data_dir, pre_data_dir, raw_data_dir = (self.userinfo_table() & key).fetch1(
             "data_dir", "pre_data_dir", "raw_data_dir")
         self.__add_experiments(key=key, data_dir=data_dir, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir)
 
@@ -39,7 +39,7 @@ class ExperimentTemplate(dj.Computed):
         if restrictions is None:
             restrictions = dict()
 
-        for row in (self.userinfo_table & restrictions):
+        for row in (self.userinfo_table() & restrictions):
             key = dict()
             key['experimenter'] = row['experimenter']
 

@@ -80,21 +80,21 @@ class FieldTemplate(dj.Computed):
         if restrictions is None:
             restrictions = dict()
 
-        for row in (self.experiment_table & restrictions):
+        for row in (self.experiment_table() & restrictions):
             key = dict(experimenter=row['experimenter'], date=row['date'], exp_num=row['exp_num'])
             if verbose:
                 print('Adding fields for:', key)
             self.__add_experiment_fields(key, only_new=True, verbose=verbose)
 
     def __add_experiment_fields(self, key, only_new=False, verbose=0):
-        pre_data_path = (self.experiment_table & key).fetch1('pre_data_path')
+        pre_data_path = (self.experiment_table() & key).fetch1('pre_data_path')
 
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
         if verbose:
             print("--> Processing fields in:", pre_data_path)
 
-        datatype_loc, animal_loc, region_loc, field_loc, stimulus_loc, pharm_loc = (self.userinfo_table & key).fetch1(
+        datatype_loc, animal_loc, region_loc, field_loc, stimulus_loc, pharm_loc = (self.userinfo_table() & key).fetch1(
             "datatype_loc", "animal_loc", "region_loc", "field_loc", "stimulus_loc", "pharm_loc")
 
         # walk through the filenames belonging to this experiment and fetch all fields from filenames
@@ -131,7 +131,7 @@ class FieldTemplate(dj.Computed):
     def __add_field(self, key, field, files, region):
         assert field is not None
 
-        pre_data_path = (self.experiment_table & key).fetch1("pre_data_path")
+        pre_data_path = (self.experiment_table() & key).fetch1("pre_data_path")
 
         if field is not None and (field.startswith('loc') or field.startswith('outline')) or \
                 region is not None and (region.startswith('loc') or region.startswith('outline')):
@@ -228,12 +228,12 @@ class RoiTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.field_table & 'od_flag=0 and loc_flag=0'
+        return self.field_table() & 'od_flag=0 and loc_flag=0'
 
     def make(self, key):
         # load roi_mask for insert roi for a specific experiment and field
-        roi_mask = (Field.RoiMask & key).fetch1("roi_mask")
-        pixel_size_um = (Field.FieldInfo & key).fetch1("pixel_size_um")
+        roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask")
+        pixel_size_um = (self.field_table.FieldInfo() & key).fetch1("pixel_size_um")
 
         if not np.any(roi_mask):
             return

@@ -28,7 +28,7 @@ class RelativeFieldLocationTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.field_table & 'od_flag=0'
+        return self.field_table() & 'od_flag=0'
 
     def make(self, key):
         exp_key = {'experimenter': key["experimenter"], 'date': key["date"], 'exp_num': key["exp_num"]}
@@ -52,7 +52,7 @@ class RelativeFieldLocationTemplate(dj.Computed):
             print(f'No optic disk information found for {exp_key}')
             return
 
-        absx, absy, absz, nxpix, nxpix_offset, nypix, pixel_size_um = (self.field_table.FieldInfo & key).fetch1(
+        absx, absy, absz, nxpix, nxpix_offset, nypix, pixel_size_um = (self.field_table.FieldInfo() & key).fetch1(
             'absx', 'absy', 'absz', 'nxpix', 'nxpix_offset', 'nypix', 'pixel_size_um')
 
         # Get center of scan field
@@ -89,8 +89,8 @@ class RetinalFieldLocationTemplate(dj.Computed):
     expinfo_table = PlaceholderTable
 
     def make(self, key):
-        relx, rely = (self.relativefieldlocalation_table & key).fetch1('relx', 'rely')
-        eye, prepwmorient = (self.expinfo_table & key).fetch1('eye', 'prepwmorient')
+        relx, rely = (self.relativefieldlocalation_table() & key).fetch1('relx', 'rely')
+        eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
 
         ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(
             rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)

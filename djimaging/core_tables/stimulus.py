@@ -3,7 +3,6 @@ import numpy as np
 import datajoint as dj
 from copy import deepcopy
 import h5py
-import tqdm
 
 from djimaging.utils.data_utils import list_h5_files, extract_h5_table
 from djimaging.utils.dj_utils import PlaceholderTable
@@ -151,14 +150,14 @@ class PresentationTemplate(dj.Computed):
             return definition
 
     def make(self, key):
-        field = (self.field_table & key).fetch1("field")
-        stim_loc, field_loc = (self.userinfo_table & key).fetch1("stimulus_loc", "field_loc")
+        field = (self.field_table() & key).fetch1("field")
+        stim_loc, field_loc = (self.userinfo_table() & key).fetch1("stimulus_loc", "field_loc")
 
-        pre_data_path = (self.experiment_table * self.field_table & key).fetch1("pre_data_path")
+        pre_data_path = (self.experiment_table() * self.field_table() & key).fetch1("pre_data_path")
         assert os.path.exists(pre_data_path), f"Could not read path: {pre_data_path}"
 
         h5_files = list_h5_files(folder=pre_data_path, hidden=False, field=field, field_loc=field_loc)
-        stim_alias = (self.stimulus_table & key).fetch1("alias").split('_')
+        stim_alias = (self.stimulus_table() & key).fetch1("alias").split('_')
 
         for h5_file in h5_files:
             split_string = h5_file[:h5_file.find(".h5")].split("_")
@@ -203,7 +202,7 @@ class PresentationTemplate(dj.Computed):
             # get scanning frequency
             if "LineDuration" in os_params:
                 pres_key["scan_line_duration"] = os_params['LineDuration']
-                roi_mask = (self.field_table.RoiMask & key).fetch1('roi_mask')
+                roi_mask = (self.field_table.RoiMask() & key).fetch1('roi_mask')
                 if roi_mask.size > 0:
                     pres_key["scan_num_lines"] = roi_mask.shape[-1]  # TODO: set to os info?
                     pres_key["scan_frequency"] = \

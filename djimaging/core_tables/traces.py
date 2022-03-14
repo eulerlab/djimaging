@@ -33,14 +33,14 @@ class TracesTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.presentation_table & (self.field_table & 'loc_flag=0 and od_flag=0')
+        return self.presentation_table() & (self.field_table() & 'loc_flag=0 and od_flag=0')
 
     def make(self, key):
 
         # get all params we need for creating traces
-        filepath = (self.presentation_table & key).fetch1("h5_header")
-        triggertimes = (self.presentation_table & key).fetch1("triggertimes")
-        roi_ids = (self.roi_table & key).fetch("roi_id")
+        filepath = (self.presentation_table() & key).fetch1("h5_header")
+        triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+        roi_ids = (self.roi_table() & key).fetch("roi_id")
 
         roi2trace = load_traces_from_h5_file(filepath, roi_ids)
 
@@ -102,23 +102,23 @@ class DetrendTracesTemplate(dj.Computed):
 
     def make(self, key):
 
-        window_len_seconds = (self.detrendparams_table & key).fetch1('window_length')
-        poly_order = (self.detrendparams_table & key).fetch1('poly_order')
-        subtract_baseline = (self.detrendparams_table & key).fetch1('subtract_baseline')
-        non_negative = (self.detrendparams_table & key).fetch1('non_negative')
-        standardize = (self.detrendparams_table & key).fetch1('standardize')
-        fs = (self.presentation_table & key).fetch1('scan_frequency')
+        window_len_seconds = (self.detrendparams_table() & key).fetch1('window_length')
+        poly_order = (self.detrendparams_table() & key).fetch1('poly_order')
+        subtract_baseline = (self.detrendparams_table() & key).fetch1('subtract_baseline')
+        non_negative = (self.detrendparams_table() & key).fetch1('non_negative')
+        standardize = (self.detrendparams_table() & key).fetch1('standardize')
+        fs = (self.presentation_table() & key).fetch1('scan_frequency')
 
         assert not (non_negative and subtract_baseline), \
             "You are trying to populate DetrendTraces with an invalid parameter set"
         assert (np.logical_or(standardize == non_negative, standardize == subtract_baseline)), \
             "You are trying to populate DetrendTraces with an invalid parameter set"
 
-        raw_traces = (self.traces_table & key).fetch1('traces')
+        raw_traces = (self.traces_table() & key).fetch1('traces')
         temp = deepcopy(raw_traces)  # TODO: what is happening here?
         temp[0] = temp[1]
         raw_traces = temp
-        traces_times = (self.traces_table & key).fetch1('traces_times')
+        traces_times = (self.traces_table() & key).fetch1('traces_times')
         window_len_frames = np.ceil(window_len_seconds * fs)
         if window_len_frames % 2 == 0:
             window_len_frames -= 1
@@ -129,7 +129,7 @@ class DetrendTracesTemplate(dj.Computed):
 
         stim_start = None
         if standardize or subtract_baseline:
-            stim_start = (self.presentation_table & key).fetch1('triggertimes')[0]
+            stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
             # heuristic to find out whether triggers are in time base or in frame base
             if stim_start > 1000:
                 print("Converting triggers from frame base to time base")
@@ -187,14 +187,14 @@ class DetrendSnippetsTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.stimulus_table & "isrepeated=1"
+        return self.stimulus_table() & "isrepeated=1"
 
     def make(self, key):
-        ntrigger_rep = (self.stimulus_table & key).fetch1('ntrigger_rep')
-        triggertimes = (self.presentation_table & key).fetch1('triggertimes')
-        traces_times = (self.traces_table & key).fetch1('traces_times')
-        detrend_traces = (self.detrendtraces_table & key).fetch1('detrend_traces')
-        smoothed_traces = (self.detrendtraces_table & key).fetch1('smoothed_traces')
+        ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
+        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        traces_times = (self.traces_table() & key).fetch1('traces_times')
+        detrend_traces = (self.detrendtraces_table() & key).fetch1('detrend_traces')
+        smoothed_traces = (self.detrendtraces_table() & key).fetch1('smoothed_traces')
 
         if triggertimes[-1] > 2 * traces_times[-1]:
             triggertimes = triggertimes / 500.
@@ -257,8 +257,8 @@ class AveragesTemplate(dj.Computed):
     detrendsnippets_table = PlaceholderTable
 
     def make(self, key):
-        snippets, times = (self.detrendsnippets_table & key).fetch1('detrend_snippets', 'detrend_snippets_times')
-        triggertimes_snippets = (self.detrendsnippets_table & key).fetch1('triggertimes_snippets').copy()
+        snippets, times = (self.detrendsnippets_table() & key).fetch1('detrend_snippets', 'detrend_snippets_times')
+        triggertimes_snippets = (self.detrendsnippets_table() & key).fetch1('triggertimes_snippets').copy()
 
         times = times - times[0, :]
 
