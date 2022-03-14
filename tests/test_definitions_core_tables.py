@@ -3,15 +3,8 @@ from djimaging.core_tables import field
 from djimaging.core_tables import location
 from djimaging.core_tables import traces
 from djimaging.core_tables import stimulus
-from djimaging.utils.dj_utils import get_class_attributes, get_input_tables
 
-
-def _test_definition(class_):
-    tables = get_input_tables(class_().definition)
-    class_attrs = get_class_attributes(class_)
-
-    for table in tables:
-        assert table == 'master' or table in class_attrs, table
+from .utils import _test_definition
 
 
 # experiment

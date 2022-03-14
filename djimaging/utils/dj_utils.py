@@ -20,6 +20,9 @@ class PlaceholderTable:
     def FieldInfo(cls):
         pass
 
+    def DsInfo(self):
+        pass
+
 
 def get_class_attributes(class_):
     class_attrs = [attr for attr in class_.__dict__.keys() if attr[:2] != '__']
