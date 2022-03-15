@@ -34,6 +34,8 @@ class ChirpQITemplate(dj.Computed):
 
 
 class ChirpFeaturesTemplate(dj.Computed):
+    # TODO: Add more features
+
     database = ""  # hack to suppress DJ error
 
     @property
@@ -59,7 +61,7 @@ class ChirpFeaturesTemplate(dj.Computed):
         # TODO: Make this code readable
         # TODO: Should this depend on pres? Triggertimes are also in snippets and sf can be derived from times
         snippets = (self.detrendsnippets_table() & key).fetch1('detrend_snippets')
-        snippets_times = (self.detrendsnippets_table() & key).fetch1('detrend_snippets_times')
+        snippets_times = (self.detrendsnippets_table() & key).fetch1('snippets_times')
         trigger_times = (self.presentation_table() & key).fetch1('triggertimes')
         sf = (self.presentation_table() & key).fetch1('scan_frequency')
         start_trigs = trigger_times[::2]
@@ -69,6 +71,7 @@ class ChirpFeaturesTemplate(dj.Computed):
         # On-Off Index
         on_responses = np.zeros((light_step_frames, snippets.shape[1]))
         off_responses = np.zeros((light_step_frames, snippets.shape[1]))
+
         for i in range(snippets.shape[1]):
             step_up = start_trigs[i] + 2
             snip_times = snippets_times[:, i]
@@ -77,12 +80,12 @@ class ChirpFeaturesTemplate(dj.Computed):
             step_up_idx = \
                 np.nonzero(np.isclose(snip_times,
                                       np.ones_like(snip_times) * step_up,
-                                      atol=1e-01))[0][0]
+                                      atol=1e-01))[0][0]  # TODO: Fix this
             step_down = start_trigs[i] + 5
             step_down_idx = \
                 np.nonzero(np.isclose(snip_times,
                                       np.ones_like(snip_times) * step_down,
-                                      atol=1e-01))[0][0]
+                                      atol=1e-01))[0][0]  # TODO: Fix this
             baseline_on = np.median(snip[:step_up_idx])
             on_response = snip[step_up_idx:step_up_idx + light_step_frames]
             off_response = \
@@ -94,11 +97,15 @@ class ChirpFeaturesTemplate(dj.Computed):
             off_response[off_response < 0] = 0
             on_responses[:, i] = on_response
             off_responses[:, i] = off_response
+
         avg_on = on_responses[4:, :].mean()
         avg_off = off_responses[4:, :].mean()
-        on_off_index = (avg_on - avg_off) / (avg_on + avg_off)
-        if np.isnan(on_off_index):
+
+        if avg_on + avg_off < 1e-10:
             on_off_index = 0
+        else:
+            on_off_index = (avg_on - avg_off) / (avg_on + avg_off)
+
         # Transience Index
         upsam_fre = 500
         upsampling_factor = int(snippets.shape[0] / sf * upsam_fre)
@@ -124,8 +131,8 @@ class ChirpFeaturesTemplate(dj.Computed):
             snip_times = resampled_snippets_times[:, i]
             snip = resampled_snippets[:, i]
             snip = snip - snip.min()
-            stim_start_idx = np.nonzero(np.isclose(snip_times, np.ones_like(snip_times) * stim_start, atol=1e-01))[0][0]
-            stim_end_idx = np.nonzero(np.isclose(snip_times, np.ones_like(snip_times) * stim_end, atol=1e-01))[0][0]
+            stim_start_idx = np.nonzero(np.isclose(snip_times, np.ones_like(snip_times) * stim_start, atol=1e-01))[0][0] # TODO: Fix this
+            stim_end_idx = np.nonzero(np.isclose(snip_times, np.ones_like(snip_times) * stim_end, atol=1e-01))[0][0] # TODO: Fix this
             trace = snip[stim_start_idx:stim_end_idx]
             peak = np.where(trace == trace.max())[0][0]
             peak_alpha = np.nonzero(np.isclose(snip_times, snip_times[peak] + 0.4, atol=1e-01))[0][0]
