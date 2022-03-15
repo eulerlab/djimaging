@@ -3,7 +3,7 @@ import datajoint as dj
 from copy import deepcopy
 from scipy import signal
 
-from djimaging.utils.scanm_utils import load_traces_from_h5_file
+from djimaging.utils.scanm_utils import load_traces_from_h5_file, split_trace_by_reps
 from djimaging.utils.dj_utils import PlaceholderTable
 
 
@@ -172,11 +172,11 @@ class DetrendSnippetsTemplate(dj.Computed):
         -> self.traces_table
         -> self.detrendtraces_table
         ---
-        detrend_snippets             :longblob     # array of snippets (time x repetitions)
-        detrend_snippets_times       :longblob     # array of snippet times (time x repetitions)
-        smoothed_snippets            :longblob     # snippeted, smoothed signal (time x repetitions)
-        triggertimes_snippets        :longblob     # snippeted triggertimes (ntrigger_rep x repetitions)
-        droppedlastrep_flag          :tinyint unsigned 
+        detrend_snippets         :longblob     # array of snippets (time x repetitions)
+        snippets_times           :longblob     # array of snippet times (time x repetitions)
+        smoothed_snippets        :longblob     # snippeted, smoothed signal (time x repetitions)
+        triggertimes_snippets    :longblob     # snippeted triggertimes (ntrigger_rep x repetitions)
+        droppedlastrep_flag      :tinyint unsigned 
         """
         return definition
 
@@ -187,51 +187,26 @@ class DetrendSnippetsTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.stimulus_table() & "isrepeated=1"
+        return self.detrendtraces_table() * (self.stimulus_table() & "isrepeated=1")
 
     def make(self, key):
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
         traces_times = (self.traces_table() & key).fetch1('traces_times')
-        detrend_traces = (self.detrendtraces_table() & key).fetch1('detrend_traces')
-        smoothed_traces = (self.detrendtraces_table() & key).fetch1('smoothed_traces')
+        detrend_traces, smoothed_traces = (self.detrendtraces_table() & key).fetch1('detrend_traces', 'smoothed_traces')
 
         if triggertimes[-1] > 2 * traces_times[-1]:
             triggertimes = triggertimes / 500.
 
-        t_idxs = [np.argwhere(np.isclose(traces_times, t, atol=1e-01))[0][0] for t in triggertimes[::ntrigger_rep]]
-
-        if len(t_idxs) < 2:
-            print("Failed to populate Snippets for ", key)
-            return
-
-        n_frames_per_rep = int(np.round(np.mean(np.diff(t_idxs))))
-
-        if detrend_traces[t_idxs[-1]:].size < n_frames_per_rep:
-            # if there are not enough data points after the last trigger,
-            # remove the last trigger (e.g. if a chirp was cancelled)
-            droppedlastrep_flag = 1
-            t_idxs.pop(-1)
-        else:
-            droppedlastrep_flag = 0
-
-        detrend_snippets = np.zeros((n_frames_per_rep, len(t_idxs)))
-        smoothed_snippets = np.zeros((n_frames_per_rep, len(t_idxs)))
-        detrend_snippets_times = np.zeros((n_frames_per_rep, len(t_idxs)))
-        triggertimes_snippets = np.zeros((ntrigger_rep, len(t_idxs)))
-
-        for i, idx in enumerate(t_idxs):
-            # Frames may be reused, this is not a standard reshaping
-            detrend_snippets[:, i] = detrend_traces[idx:idx + n_frames_per_rep]
-            detrend_snippets_times[:, i] = traces_times[idx:idx + n_frames_per_rep]
-            smoothed_snippets[:, i] = smoothed_traces[idx:idx + n_frames_per_rep]
-            triggertimes_snippets[:, i] = triggertimes[i * ntrigger_rep:(i + 1) * ntrigger_rep]
+        snippets_times, triggertimes_snippets, snippets_list, droppedlastrep_flag = split_trace_by_reps(
+            triggertimes=triggertimes, ntrigger_rep=ntrigger_rep, times=traces_times,
+            trace_list=[detrend_traces, smoothed_traces], allow_drop_last=True)
 
         self.insert1(dict(
             **key,
-            detrend_snippets=detrend_snippets,
-            smoothed_snippets=smoothed_snippets,
-            detrend_snippets_times=detrend_snippets_times,
+            detrend_snippets=snippets_list[0],
+            smoothed_snippets=snippets_list[1],
+            snippets_times=snippets_times,
             triggertimes_snippets=triggertimes_snippets,
             droppedlastrep_flag=droppedlastrep_flag,
         ))
@@ -257,7 +232,7 @@ class AveragesTemplate(dj.Computed):
     detrendsnippets_table = PlaceholderTable
 
     def make(self, key):
-        snippets, times = (self.detrendsnippets_table() & key).fetch1('detrend_snippets', 'detrend_snippets_times')
+        snippets, times = (self.detrendsnippets_table() & key).fetch1('detrend_snippets', 'snippets_times')
         triggertimes_snippets = (self.detrendsnippets_table() & key).fetch1('triggertimes_snippets').copy()
 
         times = times - times[0, :]

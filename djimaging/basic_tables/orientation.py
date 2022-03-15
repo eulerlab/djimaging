@@ -177,7 +177,6 @@ class OsDsIndexesTemplate(dj.Computed):
         definition = """
         #This class computes the direction and orientation selectivity indexes 
         #as well as a quality index of DS responses as described in Baden et al. (2016)
-        -> self.stimulus_table
         -> self.detrendsnippets_table
         ---
         ds_index:   float   #direction selectivity index as resulting vector length (absolute of projection on complex exponential)
@@ -198,15 +197,14 @@ class OsDsIndexesTemplate(dj.Computed):
         """
         return definition
 
-    stimulus_table = PlaceholderTable
     detrendsnippets_table = PlaceholderTable
 
     @property
     def key_source(self):
-        return self.stimulus_table() & 'stim_id = 2'
+        return self.detrendsnippets_table() & 'stim_id = 2'
 
     def make(self, key):
-        dir_order = self.stimulus_table().DsInfo().fetch1('trialinfo')
+        dir_order = np.array([0, 180, 45, 225, 90, 270, 135, 315])  # TODO: Load this from stimulus
         snippets = (self.detrendsnippets_table() & key).fetch1('detrend_snippets')  # get the response snippets
 
         dir_deg = list(dir_order[:8])  # get the directions of the bars in degree
