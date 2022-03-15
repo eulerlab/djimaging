@@ -6,6 +6,8 @@ from djimaging.utils.dj_utils import PlaceholderTable
 
 
 class ChirpQITemplate(dj.Computed):
+    database = ""  # hack to suppress DJ error
+
     @property
     def definition(self):
         definition = '''
@@ -32,6 +34,7 @@ class ChirpQITemplate(dj.Computed):
 
 
 class ChirpFeaturesTemplate(dj.Computed):
+    database = ""  # hack to suppress DJ error
 
     @property
     def definition(self):
@@ -54,6 +57,7 @@ class ChirpFeaturesTemplate(dj.Computed):
 
     def make(self, key):
         # TODO: Make this code readable
+        # TODO: Should this depend on pres? Triggertimes are also in snippets and sf can be derived from times
         snippets = (self.detrendsnippets_table() & key).fetch1('detrend_snippets')
         snippets_times = (self.detrendsnippets_table() & key).fetch1('detrend_snippets_times')
         trigger_times = (self.presentation_table() & key).fetch1('triggertimes')

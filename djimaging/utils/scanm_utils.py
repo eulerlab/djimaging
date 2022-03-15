@@ -48,7 +48,9 @@ def load_traces_from_h5_file(filepath, roi_ids):
         else:
             raise ValueError(f'Traces not found in {filepath}')
 
-    assert traces.shape == traces_times.shape
+    assert traces.shape == traces_times.shape, f'Inconsistent traces and tracetimes in {filepath}'
+    assert np.all(np.isfinite(traces)), f'NaN traces in {filepath}'
+    assert np.all(np.isfinite(traces_times)), f'NaN tracetimess in {filepath}'
 
     roi2trace = dict()
 

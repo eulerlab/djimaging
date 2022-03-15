@@ -25,22 +25,31 @@ def _quality_index_ds(raw_sorted_resp_mat):
     return np.max(qis)
 
 
-def _sort_response_matrix(snippets, idxs, directions):
+def _sort_response_matrix(snippets, dir_order):
     """
     Sorts the snippets according to stimulus condition and repetition into a time x direction x repetition matrix
-    Inputs:
-    snippets    list or array, time x (directions*repetitions)
-    idxs        list of lists giving idxs into last axis of snippets. idxs[0] gives the indexes of rows in snippets
-                which are responses to the direction directions[0]
-    Outputs:
-    sorted_responses   array, time x direction x repetitions, with directions sorted(!) (0, 45, 90, ..., 315) degrees
-    sorted_directions   array, sorted directions
+    :param snippets: arraylike, time x (directions*repetitions)
+    :param dir_order: arraylike, order of directions of moving bar
+    :returns sorted_responses: array, time x direction x repetitions, relative to sorted directions
+    :returns sorted_directions: sorted directions in radians
     """
-    structured_responses = snippets[:, idxs]
-    sorting = np.argsort(directions)
-    sorted_responses = structured_responses[:, sorting, :]
-    sorted_directions = directions[sorting]
-    return sorted_responses, sorted_directions
+
+    nreps = snippets.shape[1]
+    dir_order = dir_order.flatten()
+
+    if nreps != dir_order.size:
+        assert nreps % dir_order.size == 0, 'directions must be a multiple of reps'
+        dir_order = np.tile(dir_order, int(nreps / dir_order.size))
+
+    dir_deg, dir_counts = np.unique(dir_order, return_counts=True)
+    assert np.all(dir_counts == dir_counts[0]), 'Different number of repetitions per direction not implemented'
+
+    dir_idx = [np.where(dir_order == d)[0] for d in dir_deg]
+
+    sorted_responses = snippets[:, dir_idx]
+    sorted_directions_rad = np.deg2rad(dir_deg)
+
+    return sorted_responses, sorted_directions_rad
 
 
 def _get_time_dir_kernels(sorted_responses):
@@ -172,6 +181,8 @@ def _compute_null_dist(rep_dir_resps, dirs, per, iters=1000):
 
 
 class OsDsIndexesTemplate(dj.Computed):
+    database = ""  # hack to suppress DJ error
+
     @property
     def definition(self):
         definition = """
@@ -197,6 +208,7 @@ class OsDsIndexesTemplate(dj.Computed):
         """
         return definition
 
+    stimulus_table = PlaceholderTable
     detrendsnippets_table = PlaceholderTable
 
     @property
@@ -204,24 +216,20 @@ class OsDsIndexesTemplate(dj.Computed):
         return self.detrendsnippets_table() & 'stim_id = 2'
 
     def make(self, key):
-        dir_order = np.array([0, 180, 45, 225, 90, 270, 135, 315])  # TODO: Load this from stimulus
+
+        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
         snippets = (self.detrendsnippets_table() & key).fetch1('detrend_snippets')  # get the response snippets
 
-        dir_deg = list(dir_order[:8])  # get the directions of the bars in degree
-        dir_rad = np.deg2rad(dir_deg)  # convert to radians
-
-        if snippets.shape[-1] == len(dir_order):
-            dir_idx = [list(np.nonzero(dir_order == d)[0]) for d in dir_deg]
-        elif snippets.shape[-1] == 16:
-            dir_idx = [list(np.nonzero(dir_order[:-8] == d)[0]) for d in dir_deg]
-        else:
-            raise ValueError()
-
-        sorted_responses, sorted_directions = _sort_response_matrix(snippets, dir_idx, dir_rad)
+        sorted_responses, sorted_directions_rad = _sort_response_matrix(snippets, dir_order)
         avg_sorted_responses = np.mean(sorted_responses, axis=-1)
-        u, v, s = _get_time_dir_kernels(avg_sorted_responses)
-        dsi, pref_dir = _get_si(v, sorted_directions, 1)
-        osi, pref_or = _get_si(v, sorted_directions, 2)
+        try:
+            u, v, s = _get_time_dir_kernels(avg_sorted_responses)
+        except np.linalg.LinAlgError:
+            print(f'ERROR: LinAlgError for key {key}')
+            return
+
+        dsi, pref_dir = _get_si(v, sorted_directions_rad, 1)
+        osi, pref_or = _get_si(v, sorted_directions_rad, 2)
         (t, d, r) = sorted_responses.shape
         temp = np.reshape(sorted_responses, (t, d * r))
         projected = np.dot(np.transpose(temp), u)  # we do this whole projection thing to make the result
@@ -229,11 +237,11 @@ class OsDsIndexesTemplate(dj.Computed):
         surrogate_v = np.mean(projected, axis=-1)
         surrogate_v -= np.min(surrogate_v)
         surrogate_v /= np.max(surrogate_v)
-        dsi_s, pref_dir_s = _get_si(surrogate_v, sorted_directions, 1)
-        osi_s, pref_or_s = _get_si(surrogate_v, sorted_directions, 2)
-        null_dist_dsi = _compute_null_dist(np.transpose(projected), sorted_directions, 1)
+        dsi_s, pref_dir_s = _get_si(surrogate_v, sorted_directions_rad, 1)
+        osi_s, pref_or_s = _get_si(surrogate_v, sorted_directions_rad, 2)
+        null_dist_dsi = _compute_null_dist(np.transpose(projected), sorted_directions_rad, 1)
         p_dsi = np.mean(null_dist_dsi > dsi_s)
-        null_dist_osi = _compute_null_dist(np.transpose(projected), sorted_directions, 2)
+        null_dist_osi = _compute_null_dist(np.transpose(projected), sorted_directions_rad, 2)
         p_osi = np.mean(null_dist_osi > osi_s)
         d_qi = _quality_index_ds(sorted_responses)
         on_off = _get_on_off_index(u)

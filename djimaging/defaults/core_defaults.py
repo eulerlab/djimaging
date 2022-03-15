@@ -33,8 +33,6 @@ def add_no_stim(stimulus_table):
         "stimulusname": 'no_stim',
         "stim_path": '',
         "is_colour": 0,
-        "stimulus_trace": np.zeros(0),
-        "stimulus_info": 'No stimulus',
         "framerate": 0,
         "commit_id": "",
         "alias": 'nostim_none',
@@ -102,21 +100,17 @@ def add_chirp(stimulus_table, stim_path='/gpfs01/euler/data/Resources/Stimulus/o
 
 
 def add_movingbar(stimulus_table, stim_path=''):
-    stimulus_info = {
-        "DirList": [0, 180, 45, 225, 90, 270, 135, 315],
-    }
-
     key = {
         "stim_id": 2,
         "stimulusname": 'movingbar',
         "stim_path": stim_path,
         "is_colour": 0,
-        "stimulus_trace": np.zeros(1),
-        "stimulus_info": str(stimulus_info),
+        "trial_info": np.array([0, 180, 45, 225, 90, 270, 135, 315]),
+        "stimulus_info": "",
         "framerate": 1 / 60.,
         "commit_id": "",
         "alias": "mb_mbar_bar_movingbar",
-        "ntrigger_rep": 8,
+        "ntrigger_rep": 1,
         "isrepeated": 1,
     }
 

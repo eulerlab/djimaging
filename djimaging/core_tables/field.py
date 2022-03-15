@@ -33,7 +33,7 @@ class FieldTemplate(dj.Computed):
         def definition(self):
             definition = """
             #was there a zstack in the field
-            -> Field
+            -> master
             ---
             zstack      :tinyint    #flag marking whether field was a zstack
             zstep       :float      #size of step size in um
@@ -45,7 +45,7 @@ class FieldTemplate(dj.Computed):
         def definition(self):
             definition = """
             # ROI Mask
-            -> Field
+            -> master
             ---
             fromfile                   :varchar(255)   # from which file the roi mask was extracted from
             roi_mask                   :longblob       # roi mask for the recording field
@@ -57,7 +57,7 @@ class FieldTemplate(dj.Computed):
         def definition(self):
             definition = """
             # ROI Mask
-            -> Field
+            -> master
             ---
             absx: float  # absolute position in the x axis as recorded by ScanM
             absy: float  # absolute position in the y axis as recorded by ScanM
@@ -157,9 +157,13 @@ class FieldTemplate(dj.Computed):
         for file in sorted(files):
             with h5py.File(pre_data_path + file, 'r', driver="stdio") as h5_file:
                 if 'rois' in [k.lower() for k in h5_file.keys()]:
+                    # File is there
                     for h5_keys in h5_file.keys():
                         if h5_keys.lower() == 'rois':
                             roi_mask = np.copy(h5_file[h5_keys])
+                            break
+                    else:
+                        raise Exception('This should not happen')
                     break
         else:
             assert loc_flag or od_flag, f'ROIs not found in {files}'
@@ -178,6 +182,9 @@ class FieldTemplate(dj.Computed):
         nxpix = w_params_num["User_dxPix"] - nxpix_retrace - nxpix_offset
         nypix = w_params_num["User_dyPix"]
         pixel_size_um = get_pixel_size_um(zoom=w_params_num["Zoom"], setupid=setupid, nypix=nypix)
+
+        if roi_mask.size > 0:
+            assert roi_mask.shape == (nxpix, nypix), 'ROI mask does not match data shape'
 
         # subkey for fieldinfo
         fieldinfo_key = deepcopy(primary_key)
