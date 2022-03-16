@@ -4,6 +4,7 @@ from scipy import stats
 import cmath
 
 from djimaging.utils.dj_utils import PlaceholderTable
+from djimaging.utils.math_utils import normalize_zero_one
 
 
 def _quality_index_ds(raw_sorted_resp_mat):
@@ -93,10 +94,7 @@ def _get_time_dir_kernels(sorted_responses):
     idx = int(len(u) / 4)
     u -= np.mean(u[:idx])
     u = u / np.max(abs(u))
-    v = s * v
-    v -= np.min(v)
-    v /= np.max(abs(v))
-
+    v = normalize_zero_one(s * v)
     return u, v, s
 
 
@@ -147,10 +145,8 @@ def _get_on_off_index(time_kernel):
     Computes a preliminary On-Off Index based on the responses to the On (first half) and the OFF (2nd half) part of
     the responses to the moving bars stimulus
     """
-    normed_kernel = time_kernel - np.min(time_kernel)
-    normed_kernel = normed_kernel / np.max(normed_kernel)
-    deriv = np.diff(normed_kernel)
-    on_response = np.max(deriv[9:19])
+    deriv = np.diff(normalize_zero_one(time_kernel))
+    on_response = np.max(deriv[9:19])  # TODO: This is very hardcoded. Probably one sho
     off_response = np.max(deriv[19:29])
     off_response = np.max((0, off_response))
     on_response = np.max((0, on_response))
@@ -230,13 +226,13 @@ class OsDsIndexesTemplate(dj.Computed):
 
         dsi, pref_dir = _get_si(v, sorted_directions_rad, 1)
         osi, pref_or = _get_si(v, sorted_directions_rad, 2)
+
         (t, d, r) = sorted_responses.shape
-        temp = np.reshape(sorted_responses, (t, d * r))
-        projected = np.dot(np.transpose(temp), u)  # we do this whole projection thing to make the result
-        projected = np.reshape(projected, (d, r))  # between the original and the shuffled comparable
-        surrogate_v = np.mean(projected, axis=-1)
-        surrogate_v -= np.min(surrogate_v)
-        surrogate_v /= np.max(surrogate_v)
+        # make the result between the original and the shuffled comparable
+        projected = np.dot(np.transpose(np.reshape(sorted_responses, (t, d * r))), u)
+        projected = np.reshape(projected, (d, r))
+        surrogate_v = normalize_zero_one(np.mean(projected, axis=-1))
+
         dsi_s, pref_dir_s = _get_si(surrogate_v, sorted_directions_rad, 1)
         osi_s, pref_or_s = _get_si(surrogate_v, sorted_directions_rad, 2)
         null_dist_dsi = _compute_null_dist(np.transpose(projected), sorted_directions_rad, 1)
@@ -245,6 +241,7 @@ class OsDsIndexesTemplate(dj.Computed):
         p_osi = np.mean(null_dist_osi > osi_s)
         d_qi = _quality_index_ds(sorted_responses)
         on_off = _get_on_off_index(u)
+
         self.insert1(dict(**key,
                           ds_index=dsi, ds_pvalue=p_dsi,
                           ds_null=null_dist_dsi, pref_dir=pref_dir,
