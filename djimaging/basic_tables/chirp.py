@@ -76,15 +76,9 @@ class ChirpFeaturesTemplate(dj.Computed):
             snip_times = snippets_times[:, i]
             snip = snippets[:, i]
             snip = snip - snip.min()
-            step_up_idx = \
-                np.nonzero(np.isclose(snip_times,
-                                      np.ones_like(snip_times) * step_up,
-                                      atol=1e-01))[0][0]  # TODO: Fix this
+            step_up_idx = np.argmax(np.isclose(snip_times, step_up, atol=1e-01))
             step_down = start_trigs[i] + 5
-            step_down_idx = \
-                np.nonzero(np.isclose(snip_times,
-                                      np.ones_like(snip_times) * step_down,
-                                      atol=1e-01))[0][0]  # TODO: Fix this
+            step_down_idx = np.argmax(np.isclose(snip_times, step_down, atol=1e-01))
             baseline_on = np.median(snip[:step_up_idx])
             on_response = snip[step_up_idx:step_up_idx + light_step_frames]
             off_response = \
@@ -130,8 +124,8 @@ class ChirpFeaturesTemplate(dj.Computed):
             snip_times = resampled_snippets_times[:, i]
             snip = resampled_snippets[:, i]
             snip = snip - snip.min()
-            stim_start_idx = np.nonzero(np.isclose(snip_times, np.ones_like(snip_times) * stim_start, atol=1e-01))[0][0]  # TODO: Fix this
-            stim_end_idx = np.nonzero(np.isclose(snip_times, np.ones_like(snip_times) * stim_end, atol=1e-01))[0][0]  # TODO: Fix this
+            stim_start_idx = np.argmax(np.isclose(snip_times, stim_start, atol=1e-01))
+            stim_end_idx = np.argmax(np.isclose(snip_times, stim_end, atol=1e-01))
             trace = snip[stim_start_idx:stim_end_idx]
             peak = np.where(trace == trace.max())[0][0]
             peak_alpha = np.nonzero(np.isclose(snip_times, snip_times[peak] + 0.4, atol=1e-01))[0][0]
