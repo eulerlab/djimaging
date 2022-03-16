@@ -14,6 +14,7 @@ class UserInfoTemplate(dj.Manual):
         data_dir                    :varchar(255)             # path to header file, used for computed tables
         pre_data_dir='Pre'          :varchar(255)             # directory for h5 data files
         raw_data_dir='Raw'          :varchar(255)             # directory for raw data files
+        data_stack_name='wDataCh0'  :varchar(255)             # name of data stack
         datatype_loc                :tinyint                  # string location for datatype (eg. SMP)
         animal_loc                  :tinyint                  # string location for number of animal (e.g. M1)
         region_loc                  :tinyint                  # string location for region (eg. LR or RR)

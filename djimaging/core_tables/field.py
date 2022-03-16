@@ -59,6 +59,7 @@ class FieldTemplate(dj.Computed):
             # ROI Mask
             -> master
             ---
+            fromfile: varchar(255)  # info extracted from which file?
             absx: float  # absolute position in the x axis as recorded by ScanM
             absy: float  # absolute position in the y axis as recorded by ScanM
             absz: float  # absolute position in the z axis as recorded by ScanM
@@ -68,7 +69,7 @@ class FieldTemplate(dj.Computed):
             nxpix_retrace: int  # number of retrace pixels in x
             pixel_size_um :float  # width / height of a pixel in um
             recording_depth :float  # XY-scan: single element list with IPL depth, XZ: list of ROI depths
-            fromfile: varchar(255)  # info extracted from which file?
+            stack_average: longblob  # Average of the data stack for visualization
             """
             return definition
 
@@ -132,6 +133,7 @@ class FieldTemplate(dj.Computed):
         assert field is not None
 
         pre_data_path = (self.experiment_table() & key).fetch1("pre_data_path")
+        data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
 
         if field is not None and (field.startswith('loc') or field.startswith('outline')) or \
                 region is not None and (region.startswith('loc') or region.startswith('outline')):
@@ -152,7 +154,7 @@ class FieldTemplate(dj.Computed):
         field_key["od_flag"] = od_flag
         field_key["loc_flag"] = loc_flag
 
-        # Get more info
+        # Roi mask
         roi_mask = np.zeros(0)
         for file in sorted(files):
             with h5py.File(pre_data_path + file, 'r', driver="stdio") as h5_file:
@@ -169,6 +171,11 @@ class FieldTemplate(dj.Computed):
             assert loc_flag or od_flag, f'ROIs not found in {files}'
             file = files[0]
 
+        # Get stack
+        with h5py.File(pre_data_path + file, 'r', driver="stdio") as h5_file:
+            stack = np.copy(h5_file[data_stack_name])
+
+        # Get parameters
         w_params_num = load_h5_table('wParamsNum', filename=pre_data_path + file)
         absx = w_params_num['XCoord_um']
         absy = w_params_num['YCoord_um']
@@ -177,17 +184,25 @@ class FieldTemplate(dj.Computed):
         zstack = w_params_num['User_ScanType']
 
         setupid = (self.experiment_table.ExpInfo() & key).fetch1('setupid')
-        nxpix_offset = w_params_num["User_nXPixLineOffs"]
-        nxpix_retrace = w_params_num["User_nPixRetrace"]
-        nxpix = w_params_num["User_dxPix"] - nxpix_retrace - nxpix_offset
-        nypix = w_params_num["User_dyPix"]
+        nxpix_offset = int(w_params_num["User_nXPixLineOffs"])
+        nxpix_retrace = int(w_params_num["User_nPixRetrace"])
+        nxpix = int(w_params_num["User_dxPix"] - nxpix_retrace - nxpix_offset)
+        nypix = int(w_params_num["User_dyPix"])
         pixel_size_um = get_pixel_size_um(zoom=w_params_num["Zoom"], setupid=setupid, nypix=nypix)
 
+        # Sanity checks
         if roi_mask.size > 0:
-            assert roi_mask.shape == (nxpix, nypix), 'ROI mask does not match data shape'
+            assert roi_mask.shape == (nxpix, nypix), f'ROI mask shape error: {roi_mask.shape} vs {(nxpix, nypix)}'
+
+        if stack.size > 0:
+            assert stack.shape[:2] == (nxpix, nypix), f'Stack shape error: {stack.shape} vs {(nxpix, nypix)}'
+            assert stack.ndim == 3, 'Stack does not match expected shape'
+
+        stack_average = np.mean(stack, 2)
 
         # subkey for fieldinfo
         fieldinfo_key = deepcopy(primary_key)
+        fieldinfo_key["fromfile"] = file
         fieldinfo_key["absx"] = absx
         fieldinfo_key["absy"] = absy
         fieldinfo_key["absz"] = absz
@@ -196,8 +211,8 @@ class FieldTemplate(dj.Computed):
         fieldinfo_key["nxpix_retrace"] = nxpix_retrace
         fieldinfo_key["nypix"] = nypix
         fieldinfo_key["pixel_size_um"] = pixel_size_um
-        fieldinfo_key["fromfile"] = file
         fieldinfo_key['recording_depth'] = -9999
+        fieldinfo_key['stack_average'] = stack_average
 
         # subkey for adding Fields to ZStack
         zstack_key = deepcopy(primary_key)

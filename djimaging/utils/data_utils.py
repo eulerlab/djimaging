@@ -27,7 +27,9 @@ def extract_h5_table(*tablename, open_file, lower_keys=False):
         for key, value in zip(keys, values):
             if len(key) > 0:
                 if type(key) == bytes:
-                    key.decode('utf-8')
+                    key = key.decode('utf-8')
+                assert type(key) == str, type(key)
+
                 if lower_keys:
                     key = key.lower()
                 data_dict[key] = value
