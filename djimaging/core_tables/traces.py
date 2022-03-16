@@ -1,5 +1,6 @@
 import numpy as np
 import datajoint as dj
+from matplotlib import pyplot as plt
 from copy import deepcopy
 from scipy import signal
 
@@ -60,6 +61,17 @@ class TracesTemplate(dj.Computed):
                 trace_key["trigger_flag"] = 0
 
             self.insert1(trace_key)
+
+    def plot1(self, key):
+        traces_times, traces = (self & key).fetch1("traces_times", "traces")
+        triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 2))
+        ax.plot(traces_times, traces)
+        ax.set(xlabel='traces_times', ylabel='traces')
+        ax.vlines(triggertimes, np.min(traces), np.max(traces), color='r', label='trigger')
+        ax.legend(loc='upper right')
+        plt.show()
 
 
 class DetrendParamsTemplate(dj.Lookup):
@@ -158,6 +170,24 @@ class DetrendTracesTemplate(dj.Computed):
 
         self.insert1(dict(key, detrend_traces=detrend_traces, smoothed_traces=smoothed_traces))
 
+    def plot1(self, key):
+        detrend_traces, smoothed_traces = (self & key).fetch1("detrend_traces", "smoothed_traces")
+        traces_times = (self.traces_table() & key).fetch1("traces_times")
+        triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+
+        fig, axs = plt.subplots(2, 1, figsize=(10, 4), sharex='all')
+        ax = axs[0]
+        ax.plot(traces_times, detrend_traces)
+        ax.set(ylabel='detrend_traces')
+        ax.vlines(triggertimes, np.min(detrend_traces), np.max(detrend_traces), color='r', label='trigger')
+        ax.legend(loc='upper right')
+        ax = axs[1]
+        ax.plot(traces_times, smoothed_traces)
+        ax.set(xlabel='traces_times', ylabel='smoothed_traces')
+        ax.vlines(triggertimes, np.min(smoothed_traces), np.max(smoothed_traces), color='r', label='trigger')
+        ax.legend(loc='upper right')
+        plt.show()
+
 
 class DetrendSnippetsTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
@@ -211,6 +241,25 @@ class DetrendSnippetsTemplate(dj.Computed):
             droppedlastrep_flag=droppedlastrep_flag,
         ))
 
+    def plot1(self, key):
+        detrend_snippets, smoothed_snippets, snippets_times, triggertimes_snippets = (self & key).fetch1(
+            "detrend_snippets", "smoothed_snippets", "snippets_times", "triggertimes_snippets")
+
+        fig, axs = plt.subplots(2, 1, figsize=(10, 4), sharex='all')
+        ax = axs[0]
+        ax.plot(snippets_times - snippets_times[0, :], detrend_snippets)
+        ax.set(ylabel='detrend_traces')
+        ax.vlines(triggertimes_snippets - triggertimes_snippets[0, :],
+                  np.min(detrend_snippets), np.max(detrend_snippets), color='r', label='trigger')
+        ax.legend(loc='upper right')
+        ax = axs[1]
+        ax.plot(snippets_times - snippets_times[0, :], smoothed_snippets)
+        ax.set(xlabel='relative snippets_times', ylabel='smoothed_traces')
+        ax.vlines(triggertimes_snippets - triggertimes_snippets[0, :],
+                  np.min(smoothed_snippets), np.max(smoothed_snippets), color='r', label='trigger')
+        ax.legend(loc='upper right')
+        plt.show()
+
 
 class AveragesTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
@@ -253,3 +302,17 @@ class AveragesTemplate(dj.Computed):
             average_times=average_times,
             triggertimes_rel=triggertimes_rel,
         ))
+
+    def plot1(self, key):
+        average, average_norm, average_times, triggertimes_rel = \
+            (self & key).fetch1('average', 'average_norm', 'average_times', 'triggertimes_rel')
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 2))
+        ax.plot(average_times, average)
+        ax.set(xlabel='average_times', ylabel='average')
+        ax.vlines(triggertimes_rel, np.min(average), np.max(average), color='r', label='trigger')
+        ax.legend(loc='upper right')
+        tax = ax.twinx()
+        tax.plot(average_times, average_norm)
+        tax.set(ylabel='average_norm')
+        plt.show()
