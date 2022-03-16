@@ -5,6 +5,7 @@ from djimaging.core_tables import experiment
 from djimaging.core_tables import field
 from djimaging.core_tables import location
 from djimaging.core_tables import stimulus
+from djimaging.core_tables import presentation
 from djimaging.core_tables import traces
 
 
@@ -56,13 +57,13 @@ class Stimulus(stimulus.StimulusTemplate):
 
 
 @schema
-class Presentation(stimulus.PresentationTemplate):
+class Presentation(presentation.PresentationTemplate):
     experiment_table = Experiment
     userinfo_table = UserInfo
     field_table = Field
     stimulus_table = Stimulus
 
-    class ScanInfo(stimulus.PresentationTemplate.ScanInfo):
+    class ScanInfo(presentation.PresentationTemplate.ScanInfo):
         pass
 
 

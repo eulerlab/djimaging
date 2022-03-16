@@ -2,7 +2,7 @@ from djimaging.core_tables import experiment
 from djimaging.core_tables import field
 from djimaging.core_tables import location
 from djimaging.core_tables import traces
-from djimaging.core_tables import stimulus
+from djimaging.core_tables import presentation
 
 from .utils import _test_definition
 
@@ -55,9 +55,9 @@ def test_definition_detrendsnippets():
     _test_definition(traces.DetrendSnippetsTemplate)
 
 
-# stimulus
+# presentation
 def test_definition_presentation():
-    _test_definition(stimulus.PresentationTemplate)
+    _test_definition(presentation.PresentationTemplate)
 
 
 

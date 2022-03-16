@@ -130,8 +130,8 @@ class ChirpFeaturesTemplate(dj.Computed):
             snip_times = resampled_snippets_times[:, i]
             snip = resampled_snippets[:, i]
             snip = snip - snip.min()
-            stim_start_idx = np.nonzero(np.isclose(snip_times, np.ones_like(snip_times) * stim_start, atol=1e-01))[0][0] # TODO: Fix this
-            stim_end_idx = np.nonzero(np.isclose(snip_times, np.ones_like(snip_times) * stim_end, atol=1e-01))[0][0] # TODO: Fix this
+            stim_start_idx = np.nonzero(np.isclose(snip_times, np.ones_like(snip_times) * stim_start, atol=1e-01))[0][0]  # TODO: Fix this
+            stim_end_idx = np.nonzero(np.isclose(snip_times, np.ones_like(snip_times) * stim_end, atol=1e-01))[0][0]  # TODO: Fix this
             trace = snip[stim_start_idx:stim_end_idx]
             peak = np.where(trace == trace.max())[0][0]
             peak_alpha = np.nonzero(np.isclose(snip_times, snip_times[peak] + 0.4, atol=1e-01))[0][0]
