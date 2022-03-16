@@ -20,11 +20,29 @@ class UserInfo(userinfo.UserInfoTemplate):
 class Experiment(experiment.ExperimentTemplate):
     userinfo_table = UserInfo
 
+    class ExpInfo(experiment.ExperimentTemplate.ExpInfo):
+        pass
+
+    class Animal(experiment.ExperimentTemplate.Animal):
+        pass
+
+    class Indicator(experiment.ExperimentTemplate.Indicator):
+        pass
+
 
 @schema
 class Field(field.FieldTemplate):
     userinfo_table = UserInfo
     experiment_table = Experiment
+
+    class FieldInfo(field.FieldTemplate.FieldInfo):
+        pass
+
+    class RoiMask(field.FieldTemplate.RoiMask):
+        pass
+
+    class Zstack(field.FieldTemplate.Zstack):
+        pass
 
 
 @schema
@@ -43,6 +61,9 @@ class Presentation(stimulus.PresentationTemplate):
     userinfo_table = UserInfo
     field_table = Field
     stimulus_table = Stimulus
+
+    class ScanInfo(stimulus.PresentationTemplate.ScanInfo):
+        pass
 
 
 @schema

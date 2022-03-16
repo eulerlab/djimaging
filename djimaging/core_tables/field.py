@@ -2,6 +2,7 @@ import os
 from copy import deepcopy
 import datajoint as dj
 import numpy as np
+from matplotlib import pyplot as plt
 import h5py
 
 from djimaging.utils.data_utils import load_h5_table
@@ -287,3 +288,16 @@ class RoiTemplate(dj.Computed):
                 'roi_dia_um': roi_dia_um,
             })
         self.insert(roi_keys)
+
+    def plot1(self, key):
+        fig, axs = plt.subplots(1, 3, figsize=(15, 3))
+        stack_average = (self.field_table.FieldInfo() & key).fetch1("stack_average").T
+        roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask").T
+        axs[0].imshow(stack_average)
+        axs[0].set(title='stack_average')
+        roi_mask_im = axs[1].imshow(roi_mask, cmap='jet')
+        plt.colorbar(roi_mask_im, ax=axs[1])
+        axs[1].set(title='roi_mask')
+        axs[2].imshow(roi_mask == -key['roi_id'])
+        axs[2].set(title='ROI')
+        plt.show()
