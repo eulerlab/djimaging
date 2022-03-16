@@ -230,6 +230,19 @@ class FieldTemplate(dj.Computed):
         (self.Zstack & field_key).insert1(zstack_key, allow_direct_insert=True)
         (self.FieldInfo & field_key).insert1(fieldinfo_key, allow_direct_insert=True)
 
+    def plot1(self, key):
+        fig, axs = plt.subplots(1, 2, figsize=(10, 3.5))
+        stack_average = (self.FieldInfo() & key).fetch1("stack_average").T
+        roi_mask = (self.RoiMask() & key).fetch1("roi_mask").T
+        axs[0].imshow(stack_average)
+        axs[0].set(title='stack_average')
+
+        if roi_mask.size > 0:
+            roi_mask_im = axs[1].imshow(roi_mask, cmap='jet')
+            plt.colorbar(roi_mask_im, ax=axs[1])
+            axs[1].set(title='roi_mask')
+        plt.show()
+
 
 class RoiTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
@@ -290,7 +303,7 @@ class RoiTemplate(dj.Computed):
         self.insert(roi_keys)
 
     def plot1(self, key):
-        fig, axs = plt.subplots(1, 3, figsize=(15, 3))
+        fig, axs = plt.subplots(1, 3, figsize=(15, 3.5))
         stack_average = (self.field_table.FieldInfo() & key).fetch1("stack_average").T
         roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask").T
         axs[0].imshow(stack_average)

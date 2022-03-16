@@ -16,7 +16,6 @@ class TracesTemplate(dj.Computed):
         definition = """
         # Raw Traces for each roi under a specific presentation
     
-        -> self.field_table
         -> self.presentation_table
         -> self.roi_table
     
@@ -196,10 +195,6 @@ class DetrendSnippetsTemplate(dj.Computed):
     def definition(self):
         definition = """
         # Snippets created from slicing filtered traces using the triggertimes. 
-    
-        -> self.stimulus_table
-        -> self.presentation_table
-        -> self.traces_table
         -> self.detrendtraces_table
         ---
         detrend_snippets         :longblob     # array of snippets (time x repetitions)

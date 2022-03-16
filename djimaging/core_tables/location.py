@@ -1,4 +1,5 @@
 import datajoint as dj
+from matplotlib import pyplot as plt
 
 from djimaging.utils.scanm_utils import get_retinal_position
 from djimaging.utils.dj_utils import PlaceholderTable
@@ -15,7 +16,6 @@ class RelativeFieldLocationTemplate(dj.Computed):
         # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
         
         -> self.field_table
-        -> self.expinfo_table
         ---
         relx        :float      # XCoord_um relative to the optic disk
         rely        :float      # YCoord_um relative to the optic disk
@@ -66,6 +66,14 @@ class RelativeFieldLocationTemplate(dj.Computed):
 
         self.insert1(loc_key)
 
+    def plot(self):
+        relx, rely = self.fetch("relx", "rely")
+        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+        ax.scatter(rely, relx)
+        ax.set(xlabel="rely", ylabel="relx")
+        ax.set_aspect(aspect="equal", adjustable="datalim")
+        plt.show()
+
 
 class RetinalFieldLocationTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
@@ -78,7 +86,6 @@ class RetinalFieldLocationTemplate(dj.Computed):
         # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
         
         -> self.relativefieldlocalation_table
-        -> self.expinfo_table
         ---
         ventral_dorsal_pos_um       :float      # position on the ventral-dorsal axis, greater 0 means dorsal
         temporal_nasal_pos_um       :float      # position on the temporal-nasal axis, greater 0 means nasal
@@ -99,3 +106,11 @@ class RetinalFieldLocationTemplate(dj.Computed):
         rfl_key['ventral_dorsal_pos_um'] = ventral_dorsal_pos_um
         rfl_key['temporal_nasal_pos_um'] = temporal_nasal_pos_um
         self.insert1(rfl_key)
+
+    def plot(self):
+        temporal_nasal_pos_um, ventral_dorsal_pos_um = self.fetch("temporal_nasal_pos_um", "ventral_dorsal_pos_um")
+        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+        ax.scatter(temporal_nasal_pos_um, ventral_dorsal_pos_um)
+        ax.set(xlabel="temporal_nasal_pos_um", ylabel="ventral_dorsal_pos_um")
+        ax.set_aspect(aspect="equal", adjustable="datalim")
+        plt.show()

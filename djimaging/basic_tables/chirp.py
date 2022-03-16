@@ -43,7 +43,6 @@ class ChirpFeaturesTemplate(dj.Computed):
         definition = '''
         #Computes an OnOff and a transience index based on the chirp step response
         -> self.detrendsnippets_table
-        -> self.presentation_table
         ---
         on_off_index:       float   # index indicating light preference (-1 Off, 1 On)
         transience_index:   float   # index indicating transience of response
