@@ -1,8 +1,4 @@
-from djimaging.core_tables import experiment
-from djimaging.core_tables import field
-from djimaging.core_tables import location
-from djimaging.core_tables import traces
-from djimaging.core_tables import presentation
+from djimaging.tables.core import location, traces, presentation, experiment, field
 
 from .utils import _test_definition
 

@@ -33,7 +33,43 @@ class ChirpQITemplate(dj.Computed):
         self.insert1(dict(key, chirp_qi=chirp_qi, min_qi=min_qi))
 
 
-def _compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1):
+class ChirpFeaturesTemplate(dj.Computed):
+    # TODO: Add more features
+
+    database = ""  # hack to suppress DJ error
+
+    @property
+    def definition(self):
+        definition = '''
+        #Computes an OnOff and a transience index based on the chirp step response
+        -> self.detrendsnippets_table
+        ---
+        on_off_index:       float   # index indicating light preference (-1 Off, 1 On)
+        transience_index:   float   # index indicating transience of response
+        '''
+        return definition
+
+    detrendsnippets_table = PlaceholderTable
+    presentation_table = PlaceholderTable
+
+    @property
+    def key_source(self):
+        return self.detrendsnippets_table() & "stim_id=1"
+
+    def make(self, key):
+        # TODO: Should this depend on pres? Triggertimes are also in snippets and sf can be derived from times
+        snippets = (self.detrendsnippets_table() & key).fetch1('detrend_snippets')
+        snippets_times = (self.detrendsnippets_table() & key).fetch1('snippets_times')
+        trigger_times = (self.presentation_table() & key).fetch1('triggertimes')
+        sf = (self.presentation_table() & key).fetch1('scan_frequency')
+
+        on_off_index = compute_on_off_index(snippets, snippets_times, trigger_times, sf)
+        transience_index = compute_transience_index(snippets, snippets_times, trigger_times, sf)
+
+        self.insert1(dict(key, on_off_index=on_off_index, transience_index=transience_index))
+
+
+def compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1):
     start_trigs = trigger_times[::2]
     light_step_frames = int(light_step_duration * sf)
 
@@ -73,7 +109,7 @@ def _compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_ste
     return on_off_index
 
 
-def _compute_transcience_index(snippets, snippets_times, trigger_times, sf, upsam_fre=500):
+def compute_transience_index(snippets, snippets_times, trigger_times, sf, upsam_fre=500):
     upsampling_factor = int(snippets.shape[0] / sf * upsam_fre)
 
     resampled_snippets = np.zeros((upsampling_factor, snippets.shape[1]))
@@ -106,39 +142,3 @@ def _compute_transcience_index(snippets, snippets_times, trigger_times, sf, upsa
     RTi = RTi.mean()
 
     return RTi
-
-
-class ChirpFeaturesTemplate(dj.Computed):
-    # TODO: Add more features
-
-    database = ""  # hack to suppress DJ error
-
-    @property
-    def definition(self):
-        definition = '''
-        #Computes an OnOff and a transience index based on the chirp step response
-        -> self.detrendsnippets_table
-        ---
-        on_off_index:       float   # index indicating light preference (-1 Off, 1 On)
-        transience_index:   float   # index indicating transience of response
-        '''
-        return definition
-
-    detrendsnippets_table = PlaceholderTable
-    presentation_table = PlaceholderTable
-
-    @property
-    def key_source(self):
-        return self.detrendsnippets_table() & "stim_id=1"
-
-    def make(self, key):
-        # TODO: Should this depend on pres? Triggertimes are also in snippets and sf can be derived from times
-        snippets = (self.detrendsnippets_table() & key).fetch1('detrend_snippets')
-        snippets_times = (self.detrendsnippets_table() & key).fetch1('snippets_times')
-        trigger_times = (self.presentation_table() & key).fetch1('triggertimes')
-        sf = (self.presentation_table() & key).fetch1('scan_frequency')
-
-        on_off_index = _compute_on_off_index(snippets, snippets_times, trigger_times, sf)
-        transience_index = _compute_transcience_index(snippets, snippets_times, trigger_times, sf)
-
-        self.insert1(dict(key, on_off_index=on_off_index, transience_index=transience_index))

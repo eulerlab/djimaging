@@ -1,5 +1,5 @@
 from djimaging.schemas.core_schema import schema, DetrendSnippets, Stimulus, Presentation
-from djimaging.basic_tables import chirp, orientation
+from djimaging.tables.optional import chirp, orientation
 
 
 @schema

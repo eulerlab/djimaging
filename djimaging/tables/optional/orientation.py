@@ -7,6 +7,82 @@ from djimaging.utils.dj_utils import PlaceholderTable
 from djimaging.utils.math_utils import normalize_zero_one
 
 
+class OsDsIndexesTemplate(dj.Computed):
+    database = ""  # hack to suppress DJ error
+
+    @property
+    def definition(self):
+        definition = """
+        #This class computes the direction and orientation selectivity indexes 
+        #as well as a quality index of DS responses as described in Baden et al. (2016)
+        -> self.detrendsnippets_table
+        ---
+        ds_index:   float   #direction selectivity index as resulting vector length (absolute of projection on complex exponential)
+        ds_pvalue:  float   #p-value indicating the percentile of the vector length in null distribution
+        ds_null:    longblob    #null distribution of DSIs
+        pref_dir:  float    #preferred direction
+        os_index:   float   #orientation selectivity index in analogy to ds_index
+        os_pvalue:  float   #analogous to ds_pvalue for orientation tuning
+        os_null:    longblob    #null distribution of OSIs
+        pref_or:    float   #preferred orientation
+        on_off:     float   #on off index based on time kernel
+        d_qi:       float   #quality index for moving bar response
+        u:     longblob    #time component
+        v:     longblob    #direction component
+        surrogate_v:    longblob    #computed by projecting on time
+        surrogate_dsi:  float   #DSI of surrogate v 
+        avg_sorted_resp:    longblob    # response matrix, averaged across reps
+        """
+        return definition
+
+    stimulus_table = PlaceholderTable
+    detrendsnippets_table = PlaceholderTable
+
+    @property
+    def key_source(self):
+        return self.detrendsnippets_table() & 'stim_id = 2'
+
+    def make(self, key):
+
+        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
+        snippets = (self.detrendsnippets_table() & key).fetch1('detrend_snippets')  # get the response snippets
+
+        sorted_responses, sorted_directions_rad = _sort_response_matrix(snippets, dir_order)
+        avg_sorted_responses = np.mean(sorted_responses, axis=-1)
+        try:
+            u, v, s = _get_time_dir_kernels(avg_sorted_responses)
+        except np.linalg.LinAlgError:
+            print(f'ERROR: LinAlgError for key {key}')
+            return
+
+        dsi, pref_dir = _get_si(v, sorted_directions_rad, 1)
+        osi, pref_or = _get_si(v, sorted_directions_rad, 2)
+
+        (t, d, r) = sorted_responses.shape
+        # make the result between the original and the shuffled comparable
+        projected = np.dot(np.transpose(np.reshape(sorted_responses, (t, d * r))), u)
+        projected = np.reshape(projected, (d, r))
+        surrogate_v = normalize_zero_one(np.mean(projected, axis=-1))
+
+        dsi_s, pref_dir_s = _get_si(surrogate_v, sorted_directions_rad, 1)
+        osi_s, pref_or_s = _get_si(surrogate_v, sorted_directions_rad, 2)
+        null_dist_dsi = _compute_null_dist(np.transpose(projected), sorted_directions_rad, 1)
+        p_dsi = np.mean(null_dist_dsi > dsi_s)
+        null_dist_osi = _compute_null_dist(np.transpose(projected), sorted_directions_rad, 2)
+        p_osi = np.mean(null_dist_osi > osi_s)
+        d_qi = _quality_index_ds(sorted_responses)
+        on_off = _get_on_off_index(u)
+
+        self.insert1(dict(**key,
+                          ds_index=dsi, ds_pvalue=p_dsi,
+                          ds_null=null_dist_dsi, pref_dir=pref_dir,
+                          os_index=osi, os_pvalue=p_osi,
+                          os_null=null_dist_osi, pref_or=pref_or,
+                          on_off=on_off, d_qi=d_qi, u=u, v=v,
+                          surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
+                          avg_sorted_resp=avg_sorted_responses))
+
+
 def _quality_index_ds(raw_sorted_resp_mat):
     """
     This function computes the quality index for responses to moving bar as described in
@@ -174,79 +250,3 @@ def _compute_null_dist(rep_dir_resps, dirs, per, iters=1000):
         null_dist[i] = dsi
 
     return null_dist
-
-
-class OsDsIndexesTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
-
-    @property
-    def definition(self):
-        definition = """
-        #This class computes the direction and orientation selectivity indexes 
-        #as well as a quality index of DS responses as described in Baden et al. (2016)
-        -> self.detrendsnippets_table
-        ---
-        ds_index:   float   #direction selectivity index as resulting vector length (absolute of projection on complex exponential)
-        ds_pvalue:  float   #p-value indicating the percentile of the vector length in null distribution
-        ds_null:    longblob    #null distribution of DSIs
-        pref_dir:  float    #preferred direction
-        os_index:   float   #orientation selectivity index in analogy to ds_index
-        os_pvalue:  float   #analogous to ds_pvalue for orientation tuning
-        os_null:    longblob    #null distribution of OSIs
-        pref_or:    float   #preferred orientation
-        on_off:     float   #on off index based on time kernel
-        d_qi:       float   #quality index for moving bar response
-        u:     longblob    #time component
-        v:     longblob    #direction component
-        surrogate_v:    longblob    #computed by projecting on time
-        surrogate_dsi:  float   #DSI of surrogate v 
-        avg_sorted_resp:    longblob    # response matrix, averaged across reps
-        """
-        return definition
-
-    stimulus_table = PlaceholderTable
-    detrendsnippets_table = PlaceholderTable
-
-    @property
-    def key_source(self):
-        return self.detrendsnippets_table() & 'stim_id = 2'
-
-    def make(self, key):
-
-        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
-        snippets = (self.detrendsnippets_table() & key).fetch1('detrend_snippets')  # get the response snippets
-
-        sorted_responses, sorted_directions_rad = _sort_response_matrix(snippets, dir_order)
-        avg_sorted_responses = np.mean(sorted_responses, axis=-1)
-        try:
-            u, v, s = _get_time_dir_kernels(avg_sorted_responses)
-        except np.linalg.LinAlgError:
-            print(f'ERROR: LinAlgError for key {key}')
-            return
-
-        dsi, pref_dir = _get_si(v, sorted_directions_rad, 1)
-        osi, pref_or = _get_si(v, sorted_directions_rad, 2)
-
-        (t, d, r) = sorted_responses.shape
-        # make the result between the original and the shuffled comparable
-        projected = np.dot(np.transpose(np.reshape(sorted_responses, (t, d * r))), u)
-        projected = np.reshape(projected, (d, r))
-        surrogate_v = normalize_zero_one(np.mean(projected, axis=-1))
-
-        dsi_s, pref_dir_s = _get_si(surrogate_v, sorted_directions_rad, 1)
-        osi_s, pref_or_s = _get_si(surrogate_v, sorted_directions_rad, 2)
-        null_dist_dsi = _compute_null_dist(np.transpose(projected), sorted_directions_rad, 1)
-        p_dsi = np.mean(null_dist_dsi > dsi_s)
-        null_dist_osi = _compute_null_dist(np.transpose(projected), sorted_directions_rad, 2)
-        p_osi = np.mean(null_dist_osi > osi_s)
-        d_qi = _quality_index_ds(sorted_responses)
-        on_off = _get_on_off_index(u)
-
-        self.insert1(dict(**key,
-                          ds_index=dsi, ds_pvalue=p_dsi,
-                          ds_null=null_dist_dsi, pref_dir=pref_dir,
-                          os_index=osi, os_pvalue=p_osi,
-                          os_null=null_dist_osi, pref_or=pref_or,
-                          on_off=on_off, d_qi=d_qi, u=u, v=v,
-                          surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
-                          avg_sorted_resp=avg_sorted_responses))

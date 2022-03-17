@@ -24,3 +24,4 @@ class StimulusTemplate(dj.Manual):
         ntrigger_rep=0      :int unsigned       # Number of triggers per repetition  
         """
         return definition
+

@@ -7,5 +7,5 @@ def test_build_core_schema():
 
 
 def test_build_basic_schema():
-    from djimaging.schemas.basic_schema import schema
+    from djimaging.schemas.core_plus_optional_schema import schema
     assert isinstance(schema, dj.schemas.Schema)

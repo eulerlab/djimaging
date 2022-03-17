@@ -71,7 +71,7 @@ docs/_build/
 target/
 
 # Jupyter Notebook
-.ipynb_checkpoints
+.ipynb_checkpoints/
 
 # pyenv
 .python-version
@@ -113,8 +113,6 @@ djconfig/
 !djimaging/djconfig/README.md
 !djimaging/djconfig/djconf_template.json
 
-# Experimental stuff
-experimental/
-!djimaging/experimental/README.md
-my_tables/
-!djimaging/my_tables/README.md
+# Exclude user stuff
+user/
+!user/README.md

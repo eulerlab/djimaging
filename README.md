@@ -22,5 +22,11 @@ e.g. based on the template <code>djimaging/djconfig/djconf_template.json</code>.
 Fill out the missing values; if you don't know how, ask someone in your group.
 Never upload this personal config file to GitHub.
 
-Checkout the notebooks in <code>djimaging/notebooks</code> 
-and follow the instructions to create your first test database.
+Inside the root folder <code>djimaging</code> (not in <code>djimaging/djimaging</code>) 
+run the make user script my calling
+```bash
+python3 make_user.py your_username_here
+```
+This will create a folder <code>djimaging/user/your_username_here/notebooks</code> with some tutorial notebooks.
+Note that per default everyhing in this folder will not be under version control.
+Consider adding an expection for your files here, but do not upload them to the shared repository.

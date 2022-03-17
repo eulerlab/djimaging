@@ -1,13 +1,6 @@
 import datajoint as dj
 
-from djimaging.core_tables import userinfo
-from djimaging.core_tables import experiment
-from djimaging.core_tables import field
-from djimaging.core_tables import location
-from djimaging.core_tables import stimulus
-from djimaging.core_tables import presentation
-from djimaging.core_tables import traces
-
+from djimaging.tables.core import location, stimulus, traces, userinfo, presentation, experiment, field
 
 schema = dj.Schema()
 

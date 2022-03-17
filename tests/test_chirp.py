@@ -1,15 +1,14 @@
-from djimaging.basic_tables.chirp import _compute_on_off_index
+from djimaging.tables.optional.chirp import compute_on_off_index
 import numpy as np
 
 
 def test_compute_on_off_index_on_response():
-    t_start = 0.0
+    t_start = 5.0
     n_reps = 3
     sf = 7.81
     stim_dur = sf * 4.2
     sin_f = 0.2
 
-    np.random.seed(42)
     frames_per_rep = int(np.floor(stim_dur * sf))
 
     # Create data
@@ -25,19 +24,18 @@ def test_compute_on_off_index_on_response():
 
     trigger_times = np.concatenate([[t_start + i * stim_dur, t_start + i * stim_dur] for i in range(n_reps)])
 
-    obs = _compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1)
+    obs = compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1)
     exp_lb = 0.95
     assert obs > exp_lb
 
 
 def test_compute_on_off_index_off_response():
-    t_start = 0.0
+    t_start = 17.4
     n_reps = 3
     sf = 7.81
     stim_dur = sf * 4.2
     sin_f = 0.2
 
-    np.random.seed(42)
     frames_per_rep = int(np.floor(stim_dur * sf))
 
     # Create data
@@ -53,7 +51,7 @@ def test_compute_on_off_index_off_response():
 
     trigger_times = np.concatenate([[t_start + i * stim_dur, t_start + i * stim_dur] for i in range(n_reps)])
 
-    obs = _compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1)
+    obs = compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1)
     exp_ub = -0.95
     assert obs < exp_ub
 
@@ -64,7 +62,6 @@ def test_compute_on_off_index_no_response():
     sf = 7.81
     stim_dur = sf * 4.2
 
-    np.random.seed(42)
     frames_per_rep = int(np.floor(stim_dur * sf))
 
     # Create data
@@ -74,6 +71,6 @@ def test_compute_on_off_index_no_response():
 
     trigger_times = np.concatenate([[t_start + i * stim_dur, t_start + i * stim_dur] for i in range(n_reps)])
 
-    obs = _compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1)
+    obs = compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1)
     exp = 0.0
     assert obs == exp

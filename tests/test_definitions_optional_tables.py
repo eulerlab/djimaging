@@ -1,5 +1,4 @@
-from djimaging.basic_tables import chirp
-from djimaging.basic_tables import orientation
+from djimaging.tables.optional import chirp, orientation
 
 from .utils import _test_definition
 
