@@ -17,13 +17,16 @@ def run():
 
 def create_user_dir(djimaging_dir, user):
     assert os.path.isdir(os.path.join(djimaging_dir, 'djimaging'))
-    all_user_dir = os.path.join(djimaging_dir, 'user')
+    all_user_dir = os.path.join(djimaging_dir, 'djimaging', 'user')
     make_dir_if_new(all_user_dir)  # Make if not exists
-
+    open(os.path.join(all_user_dir, '__init__.py'), 'a').close()
     user_dir = os.path.join(all_user_dir, user)
     make_dir_if_new(user_dir)
+    open(os.path.join(user_dir, '__init__.py'), 'a').close()
     make_dir_if_new(os.path.join(user_dir, 'schemas'))
+    open(os.path.join(user_dir, 'schemas', '__init__.py'), 'a').close()
     make_dir_if_new(os.path.join(user_dir, 'tables'))
+    open(os.path.join(user_dir, 'tables', '__init__.py'), 'a').close()
     make_dir_if_new(os.path.join(user_dir, 'notebooks'))
 
     return user_dir
@@ -34,7 +37,11 @@ def copy_notebooks(djimaging_dir, user_dir):
     notebooks = [nb for nb in files
                  if os.path.isfile(os.path.join(djimaging_dir, 'notebooks', nb)) and nb.endswith('.ipynb')]
     for nb in notebooks:
-        shutil.copy(src=os.path.join(djimaging_dir, 'notebooks', nb), dst=os.path.join(user_dir, 'notebooks', nb))
+        src = os.path.join(djimaging_dir, 'notebooks', nb)
+        dst = os.path.join(user_dir, 'notebooks', nb)
+
+        if not os.path.isfile(dst):
+            shutil.copy(src, dst)
 
 
 def make_dir_if_new(path):
