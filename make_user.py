@@ -17,9 +17,10 @@ def run():
 
 def create_user_dir(djimaging_dir, user):
     assert os.path.isdir(os.path.join(djimaging_dir, 'djimaging'))
-    make_dir_if_new(os.path.join(djimaging_dir, 'djimaging', 'user'))  # Make if not exists
+    all_user_dir = os.path.join(djimaging_dir, 'user')
+    make_dir_if_new(all_user_dir)  # Make if not exists
 
-    user_dir = os.path.join(djimaging_dir, 'djimaging', 'user', user)
+    user_dir = os.path.join(all_user_dir, user)
     make_dir_if_new(user_dir)
     make_dir_if_new(os.path.join(user_dir, 'schemas'))
     make_dir_if_new(os.path.join(user_dir, 'tables'))
