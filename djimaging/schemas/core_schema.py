@@ -1,6 +1,6 @@
 import datajoint as dj
 
-from djimaging.tables.core import location, stimulus, traces, userinfo, presentation, experiment, field
+from djimaging.tables.core import stimulus, traces, userinfo, presentation, experiment, field
 
 schema = dj.Schema()
 
@@ -58,18 +58,6 @@ class Presentation(presentation.PresentationTemplate):
 
     class ScanInfo(presentation.PresentationTemplate.ScanInfo):
         pass
-
-
-@schema
-class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
-    field_table = Field
-    expinfo_table = Experiment.ExpInfo
-
-
-@schema
-class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
-    relativefieldlocalation_table = RelativeFieldLocation
-    expinfo_table = Experiment.ExpInfo
 
 
 @schema

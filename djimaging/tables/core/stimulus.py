@@ -8,8 +8,8 @@ class StimulusTemplate(dj.Manual):
     def definition(self):
         definition = """
         # Light stimuli
-    
         stim_id             :tinyint            # Unique integer identifier
+        stim_v              :tinyint            # Stimulus version, e.g. die differentiate between gChirp and lChirp
         ---
         framerate           :float              # framerate in hz
         stimulusname        :varchar(255)       # string identifier

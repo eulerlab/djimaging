@@ -30,6 +30,7 @@ def add_no_stim(stimulus_table):
     # no_stim
     key = {
         "stim_id": -1,
+        "stim_v": 0,
         "stimulusname": 'no_stim',
         "stim_path": '',
         "is_colour": 0,
@@ -57,6 +58,7 @@ def add_noise(stimulus_table, stim_path='/gpfs01/euler/data/Resources/Stimulus/o
 
     key = {
         "stim_id": 0,
+        "stim_v": 0,
         "stimulusname": 'noise',
         "stim_path": stim_path,
         "is_colour": 0,
@@ -83,6 +85,7 @@ def add_chirp(stimulus_table, stim_path='/gpfs01/euler/data/Resources/Stimulus/o
 
     key = {
         "stim_id": 1,
+        "stim_v": 0,
         "stimulusname": 'chirp',
         "stim_path": stim_path,
         "is_colour": 0,
@@ -102,6 +105,7 @@ def add_chirp(stimulus_table, stim_path='/gpfs01/euler/data/Resources/Stimulus/o
 def add_movingbar(stimulus_table, stim_path=''):
     key = {
         "stim_id": 2,
+        "stim_v": 0,
         "stimulusname": 'movingbar',
         "stim_path": stim_path,
         "is_colour": 0,

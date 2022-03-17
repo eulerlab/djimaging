@@ -1,4 +1,4 @@
-from djimaging.tables.core import location, traces, presentation, experiment, field
+from djimaging.tables.core import traces, presentation, experiment, field, roi
 
 from .utils import _test_definition
 
@@ -26,16 +26,7 @@ def test_definition_field():
 
 
 def test_definition_roi():
-    _test_definition(field.RoiTemplate)
-
-
-# location
-def test_definition_relativefieldlocation():
-    _test_definition(location.RelativeFieldLocationTemplate)
-
-
-def test_definition_retinalfieldlocation():
-    _test_definition(location.RetinalFieldLocationTemplate)
+    _test_definition(roi.RoiTemplate)
 
 
 # traces

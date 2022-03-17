@@ -79,10 +79,10 @@ class DetrendParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        detrend_param_set_id:           int         #unique param set id
+        detrend_param_set_id:           int       # unique param set id
         ---
-        window_length=60:               int       #window length for SavGol filter in seconds
-        poly_order=3:                   int             # order of polynomial for savgol filter
+        window_length=60:               int       # window length for SavGol filter in seconds
+        poly_order=3:                   int       # order of polynomial for savgol filter
         non_negative=0:                 tinyint unsigned
         subtract_baseline=0:            tinyint unsigned
         standardize=1:                  tinyint unsigned  # whether to standardize (divide by sd)
@@ -100,10 +100,8 @@ class DetrendTracesTemplate(dj.Computed):
         -> self.detrendparams_table
         -> self.traces_table
         ---
-        detrend_traces:         longblob        #detrended traces
-        smoothed_traces:        longblob        #output of savgol filter which is
-                                                #subtracted from the raw traces to
-                                                #yield detrended traces
+        detrend_traces:         longblob        # detrended traces
+        smoothed_traces:        longblob        # output of savgol filter which is subtracted from the raw traces
         """
         return definition
 
