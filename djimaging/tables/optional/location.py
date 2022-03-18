@@ -21,9 +21,9 @@ class OpticDiskTemplate(dj.Computed):
         -> self.experiment_table
         ---
         fromfile :varchar(255)  # File from which data was extraced
-        odx  :float    # XCoord_um relative to the optic disk
-        ody  :float    # YCoord_um relative to the optic disk
-        odz  :float    # ZCoord_um relative to the optic disk
+        odx      :float         # XCoord_um relative to the optic disk
+        ody      :float         # YCoord_um relative to the optic disk
+        odz      :float         # ZCoord_um relative to the optic disk
         """
         return definition
 
@@ -46,23 +46,17 @@ class OpticDiskTemplate(dj.Computed):
         else:
             file = None
 
-        # Get OD information, either from file, from header or not at all
+        # Try to get OD information, either from file or from header
         if file is not None:
 
             filepath = os.path.join(pre_data_path, file)
             wparamsnum = load_h5_table('wParamsNum', filename=filepath)
-            absx = wparamsnum['XCoord_um']
-            absy = wparamsnum['YCoord_um']
-            absz = wparamsnum['ZCoord_um']
-            nxpix = int(wparamsnum['User_dxPix'])
-            nxpix_offset = int(wparamsnum['User_nXPixLineOffs'])
-            nypix = int(wparamsnum['User_dyPix'])
-            pixel_size_um = get_pixel_size_um(setupid=wparamsnum['User_SetupID'], nypix=nypix, zoom=wparamsnum['Zoom'])
 
-            # Use center of od field
-            odx = absx + (nxpix_offset + nxpix / 2.) * pixel_size_um
-            ody = absy + (nxpix_offset + nypix / 2.) * pixel_size_um
-            odz = absz
+            # Refers to center of fields
+            odx = wparamsnum['XCoord_um']
+            ody = wparamsnum['YCoord_um']
+            odz = wparamsnum['ZCoord_um']
+
             fromfile = filepath
 
         elif (self.experiment_table.ExpInfo() & key).fetch1("od_ini_flag") == 1:
@@ -111,17 +105,11 @@ class RelativeFieldLocationTemplate(dj.Computed):
         print(od_key)
 
         odx, ody, odz = (self.opticdisk_table() & od_key).fetch1("odx", "ody", "odz")
-
-        absx, absy, absz, nxpix, nxpix_offset, nypix, pixel_size_um = (self.field_table.FieldInfo() & key).fetch1(
-            'absx', 'absy', 'absz', 'nxpix', 'nxpix_offset', 'nypix', 'pixel_size_um')
-
-        # Get center of scan field
-        cabsx = absx + (nxpix_offset + nxpix / 2.) * pixel_size_um
-        cabsy = absy + (nxpix_offset + nypix / 2.) * pixel_size_um
+        absx, absy, absz = (self.field_table.FieldInfo() & key).fetch1('absx', 'absy', 'absz')
 
         loc_key = key.copy()
-        loc_key["relx"] = cabsx - odx
-        loc_key["rely"] = cabsy - ody
+        loc_key["relx"] = absx - odx
+        loc_key["rely"] = absy - ody
         loc_key["relz"] = absz - odz
 
         self.insert1(loc_key)

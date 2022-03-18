@@ -75,15 +75,27 @@ class DetrendParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        detrend_param_set_id:           int       # unique param set id
+        detrend_param_set_id:         int       # unique param set id
         ---
-        window_length=60:               int       # window length for SavGol filter in seconds
-        poly_order=3:                   int       # order of polynomial for savgol filter
-        non_negative=0:                 tinyint unsigned
-        subtract_baseline=0:            tinyint unsigned
-        standardize=1:                  tinyint unsigned  # whether to standardize (divide by sd)
+        window_length:                int       # window length for SavGol filter in seconds
+        poly_order:                   int       # order of polynomial for savgol filter
+        non_negative:                 tinyint unsigned
+        subtract_baseline:            tinyint unsigned
+        standardize:                  tinyint unsigned  # whether to standardize (divide by sd)
         """
         return definition
+
+    def add_default(self, skip_duplicates=False):
+        """Add default detrend parameter to table"""
+        key = {
+            'detrend_param_set_id': 1,
+            'window_length': 60,
+            'poly_order': 3,
+            'non_negative': 0,
+            'subtract_baseline': 1,
+            'standardize': 1,
+        }
+        self.insert1(key, skip_duplicates=skip_duplicates)
 
 
 class DetrendTracesTemplate(dj.Computed):
