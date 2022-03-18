@@ -1,11 +1,11 @@
-from djimaging.schemas.core_schema import schema, Stimulus, Field, Experiment, Presentation, DetrendSnippets
+from djimaging.schemas.core_schema import schema, Stimulus, Field, Experiment, Presentation, DetrendSnippets, UserInfo
 from djimaging.tables.optional import location, chirp, orientation
 
 
 @schema
 class OpticDisk(location.OpticDiskTemplate):
-    expinfo_table = Experiment.ExpInfo
-    field_table = Field
+    experiment_table = Experiment
+    userinfo_table = UserInfo
 
 
 @schema

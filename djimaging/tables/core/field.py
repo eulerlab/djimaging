@@ -19,10 +19,7 @@ class FieldTemplate(dj.Computed):
         definition = """
         # Recording fields
         -> self.experiment_table
-        field                :varchar(255)          # string identifying files corresponding to field
-        ---
-        od_flag              :tinyint unsigned      # is this the optic disk recording?
-        loc_flag             :tinyint unsigned      # is this a location recording? e.g. the edge
+        field   :varchar(255)          # string identifying files corresponding to field
         """
         return definition
 
@@ -48,8 +45,8 @@ class FieldTemplate(dj.Computed):
             # ROI Mask
             -> master
             ---
-            fromfile                   :varchar(255)   # from which file the roi mask was extracted from
-            roi_mask                   :longblob       # roi mask for the recording field
+            fromfile    :varchar(255)   # from which file the roi mask was extracted from
+            roi_mask    :longblob       # roi mask for the recording field
             """
             return definition
 
@@ -69,7 +66,7 @@ class FieldTemplate(dj.Computed):
             nxpix_offset: int  # number of offset pixels in x
             nxpix_retrace: int  # number of retrace pixels in x
             pixel_size_um :float  # width / height of a pixel in um
-            recording_depth :float  # XY-scan: single element list with IPL depth, XZ: list of ROI depths
+            recording_depth=-9999 :float  # XY-scan: single element list with IPL depth, XZ: list of ROI depths
             stack_average: longblob  # Average of the data stack for visualization
             """
             return definition
@@ -96,32 +93,23 @@ class FieldTemplate(dj.Computed):
         if verbose:
             print("--> Processing fields in:", pre_data_path)
 
-        datatype_loc, animal_loc, region_loc, field_loc, stimulus_loc, pharm_loc = (self.userinfo_table() & key).fetch1(
-            "datatype_loc", "animal_loc", "region_loc", "field_loc", "stimulus_loc", "pharm_loc")
+        user_dict = (self.userinfo_table() & key).fetch1()
 
-        # walk through the filenames belonging to this experiment and fetch all fields from filenames
-        fields_info = dict()
-        for file in sorted(os.listdir(pre_data_path)):
-            if file.startswith('.') or not file.endswith('.h5'):
-                continue
+        # Collect all files belonging to this experiment
+        field2info = scan_fields_and_files(pre_data_path, user_dict=user_dict, verbose=verbose)
 
-            datatype, animal, region, field, stimulus, pharm = get_file_info(
-                file, datatype_loc, animal_loc, region_loc, field_loc, stimulus_loc, pharm_loc)
+        # Remove opticdisk and outline recordings
+        remove_fields = []
+        for field in field2info.keys():
+            if field.lower() in user_dict['opticdisk_alias'].split('_') + user_dict['outline_alias'].split('_'):
+                remove_fields.append(field)
+        for remove_field in remove_fields:
+            field2info.pop(remove_field)
 
-            if field is None:
-                if verbose:
-                    print(f"\tSkipping file with unrecognized field: {file}")
-                continue
-
-            if field not in fields_info:
-                fields_info[field] = dict(files=[file], region=region)
-            else:
-                assert fields_info[field]['region'] == region, f"{fields_info[field]['region']} vs. {region}"
-
-            fields_info[field]['files'].append(file)
-
-        for field, info in fields_info.items():
-            if only_new and len((self & key & dict(field=field)).fetch()) > 0:
+        # Go through remaining fields and add them
+        for field, info in field2info.items():
+            exists = len((self & key & dict(field=field)).fetch()) > 0
+            if only_new and exists:
                 if verbose > 1:
                     print(f"\tSkipping field {field} with files: {info['files']}")
                 continue
@@ -135,93 +123,24 @@ class FieldTemplate(dj.Computed):
 
         pre_data_path = (self.experiment_table() & key).fetch1("pre_data_path")
         data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
+        setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
 
         if field is not None and (field.startswith('loc') or field.startswith('outline')) or \
                 region is not None and (region.startswith('loc') or region.startswith('outline')):
-            loc_flag = 1
-        else:
-            loc_flag = 0
+            return
 
         if field is not None and (field.startswith('od') or field.startswith('opticdis')) or \
                 region is not None and (region.startswith('od') or region.startswith('opticdis')):
-            od_flag = 1
-        else:
-            od_flag = 0
+            return
 
-        primary_key = deepcopy(key)
-        primary_key["field"] = field
+        roi_mask, file = get_roi_mask(pre_data_path, files)
 
-        field_key = deepcopy(primary_key)
-        field_key["od_flag"] = od_flag
-        field_key["loc_flag"] = loc_flag
-
-        # Roi mask
-        roi_mask = np.zeros(0)
-        for file in sorted(files):
-            with h5py.File(pre_data_path + file, 'r', driver="stdio") as h5_file:
-                if 'rois' in [k.lower() for k in h5_file.keys()]:
-                    # File is there
-                    for h5_keys in h5_file.keys():
-                        if h5_keys.lower() == 'rois':
-                            roi_mask = np.copy(h5_file[h5_keys])
-                            break
-                    else:
-                        raise Exception('This should not happen')
-                    break
-        else:
-            assert loc_flag or od_flag, f'ROIs not found in {files}'
-            file = files[0]
-
-        # Get stack
-        with h5py.File(pre_data_path + file, 'r', driver="stdio") as h5_file:
-            stack = np.copy(h5_file[data_stack_name])
-
-        # Get parameters
-        w_params_num = load_h5_table('wParamsNum', filename=pre_data_path + file)
-        absx = w_params_num['XCoord_um']
-        absy = w_params_num['YCoord_um']
-        absz = w_params_num['ZCoord_um']
-        zstep = w_params_num['ZStep_um']
-        zstack = w_params_num['User_ScanType']
-
-        setupid = (self.experiment_table.ExpInfo() & key).fetch1('setupid')
-        nxpix_offset = int(w_params_num["User_nXPixLineOffs"])
-        nxpix_retrace = int(w_params_num["User_nPixRetrace"])
-        nxpix = int(w_params_num["User_dxPix"] - nxpix_retrace - nxpix_offset)
-        nypix = int(w_params_num["User_dyPix"])
-        pixel_size_um = get_pixel_size_um(zoom=w_params_num["Zoom"], setupid=setupid, nypix=nypix)
-
-        # Sanity checks
-        if roi_mask.size > 0:
-            assert roi_mask.shape == (nxpix, nypix), f'ROI mask shape error: {roi_mask.shape} vs {(nxpix, nypix)}'
-
-        if stack.size > 0:
-            assert stack.shape[:2] == (nxpix, nypix), f'Stack shape error: {stack.shape} vs {(nxpix, nypix)}'
-            assert stack.ndim == 3, 'Stack does not match expected shape'
-
-        stack_average = np.mean(stack, 2)
-
-        # subkey for fieldinfo
-        fieldinfo_key = deepcopy(primary_key)
-        fieldinfo_key["fromfile"] = file
-        fieldinfo_key["absx"] = absx
-        fieldinfo_key["absy"] = absy
-        fieldinfo_key["absz"] = absz
-        fieldinfo_key["nxpix"] = nxpix
-        fieldinfo_key["nxpix_offset"] = nxpix_offset
-        fieldinfo_key["nxpix_retrace"] = nxpix_retrace
-        fieldinfo_key["nypix"] = nypix
-        fieldinfo_key["pixel_size_um"] = pixel_size_um
-        fieldinfo_key['recording_depth'] = -9999
-        fieldinfo_key['stack_average'] = stack_average
-
-        # subkey for adding Fields to ZStack
-        zstack_key = deepcopy(primary_key)
-        zstack_key["zstack"] = 1 if zstack == 11 else 0
-        zstack_key["zstep"] = zstep
+        field_key, fieldinfo_key, zstack_key = load_scan_info(
+            key=key, field=field, pre_data_path=pre_data_path, file=file,
+            data_stack_name=data_stack_name, setupid=setupid)
 
         # subkey for adding Fields to RoiMask
-        roimask_key = deepcopy(primary_key)
+        roimask_key = deepcopy(field_key)
         roimask_key["fromfile"] = file if roi_mask.size > 0 else ''
         roimask_key["roi_mask"] = roi_mask
 
@@ -244,3 +163,95 @@ class FieldTemplate(dj.Computed):
         plt.show()
 
 
+def scan_fields_and_files(pre_data_path, user_dict, verbose=0) -> dict:
+    """Return a dictonary that maps fields to their respective files"""
+
+    loc_mapper = {k: v for k, v in user_dict.items() if k.endswith('loc')}
+
+    field2info = dict()
+
+    for file in sorted(os.listdir(pre_data_path)):
+        if file.startswith('.') or not file.endswith('.h5'):
+            continue
+
+        datatype, animal, region, field, stimulus, pharm = get_file_info(file, **loc_mapper)
+
+        if field is None:
+            if verbose:
+                print(f"\tSkipping file with unrecognized field: {file}")
+            continue
+
+        # Create new or check for inconsistencies
+        if field not in field2info:
+            field2info[field] = dict(files=[], region=region)
+        else:
+            assert field2info[field]['region'] == region, f"{field2info[field]['region']} vs. {region}"
+
+        # Add file
+        field2info[field]['files'].append(file)
+    return field2info
+
+
+def get_roi_mask(pre_data_path, files):
+    # Roi mask
+    for file in sorted(files):
+        with h5py.File(pre_data_path + file, 'r', driver="stdio") as h5_file:
+            if 'rois' in [k.lower() for k in h5_file.keys()]:
+                # File is there
+                for h5_keys in h5_file.keys():
+                    if h5_keys.lower() == 'rois':
+                        roi_mask = np.copy(h5_file[h5_keys])
+                        break
+                else:
+                    raise Exception('This should not happen')
+                break
+    else:
+        raise ValueError(f'ROIs not found in {files}')
+
+    return roi_mask, file
+
+
+def load_scan_info(key, field, pre_data_path, file, data_stack_name, setupid):
+    # TODO: Clean this
+
+    # Get stack
+    with h5py.File(pre_data_path + file, 'r', driver="stdio") as h5_file:
+        stack = np.copy(h5_file[data_stack_name])
+
+    # Get parameters
+    wparamsnum = load_h5_table('wParamsNum', filename=pre_data_path + file)
+
+    nxpix_offset = int(wparamsnum["User_nXPixLineOffs"])
+    nxpix_retrace = int(wparamsnum["User_nPixRetrace"])
+    nxpix = int(wparamsnum["User_dxPix"] - nxpix_retrace - nxpix_offset)
+    nypix = int(wparamsnum["User_dyPix"])
+    pixel_size_um = get_pixel_size_um(zoom=wparamsnum["Zoom"], setupid=setupid, nypix=nypix)
+
+    assert stack.shape[:2] == (nxpix, nypix), f'Stack shape error: {stack.shape} vs {(nxpix, nypix)}'
+    assert stack.ndim == 3, 'Stack does not match expected shape'
+
+    stack_average = np.mean(stack, 2)
+
+    # keys
+    field_key = deepcopy(key)
+    field_key["field"] = field
+
+    # subkey for fieldinfo
+    fieldinfo_key = deepcopy(field_key)
+    fieldinfo_key["fromfile"] = file
+    fieldinfo_key["absx"] = wparamsnum['XCoord_um']
+    fieldinfo_key["absy"] = wparamsnum['YCoord_um']
+    fieldinfo_key["absz"] = wparamsnum['ZCoord_um']
+    fieldinfo_key["nxpix"] = nxpix
+    fieldinfo_key["nxpix_offset"] = nxpix_offset
+    fieldinfo_key["nxpix_retrace"] = nxpix_retrace
+    fieldinfo_key["nypix"] = nypix
+    fieldinfo_key["pixel_size_um"] = pixel_size_um
+    fieldinfo_key['stack_average'] = stack_average
+
+    # subkey for adding Fields to ZStack
+    zstack_key = deepcopy(field_key)
+    zstack_key["zstack"] = 1 if wparamsnum['User_ScanType'] == 11 else 0
+    zstack_key["zstep"] = wparamsnum['ZStep_um']
+
+    return field_key, fieldinfo_key, zstack_key

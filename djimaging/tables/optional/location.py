@@ -1,28 +1,12 @@
+import os
+
 import datajoint as dj
 from matplotlib import pyplot as plt
 
-from djimaging.utils.scanm_utils import get_retinal_position
+from djimaging.tables.core.field import scan_fields_and_files, load_scan_info
+from djimaging.utils.scanm_utils import get_retinal_position, get_pixel_size_um
+from djimaging.utils.data_utils import load_h5_table
 from djimaging.utils.dj_utils import PlaceholderTable
-
-
-class RetinaEdgesTemplate(dj.Computed):
-    database = ""
-
-    @property
-    def definition(self):
-        definition = """
-        # location of the recorded field center relative to the optic disk
-        # XCoord_um is the relative position from back towards curtain, i.e. larger XCoord_um means closer to curtain
-        # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
-
-        -> self.expinfo_table
-        ---
-        -> self.field_table.proj(source='field')
-        odx  :float    # XCoord_um relative to the optic disk
-        ody  :float    # YCoord_um relative to the optic disk
-        odz  :float    # ZCoord_um relative to the optic disk
-        """
-        return definition
 
 
 class OpticDiskTemplate(dj.Computed):
@@ -34,38 +18,57 @@ class OpticDiskTemplate(dj.Computed):
         # location of the recorded field center relative to the optic disk
         # XCoord_um is the relative position from back towards curtain, i.e. larger XCoord_um means closer to curtain
         # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
-
-        -> self.expinfo_table
+        -> self.experiment_table
         ---
-        -> self.field_table.proj(source='field')
+        fromfile :varchar(255)  # File from which data was extraced
         odx  :float    # XCoord_um relative to the optic disk
         ody  :float    # YCoord_um relative to the optic disk
         odz  :float    # ZCoord_um relative to the optic disk
         """
         return definition
 
-    expinfo_table = PlaceholderTable
-    field_table = PlaceholderTable
+    experiment_table = PlaceholderTable
+    userinfo_table = PlaceholderTable
 
     def make(self, key):
-        od_table = (self.field_table() * self.field_table.FieldInfo() & key & "od_flag=1")
+        user_dict = (self.userinfo_table() & key).fetch1()
+        pre_data_path = (self.experiment_table() & key).fetch1('pre_data_path')
 
-        if len(od_table) > 0:
-            print(f'Optic disk h5 file found for {key}')
-            assert len(od_table) == 1, 'Multiple OD recordings found'
-            absx, absy, absz, nxpix, nxpix_offset, nypix, pixel_size_um = od_table.fetch1(
-                'absx', 'absy', 'absz', 'nxpix', 'nxpix_offset', 'nypix', 'pixel_size_um')
+        field2info = scan_fields_and_files(pre_data_path, user_dict=user_dict)
+
+        # Get correct
+        for field, info in field2info.items():
+            if field.lower() in user_dict['opticdisk_alias'].split('_'):
+                files = info['files']
+                assert len(files) == 1, files
+                file = files[0]
+                break
+        else:
+            file = None
+
+        # Get OD information, either from file, from header or not at all
+        if file is not None:
+
+            filepath = os.path.join(pre_data_path, file)
+            wparamsnum = load_h5_table('wParamsNum', filename=filepath)
+            absx = wparamsnum['XCoord_um']
+            absy = wparamsnum['YCoord_um']
+            absz = wparamsnum['ZCoord_um']
+            nxpix = int(wparamsnum['User_dxPix'])
+            nxpix_offset = int(wparamsnum['User_nXPixLineOffs'])
+            nypix = int(wparamsnum['User_dyPix'])
+            pixel_size_um = get_pixel_size_um(setupid=wparamsnum['User_SetupID'], nypix=nypix, zoom=wparamsnum['Zoom'])
 
             # Use center of od field
             odx = absx + (nxpix_offset + nxpix / 2.) * pixel_size_um
             ody = absy + (nxpix_offset + nypix / 2.) * pixel_size_um
             odz = absz
-            source = od_table.fetch1('field')
+            fromfile = filepath
 
-        elif (self.expinfo_table() & key).fetch1("od_ini_flag") == 1:
+        elif (self.experiment_table.ExpInfo() & key).fetch1("od_ini_flag") == 1:
             print(f'Optic disk header information found for {key}')
-            odx, ody, odz = (self.expinfo_table() & key).fetch1("odx", "ody", "odz")
-            source = "header"
+            odx, ody, odz = (self.experiment_table.ExpInfo() & key).fetch1("odx", "ody", "odz")
+            fromfile = os.path.join(*(self.experiment_table() & key).fetch1("header_path", "header_name"))
 
         else:
             print(f'No optic disk information found for {key}')
@@ -75,7 +78,7 @@ class OpticDiskTemplate(dj.Computed):
         loc_key["odx"] = odx
         loc_key["ody"] = ody
         loc_key["odz"] = odz
-        loc_key["source"] = source
+        loc_key["fromfile"] = fromfile
 
         self.insert1(loc_key)
 
@@ -101,10 +104,6 @@ class RelativeFieldLocationTemplate(dj.Computed):
 
     opticdisk_table = PlaceholderTable
     field_table = PlaceholderTable
-
-    @property
-    def key_source(self):
-        return self.opticdisk_table() * (self.field_table() & 'od_flag=0')
 
     def make(self, key):
         od_key = key.copy()

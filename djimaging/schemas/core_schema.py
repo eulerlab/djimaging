@@ -1,6 +1,6 @@
 import datajoint as dj
 
-from djimaging.tables.core import stimulus, traces, userinfo, presentation, experiment, field
+from djimaging.tables.core import stimulus, traces, userinfo, presentation, experiment, field, roi
 
 schema = dj.Schema()
 
@@ -40,7 +40,7 @@ class Field(field.FieldTemplate):
 
 
 @schema
-class Roi(field.RoiTemplate):
+class Roi(roi.RoiTemplate):
     field_table = Field
 
 

@@ -31,10 +31,6 @@ class TracesTemplate(dj.Computed):
     field_table = PlaceholderTable
     roi_table = PlaceholderTable
 
-    @property
-    def key_source(self):
-        return self.presentation_table() & (self.field_table() & 'loc_flag=0 and od_flag=0')
-
     def make(self, key):
 
         # get all params we need for creating traces

@@ -1,4 +1,7 @@
 import datajoint as dj
+import numpy as np
+from matplotlib import pyplot as plt
+
 from djimaging.utils.dj_utils import PlaceholderTable
 
 
@@ -19,10 +22,6 @@ class RoiTemplate(dj.Computed):
         return definition
 
     field_table = PlaceholderTable
-
-    @property
-    def key_source(self):
-        return self.field_table() & 'od_flag=0 and loc_flag=0'
 
     def make(self, key):
         # load roi_mask for insert roi for a specific experiment and field
