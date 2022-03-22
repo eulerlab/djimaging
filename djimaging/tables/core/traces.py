@@ -69,26 +69,26 @@ class TracesTemplate(dj.Computed):
         plt.show()
 
 
-class DetrendParamsTemplate(dj.Lookup):
+class DetrendParamsTemplate(dj.Manual):
     database = ""  # hack to suppress DJ error
 
     @property
     def definition(self):
         definition = """
-        detrend_param_set_id:         int       # unique param set id
+        detrend_id:          int       # unique param set id
         ---
-        window_length:                int       # window length for SavGol filter in seconds
-        poly_order:                   int       # order of polynomial for savgol filter
-        non_negative:                 tinyint unsigned
-        subtract_baseline:            tinyint unsigned
-        standardize:                  tinyint unsigned  # whether to standardize (divide by sd)
+        window_length:       int       # window length for SavGol filter in seconds
+        poly_order:          int       # order of polynomial for savgol filter
+        non_negative:        tinyint unsigned
+        subtract_baseline:   tinyint unsigned
+        standardize:         tinyint unsigned  # whether to standardize (divide by sd)
         """
         return definition
 
     def add_default(self, skip_duplicates=False):
         """Add default detrend parameter to table"""
         key = {
-            'detrend_param_set_id': 1,
+            'detrend_id': 1,
             'window_length': 60,
             'poly_order': 3,
             'non_negative': 0,
@@ -105,8 +105,8 @@ class DetrendTracesTemplate(dj.Computed):
     def definition(self):
         definition = """
         # performs basic preprocessing on raw traces
-        -> self.detrendparams_table
         -> self.traces_table
+        -> self.detrendparams_table
         ---
         detrend_traces:         longblob        # detrended traces
         smoothed_traces:        longblob        # output of savgol filter which is subtracted from the raw traces
@@ -175,7 +175,9 @@ class DetrendTracesTemplate(dj.Computed):
 
         self.insert1(dict(key, detrend_traces=detrend_traces, smoothed_traces=smoothed_traces))
 
-    def plot1(self, key):
+    def plot1(self, key: dict):
+        key = {k: v for k, v in key.items() if k in self.primary_key}
+
         detrend_traces, smoothed_traces = (self & key).fetch1("detrend_traces", "smoothed_traces")
         traces_times = (self.traces_table() & key).fetch1("traces_times")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
@@ -243,6 +245,8 @@ class DetrendSnippetsTemplate(dj.Computed):
         ))
 
     def plot1(self, key):
+        key = {k: v for k, v in key.items() if k in self.primary_key}
+
         detrend_snippets, smoothed_snippets, snippets_times, triggertimes_snippets = (self & key).fetch1(
             "detrend_snippets", "smoothed_snippets", "snippets_times", "triggertimes_snippets")
 
@@ -305,6 +309,8 @@ class AveragesTemplate(dj.Computed):
         ))
 
     def plot1(self, key):
+        key = {k: v for k, v in key.items() if k in self.primary_key}
+
         average, average_norm, average_times, triggertimes_rel = \
             (self & key).fetch1('average', 'average_norm', 'average_times', 'triggertimes_rel')
 

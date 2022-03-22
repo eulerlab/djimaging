@@ -14,46 +14,43 @@ class StimulusTemplate(dj.Manual):
         ---
         stim_name           :varchar(255)       # string identifier
         alias               :varchar(9999)      # Strings (_ seperator) used to identify this stimulus
-        framerate=0         :float              # framerate in hz
+        framerate           :float              # framerate in Hz
         isrepeated=0        :tinyint unsigned   # Is the stimulus repeated? Used for snippets
         ntrigger_rep=0      :int unsigned       # Number of triggers per repetition  
-        is_colour=0         :tinyint            # is stimulus coloured (e.g., noise vs. cnoise)
+        is_colour=0         :tinyint unsigned   # is stimulus coloured (e.g., noise vs. cnoise)
         stim_path=""        :varchar(255)       # Path to hdf5 file containing numerical array and info about stim
         commit_id=""        :varchar(255)       # Commit id corresponding to stimulus entry in Github repo
         """
         return definition
 
-    def add_no_stim(self, stim_v="standard", key=None, skip_duplicates=False):
-        """Add none stimulus"""
-        stim_id = -1
-
-        default_key = {
-            "stim_id": stim_id,
-            "stim_v": stim_v,
-            "stim_name": 'no_stim',
-            "alias": 'nostim_none',
-        }
-
-        if key is not None:
-            default_key.update(key)
-
-        self.insert1(default_key, skip_duplicates=skip_duplicates)
-
     class StimInfo(dj.Part):
-        definition = """
-        # General stimulus information for convient inserting of new stimuli
-        ->Stimulus
-        ---
-        trialinfo=NULL          :longblob      # Array of stimulus
-        stimulus_info=NULL      :longblob      # Some data of stimulus
-        stimulus_description="" :varchar(9999) # additional stimulus info in string format
-        """
+        @property
+        def definition(self):
+            definition = """
+            # General stimulus information for convient inserting of new stimuli
+            ->Stimulus
+            ---
+            trialinfo=NULL      :longblob      # Array of stimulus
+            stim_info=NULL      :longblob      # Some data of stimulus, e.g. a dict
+            """
+            return definition
 
-    def add_stimulus(self, stim_id, stim_v, stim_name, alias, ntrigger_rep, isrepeated, is_colour, framerate,
-                     trialinfo=None, stimulus_data=None, stimulus_info=None,
-                     key=None, skip_duplicates=False):
+    def check_alias(self, alias, stim_v, stim_id):
+        # Skip duplicate comparison
+        existing_aliases = (self - [dict(stim_id=stim_id, stim_v=stim_v)]).fetch('alias')
+        for existing_alias in existing_aliases:
+            for existing_alias_i in existing_alias.split('_'):
+                assert existing_alias_i not in alias.split('_'), \
+                    f'Found existing alias `{existing_alias_i}`. Set `unique_alias` to False to insert duplicate.'
 
-        default_key = {
+    def add_stimulus(self, stim_id, stim_v, stim_name, alias, framerate,
+                     isrepeated=0, ntrigger_rep=0, is_colour=0, stim_path="", commit_id="",
+                     trialinfo=None, stim_info=None, skip_duplicates=False, unique_alias=True):
+
+        if unique_alias:
+            self.check_alias(alias, stim_v, stim_id)
+
+        key = {
             "stim_id": stim_id,
             "stim_v": stim_v,
             "stim_name": stim_name,
@@ -62,35 +59,48 @@ class StimulusTemplate(dj.Manual):
             "isrepeated": isrepeated,
             "is_colour": is_colour,
             "framerate": framerate,
+            "stim_path": stim_path,
+            "commit_id": commit_id,
         }
 
-        info = {
-            "stim_id": stim_id,
-            "stim_v": stim_v,
-            "trialinfo": trialinfo,
-            "stimulus_data": stimulus_data,
-            "stimulus_info": stimulus_info,
-        }
+        self.insert1(key, skip_duplicates=skip_duplicates)
 
-        if key is not None:
-            default_key.update(key)
+        if trialinfo is not None or stim_info is not None:
+            stiminfo_key = {
+                "stim_id": stim_id,
+                "stim_v": stim_v,
+                "trialinfo": trialinfo,
+                "stim_info": stim_info,
+            }
+            self.StimInfo().insert1(stiminfo_key, skip_duplicates=skip_duplicates)
 
-        self.insert1(default_key, skip_duplicates=skip_duplicates)
-        self.StimInfo().insert1(info, skip_duplicates=skip_duplicates)
+    def add_nostim(self, stim_v="default", alias="nostim_none", skip_duplicates=False):
+        """Add none stimulus"""
+        self.add_stimulus(
+            stim_id=-1,
+            stim_v=stim_v,
+            stim_name='nostim',
+            alias=alias,
+            framerate=0,
+            skip_duplicates=skip_duplicates,
+            unique_alias=True
+        )
 
     class NoiseInfo(dj.Part):
-        definition = """
-        # noise stimulus
-        ->Stimulus
-
-        ---
-        pix_n_x              :tinyint        # Number of pixels in stimulus X dimension
-        pix_n_y              :tinyint        # Number of pixels in stimulus Y dimension
-        pix_scale_x_um       :float          # Length of stimulus in X dimension
-        pix_scale_y_um       :float          # Length of stimulus in Y dimension
-        trialinfo=NULL       :longblob       # Array of stimulus
-        frozencondition=NULL :tinyint        # If noise: Which condition corresponds to frozen noise
-        """
+        @property
+        def definition(self):
+            definition = """
+            # noise stimulus
+            ->Stimulus
+            ---
+            pix_n_x              :tinyint        # Number of pixels in stimulus X dimension
+            pix_n_y              :tinyint        # Number of pixels in stimulus Y dimension
+            pix_scale_x_um       :float          # Length of stimulus in X dimension
+            pix_scale_y_um       :float          # Length of stimulus in Y dimension
+            trialinfo=NULL       :longblob       # Array of stimulus
+            frozencondition=NULL :tinyint        # If noise: Which condition corresponds to frozen noise
+            """
+            return definition
 
     def add_noise(self, pix_n_x=20, pix_n_y=15, pix_scale_x_um=30, pix_scale_y_um=30, stim_v=None,
                   key=None, skip_duplicates=False):
@@ -122,16 +132,21 @@ class StimulusTemplate(dj.Manual):
         if key is not None:
             default_key.update(key)
 
+        self.check_alias(default_key['alias'], stim_v, stim_id)
+
         self.insert1(default_key, skip_duplicates=skip_duplicates)
         self.NoiseInfo().insert1(info, skip_duplicates=skip_duplicates)
 
     class ChirpInfo(dj.Part):
-        definition = """
-        # local or global chirp stimulus
-        ->Stimulus
-        ---
-        spatialextent       :int        # diameter of stimulus in um
-        """
+        @property
+        def definition(self):
+            definition = """
+            # local or global chirp stimulus
+            ->Stimulus
+            ---
+            spatialextent       :int        # diameter of stimulus in um
+            """
+            return definition
 
     def add_chirp(self, spatialextent, stim_v=None, key=None, skip_duplicates=False):
         stim_id = 1
@@ -159,27 +174,32 @@ class StimulusTemplate(dj.Manual):
         if key is not None:
             default_key.update(key)
 
+        self.check_alias(default_key['alias'], stim_v, stim_id)
+
         self.insert1(default_key, skip_duplicates=skip_duplicates)
         self.ChirpInfo().insert1(info, skip_duplicates=skip_duplicates)
 
     class DsInfo(dj.Part):
-        definition = """
-        # moving bar stimulus
-        ->Stimulus
+        @property
+        def definition(self):
+            definition = """
+            # moving bar stimulus
+            ->Stimulus
+            ---
+            trialinfo       :longblob   # 1D array with directions, either for for trial or for all repetions
+            bardx           :float      # bar x extension in um
+            bardy           :float      # bar y extension in um
+            velumsec        :float      # bar movement velocity um/sec
+            tmovedurs       :float      # amount of time bar is displayed
+            """
+            return definition
 
-        ---
-        trialinfo       :longblob   # 1D array with directions, either for for trial or for all repetions
-        bardx           :int        # bar x extension in um
-        bardy           :int        # bar y extension in um
-        velumsec        :float      # bar movement velocity um/sec
-        tmovedurs       :float      # amount of time bar is displayed
-        """
-
-    def add_movingbar(self, trial_info=None, stim_v="default", key=None, skip_duplicates=False):
+    def add_movingbar(self, trialinfo=None, bardx=-1, bardy=-1, velumsec=-1, tmovedurs=-1,
+                      stim_v="default", key=None, skip_duplicates=False):
         stim_id = 2
 
-        if trial_info is None:
-            trial_info = np.array([0, 180, 45, 225, 90, 270, 135, 315])
+        if trialinfo is None:
+            trialinfo = np.array([0, 180, 45, 225, 90, 270, 135, 315])
 
         default_key = {
             "stim_id": stim_id,
@@ -195,11 +215,17 @@ class StimulusTemplate(dj.Manual):
         info = {
             "stim_id": stim_id,
             "stim_v": stim_v,
-            "trial_info": trial_info,
+            "trialinfo": trialinfo,
+            "bardx": bardx,
+            "bardy": bardy,
+            "velumsec": velumsec,
+            "tmovedurs": tmovedurs,
         }
 
         if key is not None:
             default_key.update(key)
+
+        self.check_alias(default_key['alias'], stim_v, stim_id)
 
         self.insert1(default_key, skip_duplicates=skip_duplicates)
         self.DsInfo().insert1(info, skip_duplicates=skip_duplicates)
