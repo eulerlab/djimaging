@@ -222,7 +222,7 @@ def _get_on_off_index(time_kernel):
     the responses to the moving bars stimulus
     """
     deriv = np.diff(normalize_zero_one(time_kernel))
-    on_response = np.max(deriv[9:19])  # TODO: This is very hardcoded. Probably one sho
+    on_response = np.max(deriv[9:19])  # TODO: This is very hardcoded
     off_response = np.max(deriv[19:29])
     off_response = np.max((0, off_response))
     on_response = np.max((0, on_response))
@@ -243,9 +243,7 @@ def _compute_null_dist(rep_dir_resps, dirs, per, iters=1000):
         np.random.shuffle(rand_idx)
         shuffled = flattened[rand_idx]
         shuffled = np.reshape(shuffled, (rep_n, dir_n))
-        shuffled_mean = np.mean(shuffled, axis=0)
-        normalized_shuffled_mean = shuffled_mean - np.min(shuffled_mean)
-        normalized_shuffled_mean /= np.max(abs(normalized_shuffled_mean))
+        normalized_shuffled_mean = normalize_zero_one(np.mean(shuffled, axis=0))
         dsi, _ = _get_si(normalized_shuffled_mean, dirs, per)
         null_dist[i] = dsi
 

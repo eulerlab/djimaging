@@ -1,5 +1,5 @@
 from numpy.testing import assert_almost_equal
-from djimaging.utils.scanm_utils import get_pixel_size_um
+from djimaging.utils.scanm_utils import get_pixel_size_um, get_retinal_position
 
 
 def test_get_pixel_size_um_64_default_scan1():
@@ -47,3 +47,37 @@ def test_get_pixel_size_um_128_wide_scan1():
     assert_almost_equal(obs, exp, decimal=4)
 
 
+def test_get_retinal_position_right_dn():
+    """The x stored in ScanM is dorsoventral axis (spatial y) and the y is nasotemporal axis (spatial x).
+    The spatial y has to be multiplied with -1, to make dorsal positive.
+    The spatial x: in RR x>0 means more nasal and in LR x<0 means more nasal,
+    so the correct x in LR has to be multiplied with -1."""
+    rel_xcoord_um = -1000.
+    rel_ycoord_um = 100.
+    rotation = 0.0
+    eye = 'right'
+
+    exp_ventral_dorsal_pos = 1000.
+    exp_temporal_nasal_pos = 100.
+
+    obs_ventral_dorsal_pos, obs_temporal_nasal_pos = get_retinal_position(
+        rel_xcoord_um=rel_xcoord_um, rel_ycoord_um=rel_ycoord_um, rotation=rotation, eye=eye)
+
+    assert exp_ventral_dorsal_pos == obs_ventral_dorsal_pos
+    assert exp_temporal_nasal_pos == obs_temporal_nasal_pos
+
+
+def test_get_retinal_position_left_vn():
+    rel_xcoord_um = 1000.
+    rel_ycoord_um = -100.
+    rotation = 0.0
+    eye = 'left'
+
+    exp_ventral_dorsal_pos = -1000.
+    exp_temporal_nasal_pos = 100.
+
+    obs_ventral_dorsal_pos, obs_temporal_nasal_pos = get_retinal_position(
+        rel_xcoord_um=rel_xcoord_um, rel_ycoord_um=rel_ycoord_um, rotation=rotation, eye=eye)
+
+    assert exp_ventral_dorsal_pos == obs_ventral_dorsal_pos
+    assert exp_temporal_nasal_pos == obs_temporal_nasal_pos

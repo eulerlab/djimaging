@@ -31,33 +31,29 @@ class RoiTemplate(dj.Computed):
         if not np.any(roi_mask):
             return
 
-        experimenter = key["experimenter"]
-        date = key["date"]
-        exp_num = key["exp_num"]
-        field = key["field"]
+        field_key = dict(
+            experimenter=key["experimenter"],
+            date=key["date"],
+            exp_num=key["exp_num"],
+            field=key["field"],
+        )
 
         roi_idxs = np.unique(roi_mask)
         roi_idxs = roi_idxs[(roi_idxs != 0) & (roi_idxs != 1)]  # remove background index (0 or 1)
         roi_idxs = roi_idxs[np.argsort(np.abs(roi_idxs))]  # Sort by value
 
         # add every roi to list and the bulk add to roi table
-        roi_keys = []
         for roi_idx in roi_idxs:
             roi_size = np.sum(roi_mask == roi_idx)
             roi_size_um2 = roi_size * pixel_size_um ** 2
             roi_dia_um = 2 * np.sqrt(roi_size_um2 / np.pi)
 
-            roi_keys.append({
-                'experimenter': experimenter,
-                'date': date,
-                'exp_num': exp_num,
-                'field': field,
+            self.insert1({
+                **field_key,
                 'roi_id': int(abs(roi_idx)),
                 'roi_size': roi_size,
                 'roi_size_um2': roi_size_um2,
-                'roi_dia_um': roi_dia_um,
-            })
-        self.insert(roi_keys)
+                'roi_dia_um': roi_dia_um})
 
     def plot1(self, key):
         fig, axs = plt.subplots(1, 3, figsize=(15, 3.5))
