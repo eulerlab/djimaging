@@ -174,7 +174,7 @@ def scan_fields_and_files(pre_data_path, user_dict, verbose=0) -> dict:
         if file.startswith('.') or not file.endswith('.h5'):
             continue
 
-        datatype, animal, region, field, stimulus, pharm = get_file_info(file, **loc_mapper)
+        datatype, animal, region, field, stimulus, condition = get_file_info(file, **loc_mapper)
 
         if field is None:
             if verbose:

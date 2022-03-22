@@ -23,6 +23,9 @@ class Experiment(experiment.ExperimentTemplate):
     class Indicator(experiment.ExperimentTemplate.Indicator):
         pass
 
+    class PharmInfo(experiment.ExperimentTemplate.PharmInfo):
+        pass
+
 
 @schema
 class Field(field.FieldTemplate):

@@ -17,7 +17,7 @@ class UserInfoTemplate(dj.Manual):
         region_loc                  :tinyint         # string location for region (eg. LR or RR)
         field_loc                   :tinyint         # string location for field
         stimulus_loc                :tinyint         # string location for stimulus
-        pharm_loc                   :tinyint         # string location for pharmacology
+        condition_loc               :tinyint         # string location for (pharmacological) condition
         pre_data_dir='Pre'          :varchar(255)    # directory for h5 data files
         raw_data_dir='Raw'          :varchar(255)    # directory for raw data files
         data_stack_name='wDataCh0'  :varchar(255)    # name of data stack

@@ -11,13 +11,13 @@ from djimaging.utils.dj_utils import PlaceholderTable
 class PresentationTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
-    # TODO: Add Pharamcology?
     @property
     def definition(self):
         definition = """
         # information about each stimulus presentation
         -> self.field_table
         -> self.stimulus_table
+        condition             :varchar(255)     # condition (pharmacological or other)
         ---
         h5_header             :varchar(255)     # path to h5 file
         triggertimes          :longblob         # triggertimes in each presentation
@@ -127,7 +127,8 @@ class PresentationTemplate(dj.Computed):
 
     def make(self, key):
         field = (self.field_table() & key).fetch1("field")
-        stim_loc, field_loc = (self.userinfo_table() & key).fetch1("stimulus_loc", "field_loc")
+        stim_loc, field_loc, condition_loc = (self.userinfo_table() & key).fetch1(
+            "stimulus_loc", "field_loc", "condition_loc")
 
         pre_data_path = (self.experiment_table() * self.field_table() & key).fetch1("pre_data_path")
         assert os.path.exists(pre_data_path), f"Could not read path: {pre_data_path}"
@@ -138,9 +139,13 @@ class PresentationTemplate(dj.Computed):
         for h5_file in h5_files:
             split_string = h5_file[:h5_file.find(".h5")].split("_")
             stim = split_string[stim_loc] if stim_loc < len(split_string) else 'nostim'
+            condition = split_string[condition_loc] if condition_loc < len(split_string) else 'none'
+
+            primary_key = deepcopy(key)
+            primary_key["condition"] = condition
 
             if stim.lower() in stim_alias:
-                self.__add_presentation(key=key, filepath=os.path.join(pre_data_path, h5_file))
+                self.__add_presentation(key=primary_key, filepath=os.path.join(pre_data_path, h5_file))
 
     def __add_presentation(self, key, filepath):
         pres_key = deepcopy(key)
@@ -159,6 +164,7 @@ class PresentationTemplate(dj.Computed):
                 raise ValueError('Multiple triggertimes found')
 
             key_triggervalues = [k for k in h5_file.keys() if k.lower() == 'triggervalues']
+
             if len(key_triggervalues) == 1:
                 pres_key["triggervalues"] = h5_file[key_triggervalues[0]][()]
                 assert len(pres_key["triggertimes"]) == len(pres_key["triggervalues"]), 'Trigger mismatch'

@@ -180,12 +180,25 @@ class ExperimentTemplate(dj.Computed):
         indicator_key["braininjectrem"] = config_dict["braininjectrem"]
         indicator_key["braininjectq"] = config_dict["braininjectq"]
 
+        # Populate Pharmacology table for this experiment
+        pharminfo_key = deepcopy(primary_key)
+        drug = config_dict.get("pharmdrug", "").lower()
+        if drug.lower() in ["", "none"]:
+            drug = "none"
+        pharminfo_key['drug'] = drug
+        pharminfo_key["pharmaflag"] = 0 if drug == 'none' else 1
+        pharminfo_key['pharmconc'] = config_dict.get("pharmdrugconc_um", "")
+        pharminfo_key['preapptime'] = config_dict.get("pretime", "")
+        pharminfo_key['pharmcom'] = config_dict.get("pharmrem", "")
+
         if verbose:
             print('\t\tAdding:', primary_key)
+
         self.insert1(exp_key, allow_direct_insert=True)
         self.ExpInfo().insert1(expinfo_key)
         self.Animal().insert1(animal_key)
         self.Indicator().insert1(indicator_key)
+        self.PharmInfo().insert1(pharminfo_key)
 
     class ExpInfo(dj.Part):
         @property
@@ -251,5 +264,20 @@ class ExperimentTemplate(dj.Computed):
                braininjectq                :varchar(255)     # numerical rating of the brain injection quality
                braininjectrem              :varchar(255)     # comments on the brain injection
                """
+            return definition
+
+    class PharmInfo(dj.Part):
+        @property
+        def definition(self):
+            definition = """
+            # Pharmacology Info
+            -> master
+            ---
+            pharmaflag      :tinyint unsigned # 1 there was pharma, 0 no pharma
+            drug            :varchar(255)     # which drug was applied
+            pharmconc       :varchar(255)     # concentration used in micromolar
+            preapptime      :varchar(255)     # preapplication time
+            pharmcom        :varchar(255)     # experimenter comments
+            """
             return definition
 

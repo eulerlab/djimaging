@@ -12,7 +12,7 @@ class StimulusTemplate(dj.Manual):
         stim_id    :smallint     # Unique integer identifier
         stim_v     :varchar(255) # Stimulus version, e.g. to differentiate between gChirp and lChirp
         ---
-        stimulusname        :varchar(255)       # string identifier
+        stim_name           :varchar(255)       # string identifier
         alias               :varchar(9999)      # Strings (_ seperator) used to identify this stimulus
         framerate=0         :float              # framerate in hz
         isrepeated=0        :tinyint unsigned   # Is the stimulus repeated? Used for snippets
@@ -30,7 +30,7 @@ class StimulusTemplate(dj.Manual):
         default_key = {
             "stim_id": stim_id,
             "stim_v": stim_v,
-            "stimulusname": 'no_stim',
+            "stim_name": 'no_stim',
             "alias": 'nostim_none',
         }
 
@@ -45,18 +45,18 @@ class StimulusTemplate(dj.Manual):
         ->Stimulus
         ---
         trialinfo=NULL          :longblob      # Array of stimulus
-        stimulus_info=NULL      :longblob      # Some data of stimulus, de
+        stimulus_info=NULL      :longblob      # Some data of stimulus
         stimulus_description="" :varchar(9999) # additional stimulus info in string format
         """
 
-    def add_stimulus(self, stim_id, stim_v, stimulusname, alias, ntrigger_rep, isrepeated, is_colour, framerate,
+    def add_stimulus(self, stim_id, stim_v, stim_name, alias, ntrigger_rep, isrepeated, is_colour, framerate,
                      trialinfo=None, stimulus_data=None, stimulus_info=None,
                      key=None, skip_duplicates=False):
 
         default_key = {
             "stim_id": stim_id,
             "stim_v": stim_v,
-            "stimulusname": stimulusname,
+            "stim_name": stim_name,
             "alias": alias,
             "ntrigger_rep": ntrigger_rep,
             "isrepeated": isrepeated,
@@ -102,7 +102,7 @@ class StimulusTemplate(dj.Manual):
         default_key = {
             "stim_id": stim_id,
             "stim_v": stim_v,
-            "stimulusname": 'noise',
+            "stim_name": 'noise',
             "alias": f"dn_noise_noise{pix_scale_x_um}m",
             "ntrigger_rep": 1500,
             "isrepeated": 0,
@@ -142,7 +142,7 @@ class StimulusTemplate(dj.Manual):
         default_key = {
             "stim_id": stim_id,
             "stim_v": stim_v,
-            "stimulusname": 'chirp',
+            "stim_name": 'chirp',
             "alias": "chirp_gchirp_globalchirp",
             "is_colour": 0,
             "framerate": 1 / 60.,
@@ -184,7 +184,7 @@ class StimulusTemplate(dj.Manual):
         default_key = {
             "stim_id": stim_id,
             "stim_v": stim_v,
-            "stimulusname": 'movingbar',
+            "stim_name": 'movingbar',
             "alias": "mb_mbar_bar_movingbar",
             "is_colour": 0,
             "framerate": 1 / 60.,            
