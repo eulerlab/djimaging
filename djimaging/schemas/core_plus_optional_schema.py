@@ -1,4 +1,4 @@
-from djimaging.schemas.core_schema import schema, Stimulus, Field, Experiment, Presentation, DetrendSnippets, UserInfo
+from djimaging.schemas.core_schema import schema, Stimulus, Field, Experiment, Presentation, Snippets, UserInfo
 from djimaging.tables.optional import location, chirp, orientation
 
 
@@ -23,16 +23,16 @@ class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
 @schema
 class ChirpQI(chirp.ChirpQITemplate):
     stimulus_table = Stimulus
-    detrendsnippets_table = DetrendSnippets
+    snippets_table = Snippets
 
 
 @schema
 class ChirpFeatures(chirp.ChirpFeaturesTemplate):
-    detrendsnippets_table = DetrendSnippets
+    snippets_table = Snippets
     presentation_table = Presentation
 
 
 @schema
 class OsDsIndexes(orientation.OsDsIndexesTemplate):
     stimulus_table = Stimulus
-    detrendsnippets_table = DetrendSnippets
+    snippets_table = Snippets

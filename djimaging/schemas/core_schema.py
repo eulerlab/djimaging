@@ -82,25 +82,25 @@ class Traces(traces.TracesTemplate):
 
 
 @schema
-class DetrendParams(traces.DetrendParamsTemplate):
+class PreprocessParams(traces.PreprocessParamsTemplate):
     pass
 
 
 @schema
-class DetrendTraces(traces.DetrendTracesTemplate):
+class PreprocessTraces(traces.PreprocessTracesTemplate):
     presentation_table = Presentation
-    detrendparams_table = DetrendParams
+    preprocessparams_table = PreprocessParams
     traces_table = Traces
 
 
 @schema
-class DetrendSnippets(traces.DetrendSnippetsTemplate):
+class Snippets(traces.SnippetsTemplate):
     stimulus_table = Stimulus
     presentation_table = Presentation
     traces_table = Traces
-    detrendtraces_table = DetrendTraces
+    preprocesstraces_table = PreprocessTraces
 
 
 @schema
 class Averages(traces.AveragesTemplate):
-    detrendsnippets_table = DetrendSnippets
+    snippets_table = Snippets

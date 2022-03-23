@@ -60,12 +60,11 @@ class OpticDiskTemplate(dj.Computed):
             fromfile = filepath
 
         elif (self.experiment_table.ExpInfo() & key).fetch1("od_ini_flag") == 1:
-            print(f'Optic disk header information found for {key}')
             odx, ody, odz = (self.experiment_table.ExpInfo() & key).fetch1("odx", "ody", "odz")
             fromfile = os.path.join(*(self.experiment_table() & key).fetch1("header_path", "header_name"))
 
         else:
-            print(f'No optic disk information found for {key}')
+            print(f'WARNING: No optic disk information found for {key}')
             return
 
         loc_key = key.copy()
@@ -102,7 +101,6 @@ class RelativeFieldLocationTemplate(dj.Computed):
     def make(self, key):
         od_key = key.copy()
         od_key.pop('field', None)
-        print(od_key)
 
         odx, ody, odz = (self.opticdisk_table() & od_key).fetch1("odx", "ody", "odz")
         absx, absy, absz = (self.field_table.FieldInfo() & key).fetch1('absx', 'absy', 'absz')

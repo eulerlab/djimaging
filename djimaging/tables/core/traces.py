@@ -69,13 +69,13 @@ class TracesTemplate(dj.Computed):
         plt.show()
 
 
-class DetrendParamsTemplate(dj.Manual):
+class PreprocessParamsTemplate(dj.Lookup):
     database = ""  # hack to suppress DJ error
 
     @property
     def definition(self):
         definition = """
-        detrend_id:          int       # unique param set id
+        preprocess_id:          int       # unique param set id
         ---
         window_length:       int       # window length for SavGol filter in seconds
         poly_order:          int       # order of polynomial for savgol filter
@@ -86,9 +86,9 @@ class DetrendParamsTemplate(dj.Manual):
         return definition
 
     def add_default(self, skip_duplicates=False):
-        """Add default detrend parameter to table"""
+        """Add default preprocess parameter to table"""
         key = {
-            'detrend_id': 1,
+            'preprocess_id': 1,
             'window_length': 60,
             'poly_order': 3,
             'non_negative': 0,
@@ -98,7 +98,7 @@ class DetrendParamsTemplate(dj.Manual):
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
-class DetrendTracesTemplate(dj.Computed):
+class PreprocessTracesTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     @property
@@ -106,30 +106,30 @@ class DetrendTracesTemplate(dj.Computed):
         definition = """
         # performs basic preprocessing on raw traces
         -> self.traces_table
-        -> self.detrendparams_table
+        -> self.preprocessparams_table
         ---
-        detrend_traces:         longblob        # detrended traces
+        preprocess_traces:      longblob        # preprocessed traces
         smoothed_traces:        longblob        # output of savgol filter which is subtracted from the raw traces
         """
         return definition
 
-    presentation_table = PlaceholderTable
-    detrendparams_table = PlaceholderTable
     traces_table = PlaceholderTable
+    preprocessparams_table = PlaceholderTable
+    presentation_table = PlaceholderTable
 
     def make(self, key):
 
-        window_len_seconds = (self.detrendparams_table() & key).fetch1('window_length')
-        poly_order = (self.detrendparams_table() & key).fetch1('poly_order')
-        subtract_baseline = (self.detrendparams_table() & key).fetch1('subtract_baseline')
-        non_negative = (self.detrendparams_table() & key).fetch1('non_negative')
-        standardize = (self.detrendparams_table() & key).fetch1('standardize')
+        window_len_seconds = (self.preprocessparams_table() & key).fetch1('window_length')
+        poly_order = (self.preprocessparams_table() & key).fetch1('poly_order')
+        subtract_baseline = (self.preprocessparams_table() & key).fetch1('subtract_baseline')
+        non_negative = (self.preprocessparams_table() & key).fetch1('non_negative')
+        standardize = (self.preprocessparams_table() & key).fetch1('standardize')
         fs = (self.presentation_table() & key).fetch1('scan_frequency')
 
         assert not (non_negative and subtract_baseline), \
-            "You are trying to populate DetrendTraces with an invalid parameter set"
+            "You are trying to populate with an invalid parameter set"
         assert (np.logical_or(standardize == non_negative, standardize == subtract_baseline)), \
-            "You are trying to populate DetrendTraces with an invalid parameter set"
+            "You are trying to populate with an invalid parameter set"
 
         raw_traces = (self.traces_table() & key).fetch1('traces')
         temp = deepcopy(raw_traces)  # TODO: what is happening here?
@@ -142,7 +142,7 @@ class DetrendTracesTemplate(dj.Computed):
         window_len_frames = int(window_len_frames)
         smoothed_traces = \
             signal.savgol_filter(raw_traces, window_length=window_len_frames, polyorder=poly_order)
-        detrend_traces = raw_traces - smoothed_traces
+        preprocess_traces = raw_traces - smoothed_traces
 
         stim_start = None
         if standardize or subtract_baseline:
@@ -156,37 +156,37 @@ class DetrendTracesTemplate(dj.Computed):
                 f"stim_start={stim_start:.1g}, traces_starts at {traces_times.min():.1g}: key={key}"
 
         if non_negative:
-            clip_value = np.percentile(detrend_traces, q=2.5)
-            detrend_traces[detrend_traces < clip_value] = clip_value
-            detrend_traces = detrend_traces - clip_value
+            clip_value = np.percentile(preprocess_traces, q=2.5)
+            preprocess_traces[preprocess_traces < clip_value] = clip_value
+            preprocess_traces = preprocess_traces - clip_value
             if standardize:
                 # find last frame recorded before stimulus started
                 baseline_end = np.nonzero(traces_times[traces_times < stim_start])[0][-1]
-                baseline = detrend_traces[:baseline_end]
-                detrend_traces = detrend_traces / np.std(baseline)
+                baseline = preprocess_traces[:baseline_end]
+                preprocess_traces = preprocess_traces / np.std(baseline)
         elif subtract_baseline:
             # find last frame recorded before stimulus started
             baseline_end = np.nonzero(traces_times[traces_times < stim_start])[0][-1]
-            baseline = detrend_traces[:baseline_end]
-            detrend_traces = detrend_traces - np.median(baseline)
+            baseline = preprocess_traces[:baseline_end]
+            preprocess_traces = preprocess_traces - np.median(baseline)
 
             if standardize:
-                detrend_traces = detrend_traces / np.std(baseline)
+                preprocess_traces = preprocess_traces / np.std(baseline)
 
-        self.insert1(dict(key, detrend_traces=detrend_traces, smoothed_traces=smoothed_traces))
+        self.insert1(dict(key, preprocess_traces=preprocess_traces, smoothed_traces=smoothed_traces))
 
     def plot1(self, key: dict):
         key = {k: v for k, v in key.items() if k in self.primary_key}
 
-        detrend_traces, smoothed_traces = (self & key).fetch1("detrend_traces", "smoothed_traces")
+        preprocess_traces, smoothed_traces = (self & key).fetch1("preprocess_traces", "smoothed_traces")
         traces_times = (self.traces_table() & key).fetch1("traces_times")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
 
         fig, axs = plt.subplots(2, 1, figsize=(10, 4), sharex='all')
         ax = axs[0]
-        ax.plot(traces_times, detrend_traces)
-        ax.set(ylabel='detrend_traces')
-        ax.vlines(triggertimes, np.min(detrend_traces), np.max(detrend_traces), color='r', label='trigger')
+        ax.plot(traces_times, preprocess_traces)
+        ax.set(ylabel='preprocess_traces')
+        ax.vlines(triggertimes, np.min(preprocess_traces), np.max(preprocess_traces), color='r', label='trigger')
         ax.legend(loc='upper right')
         ax = axs[1]
         ax.plot(traces_times, smoothed_traces)
@@ -196,16 +196,16 @@ class DetrendTracesTemplate(dj.Computed):
         plt.show()
 
 
-class DetrendSnippetsTemplate(dj.Computed):
+class SnippetsTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
     @property
     def definition(self):
         definition = """
-        # Snippets created from slicing filtered traces using the triggertimes. 
-        -> self.detrendtraces_table
+        # Snippets created from slicing traces using the triggertimes. 
+        -> self.preprocesstraces_table
         ---
-        detrend_snippets         :longblob     # array of snippets (time x repetitions)
+        snippets                 :longblob     # array of snippets (time x repetitions)
         snippets_times           :longblob     # array of snippet times (time x repetitions)
         smoothed_snippets        :longblob     # snippeted, smoothed signal (time x repetitions)
         triggertimes_snippets    :longblob     # snippeted triggertimes (ntrigger_rep x repetitions)
@@ -213,31 +213,31 @@ class DetrendSnippetsTemplate(dj.Computed):
         """
         return definition
 
+    preprocesstraces_table = PlaceholderTable
     stimulus_table = PlaceholderTable
     presentation_table = PlaceholderTable
     traces_table = PlaceholderTable
-    detrendtraces_table = PlaceholderTable
 
     @property
     def key_source(self):
-        return self.detrendtraces_table() * (self.stimulus_table() & "isrepeated=1")
+        return self.preprocesstraces_table() * (self.stimulus_table() & "isrepeated=1")
 
     def make(self, key):
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
         traces_times = (self.traces_table() & key).fetch1('traces_times')
-        detrend_traces, smoothed_traces = (self.detrendtraces_table() & key).fetch1('detrend_traces', 'smoothed_traces')
+        preprocess_traces, smoothed_traces = (self.preprocesstraces_table() & key).fetch1('preprocess_traces', 'smoothed_traces')
 
         if triggertimes[-1] > 2 * traces_times[-1]:
             triggertimes = triggertimes / 500.
 
         snippets_times, triggertimes_snippets, snippets_list, droppedlastrep_flag = split_trace_by_reps(
             triggertimes=triggertimes, ntrigger_rep=ntrigger_rep, times=traces_times,
-            trace_list=[detrend_traces, smoothed_traces], allow_drop_last=True)
+            trace_list=[preprocess_traces, smoothed_traces], allow_drop_last=True)
 
         self.insert1(dict(
             **key,
-            detrend_snippets=snippets_list[0],
+            snippets=snippets_list[0],
             smoothed_snippets=snippets_list[1],
             snippets_times=snippets_times,
             triggertimes_snippets=triggertimes_snippets,
@@ -247,15 +247,15 @@ class DetrendSnippetsTemplate(dj.Computed):
     def plot1(self, key):
         key = {k: v for k, v in key.items() if k in self.primary_key}
 
-        detrend_snippets, smoothed_snippets, snippets_times, triggertimes_snippets = (self & key).fetch1(
-            "detrend_snippets", "smoothed_snippets", "snippets_times", "triggertimes_snippets")
+        snippets, smoothed_snippets, snippets_times, triggertimes_snippets = (self & key).fetch1(
+            "snippets", "smoothed_snippets", "snippets_times", "triggertimes_snippets")
 
         fig, axs = plt.subplots(2, 1, figsize=(10, 4), sharex='all')
         ax = axs[0]
-        ax.plot(snippets_times - snippets_times[0, :], detrend_snippets)
-        ax.set(ylabel='detrend_traces')
+        ax.plot(snippets_times - snippets_times[0, :], snippets)
+        ax.set(ylabel='preprocess_traces')
         ax.vlines(triggertimes_snippets - triggertimes_snippets[0, :],
-                  np.min(detrend_snippets), np.max(detrend_snippets), color='r', label='trigger')
+                  np.min(snippets), np.max(snippets), color='r', label='trigger')
         ax.legend(loc='upper right')
         ax = axs[1]
         ax.plot(snippets_times - snippets_times[0, :], smoothed_snippets)
@@ -274,7 +274,7 @@ class AveragesTemplate(dj.Computed):
         definition = """
         # Averages of snippets
     
-        -> self.detrendsnippets_table
+        -> self.snippets_table
         ---
         average             :longblob  # array of snippet average (time)
         average_norm        :longblob  # normalized array of snippet average (time)
@@ -283,11 +283,11 @@ class AveragesTemplate(dj.Computed):
         """
         return definition
 
-    detrendsnippets_table = PlaceholderTable
+    snippets_table = PlaceholderTable
 
     def make(self, key):
-        snippets, times = (self.detrendsnippets_table() & key).fetch1('detrend_snippets', 'snippets_times')
-        triggertimes_snippets = (self.detrendsnippets_table() & key).fetch1('triggertimes_snippets').copy()
+        snippets, times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
+        triggertimes_snippets = (self.snippets_table() & key).fetch1('triggertimes_snippets').copy()
 
         times = times - times[0, :]
 

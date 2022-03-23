@@ -34,12 +34,12 @@ def test_definition_traces():
     _test_definition(traces.TracesTemplate)
 
 
-def test_definition_detrendtraces():
-    _test_definition(traces.DetrendTracesTemplate)
+def test_definition_preprocesstraces():
+    _test_definition(traces.PreprocessTracesTemplate)
 
 
-def test_definition_detrendsnippets():
-    _test_definition(traces.DetrendSnippetsTemplate)
+def test_definition_snippets():
+    _test_definition(traces.SnippetsTemplate)
 
 
 # presentation

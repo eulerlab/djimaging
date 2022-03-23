@@ -12,21 +12,21 @@ class ChirpQITemplate(dj.Computed):
     def definition(self):
         definition = '''
         #Computes the QI index for chirp responses as described in Baden et al. (2016)
-        -> self.detrendsnippets_table
+        -> self.snippets_table
         ---
         chirp_qi:   float   # chirp quality index
         min_qi:     float   # minimum quality index as 1/r (r = #repetitions)
         '''
         return definition
 
-    detrendsnippets_table = PlaceholderTable
+    snippets_table = PlaceholderTable
 
     @property
     def key_source(self):
-        return self.detrendsnippets_table() & "stim_id=1"
+        return self.snippets_table() & "stim_id=1"
 
     def make(self, key):
-        snippets = (self.detrendsnippets_table() & key).fetch1('detrend_snippets')
+        snippets = (self.snippets_table() & key).fetch1('snippets')
         assert snippets.ndim == 2
         chirp_qi = np.var(np.mean(snippets, axis=1)) / np.mean(np.var(snippets, axis=0))
         min_qi = 1 / snippets.shape[1]
@@ -42,24 +42,24 @@ class ChirpFeaturesTemplate(dj.Computed):
     def definition(self):
         definition = '''
         #Computes an OnOff and a transience index based on the chirp step response
-        -> self.detrendsnippets_table
+        -> self.snippets_table
         ---
         on_off_index:       float   # index indicating light preference (-1 Off, 1 On)
         transience_index:   float   # index indicating transience of response
         '''
         return definition
 
-    detrendsnippets_table = PlaceholderTable
+    snippets_table = PlaceholderTable
     presentation_table = PlaceholderTable
 
     @property
     def key_source(self):
-        return self.detrendsnippets_table() & "stim_id=1"
+        return self.snippets_table() & "stim_id=1"
 
     def make(self, key):
         # TODO: Should this depend on pres? Triggertimes are also in snippets and sf can be derived from times
-        snippets = (self.detrendsnippets_table() & key).fetch1('detrend_snippets')
-        snippets_times = (self.detrendsnippets_table() & key).fetch1('snippets_times')
+        snippets = (self.snippets_table() & key).fetch1('snippets')
+        snippets_times = (self.snippets_table() & key).fetch1('snippets_times')
         trigger_times = (self.presentation_table() & key).fetch1('triggertimes')
         sf = (self.presentation_table() & key).fetch1('scan_frequency')
 
