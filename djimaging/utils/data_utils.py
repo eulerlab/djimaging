@@ -45,7 +45,7 @@ def list_h5_files(folder, hidden=False, field=None, field_loc=None):
             continue
         if field is not None:
             assert field_loc is not None
-            if field != file.strip('.h5').split("_")[field_loc]:
+            if field != file.replace('.h5', '').split("_")[field_loc]:
                 continue
         h5_files.append(file)
     return h5_files

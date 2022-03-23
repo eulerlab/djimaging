@@ -130,7 +130,7 @@ class ExperimentTemplate(dj.Computed):
         # find optic disk information if available
         odx, ody, odz, od_ini_flag = 0, 0, 0, 0
 
-        odpos_string = config_dict["prepwmopticdiscpos"].strip('()').replace(" ", "")
+        odpos_string = config_dict["prepwmopticdiscpos"].strip('() ')
         if len(odpos_string) > 0:
             odpos_list = odpos_string.split(";" if ';' in odpos_string else ',')
 

@@ -272,7 +272,7 @@ class AveragesTemplate(dj.Computed):
     @property
     def definition(self):
         definition = """
-        # Snippets created from slicing filtered traces using the triggertimes. 
+        # Averages of snippets
     
         -> self.detrendsnippets_table
         ---

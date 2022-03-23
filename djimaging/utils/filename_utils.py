@@ -1,6 +1,6 @@
 def get_file_info(filename, datatype_loc, animal_loc, region_loc, field_loc, stimulus_loc, condition_loc):
     """Extract information from filename"""
-    file_info = filename.strip('.h5').split('_')
+    file_info = filename.replace('.h5', '').split('_')
     datatype = file_info[datatype_loc] if len(file_info) > datatype_loc else None
     animal = file_info[animal_loc] if len(file_info) > animal_loc else None
     region = file_info[region_loc] if len(file_info) > region_loc else None
