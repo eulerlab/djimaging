@@ -6,7 +6,7 @@ from matplotlib import pyplot as plt
 import h5py
 
 from djimaging.utils.data_utils import load_h5_table
-from djimaging.utils.filename_utils import get_file_info
+from djimaging.utils.datafile_utils import get_filename_info
 from djimaging.utils.scanm_utils import get_pixel_size_um
 from djimaging.utils.dj_utils import PlaceholderTable
 
@@ -125,15 +125,7 @@ class FieldTemplate(dj.Computed):
         data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
         setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
 
-        if field is not None and (field.startswith('loc') or field.startswith('outline')) or \
-                region is not None and (region.startswith('loc') or region.startswith('outline')):
-            return
-
-        if field is not None and (field.startswith('od') or field.startswith('opticdis')) or \
-                region is not None and (region.startswith('od') or region.startswith('opticdis')):
-            return
-
-        roi_mask, file = get_roi_mask(pre_data_path, files)
+        roi_mask, file = get_field_roi_mask(pre_data_path, files)
 
         field_key, fieldinfo_key, zstack_key = load_scan_info(
             key=key, field=field, pre_data_path=pre_data_path, file=file,
@@ -174,7 +166,7 @@ def scan_fields_and_files(pre_data_path, user_dict, verbose=0) -> dict:
         if file.startswith('.') or not file.endswith('.h5'):
             continue
 
-        datatype, animal, region, field, stimulus, condition = get_file_info(file, **loc_mapper)
+        datatype, animal, region, field, stimulus, condition = get_filename_info(file, **loc_mapper)
 
         if field is None:
             if verbose:
@@ -192,12 +184,23 @@ def scan_fields_and_files(pre_data_path, user_dict, verbose=0) -> dict:
     return field2info
 
 
-def get_roi_mask(pre_data_path, files):
-    # Roi mask
-    for file in sorted(files):
+def get_field_roi_mask(pre_data_path, files):
+    # TODO: makes this prefer chirp masks without being so harcoded and ugly
+
+    sorted_files = sorted(files)
+
+    sort_index = np.zeros(len(sorted_files))
+    for i, file in enumerate(sorted_files):
+        if 'chirp' in file:
+            sort_index[i] = -10
+        if 'mb' in file or 'os' in file or 'movingbar' in file or 'mb' in file:
+            sort_index[i] = -9
+
+    sorted_files = np.array(sorted_files)[np.argsort(sort_index)]
+
+    for file in sorted_files:
         with h5py.File(pre_data_path + file, 'r', driver="stdio") as h5_file:
             if 'rois' in [k.lower() for k in h5_file.keys()]:
-                # File is there
                 for h5_keys in h5_file.keys():
                     if h5_keys.lower() == 'rois':
                         roi_mask = np.copy(h5_file[h5_keys])
@@ -206,17 +209,13 @@ def get_roi_mask(pre_data_path, files):
                     raise Exception('This should not happen')
                 break
     else:
-        raise ValueError(f'ROIs not found in {files}')
+        raise ValueError(f'No ROI mask found in any of the {files}')
 
     return roi_mask, file
 
 
 def load_scan_info(key, field, pre_data_path, file, data_stack_name, setupid):
     # TODO: Clean this
-
-    # Get stack
-    with h5py.File(pre_data_path + file, 'r', driver="stdio") as h5_file:
-        stack = np.copy(h5_file[data_stack_name])
 
     # Get parameters
     wparamsnum = load_h5_table('wParamsNum', filename=pre_data_path + file)
@@ -227,8 +226,12 @@ def load_scan_info(key, field, pre_data_path, file, data_stack_name, setupid):
     nypix = int(wparamsnum["User_dyPix"])
     pixel_size_um = get_pixel_size_um(zoom=wparamsnum["Zoom"], setupid=setupid, nypix=nypix)
 
-    assert stack.shape[:2] == (nxpix, nypix), f'Stack shape error: {stack.shape} vs {(nxpix, nypix)}'
+    # Get stack
+    with h5py.File(pre_data_path + file, 'r', driver="stdio") as h5_file:
+        stack = np.copy(h5_file[data_stack_name])
+
     assert stack.ndim == 3, 'Stack does not match expected shape'
+    assert stack.shape[:2] == (nxpix, nypix), f'Stack shape error: {stack.shape} vs {(nxpix, nypix)}'
 
     stack_average = np.mean(stack, 2)
 

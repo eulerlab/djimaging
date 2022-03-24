@@ -123,7 +123,6 @@ def compute_transience_index(snippets, snippets_times, trigger_times, sf, upsam_
         resampled_snippets_times[:, i] = np.linspace(start_time, end_time, upsampling_factor)
         # used this as interpolartion, signal.resample had edge effects when interpolaring the linear array
 
-    # Local Chirp
     start_trigs_local = trigger_times[::2]
 
     RTi = np.zeros(snippets.shape[1])

@@ -1,7 +1,6 @@
 import numpy as np
 import datajoint as dj
 from matplotlib import pyplot as plt
-from copy import deepcopy
 from scipy import signal
 
 from djimaging.utils.scanm_utils import load_traces_from_h5_file, split_trace_by_reps
@@ -20,10 +19,10 @@ class TracesTemplate(dj.Computed):
         -> self.roi_table
     
         ---
-        traces                  :longblob              # array of raw traces
-        traces_times            :longblob              # numerical array of trace times
-        traces_flag             :tinyint unsigned      # flag if values in traces are correct(1) or not(0)
-        trigger_flag = 1        :tinyint unsigned      # flag if triggertimes aren't outside tracetimes
+        trace          :longblob              # array of raw trace
+        trace_times    :longblob              # numerical array of trace times
+        trace_flag     :tinyint unsigned      # flag if values in trace are correct(1) or not(0)
+        trigger_flag   :tinyint unsigned      # flag if triggertimes aren't outside tracetimes
         """
         return definition
 
@@ -33,7 +32,7 @@ class TracesTemplate(dj.Computed):
 
     def make(self, key):
 
-        # get all params we need for creating traces
+        # get all params we need for creating trace
         filepath = (self.presentation_table() & key).fetch1("h5_header")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
         roi_ids = (self.roi_table() & key).fetch("roi_id")
@@ -43,28 +42,30 @@ class TracesTemplate(dj.Computed):
         for roi_id, roi_data in roi2trace.items():
             trace_key = key.copy()
             trace_key['roi_id'] = roi_id
-            trace_key['traces'] = roi_data['trace']
-            trace_key['traces_times'] = roi_data['trace_times']
-            trace_key['traces_flag'] = roi_data['trace_flag']
+            trace_key['trace'] = roi_data['trace']
+            trace_key['trace_times'] = roi_data['trace_times']
+            trace_key['trace_flag'] = roi_data['trace_flag']
 
-            if trace_key['traces_flag']:
-                if triggertimes[0] < trace_key['traces_times'][0]:
+            if trace_key['trace_flag']:
+                if triggertimes[0] < trace_key['trace_times'][0]:
                     trace_key["trigger_flag"] = 0
-                elif trace_key['traces_flag'] and triggertimes[-1] > trace_key['traces_times'][-1]:
+                elif trace_key['trace_flag'] and triggertimes[-1] > trace_key['trace_times'][-1]:
                     trace_key["trigger_flag"] = 0
+                else:
+                    trace_key["trigger_flag"] = 1
             else:
                 trace_key["trigger_flag"] = 0
 
             self.insert1(trace_key)
 
     def plot1(self, key):
-        traces_times, traces = (self & key).fetch1("traces_times", "traces")
+        trace_times, trace = (self & key).fetch1("trace_times", "trace")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
 
         fig, ax = plt.subplots(1, 1, figsize=(10, 2))
-        ax.plot(traces_times, traces)
-        ax.set(xlabel='traces_times', ylabel='traces')
-        ax.vlines(triggertimes, np.min(traces), np.max(traces), color='r', label='trigger')
+        ax.plot(trace_times, trace)
+        ax.set(xlabel='trace_times', ylabel='trace')
+        ax.vlines(triggertimes, np.min(trace), np.max(trace), color='r', label='trigger')
         ax.legend(loc='upper right')
         plt.show()
 
@@ -108,8 +109,8 @@ class PreprocessTracesTemplate(dj.Computed):
         -> self.traces_table
         -> self.preprocessparams_table
         ---
-        preprocess_traces:      longblob        # preprocessed traces
-        smoothed_traces:        longblob        # output of savgol filter which is subtracted from the raw traces
+        preprocess_trace:      longblob    # preprocessed trace
+        smoothed_trace:        longblob    # output of savgol filter which is subtracted from the raw trace
         """
         return definition
 
@@ -118,6 +119,7 @@ class PreprocessTracesTemplate(dj.Computed):
     presentation_table = PlaceholderTable
 
     def make(self, key):
+        # TODO: clean!
 
         window_len_seconds = (self.preprocessparams_table() & key).fetch1('window_length')
         poly_order = (self.preprocessparams_table() & key).fetch1('poly_order')
@@ -131,18 +133,16 @@ class PreprocessTracesTemplate(dj.Computed):
         assert (np.logical_or(standardize == non_negative, standardize == subtract_baseline)), \
             "You are trying to populate with an invalid parameter set"
 
-        raw_traces = (self.traces_table() & key).fetch1('traces')
-        temp = deepcopy(raw_traces)  # TODO: what is happening here?
-        temp[0] = temp[1]
-        raw_traces = temp
-        traces_times = (self.traces_table() & key).fetch1('traces_times')
+        trace_times = (self.traces_table() & key).fetch1('trace_times')
+        raw_trace = (self.traces_table() & key).fetch1('trace').copy()
+        raw_trace[0] = raw_trace[1]  # Drop first value
+
         window_len_frames = np.ceil(window_len_seconds * fs)
         if window_len_frames % 2 == 0:
             window_len_frames -= 1
         window_len_frames = int(window_len_frames)
-        smoothed_traces = \
-            signal.savgol_filter(raw_traces, window_length=window_len_frames, polyorder=poly_order)
-        preprocess_traces = raw_traces - smoothed_traces
+        smoothed_trace = signal.savgol_filter(raw_trace, window_length=window_len_frames, polyorder=poly_order)
+        preprocess_trace = raw_trace - smoothed_trace
 
         stim_start = None
         if standardize or subtract_baseline:
@@ -152,46 +152,46 @@ class PreprocessTracesTemplate(dj.Computed):
                 print("Converting triggers from frame base to time base")
                 stim_start /= 500
 
-            assert np.any(traces_times < stim_start), \
-                f"stim_start={stim_start:.1g}, traces_starts at {traces_times.min():.1g}: key={key}"
+            assert np.any(trace_times < stim_start), \
+                f"stim_start={stim_start:.1g}, traces_starts at {trace_times.min():.1g}: key={key}"
 
         if non_negative:
-            clip_value = np.percentile(preprocess_traces, q=2.5)
-            preprocess_traces[preprocess_traces < clip_value] = clip_value
-            preprocess_traces = preprocess_traces - clip_value
+            clip_value = np.percentile(preprocess_trace, q=2.5)
+            preprocess_trace[preprocess_trace < clip_value] = clip_value
+            preprocess_trace = preprocess_trace - clip_value
             if standardize:
                 # find last frame recorded before stimulus started
-                baseline_end = np.nonzero(traces_times[traces_times < stim_start])[0][-1]
-                baseline = preprocess_traces[:baseline_end]
-                preprocess_traces = preprocess_traces / np.std(baseline)
+                baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
+                baseline = preprocess_trace[:baseline_end]
+                preprocess_trace = preprocess_trace / np.std(baseline)
         elif subtract_baseline:
             # find last frame recorded before stimulus started
-            baseline_end = np.nonzero(traces_times[traces_times < stim_start])[0][-1]
-            baseline = preprocess_traces[:baseline_end]
-            preprocess_traces = preprocess_traces - np.median(baseline)
+            baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
+            baseline = preprocess_trace[:baseline_end]
+            preprocess_trace = preprocess_trace - np.median(baseline)
 
             if standardize:
-                preprocess_traces = preprocess_traces / np.std(baseline)
+                preprocess_trace = preprocess_trace / np.std(baseline)
 
-        self.insert1(dict(key, preprocess_traces=preprocess_traces, smoothed_traces=smoothed_traces))
+        self.insert1(dict(key, preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
 
     def plot1(self, key: dict):
         key = {k: v for k, v in key.items() if k in self.primary_key}
 
-        preprocess_traces, smoothed_traces = (self & key).fetch1("preprocess_traces", "smoothed_traces")
-        traces_times = (self.traces_table() & key).fetch1("traces_times")
+        preprocess_trace, smoothed_trace = (self & key).fetch1("preprocess_trace", "smoothed_trace")
+        trace_times = (self.traces_table() & key).fetch1("trace_times")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
 
         fig, axs = plt.subplots(2, 1, figsize=(10, 4), sharex='all')
         ax = axs[0]
-        ax.plot(traces_times, preprocess_traces)
-        ax.set(ylabel='preprocess_traces')
-        ax.vlines(triggertimes, np.min(preprocess_traces), np.max(preprocess_traces), color='r', label='trigger')
+        ax.plot(trace_times, preprocess_trace)
+        ax.set(ylabel='preprocess_trace')
+        ax.vlines(triggertimes, np.min(preprocess_trace), np.max(preprocess_trace), color='r', label='trigger')
         ax.legend(loc='upper right')
         ax = axs[1]
-        ax.plot(traces_times, smoothed_traces)
-        ax.set(xlabel='traces_times', ylabel='smoothed_traces')
-        ax.vlines(triggertimes, np.min(smoothed_traces), np.max(smoothed_traces), color='r', label='trigger')
+        ax.plot(trace_times, smoothed_trace)
+        ax.set(xlabel='trace_times', ylabel='smoothed_trace')
+        ax.vlines(triggertimes, np.min(smoothed_trace), np.max(smoothed_trace), color='r', label='trigger')
         ax.legend(loc='upper right')
         plt.show()
 
@@ -205,11 +205,10 @@ class SnippetsTemplate(dj.Computed):
         # Snippets created from slicing traces using the triggertimes. 
         -> self.preprocesstraces_table
         ---
-        snippets                 :longblob     # array of snippets (time x repetitions)
-        snippets_times           :longblob     # array of snippet times (time x repetitions)
-        smoothed_snippets        :longblob     # snippeted, smoothed signal (time x repetitions)
-        triggertimes_snippets    :longblob     # snippeted triggertimes (ntrigger_rep x repetitions)
-        droppedlastrep_flag      :tinyint unsigned 
+        snippets               :longblob          # array of snippets (time x repetitions)
+        snippets_times         :longblob          # array of snippet times (time x repetitions)
+        triggertimes_snippets  :longblob          # snippeted triggertimes (ntrigger_rep x repetitions)
+        droppedlastrep_flag    :tinyint unsigned  # Was the last repetition incomplete and therefore dropped?
         """
         return definition
 
@@ -225,20 +224,18 @@ class SnippetsTemplate(dj.Computed):
     def make(self, key):
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
-        traces_times = (self.traces_table() & key).fetch1('traces_times')
-        preprocess_traces, smoothed_traces = (self.preprocesstraces_table() & key).fetch1('preprocess_traces', 'smoothed_traces')
+        trace_times = (self.traces_table() & key).fetch1('trace_times')
+        traces = (self.preprocesstraces_table() & key).fetch1('preprocess_trace')
 
-        if triggertimes[-1] > 2 * traces_times[-1]:
+        if triggertimes[-1] > 2 * trace_times[-1]:
             triggertimes = triggertimes / 500.
 
-        snippets_times, triggertimes_snippets, snippets_list, droppedlastrep_flag = split_trace_by_reps(
-            triggertimes=triggertimes, ntrigger_rep=ntrigger_rep, times=traces_times,
-            trace_list=[preprocess_traces, smoothed_traces], allow_drop_last=True)
+        snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_reps(
+            traces, trace_times, triggertimes, ntrigger_rep, allow_drop_last=True)
 
         self.insert1(dict(
             **key,
-            snippets=snippets_list[0],
-            smoothed_snippets=snippets_list[1],
+            snippets=snippets,
             snippets_times=snippets_times,
             triggertimes_snippets=triggertimes_snippets,
             droppedlastrep_flag=droppedlastrep_flag,
@@ -247,21 +244,14 @@ class SnippetsTemplate(dj.Computed):
     def plot1(self, key):
         key = {k: v for k, v in key.items() if k in self.primary_key}
 
-        snippets, smoothed_snippets, snippets_times, triggertimes_snippets = (self & key).fetch1(
-            "snippets", "smoothed_snippets", "snippets_times", "triggertimes_snippets")
+        snippets, snippets_times, triggertimes_snippets = (self & key).fetch1(
+            "snippets", "snippets_times", "triggertimes_snippets")
 
-        fig, axs = plt.subplots(2, 1, figsize=(10, 4), sharex='all')
-        ax = axs[0]
+        fig, ax = plt.subplots(1, 1, figsize=(10, 2))
         ax.plot(snippets_times - snippets_times[0, :], snippets)
-        ax.set(ylabel='preprocess_traces')
+        ax.set(ylabel='preprocess_trace')
         ax.vlines(triggertimes_snippets - triggertimes_snippets[0, :],
                   np.min(snippets), np.max(snippets), color='r', label='trigger')
-        ax.legend(loc='upper right')
-        ax = axs[1]
-        ax.plot(snippets_times - snippets_times[0, :], smoothed_snippets)
-        ax.set(xlabel='relative snippets_times', ylabel='smoothed_traces')
-        ax.vlines(triggertimes_snippets - triggertimes_snippets[0, :],
-                  np.min(smoothed_snippets), np.max(smoothed_snippets), color='r', label='trigger')
         ax.legend(loc='upper right')
         plt.show()
 

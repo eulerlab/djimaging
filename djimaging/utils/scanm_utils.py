@@ -75,8 +75,8 @@ def load_traces_from_h5_file(filepath, roi_ids):
     return roi2trace
 
 
-def split_trace_by_reps(triggertimes, ntrigger_rep, times, trace_list, allow_drop_last=True):
-    assert isinstance(trace_list, list)
+def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, allow_drop_last=True):
+    """Split trace in snippets, using triggertimes"""
 
     t_idxs = [np.argwhere(np.isclose(times, t, atol=1e-01))[0][0] for t in triggertimes[::ntrigger_rep]]
 
@@ -84,8 +84,7 @@ def split_trace_by_reps(triggertimes, ntrigger_rep, times, trace_list, allow_dro
 
     n_frames_per_rep = int(np.round(np.mean(np.diff(t_idxs))))
 
-    for trace in trace_list:
-        assert trace.shape == times.shape, 'Shapes do not match'
+    assert trace.shape == times.shape, 'Shapes do not match'
 
     if times[t_idxs[-1]:].size < n_frames_per_rep:
         assert allow_drop_last, 'Data incomplete, allow to drop last repetition or fix data'
@@ -96,16 +95,14 @@ def split_trace_by_reps(triggertimes, ntrigger_rep, times, trace_list, allow_dro
     else:
         droppedlastrep_flag = 0
 
+    snippets = np.zeros((n_frames_per_rep, len(t_idxs)))
     snippets_times = np.zeros((n_frames_per_rep, len(t_idxs)))
     triggertimes_snippets = np.zeros((ntrigger_rep, len(t_idxs)))
-    snippets_list = [np.zeros((n_frames_per_rep, len(t_idxs))) for _ in range(len(trace_list))]
 
+    # Frames may be reused, this is not a standard reshaping
     for i, idx in enumerate(t_idxs):
-        # Frames may be reused, this is not a standard reshaping
+        snippets[:, i] = trace[idx:idx + n_frames_per_rep]
         snippets_times[:, i] = times[idx:idx + n_frames_per_rep]
         triggertimes_snippets[:, i] = triggertimes[i * ntrigger_rep:(i + 1) * ntrigger_rep]
 
-        for j, (snippets, trace) in enumerate(zip(snippets_list, trace_list)):
-            snippets_list[j][:, i] = trace[idx:idx + n_frames_per_rep]
-
-    return snippets_times, triggertimes_snippets, snippets_list, droppedlastrep_flag
+    return snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag

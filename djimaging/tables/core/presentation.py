@@ -3,6 +3,7 @@ import numpy as np
 import datajoint as dj
 from copy import deepcopy
 import h5py
+from matplotlib import pyplot as plt
 
 from djimaging.utils.data_utils import list_h5_files, extract_h5_table
 from djimaging.utils.dj_utils import PlaceholderTable
@@ -23,6 +24,7 @@ class PresentationTemplate(dj.Computed):
         triggertimes          :longblob         # triggertimes in each presentation
         triggervalues         :longblob         # values of the recorded triggers
         ntriggers             :int              # number  of triggers
+        stack_average         :longblob         # data stack average
         scan_line_duration=-1 :float            # duration of one line scan
         scan_num_lines=-1     :float            # number of scan lines (in XZ scan)
         scan_frequency=-1     :float            # effective sampling frequency for each pixel in the scan field
@@ -129,6 +131,7 @@ class PresentationTemplate(dj.Computed):
         field = (self.field_table() & key).fetch1("field")
         stim_loc, field_loc, condition_loc = (self.userinfo_table() & key).fetch1(
             "stimulus_loc", "field_loc", "condition_loc")
+        data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
 
         pre_data_path = (self.experiment_table() * self.field_table() & key).fetch1("pre_data_path")
         assert os.path.exists(pre_data_path), f"Could not read path: {pre_data_path}"
@@ -145,9 +148,10 @@ class PresentationTemplate(dj.Computed):
             primary_key["condition"] = condition
 
             if stim.lower() in stim_alias:
-                self.__add_presentation(key=primary_key, filepath=os.path.join(pre_data_path, h5_file))
+                self.__add_presentation(
+                    key=primary_key, filepath=os.path.join(pre_data_path, h5_file), data_stack_name=data_stack_name)
 
-    def __add_presentation(self, key, filepath):
+    def __add_presentation(self, key, filepath, data_stack_name):
         pres_key = deepcopy(key)
         pres_key["h5_header"] = filepath
 
@@ -179,7 +183,7 @@ class PresentationTemplate(dj.Computed):
                 print(f'Warning: No OS_Parameters found for {filepath}')
                 os_params = dict()
 
-            w_params = extract_h5_table('wParamsStr', 'wParamsNum', open_file=h5_file, lower_keys=True)
+            wparams = extract_h5_table('wParamsStr', 'wParamsNum', open_file=h5_file, lower_keys=True)
 
             # get scanning frequency
             if "LineDuration" in os_params:
@@ -190,9 +194,17 @@ class PresentationTemplate(dj.Computed):
                     pres_key["scan_frequency"] = \
                         np.round(1 / (pres_key["scan_line_duration"] * pres_key["scan_num_lines"]), 2)
 
+            nxpix = int(wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"])
+            nypix = int(wparams["user_dypix"])
+
+            stack = np.copy(h5_file[data_stack_name])
+            assert stack.ndim == 3, 'Stack does not match expected shape'
+            assert stack.shape[:2] == (nxpix, nypix), f'Stack shape error: {stack.shape} vs {(nxpix, nypix)}'
+            pres_key["stack_average"] = np.mean(stack, 2)
+
         # extract params for scaninfo
         scaninfo_key = deepcopy(key)
-        scaninfo_key.update(w_params)
+        scaninfo_key.update(wparams)
 
         remove_list = ["user_warpparamslist", "user_nwarpparams"]
         for k in remove_list:
@@ -200,3 +212,18 @@ class PresentationTemplate(dj.Computed):
 
         self.insert1(pres_key)
         (self.ScanInfo() & key).insert1(scaninfo_key)
+
+    def plot1(self, key):
+        key = {k: v for k, v in key.items() if k in self.primary_key}
+
+        fig, axs = plt.subplots(1, 2, figsize=(10, 3.5))
+        stack_average = (self & key).fetch1("stack_average").T
+        roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask").T
+        axs[0].imshow(stack_average)
+        axs[0].set(title='stack_average')
+
+        if roi_mask.size > 0:
+            roi_mask_im = axs[1].imshow(roi_mask, cmap='jet')
+            plt.colorbar(roi_mask_im, ax=axs[1])
+            axs[1].set(title='roi_mask')
+        plt.show()
