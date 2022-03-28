@@ -8,6 +8,14 @@ from datetime import datetime
 from djimaging.utils.dj_utils import PlaceholderTable
 
 
+def find_header_files(data_dir):
+    os_walk_output = []
+    for folder, subfolders, files in os.walk(data_dir):
+        if np.any([f.endswith('.ini') for f in files]):
+            os_walk_output.append(folder)
+    return os_walk_output
+
+
 class ExperimentTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
@@ -57,18 +65,14 @@ class ExperimentTemplate(dj.Computed):
         if restrictions is None:
             restrictions = dict()
 
-        # For data_dir in data_directories: walk through all folders; select those containing header files
-        os_walk_output = []
-        for folder, subfolders, files in os.walk(data_dir):
-            if np.any([f.endswith('.ini') for f in files]):
-                os_walk_output.append(folder)
+        os_walk_output = find_header_files(data_dir)
 
         for header_path in os_walk_output:
-            self.__add_experiment(key=key, data_dir=data_dir, header_path=header_path,
-                                  pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
+            self.__add_experiment(key=key,
+                                  header_path=header_path, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
                                   only_new=only_new, restrictions=restrictions, verbose=verbose)
 
-    def __add_experiment(self, key, data_dir, header_path, pre_data_dir, raw_data_dir, only_new,
+    def __add_experiment(self, key, header_path, pre_data_dir, raw_data_dir, only_new,
                          restrictions=None, verbose=False):
 
         if restrictions is None:
@@ -86,8 +90,9 @@ class ExperimentTemplate(dj.Computed):
             print('\t\theader_name:', header_name)
 
         primary_key = deepcopy(key)
-        primary_key["date"] = datetime.strptime(header_path[len(data_dir):].split("/")[0], '%Y%m%d')
-        primary_key["exp_num"] = int(header_path[header_path.rfind("/") + 1:])
+
+        primary_key["date"] = datetime.strptime(header_path.split("/")[-2], '%Y%m%d')
+        primary_key["exp_num"] = int(header_path.split("/")[-1])
 
         if only_new:
             search = (self & restrictions & primary_key)
@@ -97,10 +102,10 @@ class ExperimentTemplate(dj.Computed):
                 return
 
         pre_data_path = header_path + "/" + pre_data_dir + "/"
-        assert os.path.isdir(pre_data_path)
+        assert os.path.isdir(pre_data_path), f"{pre_data_dir} not found {header_path}"
 
         raw_data_path = header_path + "/" + raw_data_dir + "/"
-        assert os.path.isdir(raw_data_path)
+        assert os.path.isdir(raw_data_path), f"{raw_data_dir} not found {header_path}"
 
         exp_key = deepcopy(primary_key)
         exp_key["pre_data_path"] = pre_data_path

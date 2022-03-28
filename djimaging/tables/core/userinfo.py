@@ -1,4 +1,5 @@
 import os
+from copy import deepcopy
 
 import datajoint as dj
 
@@ -31,7 +32,16 @@ class UserInfoTemplate(dj.Manual):
     def upload_user(self, *userdicts):
         """Upload one or multiple user dicts"""
         for userdict in userdicts:
+            userdict = deepcopy(userdict)
+
             assert "experimenter" in userdict, 'Set username'
+            assert "data_dir" in userdict, 'Set data_dir'
+
+            if not userdict['data_dir'].endswith('/'):
+                userdict['data_dir'] += '/'
+
+            assert os.path.isdir(userdict['data_dir']), f"ERROR: {userdict['data_dir']} is not a directory"
+
             if userdict["experimenter"] not in self.fetch("experimenter"):
                 self.insert([userdict])
             else:

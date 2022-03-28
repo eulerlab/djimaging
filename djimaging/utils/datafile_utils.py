@@ -14,7 +14,7 @@ def get_filename_info(filename, datatype_loc, animal_loc, region_loc, field_loc,
     return datatype, animal, region, field, stimulus, condition
 
 
-def print_tree(startpath, include_types=None, exclude_types=None):
+def print_tree(startpath, include_types=None, exclude_types=None, nmax=200):
 
     if exclude_types is not None:
         exclude_types = [t.lower().strip('.') for t in exclude_types]
@@ -22,7 +22,9 @@ def print_tree(startpath, include_types=None, exclude_types=None):
     if include_types is not None:
         include_types = [t.lower().strip('.') for t in include_types]
 
-    for root, dirs, files in sorted(os.walk(startpath)):
+    paths = sorted(os.walk(startpath))
+
+    for root, dirs, files in paths[:nmax]:
         level = root.replace(startpath, '').count(os.sep)
         indent = ' ' * 4 * level
         print(f'{indent}{os.path.basename(root)}/:  [{len(files)} files]')
@@ -36,4 +38,7 @@ def print_tree(startpath, include_types=None, exclude_types=None):
 
             if include_types is None or f_type in include_types:
                 print(f'{subindent}{f}')
+
+    if len(paths) > nmax:
+        print('...')
 
