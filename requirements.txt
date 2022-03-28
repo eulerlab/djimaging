@@ -1,4 +1,4 @@
-datajoint
+datajoint>=0.13
 numpy
 h5py
 scipy
