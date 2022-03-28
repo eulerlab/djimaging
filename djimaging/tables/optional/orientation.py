@@ -176,7 +176,8 @@ def _get_time_dir_kernels(sorted_responses):
 
 def _get_si(v, dirs, per):
     """
-    Computes direction/orientation selectivity index and preferred direction/orientation of a cell by projecting the tuning curve v on a
+    Computes direction/orientation selectivity index and preferred direction/orientation
+    of a cell by projecting the tuning curve v on a
     complex exponential of the according directions dirs (as in Baden et al. 2016)
     Inputs:
     v:  array, dirs x 1, tuning curve as returned by SVD
@@ -190,12 +191,15 @@ def _get_si(v, dirs, per):
     correction_factor = bin_spacing / (2 * (np.sin(bin_spacing / 2)))  # Zar 1999, Equation 26.16
     complExp = [np.exp(per * 1j * d) for d in dirs]
     vector = np.dot(complExp, v)
-    index = correction_factor * np.abs(vector) / np.sum(
-        v)  # get the absolute of the vector, normalize to make it range between 0 and 1
+
+    # get the absolute of the vector, normalize to make it range between 0 and 1
+    index = correction_factor * np.abs(vector) / np.sum(v)
+
     direction = cmath.phase(vector) / per
     # for orientation, the directions are mapped to the right half of a circle. Map instead to upper half
     if per == 2 and direction < 0:
         direction += np.pi
+
     return index, direction
 
 

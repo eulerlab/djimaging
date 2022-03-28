@@ -125,7 +125,7 @@ def compute_transience_index(snippets, snippets_times, trigger_times, sf, upsam_
 
     start_trigs_local = trigger_times[::2]
 
-    RTi = np.zeros(snippets.shape[1])
+    transience_indexes = np.zeros(snippets.shape[1])
     for i in range(snippets.shape[1]):
         stim_start = start_trigs_local[i]
         stim_end = start_trigs_local[i] + 6
@@ -137,7 +137,7 @@ def compute_transience_index(snippets, snippets_times, trigger_times, sf, upsam_
         trace = snip[stim_start_idx:stim_end_idx]
         peak = np.argmax(trace)
         peak_alpha = np.argmax(np.isclose(snip_times, snip_times[peak] + 0.4, atol=1e-01))
-        RTi[i] = 1 - (snip[stim_start_idx + peak_alpha] / snip[stim_start_idx + peak])
-    RTi = RTi.mean()
+        transience_indexes[i] = 1 - (snip[stim_start_idx + peak_alpha] / snip[stim_start_idx + peak])
 
-    return RTi
+    transience_index = np.mean(transience_indexes)
+    return transience_index
