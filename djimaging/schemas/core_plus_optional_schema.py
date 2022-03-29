@@ -36,10 +36,3 @@ class ChirpFeatures(chirp.ChirpFeaturesTemplate):
 class OsDsIndexes(orientation.OsDsIndexesTemplate):
     stimulus_table = Stimulus
     snippets_table = Snippets
-
-
-@schema
-class RoiBrightness(brightness.RoiBrightnessTemaplte):
-    field_table = Field
-    presentation_table = Presentation
-    roi_table = Roi

@@ -44,7 +44,7 @@ class OsDsIndexesTemplate(dj.Computed):
 
     def make(self, key):
 
-        dir_order = (self.stimulus_table().DsInfo() & key).fetch1('trialinfo')
+        dir_order = (self.stimulus_table().DsInfo() & key).fetch1('trial_info')
         snippets = (self.snippets_table() & key).fetch1('snippets')  # get the response snippets
 
         sorted_responses, sorted_directions_rad = _sort_response_matrix(snippets, dir_order)
