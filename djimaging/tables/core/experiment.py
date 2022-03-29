@@ -27,10 +27,8 @@ class ExperimentTemplate(dj.Computed):
         date                        :date                     # date of recording
         exp_num                     :mediumint                # experiment number in a day
         ---
-        header_path                 :varchar(255)             # path to header file, used for computed tables
-        header_name                 :varchar(255)             # name of header file, used for computed tables
-        pre_data_path               :varchar(255)
-        raw_data_path               :varchar(255)
+        header_path                 :varchar(255)             # path to header file
+        header_name                 :varchar(255)             # name of header file
         """
         return definition
 
@@ -68,9 +66,9 @@ class ExperimentTemplate(dj.Computed):
         os_walk_output = find_header_files(data_dir)
 
         for header_path in os_walk_output:
-            self.__add_experiment(key=key,
-                                  header_path=header_path, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
-                                  only_new=only_new, restrictions=restrictions, verbose=verbose)
+            self.__add_experiment(
+                key=key, header_path=header_path, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
+                only_new=only_new, restrictions=restrictions, verbose=verbose)
 
     def __add_experiment(self, key, header_path, pre_data_dir, raw_data_dir, only_new,
                          restrictions=None, verbose=False):
@@ -108,8 +106,6 @@ class ExperimentTemplate(dj.Computed):
         assert os.path.isdir(raw_data_path), f"{raw_data_dir} not found {header_path}"
 
         exp_key = deepcopy(primary_key)
-        exp_key["pre_data_path"] = pre_data_path
-        exp_key["raw_data_path"] = raw_data_path
         exp_key["header_path"] = header_path + "/"
         exp_key["header_name"] = header_name
 

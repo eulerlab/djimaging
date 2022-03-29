@@ -32,7 +32,11 @@ class OpticDiskTemplate(dj.Computed):
 
     def make(self, key):
         user_dict = (self.userinfo_table() & key).fetch1()
-        pre_data_path = (self.experiment_table() & key).fetch1('pre_data_path')
+
+        pre_data_path = os.path.join(
+            (self.experiment_table() & key).fetch1('header_path'),
+            (self.userinfo_table() & key).fetch1("pre_data_dir"))
+        assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
         field2info = scan_fields_and_files(pre_data_path, user_dict=user_dict)
 

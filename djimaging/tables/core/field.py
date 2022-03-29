@@ -86,8 +86,10 @@ class FieldTemplate(dj.Computed):
             self.__add_experiment_fields(key, only_new=True, verbose=verbose)
 
     def __add_experiment_fields(self, key, only_new=False, verbose=0):
-        pre_data_path = (self.experiment_table() & key).fetch1('pre_data_path')
 
+        pre_data_path = os.path.join(
+            (self.experiment_table() & key).fetch1('header_path'),
+            (self.userinfo_table() & key).fetch1("pre_data_dir"))
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
         if verbose:

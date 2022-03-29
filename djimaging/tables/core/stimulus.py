@@ -121,7 +121,7 @@ class StimulusTemplate(dj.Manual):
         )
 
     def add_movingbar(self, stim_name: str = "movingbar", stim_family: str = 'mb',
-                      trial_info=None, bardx=-1, bardy=-1, velumsec=-1, tmovedurs=-1, framerate=1 / 60.,
+                      trial_info=None, bardx=-1, bardy=-1, velumsec=-1, tmovedurs=-1, framerate=1/60.,
                       ntrigger_rep: int = 1, isrepeated: bool = 1, alias=None, skip_duplicates=False):
 
         if trial_info is None:

@@ -133,8 +133,10 @@ class PresentationTemplate(dj.Computed):
             "stimulus_loc", "field_loc", "condition_loc")
         data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
 
-        pre_data_path = (self.experiment_table() * self.field_table() & key).fetch1("pre_data_path")
-        assert os.path.exists(pre_data_path), f"Could not read path: {pre_data_path}"
+        pre_data_path = os.path.join(
+            (self.experiment_table() & key).fetch1('header_path'),
+            (self.userinfo_table() & key).fetch1("pre_data_dir"))
+        assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
         h5_files = list_h5_files(folder=pre_data_path, hidden=False, field=field, field_loc=field_loc)
         stim_alias = (self.stimulus_table() & key).fetch1("alias").split('_')
