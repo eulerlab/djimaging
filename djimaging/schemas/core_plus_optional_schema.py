@@ -1,5 +1,5 @@
-from djimaging.schemas.core_schema import schema, Stimulus, Field, Experiment, Presentation, Snippets, UserInfo, Roi
-from djimaging.tables.optional import location, chirp, orientation, brightness
+from djimaging.schemas.core_schema import schema, Stimulus, Field, Experiment, Presentation, Snippets, UserInfo
+from djimaging.tables.optional import location, chirp, orientation
 
 
 @schema

@@ -20,7 +20,8 @@ class PlaceholderTable:
     def FieldInfo(cls):
         pass
 
-    def DsInfo(self):
+    @classmethod
+    def ScanInfo(cls):
         pass
 
 

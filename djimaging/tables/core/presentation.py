@@ -23,10 +23,11 @@ class PresentationTemplate(dj.Computed):
         h5_header             :varchar(255)     # path to h5 file
         triggertimes          :longblob         # triggertimes in each presentation
         triggervalues         :longblob         # values of the recorded triggers
-        ntriggers             :int              # number  of triggers
         stack_average         :longblob         # data stack average
         """
         return definition
+
+    # TODO ADD scan_frequency BACK!!!
 
     field_table = PlaceholderTable
     stimulus_table = PlaceholderTable
@@ -40,6 +41,9 @@ class PresentationTemplate(dj.Computed):
             # Data read from wParamsNum and wParamsStr tables in h5 file
             -> master
             ---
+            scan_period=0              :float # Scanning frequency in Hz
+            scan_frequency=0           :float # Scanning frequency in Hz
+            line_duration=0            :float # Line duration from OS_Parameters
             hdrleninvaluepairs         :float        
             hdrleninbytes              :float        
             minvolts_ao                :float        
@@ -120,7 +124,6 @@ class PresentationTemplate(dj.Computed):
             user_etl_max_v=0           :float        
             user_etl_neutral_v=0       :float        
             user_nimgperfr=0           :float      
-            lineduration=0             : float # Line duration from OS_Parameters
             """
             return definition
 
@@ -141,7 +144,7 @@ class PresentationTemplate(dj.Computed):
         for h5_file in h5_files:
             split_string = h5_file[:h5_file.find(".h5")].split("_")
             stim = split_string[stim_loc] if stim_loc < len(split_string) else 'nostim'
-            condition = split_string[condition_loc] if condition_loc < len(split_string) else 'none'
+            condition = split_string[condition_loc] if condition_loc < len(split_string) else 'control'
 
             primary_key = deepcopy(key)
             primary_key["condition"] = condition
@@ -159,10 +162,8 @@ class PresentationTemplate(dj.Computed):
 
             if len(key_triggertimes) == 1:
                 pres_key["triggertimes"] = h5_file[key_triggertimes[0]][()]
-                pres_key["ntriggers"] = len(pres_key["triggertimes"])
             elif len(key_triggertimes) == 0:
                 pres_key["triggertimes"] = np.zeros(0)
-                pres_key["ntriggers"] = 0
             else:
                 raise ValueError('Multiple triggertimes found')
 
@@ -187,7 +188,7 @@ class PresentationTemplate(dj.Computed):
                 wparams.update(extract_h5_table('wParamsStr', open_file=h5_file, lower_keys=True))
                 wparams.update(extract_h5_table('wParamsNum', open_file=h5_file, lower_keys=True))
 
-            # Check stack if data is available
+            # Check stack average
             try:
                 nxpix = int(wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"])
                 nypix = int(wparams["user_dypix"])
@@ -196,13 +197,18 @@ class PresentationTemplate(dj.Computed):
                 assert stack.shape[:2] == (nxpix, nypix), f'Stack shape error: {stack.shape} vs {(nxpix, nypix)}'
             except KeyError:
                 pass
-
             pres_key["stack_average"] = np.mean(stack, 2)
 
         # extract params for scaninfo
         scaninfo_key = deepcopy(key)
         scaninfo_key.update(wparams)
-        scaninfo_key['lineduration'] = os_params.get('lineduration', 0)
+        try:
+            pres_key["line_duration"] = (wparams['user_dxpix'] * wparams['realpixdur']) * 1e-6
+            pres_key["scan_period"] = (pres_key["line_duration"] * wparams['user_dypix'])
+            pres_key["scan_frequency"] = 1. / pres_key["scan_period"]
+        except KeyError:
+            pass
+
         remove_list = ["user_warpparamslist", "user_nwarpparams"]
         for k in remove_list:
             scaninfo_key.pop(k, None)

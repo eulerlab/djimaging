@@ -66,7 +66,6 @@ class FieldTemplate(dj.Computed):
             nxpix_offset: int  # number of offset pixels in x
             nxpix_retrace: int  # number of retrace pixels in x
             pixel_size_um :float  # width / height of a pixel in um
-            recording_depth=-9999 :float  # XY-scan: single element list with IPL depth, XZ: list of ROI depths
             stack_average: longblob  # Average of the data stack for visualization
             """
             return definition
@@ -118,12 +117,16 @@ class FieldTemplate(dj.Computed):
 
             if verbose:
                 print(f"\tAdding field: {field} with files: {info['files']}")
-            self.__add_field(key=key, field=field, files=info['files'], region=info['region'])
+            self.__add_field(key=key, field=field, files=info['files'])
 
-    def __add_field(self, key, field, files, region):
+    def __add_field(self, key, field, files):
         assert field is not None
 
-        pre_data_path = (self.experiment_table() & key).fetch1("pre_data_path")
+        pre_data_path = os.path.join(
+            (self.experiment_table() & key).fetch1('header_path'),
+            (self.userinfo_table() & key).fetch1("pre_data_dir"))
+        assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
+
         data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
         setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
 
@@ -201,7 +204,7 @@ def get_field_roi_mask(pre_data_path, files):
     sorted_files = np.array(sorted_files)[np.argsort(sort_index)]
 
     for file in sorted_files:
-        with h5py.File(pre_data_path + file, 'r', driver="stdio") as h5_file:
+        with h5py.File(os.path.join(pre_data_path, file), 'r', driver="stdio") as h5_file:
             if 'rois' in [k.lower() for k in h5_file.keys()]:
                 for h5_keys in h5_file.keys():
                     if h5_keys.lower() == 'rois':
@@ -220,7 +223,7 @@ def load_scan_info(key, field, pre_data_path, file, data_stack_name, setupid):
     # TODO: Clean this
 
     # Get parameters
-    wparamsnum = load_h5_table('wParamsNum', filename=pre_data_path + file)
+    wparamsnum = load_h5_table('wParamsNum', filename=os.path.join(pre_data_path, file))
 
     nxpix_offset = int(wparamsnum["User_nXPixLineOffs"])
     nxpix_retrace = int(wparamsnum["User_nPixRetrace"])
@@ -229,7 +232,7 @@ def load_scan_info(key, field, pre_data_path, file, data_stack_name, setupid):
     pixel_size_um = get_pixel_size_um(zoom=wparamsnum["Zoom"], setupid=setupid, nypix=nypix)
 
     # Get stack
-    with h5py.File(pre_data_path + file, 'r', driver="stdio") as h5_file:
+    with h5py.File(os.path.join(pre_data_path, file), 'r', driver="stdio") as h5_file:
         stack = np.copy(h5_file[data_stack_name])
 
     assert stack.ndim == 3, 'Stack does not match expected shape'

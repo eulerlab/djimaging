@@ -61,7 +61,7 @@ class ChirpFeaturesTemplate(dj.Computed):
         snippets = (self.snippets_table() & key).fetch1('snippets')
         snippets_times = (self.snippets_table() & key).fetch1('snippets_times')
         trigger_times = (self.presentation_table() & key).fetch1('triggertimes')
-        sf = (self.presentation_table() & key).fetch1('scan_frequency')
+        sf = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
 
         on_off_index = compute_on_off_index(snippets, snippets_times, trigger_times, sf)
         transience_index = compute_transience_index(snippets, snippets_times, trigger_times, sf)

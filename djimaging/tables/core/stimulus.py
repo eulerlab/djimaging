@@ -11,7 +11,7 @@ class StimulusTemplate(dj.Manual):
         # Light stimuli
         stim_name           :varchar(255)       # Unique string identifier
         ---
-        alias               :varchar(9999)      # Strings (_ seperator) used to identify this stimulus
+        alias               :varchar(9999)      # Strings (_ seperator) to identify this stimulus, not case sensitive!
         stim_family=""      :varchar(255)       # To group stimuli (e.g. gChirp and lChirp) for downstream processing 
         framerate=0         :float              # framerate in Hz
         isrepeated=0        :tinyint unsigned   # Is the stimulus repeated? Used for snippets
@@ -45,7 +45,7 @@ class StimulusTemplate(dj.Manual):
 
         key = {
             "stim_name": stim_name,
-            "alias": alias,
+            "alias": alias.lower(),
             "stim_family": stim_family,
             "ntrigger_rep": int(np.round(ntrigger_rep)),
             "isrepeated": int(np.round(isrepeated)),

@@ -40,6 +40,12 @@ class UserInfoTemplate(dj.Manual):
             if not userdict['data_dir'].endswith('/'):
                 userdict['data_dir'] += '/'
 
+            if 'opticdisk_alias' in userdict['data_dir']:
+                userdict['data_dir'] = userdict['data_dir'].lower()
+
+            if 'outline_alias' in userdict['data_dir']:
+                userdict['data_dir'] = userdict['data_dir'].lower()
+
             assert os.path.isdir(userdict['data_dir']), f"ERROR: {userdict['data_dir']} is not a directory"
 
             if userdict["experimenter"] not in self.fetch("experimenter"):

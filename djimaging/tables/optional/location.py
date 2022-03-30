@@ -3,8 +3,8 @@ import os
 import datajoint as dj
 from matplotlib import pyplot as plt
 
-from djimaging.tables.core.field import scan_fields_and_files, load_scan_info
-from djimaging.utils.scanm_utils import get_retinal_position, get_pixel_size_um
+from djimaging.tables.core.field import scan_fields_and_files
+from djimaging.utils.scanm_utils import get_retinal_position
 from djimaging.utils.data_utils import load_h5_table
 from djimaging.utils.dj_utils import PlaceholderTable
 
