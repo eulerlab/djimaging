@@ -138,7 +138,7 @@ class FieldTemplate(dj.Computed):
 
         # subkey for adding Fields to RoiMask
         roimask_key = deepcopy(field_key)
-        roimask_key["fromfile"] = file if roi_mask.size > 0 else ''
+        roimask_key["fromfile"] = os.path.join(pre_data_path, file) if roi_mask.size > 0 else ''
         roimask_key["roi_mask"] = roi_mask
 
         self.insert1(field_key, allow_direct_insert=True)
@@ -225,10 +225,9 @@ def load_scan_info(key, field, pre_data_path, file, data_stack_name, setupid):
     # Get parameters
     wparamsnum = load_h5_table('wParamsNum', filename=os.path.join(pre_data_path, file))
 
-    nxpix_offset = int(wparamsnum["User_nXPixLineOffs"])
-    nxpix_retrace = int(wparamsnum["User_nPixRetrace"])
-    nxpix = int(wparamsnum["User_dxPix"] - nxpix_retrace - nxpix_offset)
-    nypix = int(wparamsnum["User_dyPix"])
+    nxpix = wparamsnum["User_dxPix"] - wparamsnum["User_nPixRetrace"] - wparamsnum["User_nXPixLineOffs"]
+    nypix = wparamsnum["User_dyPix"]
+
     pixel_size_um = get_pixel_size_um(zoom=wparamsnum["Zoom"], setupid=setupid, nypix=nypix)
 
     # Get stack
@@ -246,14 +245,14 @@ def load_scan_info(key, field, pre_data_path, file, data_stack_name, setupid):
 
     # subkey for fieldinfo
     fieldinfo_key = deepcopy(field_key)
-    fieldinfo_key["fromfile"] = file
+    fieldinfo_key["fromfile"] = os.path.join(pre_data_path, file)
     fieldinfo_key["absx"] = wparamsnum['XCoord_um']
     fieldinfo_key["absy"] = wparamsnum['YCoord_um']
     fieldinfo_key["absz"] = wparamsnum['ZCoord_um']
-    fieldinfo_key["nxpix"] = nxpix
-    fieldinfo_key["nxpix_offset"] = nxpix_offset
-    fieldinfo_key["nxpix_retrace"] = nxpix_retrace
     fieldinfo_key["nypix"] = nypix
+    fieldinfo_key["nxpix"] = nxpix
+    fieldinfo_key["nxpix_offset"] = wparamsnum["User_nXPixLineOffs"]
+    fieldinfo_key["nxpix_retrace"] = wparamsnum["User_nPixRetrace"]
     fieldinfo_key["pixel_size_um"] = pixel_size_um
     fieldinfo_key['stack_average'] = stack_average
 

@@ -17,21 +17,21 @@ class OsDsIndexesTemplate(dj.Computed):
         #as well as a quality index of DS responses as described in Baden et al. (2016)
         -> self.snippets_table
         ---
-        ds_index:   float   #direction selectivity index as resulting vector length (absolute of projection on complex exponential)
-        ds_pvalue:  float   #p-value indicating the percentile of the vector length in null distribution
-        ds_null:    longblob    #null distribution of DSIs
-        pref_dir:  float    #preferred direction
-        os_index:   float   #orientation selectivity index in analogy to ds_index
-        os_pvalue:  float   #analogous to ds_pvalue for orientation tuning
-        os_null:    longblob    #null distribution of OSIs
-        pref_or:    float   #preferred orientation
-        on_off:     float   #on off index based on time kernel
-        d_qi:       float   #quality index for moving bar response
-        u:     longblob    #time component
-        v:     longblob    #direction component
-        surrogate_v:    longblob    #computed by projecting on time
-        surrogate_dsi:  float   #DSI of surrogate v 
-        avg_sorted_resp:    longblob    # response matrix, averaged across reps
+        ds_index:   float     # direction selectivity index as vector length (abs. of projection on complex exp.)
+        ds_pvalue:  float     # p-value indicating the percentile of the vector length in null distribution
+        ds_null:    longblob  # null distribution of DSIs
+        pref_dir:   float     # preferred direction
+        os_index:   float     # orientation selectivity index in analogy to ds_index
+        os_pvalue:  float     # analogous to ds_pvalue for orientation tuning
+        os_null:    longblob  # null distribution of OSIs
+        pref_or:    float     # preferred orientation
+        on_off:     float     # on off index based on time kernel
+        d_qi:       float     # quality index for moving bar response
+        u:          longblob  # time component
+        v:          longblob  # direction component
+        surrogate_v: longblob # computed by projecting on time
+        surrogate_dsi: float  # DSI of surrogate v 
+        avg_sorted_resp: longblob # response matrix, averaged across reps
         """
         return definition
 
@@ -44,7 +44,7 @@ class OsDsIndexesTemplate(dj.Computed):
 
     def make(self, key):
 
-        dir_order = (self.stimulus_table().DsInfo() & key).fetch1('trial_info')
+        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
         snippets = (self.snippets_table() & key).fetch1('snippets')  # get the response snippets
 
         sorted_responses, sorted_directions_rad = _sort_response_matrix(snippets, dir_order)
@@ -147,8 +147,10 @@ def _get_time_dir_kernels(sorted_responses):
     U, S, V = np.linalg.svd(sorted_responses)
     u = U[:, 0]
     v = V[0, :]
+
     # the time_kernel determined by SVD should be correlated to the average response across all directions. if the
     # correlation is negative, U is likely flipped
+    # noinspection PyTypeChecker
     r, _ = stats.spearmanr(a=u, b=np.mean(sorted_responses, axis=-1), axis=1)
     su = np.sign(r)
     if su == 0:

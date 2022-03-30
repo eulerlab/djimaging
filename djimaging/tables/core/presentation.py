@@ -44,33 +44,33 @@ class PresentationTemplate(dj.Computed):
             scan_period=0              :float # Scanning frequency in Hz
             scan_frequency=0           :float # Scanning frequency in Hz
             line_duration=0            :float # Line duration from OS_Parameters
-            hdrleninvaluepairs         :float        
+            hdrleninvaluepairs         :int        
             hdrleninbytes              :float        
             minvolts_ao                :float        
             maxvolts_ao                :float        
             stimchanmask               :float        
             maxstimbufmaplen           :float        
-            numberofstimbufs           :float        
+            numberofstimbufs           :int        
             targetedpixdur_us          :float        
             minvolts_ai                :float        
             maxvolts_ai                :float        
-            inputchanmask              :float        
-            numberofinputchans         :float        
+            inputchanmask              :int        
+            numberofinputchans         :int        
             pixsizeinbytes             :float        
-            numberofpixbufsset         :float        
+            numberofpixbufsset         :int        
             pixeloffs                  :float        
             pixbufcounter              :float        
             user_scanmode              :float        
-            user_dxpix                 :float        
-            user_dypix                 :float        
-            user_npixretrace           :float        
-            user_nxpixlineoffs         :float        
-            user_nypixlineoffs=0       :float        
+            user_dxpix                 :int        
+            user_dypix                 :int        
+            user_npixretrace           :int        
+            user_nxpixlineoffs         :int        
+            user_nypixlineoffs=0       :int        
             user_divframebufreq        :float        
             user_scantype              :float        
             user_scanpathfunc          :varchar(255) 
-            user_nsubpixoversamp       :float        
-            user_nfrperstep            :float        
+            user_nsubpixoversamp       :int        
+            user_nfrperstep            :int        
             user_xoffset_v             :float        
             user_yoffset_v             :float        
             user_offsetz_v=0           :float        
@@ -107,9 +107,9 @@ class PresentationTemplate(dj.Computed):
             user_nzpixretrace=0        :float        
             user_laserwavelen_nm=0     :float        
             user_scanpathfunc          :varchar(255) 
-            user_dzfrdecoded=0         :float        
-            user_dxfrdecoded=0         :float        
-            user_dyfrdecoded=0         :float        
+            user_dzfrdecoded=0         :int        
+            user_dxfrdecoded=0         :int        
+            user_dyfrdecoded=0         :int        
             user_zeroz_v=0             :float        
             igorguiver                 :varchar(255) 
             user_comment=''            :varchar(255) 
@@ -123,7 +123,7 @@ class PresentationTemplate(dj.Computed):
             user_etl_min_v=0           :float        
             user_etl_max_v=0           :float        
             user_etl_neutral_v=0       :float        
-            user_nimgperfr=0           :float      
+            user_nimgperfr=0           :int      
             """
             return definition
 
@@ -190,8 +190,8 @@ class PresentationTemplate(dj.Computed):
 
             # Check stack average
             try:
-                nxpix = int(wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"])
-                nypix = int(wparams["user_dypix"])
+                nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
+                nypix = wparams["user_dypix"]
 
                 assert stack.ndim == 3, 'Stack does not match expected shape'
                 assert stack.shape[:2] == (nxpix, nypix), f'Stack shape error: {stack.shape} vs {(nxpix, nypix)}'
@@ -203,9 +203,9 @@ class PresentationTemplate(dj.Computed):
         scaninfo_key = deepcopy(key)
         scaninfo_key.update(wparams)
         try:
-            pres_key["line_duration"] = (wparams['user_dxpix'] * wparams['realpixdur']) * 1e-6
-            pres_key["scan_period"] = (pres_key["line_duration"] * wparams['user_dypix'])
-            pres_key["scan_frequency"] = 1. / pres_key["scan_period"]
+            scaninfo_key["line_duration"] = (wparams['user_dxpix'] * wparams['realpixdur']) * 1e-6
+            scaninfo_key["scan_period"] = (scaninfo_key["line_duration"] * wparams['user_dypix'])
+            scaninfo_key["scan_frequency"] = 1. / scaninfo_key["scan_period"]
         except KeyError:
             pass
 
