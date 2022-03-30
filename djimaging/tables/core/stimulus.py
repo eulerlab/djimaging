@@ -69,7 +69,7 @@ class StimulusTemplate(dj.Manual):
             unique_alias=True
         )
 
-    def add_noise(self, stim_name: str = "noise", stim_family: str = 'dn',
+    def add_noise(self, stim_name: str = "noise", stim_family: str = 'noise',
                   framerate: float = 5., ntrigger_rep: int = 1500, isrepeated: bool = 0,
                   alias=None, pix_n_x=None, pix_n_y=None, pix_scale_x_um=None, pix_scale_y_um=None,
                   skip_duplicates=False):
@@ -120,7 +120,7 @@ class StimulusTemplate(dj.Manual):
             stim_dict=stim_dict,
         )
 
-    def add_movingbar(self, stim_name: str = "movingbar", stim_family: str = 'mb',
+    def add_movingbar(self, stim_name: str = "movingbar", stim_family: str = 'movingbar',
                       trial_info=None, bardx=-1, bardy=-1, velumsec=-1, tmovedurs=-1, framerate=1/60.,
                       ntrigger_rep: int = 1, isrepeated: bool = 1, alias=None, skip_duplicates=False):
 

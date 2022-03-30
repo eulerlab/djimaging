@@ -28,6 +28,7 @@ class ChirpQI(chirp.ChirpQITemplate):
 
 @schema
 class ChirpFeatures(chirp.ChirpFeaturesTemplate):
+    stimulus_table = Stimulus
     snippets_table = Snippets
     presentation_table = Presentation
 

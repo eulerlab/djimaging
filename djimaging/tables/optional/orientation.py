@@ -41,7 +41,7 @@ class OsDsIndexesTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.snippets_table() & 'stim_id = 2'
+        return self.snippets_table() & (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
 
     def make(self, key):
 
@@ -82,36 +82,37 @@ class OsDsIndexesTemplate(dj.Computed):
                           on_off=on_off, d_qi=d_qi, u=u, v=v,
                           surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
                           avg_sorted_resp=avg_sorted_responses))
-    
+
     def plot1(self, key):
-        
         key = {k: v for k, v in key.items() if k in self.primary_key}
-        dir_order = (self.stimulus_table().DsInfo() & key).fetch1('trialinfo')
+        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
         sorted_directions_rad = np.deg2rad(np.sort(dir_order))
 
         v, ds_index, pref_dir, avg_sorted_resp = \
             (self & key).fetch1('v', 'ds_index', 'pref_dir', 'avg_sorted_resp')
-        fig = plt.figure(figsize=(6,6))
-        ax = plt.subplot(3, 3, 5, projection='polar', frameon=False) 
+
+        plt.figure(figsize=(6, 6), facecolor='w')
+        ax = plt.subplot(3, 3, 5, projection='polar', frameon=False)
         temp = np.max(np.append(v, ds_index))
-        ax.plot((0,np.pi),(temp*1.2,temp*1.2), color ='gray')
-        ax.plot((np.pi/2,np.pi/2*3),(temp*1.2,temp*1.2), color ='gray')
-        ax.plot([0, pref_dir], [0, ds_index*np.sum(v)], color = 'r')
-        ax.plot(np.append(sorted_directions_rad, sorted_directions_rad[0]), np.append(v, v[0]), color = 'k')
+        ax.plot((0, np.pi), (temp * 1.2, temp * 1.2), color='gray')
+        ax.plot((np.pi / 2, np.pi / 2 * 3), (temp * 1.2, temp * 1.2), color='gray')
+        ax.plot([0, pref_dir], [0, ds_index * np.sum(v)], color='r')
+        ax.plot(np.append(sorted_directions_rad, sorted_directions_rad[0]), np.append(v, v[0]), color='k')
         ax.set_rmin(0)
-        ax.set_thetalim([0, 2*np.pi])
-        ax.set_yticks([])  
+        ax.set_thetalim([0, 2 * np.pi])
+        ax.set_yticks([])
         ax.set_xticks([])
-        ax_inds = [1,2,3,4,6,7,8,9] 
-        dir_inds = [3,2,1,4,0,5,6,7]
+        ax_inds = [1, 2, 3, 4, 6, 7, 8, 9]
+        dir_inds = [3, 2, 1, 4, 0, 5, 6, 7]
         vmin, vmax = avg_sorted_resp.min(), avg_sorted_resp.max()
+
         for ii in range(len(ax_inds)):
             ax = plt.subplot(3, 3, ax_inds[ii], frameon=False)
-            ax.plot(avg_sorted_resp[:,dir_inds[ii]],color='k')
+            ax.plot(avg_sorted_resp[:, dir_inds[ii]], color='k')
             ax.set_xticks([])
             ax.set_yticks([])
-            ax.set_ylim([vmin-vmax*0.2,vmax*1.2])
-            ax.set_xlim([-len(avg_sorted_resp)*0.2, len(avg_sorted_resp)*1.2])
+            ax.set_ylim([vmin - vmax * 0.2, vmax * 1.2])
+            ax.set_xlim([-len(avg_sorted_resp) * 0.2, len(avg_sorted_resp) * 1.2])
         return None
 
 

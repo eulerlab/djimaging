@@ -19,11 +19,12 @@ class ChirpQITemplate(dj.Computed):
         '''
         return definition
 
+    stimulus_table = PlaceholderTable
     snippets_table = PlaceholderTable
 
     @property
     def key_source(self):
-        return self.snippets_table() & "stim_id=1"
+        return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
 
     def make(self, key):
         snippets = (self.snippets_table() & key).fetch1('snippets')
@@ -49,12 +50,13 @@ class ChirpFeaturesTemplate(dj.Computed):
         '''
         return definition
 
+    stimulus_table = PlaceholderTable
     snippets_table = PlaceholderTable
     presentation_table = PlaceholderTable
 
     @property
     def key_source(self):
-        return self.snippets_table() & "stim_id=1"
+        return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
 
     def make(self, key):
         # TODO: Should this depend on pres? Triggertimes are also in snippets and sf can be derived from times
