@@ -107,15 +107,10 @@ class OsDsIndexesTemplate(dj.Computed):
         vmin, vmax = avg_sorted_resp.min(), avg_sorted_resp.max()
         for ii in range(len(ax_inds)):
             ax = plt.subplot(3, 3, ax_inds[ii], frameon=False)
-            #temp = sorted_resp[:,dir_inds[ii],:]
-            #for jj in range(3):
-            #    ax.plot(temp[:,jj],color='gray')
-            #ax.plot(temp.mean(axis=-1),color='k')
-            ax.plot(avg_sorted_resp[:,ii],color='k')
+            ax.plot(avg_sorted_resp[:,dir_inds[ii]],color='k')
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_ylim([vmin-vmax*0.2,vmax*1.2])
-            #ax.set_xlim([-len(temp)*0.2, len(temp)*1.2])
             ax.set_xlim([-len(avg_sorted_resp)*0.2, len(avg_sorted_resp)*1.2])
         return None
 
