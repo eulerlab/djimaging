@@ -19,11 +19,12 @@ class ChirpQITemplate(dj.Computed):
         '''
         return definition
 
+    stimulus_table = PlaceholderTable
     snippets_table = PlaceholderTable
 
     @property
     def key_source(self):
-        return self.snippets_table() & "stim_id=1"
+        return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
 
     def make(self, key):
         snippets = (self.snippets_table() & key).fetch1('snippets')
@@ -49,19 +50,20 @@ class ChirpFeaturesTemplate(dj.Computed):
         '''
         return definition
 
+    stimulus_table = PlaceholderTable
     snippets_table = PlaceholderTable
     presentation_table = PlaceholderTable
 
     @property
     def key_source(self):
-        return self.snippets_table() & "stim_id=1"
+        return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
 
     def make(self, key):
         # TODO: Should this depend on pres? Triggertimes are also in snippets and sf can be derived from times
         snippets = (self.snippets_table() & key).fetch1('snippets')
         snippets_times = (self.snippets_table() & key).fetch1('snippets_times')
         trigger_times = (self.presentation_table() & key).fetch1('triggertimes')
-        sf = (self.presentation_table() & key).fetch1('scan_frequency')
+        sf = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
 
         on_off_index = compute_on_off_index(snippets, snippets_times, trigger_times, sf)
         transience_index = compute_transience_index(snippets, snippets_times, trigger_times, sf)

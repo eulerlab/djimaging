@@ -49,18 +49,7 @@ class Roi(roi.RoiTemplate):
 
 @schema
 class Stimulus(stimulus.StimulusTemplate):
-
-    class StimInfo(stimulus.StimulusTemplate.StimInfo):
-        pass
-
-    class DsInfo(stimulus.StimulusTemplate.DsInfo):
-        pass
-
-    class ChirpInfo(stimulus.StimulusTemplate.ChirpInfo):
-        pass
-
-    class NoiseInfo(stimulus.StimulusTemplate.NoiseInfo):
-        pass
+    pass
 
 
 @schema

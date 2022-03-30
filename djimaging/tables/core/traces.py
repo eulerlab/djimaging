@@ -126,7 +126,7 @@ class PreprocessTracesTemplate(dj.Computed):
         subtract_baseline = (self.preprocessparams_table() & key).fetch1('subtract_baseline')
         non_negative = (self.preprocessparams_table() & key).fetch1('non_negative')
         standardize = (self.preprocessparams_table() & key).fetch1('standardize')
-        fs = (self.presentation_table() & key).fetch1('scan_frequency')
+        fs = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
 
         assert not (non_negative and subtract_baseline), \
             "You are trying to populate with an invalid parameter set"

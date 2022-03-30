@@ -1,5 +1,5 @@
-from djimaging.schemas.core_schema import schema, Stimulus, Field, Experiment, Presentation, Snippets, UserInfo, Roi
-from djimaging.tables.optional import location, chirp, orientation, brightness
+from djimaging.schemas.core_schema import schema, Stimulus, Field, Experiment, Presentation, Snippets, UserInfo
+from djimaging.tables.optional import location, chirp, orientation
 
 
 @schema
@@ -28,6 +28,7 @@ class ChirpQI(chirp.ChirpQITemplate):
 
 @schema
 class ChirpFeatures(chirp.ChirpFeaturesTemplate):
+    stimulus_table = Stimulus
     snippets_table = Snippets
     presentation_table = Presentation
 
@@ -36,10 +37,3 @@ class ChirpFeatures(chirp.ChirpFeaturesTemplate):
 class OsDsIndexes(orientation.OsDsIndexesTemplate):
     stimulus_table = Stimulus
     snippets_table = Snippets
-
-
-@schema
-class RoiBrightness(brightness.RoiBrightnessTemaplte):
-    field_table = Field
-    presentation_table = Presentation
-    roi_table = Roi

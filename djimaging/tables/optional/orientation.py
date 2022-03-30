@@ -18,21 +18,21 @@ class OsDsIndexesTemplate(dj.Computed):
         #as well as a quality index of DS responses as described in Baden et al. (2016)
         -> self.snippets_table
         ---
-        ds_index:   float   #direction selectivity index as resulting vector length (absolute of projection on complex exponential)
-        ds_pvalue:  float   #p-value indicating the percentile of the vector length in null distribution
-        ds_null:    longblob    #null distribution of DSIs
-        pref_dir:  float    #preferred direction
-        os_index:   float   #orientation selectivity index in analogy to ds_index
-        os_pvalue:  float   #analogous to ds_pvalue for orientation tuning
-        os_null:    longblob    #null distribution of OSIs
-        pref_or:    float   #preferred orientation
-        on_off:     float   #on off index based on time kernel
-        d_qi:       float   #quality index for moving bar response
-        u:     longblob    #time component
-        v:     longblob    #direction component
-        surrogate_v:    longblob    #computed by projecting on time
-        surrogate_dsi:  float   #DSI of surrogate v 
-        avg_sorted_resp:    longblob    # response matrix, averaged across reps
+        ds_index:   float     # direction selectivity index as vector length (abs. of projection on complex exp.)
+        ds_pvalue:  float     # p-value indicating the percentile of the vector length in null distribution
+        ds_null:    longblob  # null distribution of DSIs
+        pref_dir:   float     # preferred direction
+        os_index:   float     # orientation selectivity index in analogy to ds_index
+        os_pvalue:  float     # analogous to ds_pvalue for orientation tuning
+        os_null:    longblob  # null distribution of OSIs
+        pref_or:    float     # preferred orientation
+        on_off:     float     # on off index based on time kernel
+        d_qi:       float     # quality index for moving bar response
+        u:          longblob  # time component
+        v:          longblob  # direction component
+        surrogate_v: longblob # computed by projecting on time
+        surrogate_dsi: float  # DSI of surrogate v 
+        avg_sorted_resp: longblob # response matrix, averaged across reps
         """
         return definition
 
@@ -41,11 +41,11 @@ class OsDsIndexesTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.snippets_table() & 'stim_id = 2'
+        return self.snippets_table() & (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
 
     def make(self, key):
 
-        dir_order = (self.stimulus_table().DsInfo() & key).fetch1('trialinfo')
+        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
         snippets = (self.snippets_table() & key).fetch1('snippets')  # get the response snippets
 
         sorted_responses, sorted_directions_rad = _sort_response_matrix(snippets, dir_order)
@@ -82,36 +82,37 @@ class OsDsIndexesTemplate(dj.Computed):
                           on_off=on_off, d_qi=d_qi, u=u, v=v,
                           surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
                           avg_sorted_resp=avg_sorted_responses))
-    
+
     def plot1(self, key):
-        
         key = {k: v for k, v in key.items() if k in self.primary_key}
-        dir_order = (self.stimulus_table().DsInfo() & key).fetch1('trialinfo')
+        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
         sorted_directions_rad = np.deg2rad(np.sort(dir_order))
 
         v, ds_index, pref_dir, avg_sorted_resp = \
             (self & key).fetch1('v', 'ds_index', 'pref_dir', 'avg_sorted_resp')
-        fig = plt.figure(figsize=(6,6))
-        ax = plt.subplot(3, 3, 5, projection='polar', frameon=False) 
+
+        plt.figure(figsize=(6, 6), facecolor='w')
+        ax = plt.subplot(3, 3, 5, projection='polar', frameon=False)
         temp = np.max(np.append(v, ds_index))
-        ax.plot((0,np.pi),(temp*1.2,temp*1.2), color ='gray')
-        ax.plot((np.pi/2,np.pi/2*3),(temp*1.2,temp*1.2), color ='gray')
-        ax.plot([0, pref_dir], [0, ds_index*np.sum(v)], color = 'r')
-        ax.plot(np.append(sorted_directions_rad, sorted_directions_rad[0]), np.append(v, v[0]), color = 'k')
+        ax.plot((0, np.pi), (temp * 1.2, temp * 1.2), color='gray')
+        ax.plot((np.pi / 2, np.pi / 2 * 3), (temp * 1.2, temp * 1.2), color='gray')
+        ax.plot([0, pref_dir], [0, ds_index * np.sum(v)], color='r')
+        ax.plot(np.append(sorted_directions_rad, sorted_directions_rad[0]), np.append(v, v[0]), color='k')
         ax.set_rmin(0)
-        ax.set_thetalim([0, 2*np.pi])
-        ax.set_yticks([])  
+        ax.set_thetalim([0, 2 * np.pi])
+        ax.set_yticks([])
         ax.set_xticks([])
-        ax_inds = [1,2,3,4,6,7,8,9] 
-        dir_inds = [3,2,1,4,0,5,6,7]
+        ax_inds = [1, 2, 3, 4, 6, 7, 8, 9]
+        dir_inds = [3, 2, 1, 4, 0, 5, 6, 7]
         vmin, vmax = avg_sorted_resp.min(), avg_sorted_resp.max()
+
         for ii in range(len(ax_inds)):
             ax = plt.subplot(3, 3, ax_inds[ii], frameon=False)
-            ax.plot(avg_sorted_resp[:,dir_inds[ii]],color='k')
+            ax.plot(avg_sorted_resp[:, dir_inds[ii]], color='k')
             ax.set_xticks([])
             ax.set_yticks([])
-            ax.set_ylim([vmin-vmax*0.2,vmax*1.2])
-            ax.set_xlim([-len(avg_sorted_resp)*0.2, len(avg_sorted_resp)*1.2])
+            ax.set_ylim([vmin - vmax * 0.2, vmax * 1.2])
+            ax.set_xlim([-len(avg_sorted_resp) * 0.2, len(avg_sorted_resp) * 1.2])
         return None
 
 
@@ -179,8 +180,10 @@ def _get_time_dir_kernels(sorted_responses):
     U, S, V = np.linalg.svd(sorted_responses)
     u = U[:, 0]
     v = V[0, :]
+
     # the time_kernel determined by SVD should be correlated to the average response across all directions. if the
     # correlation is negative, U is likely flipped
+    # noinspection PyTypeChecker
     r, _ = stats.spearmanr(a=u, b=np.mean(sorted_responses, axis=-1), axis=1)
     su = np.sign(r)
     if su == 0:
