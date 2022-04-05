@@ -1,4 +1,4 @@
-from djimaging.tables.core import traces, presentation, experiment, field, roi
+from djimaging.tables.core import traces, preprocesstraces, presentation, experiment, field, roi
 
 from .utils import _test_definition
 
@@ -35,7 +35,7 @@ def test_definition_traces():
 
 
 def test_definition_preprocesstraces():
-    _test_definition(traces.PreprocessTracesTemplate)
+    _test_definition(preprocesstraces.PreprocessTracesTemplate)
 
 
 def test_definition_snippets():

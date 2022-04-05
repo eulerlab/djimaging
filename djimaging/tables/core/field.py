@@ -73,31 +73,35 @@ class FieldTemplate(dj.Computed):
     def make(self, key):
         self.__add_experiment_fields(key)
 
-    def rescan_filesystem(self, restrictions=None, verbose=0):
-
+    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0):
+        """
+        Scan filesystem for new fields and add them to the database.
+        :param restrictions: Restritions for new fields.
+        :param verboselvl: Defines level of output.
+        """
         if restrictions is None:
             restrictions = dict()
 
         for row in (self.experiment_table() & restrictions):
             key = dict(experimenter=row['experimenter'], date=row['date'], exp_num=row['exp_num'])
-            if verbose:
+            if verboselvl > 0:
                 print('Adding fields for:', key)
-            self.__add_experiment_fields(key, only_new=True, verbose=verbose)
+            self.__add_experiment_fields(key, only_new=True, verboselvl=verboselvl)
 
-    def __add_experiment_fields(self, key, only_new=False, verbose=0):
+    def __add_experiment_fields(self, key: dict, only_new: bool = False, verboselvl: int = 0):
 
         pre_data_path = os.path.join(
             (self.experiment_table() & key).fetch1('header_path'),
             (self.userinfo_table() & key).fetch1("pre_data_dir"))
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
-        if verbose:
+        if verboselvl > 0:
             print("--> Processing fields in:", pre_data_path)
 
         user_dict = (self.userinfo_table() & key).fetch1()
 
         # Collect all files belonging to this experiment
-        field2info = scan_fields_and_files(pre_data_path, user_dict=user_dict, verbose=verbose)
+        field2info = scan_fields_and_files(pre_data_path, user_dict=user_dict, verbose=verboselvl > 0)
 
         # Remove opticdisk and outline recordings
         remove_fields = []
@@ -111,11 +115,11 @@ class FieldTemplate(dj.Computed):
         for field, info in field2info.items():
             exists = len((self & key & dict(field=field)).fetch()) > 0
             if only_new and exists:
-                if verbose > 1:
+                if verboselvl > 1:
                     print(f"\tSkipping field {field} with files: {info['files']}")
                 continue
 
-            if verbose:
+            if verboselvl > 0:
                 print(f"\tAdding field: {field} with files: {info['files']}")
             self.__add_field(key=key, field=field, files=info['files'])
 
@@ -146,7 +150,7 @@ class FieldTemplate(dj.Computed):
         (self.Zstack & field_key).insert1(zstack_key, allow_direct_insert=True)
         (self.FieldInfo & field_key).insert1(fieldinfo_key, allow_direct_insert=True)
 
-    def plot1(self, key):
+    def plot1(self, key: dict):
         fig, axs = plt.subplots(1, 2, figsize=(10, 3.5))
         stack_average = (self.FieldInfo() & key).fetch1("stack_average").T
         roi_mask = (self.RoiMask() & key).fetch1("roi_mask").T
@@ -160,7 +164,7 @@ class FieldTemplate(dj.Computed):
         plt.show()
 
 
-def scan_fields_and_files(pre_data_path, user_dict, verbose=0) -> dict:
+def scan_fields_and_files(pre_data_path: str, user_dict: dict, verbose: bool = False) -> dict:
     """Return a dictonary that maps fields to their respective files"""
 
     loc_mapper = {k: v for k, v in user_dict.items() if k.endswith('loc')}

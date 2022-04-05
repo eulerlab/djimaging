@@ -29,40 +29,47 @@ class UserInfoTemplate(dj.Manual):
         """
         return definition
 
-    def upload_user(self, *userdicts):
-        """Upload one or multiple user dicts"""
+    def upload_users(self, userdicts: list):
+        """Upload multiple users"""
         for userdict in userdicts:
-            userdict = deepcopy(userdict)
+            self.upload_user(userdict)
 
-            assert "experimenter" in userdict, 'Set username'
-            assert "data_dir" in userdict, 'Set data_dir'
+    def upload_user(self, userdict: dict):
+        """Upload one user"""
+        assert "experimenter" in userdict, 'Set username'
+        assert "data_dir" in userdict, 'Set data_dir'
+        assert os.path.isdir(userdict['data_dir']), f"data_dir={userdict['data_dir']} is not a directory"
 
-            if not userdict['data_dir'].endswith('/'):
-                userdict['data_dir'] += '/'
+        userdict = deepcopy(userdict)
+        if not userdict['data_dir'].endswith('/'):
+            userdict['data_dir'] += '/'
 
-            if 'opticdisk_alias' in userdict['data_dir']:
-                userdict['data_dir'] = userdict['data_dir'].lower()
+        if 'opticdisk_alias' in userdict['data_dir']:
+            userdict['data_dir'] = userdict['data_dir'].lower()
 
-            if 'outline_alias' in userdict['data_dir']:
-                userdict['data_dir'] = userdict['data_dir'].lower()
+        if 'outline_alias' in userdict['data_dir']:
+            userdict['data_dir'] = userdict['data_dir'].lower()
 
-            assert os.path.isdir(userdict['data_dir']), f"ERROR: {userdict['data_dir']} is not a directory"
+        if userdict["experimenter"] not in self.fetch("experimenter"):
+            self.insert([userdict])
+        else:
+            entry = (self & dict(experimenter=userdict["experimenter"])).fetch1()
 
-            if userdict["experimenter"] not in self.fetch("experimenter"):
-                self.insert([userdict])
-            else:
-                entry = (self & dict(experimenter=userdict["experimenter"])).fetch1()
-                if entry != userdict:
-                    print(f"WARNING: Information for `{userdict['experimenter']}` already uploaded.")
-                else:
-                    print(f"Information for `{userdict['experimenter']}` already uploaded")
+            if entry != userdict:
+                print(f"Information for `{userdict['experimenter']}` already uploaded.")
+                print("If you want to change the user entry, delete the existing one first and upload the user again.")
 
-    def plot1(self, key, show_pre=True, show_raw=False, show_header=True):
-        """Plot files available for this user"""
+    def plot1(self, key: dict, show_pre: bool = True, show_raw: bool = False, show_header: bool = True) -> None:
+        """Plot files available for this user
+        :param key: Key to plot.
+        :param show_pre: Show files in preprocessed data directory?
+        :param show_raw: Show files in raw data directory?
+        :param show_header: Show header file names?
+        """
         from djimaging.utils import datafile_utils
         data_dir = (self & key).fetch1('data_dir')
 
-        assert os.path.isdir(data_dir), f'ERROR: {data_dir} is not a directory'
+        assert os.path.isdir(data_dir), f"data_dir={data_dir} is not a directory"
 
         include_types = []
         if show_pre:

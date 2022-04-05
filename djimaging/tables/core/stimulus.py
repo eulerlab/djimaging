@@ -34,14 +34,35 @@ class StimulusTemplate(dj.Manual):
 
     def add_stimulus(self, stim_name: str, alias: str, stim_family: str = "", framerate: float = 0,
                      isrepeated: bool = 0, ntrigger_rep: int = 0, stim_path: str = "", commit_id: str = "",
-                     trial_info=None, stim_trace=None, stim_dict=None,
-                     skip_duplicates=False, unique_alias=True):
-
+                     trial_info: object = None, stim_trace: object = None, stim_dict: dict = None,
+                     skip_duplicates: bool = False, unique_alias: bool = True) -> None:
+        """
+        Add stimulus to database
+        :param stim_name: See table defintion.
+        :param alias: See table defintion.
+        :param stim_family: See table defintion.
+        :param framerate: See table defintion.
+        :param isrepeated: See table defintion.
+        :param ntrigger_rep: See table defintion.
+        :param stim_path: See table defintion.
+        :param commit_id: See table defintion.
+        :param trial_info: See table defintion.
+        :param stim_trace: See table defintion.
+        :param stim_dict: See table defintion.
+        :param skip_duplicates: Silently skip duplicates.
+        :param unique_alias: Check if any of the aliases is already in use.
+        """
         assert np.round(ntrigger_rep) == ntrigger_rep, 'Value needs to be an integer'
         assert np.round(isrepeated) == isrepeated, 'Value needs to be an integer'
 
         if unique_alias:
             self.check_alias(alias, stim_name=stim_name)
+
+        if stim_dict is not None:
+            missing_info = [k for k, v in stim_dict.items() if v is None]
+            if len(missing_info) > 0:
+                print(f'WARNING: Values for {missing_info} in `stim_dict` for stimulus `{stim_name}` are None. '
+                      + 'This may cause problems downstream.')
 
         key = {
             "stim_name": stim_name,
@@ -70,9 +91,9 @@ class StimulusTemplate(dj.Manual):
         )
 
     def add_noise(self, stim_name: str = "noise", stim_family: str = 'noise',
-                  framerate: float = 5., ntrigger_rep: int = 1500, isrepeated: bool = 0,
-                  alias=None, pix_n_x=None, pix_n_y=None, pix_scale_x_um=None, pix_scale_y_um=None,
-                  skip_duplicates=False):
+                  framerate: float = 5., ntrigger_rep: int = 1500, isrepeated: bool = False,
+                  alias: str = None, pix_n_x: int = None, pix_n_y: int = None,
+                  pix_scale_x_um: float = None, pix_scale_y_um: float = None, skip_duplicates: bool = False) -> None:
 
         if alias is None:
             alias = f"dn_noise_dn{pix_scale_x_um}m_noise{pix_scale_x_um}m"
@@ -97,9 +118,9 @@ class StimulusTemplate(dj.Manual):
         )
 
     def add_chirp(self, stim_name: str = "chirp", stim_family: str = 'chirp',
-                  spatialextent: float = -1., framerate: float = 1 / 60.,
-                  ntrigger_rep: int = 2, isrepeated: bool = 1,
-                  alias=None, skip_duplicates=False):
+                  spatialextent: float = None, framerate: float = 1 / 60.,
+                  ntrigger_rep: int = 2, isrepeated: bool = True,
+                  alias: str = None, skip_duplicates: bool = False):
 
         if alias is None:
             alias = "chirp_gchirp_globalchirp_lchirp_localchirp"
@@ -121,8 +142,9 @@ class StimulusTemplate(dj.Manual):
         )
 
     def add_movingbar(self, stim_name: str = "movingbar", stim_family: str = 'movingbar',
-                      trial_info=None, bardx=-1, bardy=-1, velumsec=-1, tmovedurs=-1, framerate=1/60.,
-                      ntrigger_rep: int = 1, isrepeated: bool = 1, alias=None, skip_duplicates=False):
+                      bardx: float = None, bardy: float = None, velumsec: float = None, tmovedurs: float = None,
+                      ntrigger_rep: int = 1, isrepeated: bool = 1, trial_info=None, framerate: float = 1 / 60.,
+                      alias: str = None, skip_duplicates: bool = False):
 
         if trial_info is None:
             trial_info = np.array([0, 180, 45, 225, 90, 270, 135, 315])

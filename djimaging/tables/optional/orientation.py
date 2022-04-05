@@ -91,8 +91,9 @@ class OsDsIndexesTemplate(dj.Computed):
         v, ds_index, pref_dir, avg_sorted_resp = \
             (self & key).fetch1('v', 'ds_index', 'pref_dir', 'avg_sorted_resp')
 
-        plt.figure(figsize=(6, 6), facecolor='w')
-        ax = plt.subplot(3, 3, 5, projection='polar', frameon=False)
+        fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor='w', subplot_kw=dict(frameon=False))
+        axs[1, 1].remove()
+        ax = fig.add_subplot(3, 3, 5, projection='polar', frameon=False)
         temp = np.max(np.append(v, ds_index))
         ax.plot((0, np.pi), (temp * 1.2, temp * 1.2), color='gray')
         ax.plot((np.pi / 2, np.pi / 2 * 3), (temp * 1.2, temp * 1.2), color='gray')
@@ -102,13 +103,14 @@ class OsDsIndexesTemplate(dj.Computed):
         ax.set_thetalim([0, 2 * np.pi])
         ax.set_yticks([])
         ax.set_xticks([])
-        ax_inds = [1, 2, 3, 4, 6, 7, 8, 9]
-        dir_inds = [3, 2, 1, 4, 0, 5, 6, 7]
+        ax_idxs = [0, 1, 2, 3, 5, 6, 7, 8]
+        dir_idxs = [3, 2, 1, 4, 0, 5, 6, 7]
         vmin, vmax = avg_sorted_resp.min(), avg_sorted_resp.max()
 
-        for ii in range(len(ax_inds)):
-            ax = plt.subplot(3, 3, ax_inds[ii], frameon=False)
-            ax.plot(avg_sorted_resp[:, dir_inds[ii]], color='k')
+        for ax_idx, dir_idx in zip(ax_idxs, dir_idxs):
+            ax = axs.flat[ax_idx]
+            # ax.set_title(f"{np.sort(dir_order)[dir_idx]}")
+            ax.plot(avg_sorted_resp[:, dir_idx], color='k')
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_ylim([vmin - vmax * 0.2, vmax * 1.2])

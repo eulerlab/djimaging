@@ -8,7 +8,12 @@ from datetime import datetime
 from djimaging.utils.dj_utils import PlaceholderTable
 
 
-def find_header_files(data_dir):
+def find_header_files(data_dir: str) -> list:
+    """
+    Search for header files in folder in given path.
+    :param data_dir: Root folder.
+    :return: List of header files.
+    """
     os_walk_output = []
     for folder, subfolders, files in os.walk(data_dir):
         if np.any([f.endswith('.ini') for f in files]):
@@ -34,13 +39,17 @@ class ExperimentTemplate(dj.Computed):
 
     userinfo_table = PlaceholderTable
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
         data_dir, pre_data_dir, raw_data_dir = (self.userinfo_table() & key).fetch1(
             "data_dir", "pre_data_dir", "raw_data_dir")
-        self.__add_experiments(key=key, data_dir=data_dir, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir)
+        self.__add_experiments(key=key, data_dir=data_dir, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
+                               only_new=False, restrictions=None, verboselvl=1)
 
-    def rescan_filesystem(self, restrictions=None, verbose=True):
-        """Scan file system and add experiments to database"""
+    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 1) -> None:
+        """Scan filesystem for new experiments and add them to the database.
+        :param restrictions: Restriction to users table, e.g. to scan only for specific user(s)
+        :param verboselvl: Print (0) no / (1) only new data / (2) all data information
+        """
 
         if restrictions is None:
             restrictions = dict()
@@ -49,16 +58,15 @@ class ExperimentTemplate(dj.Computed):
             key = dict()
             key['experimenter'] = row['experimenter']
 
-            if verbose:
+            if verboselvl > 0:
                 print(f"Scanning for experimenter: {key['experimenter']}")
 
             self.__add_experiments(
                 key=key, data_dir=row["data_dir"],
                 pre_data_dir=row["pre_data_dir"], raw_data_dir=row["raw_data_dir"],
-                only_new=True, restrictions=restrictions, verbose=verbose)
+                only_new=True, restrictions=restrictions, verboselvl=verboselvl)
 
-    def __add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir,
-                          only_new=False, restrictions=None, verbose=False):
+    def __add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir, only_new, restrictions, verboselvl):
 
         if restrictions is None:
             restrictions = dict()
@@ -68,15 +76,14 @@ class ExperimentTemplate(dj.Computed):
         for header_path in os_walk_output:
             self.__add_experiment(
                 key=key, header_path=header_path, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
-                only_new=only_new, restrictions=restrictions, verbose=verbose)
+                only_new=only_new, restrictions=restrictions, verboselvl=verboselvl)
 
-    def __add_experiment(self, key, header_path, pre_data_dir, raw_data_dir, only_new,
-                         restrictions=None, verbose=False):
+    def __add_experiment(self, key, header_path, pre_data_dir, raw_data_dir, only_new, restrictions, verboselvl):
 
         if restrictions is None:
             restrictions = dict()
 
-        if verbose:
+        if verboselvl > 0:
             print('\theader_path:', header_path)
 
         header_names = [s for s in os.listdir(header_path) if ".ini" in s]
@@ -84,7 +91,7 @@ class ExperimentTemplate(dj.Computed):
             raise ValueError(f'Found {len(header_names)} header files in {header_path}. Expected one.')
         header_name = header_names[0]
 
-        if verbose:
+        if verboselvl > 0:
             print('\t\theader_name:', header_name)
 
         primary_key = deepcopy(key)
@@ -95,7 +102,7 @@ class ExperimentTemplate(dj.Computed):
         if only_new:
             search = (self & restrictions & primary_key)
             if len(search) > 0:
-                if verbose:
+                if verboselvl > 1:
                     print('\t\tAlready present:', primary_key)
                 return
 
@@ -192,7 +199,7 @@ class ExperimentTemplate(dj.Computed):
         pharminfo_key['preapptime'] = config_dict.get("pretime", "")
         pharminfo_key['pharmcom'] = config_dict.get("pharmrem", "")
 
-        if verbose:
+        if verboselvl > 0:
             print('\t\tAdding:', primary_key)
 
         self.insert1(exp_key, allow_direct_insert=True)

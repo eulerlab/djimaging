@@ -1,6 +1,6 @@
 import datajoint as dj
 
-from djimaging.tables.core import stimulus, traces, userinfo, presentation, experiment, field, roi
+from djimaging.tables.core import stimulus, traces, preprocesstraces, userinfo, presentation, experiment, field, roi
 
 schema = dj.Schema()
 
@@ -71,12 +71,12 @@ class Traces(traces.TracesTemplate):
 
 
 @schema
-class PreprocessParams(traces.PreprocessParamsTemplate):
+class PreprocessParams(preprocesstraces.PreprocessParamsTemplate):
     pass
 
 
 @schema
-class PreprocessTraces(traces.PreprocessTracesTemplate):
+class PreprocessTraces(preprocesstraces.PreprocessTracesTemplate):
     presentation_table = Presentation
     preprocessparams_table = PreprocessParams
     traces_table = Traces
