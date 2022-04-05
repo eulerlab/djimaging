@@ -1,9 +1,9 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
     name='djimaging',
     version='0.0.1',
-    packages=['djimaging', 'djimaging.utils', 'djimaging.tables', 'djimaging.schemas', 'djimaging.user'],
+    packages=find_packages(include=['djimaging']),
     url='',
     license='',
     author='Jonathan Oesterle',
