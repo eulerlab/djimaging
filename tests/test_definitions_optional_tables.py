@@ -24,7 +24,7 @@ def test_definition_OsDsIndexesTemplate():
 
 # rgc_classifier
 def test_definition_CellFilterParametersTemplate():
-    _test_definition(rgc_classifier.CellFilterParametersTemplate)
+    _test_definition(rgc_classifier.CellFilterParamsTemplate)
 
 
 def test_definition_ClassifierTemplate():
@@ -33,10 +33,6 @@ def test_definition_ClassifierTemplate():
 
 def test_definition_ClassifierTrainingDataTemplate():
     _test_definition(rgc_classifier.ClassifierTrainingDataTemplate)
-
-
-def test_definition_ClassifierSeedTemplate():
-    _test_definition(rgc_classifier.ClassifierSeedTemplate)
 
 
 def test_definition_CelltypeAssignmentTemplate():

@@ -28,8 +28,8 @@ class OsDsIndexesTemplate(dj.Computed):
         pref_or:    float     # preferred orientation
         on_off:     float     # on off index based on time kernel
         d_qi:       float     # quality index for moving bar response
-        u:          longblob  # time component
-        v:          longblob  # direction component
+        time_component:  longblob
+        dir_component:   longblob
         surrogate_v: longblob # computed by projecting on time
         surrogate_dsi: float  # DSI of surrogate v 
         avg_sorted_resp: longblob # response matrix, averaged across reps
@@ -79,7 +79,8 @@ class OsDsIndexesTemplate(dj.Computed):
                           ds_null=null_dist_dsi, pref_dir=pref_dir,
                           os_index=osi, os_pvalue=p_osi,
                           os_null=null_dist_osi, pref_or=pref_or,
-                          on_off=on_off, d_qi=d_qi, u=u, v=v,
+                          on_off=on_off, d_qi=d_qi,
+                          time_component=u, dir_component=v,
                           surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
                           avg_sorted_resp=avg_sorted_responses))
 

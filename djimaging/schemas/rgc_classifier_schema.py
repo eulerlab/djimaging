@@ -4,18 +4,13 @@ from djimaging.tables.optional import rgc_classifier
 
 
 @schema
-class ClassifierSeed(rgc_classifier.ClassifierSeedTemplate):
-    pass
-
-
-@schema
-class CellFilterParameters(rgc_classifier.CellFilterParametersTemplate):
+class CellFilterParams(rgc_classifier.CellFilterParamsTemplate):
     pass
 
 
 @schema
 class ClassifierTrainingData(rgc_classifier.ClassifierTrainingDataTemplate):
-    store = "classifier"
+    store = "classifier_input"
     pass
 
 
@@ -26,27 +21,21 @@ class ClassifierMethod(rgc_classifier.ClassifierMethodTemplate):
 
 @schema
 class Classifier(rgc_classifier.ClassifierTemplate):
-    store = "classifier"
+    store = "classifier_output"
     classifier_training_data_table = ClassifierTrainingData
     classifier_method_table = ClassifierMethod
-    classifier_seed_table = ClassifierSeed
 
 
 @schema
 class CelltypeAssignment(rgc_classifier.CelltypeAssignmentTemplate):
     classifier_training_data_table = ClassifierTrainingData
-    cell_filter_parameter_table = CellFilterParameters
+    cell_filter_parameter_table = CellFilterParams
     classifier_table = Classifier
-    userInfo_table = UserInfo
+    user_info_table = UserInfo
     field_table = Field
     roi_table = Roi
     presentation_table = Presentation
-    detrend_snippets_table = Snippets
+    snippets_table = Snippets
     chirp_qi_table = ChirpQI
     or_dir_index_table = OsDsIndexes
     detrend_params_table = PreprocessParams
-
-    @property
-    def key_source(self):
-        return self.classifier_training_data_table() * self.classifier_table() * \
-               self.field_table() * self.detrend_params_table() * self.cell_filter_parameter_table()
