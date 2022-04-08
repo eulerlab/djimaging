@@ -48,16 +48,16 @@ class OsDsIndexesTemplate(dj.Computed):
         dir_order = (self.stimulus_table() & key).fetch1('trial_info')
         snippets = (self.snippets_table() & key).fetch1('snippets')  # get the response snippets
 
-        sorted_responses, sorted_directions_rad = _sort_response_matrix(snippets, dir_order)
+        sorted_responses, sorted_directions_rad = sort_response_matrix(snippets, dir_order)
         avg_sorted_responses = np.mean(sorted_responses, axis=-1)
         try:
-            u, v, s = _get_time_dir_kernels(avg_sorted_responses)
+            u, v, s = get_time_dir_kernels(avg_sorted_responses)
         except np.linalg.LinAlgError:
             print(f'ERROR: LinAlgError for key {key}')
             return
 
-        dsi, pref_dir = _get_si(v, sorted_directions_rad, 1)
-        osi, pref_or = _get_si(v, sorted_directions_rad, 2)
+        dsi, pref_dir = get_si(v, sorted_directions_rad, 1)
+        osi, pref_or = get_si(v, sorted_directions_rad, 2)
 
         (t, d, r) = sorted_responses.shape
         # make the result between the original and the shuffled comparable
@@ -65,14 +65,14 @@ class OsDsIndexesTemplate(dj.Computed):
         projected = np.reshape(projected, (d, r))
         surrogate_v = normalize_zero_one(np.mean(projected, axis=-1))
 
-        dsi_s, pref_dir_s = _get_si(surrogate_v, sorted_directions_rad, 1)
-        osi_s, pref_or_s = _get_si(surrogate_v, sorted_directions_rad, 2)
-        null_dist_dsi = _compute_null_dist(np.transpose(projected), sorted_directions_rad, 1)
+        dsi_s, pref_dir_s = get_si(surrogate_v, sorted_directions_rad, 1)
+        osi_s, pref_or_s = get_si(surrogate_v, sorted_directions_rad, 2)
+        null_dist_dsi = compute_null_dist(np.transpose(projected), sorted_directions_rad, 1)
         p_dsi = np.mean(null_dist_dsi > dsi_s)
-        null_dist_osi = _compute_null_dist(np.transpose(projected), sorted_directions_rad, 2)
+        null_dist_osi = compute_null_dist(np.transpose(projected), sorted_directions_rad, 2)
         p_osi = np.mean(null_dist_osi > osi_s)
-        d_qi = _quality_index_ds(sorted_responses)
-        on_off = _get_on_off_index(u)
+        d_qi = quality_index_ds(sorted_responses)
+        on_off = get_on_off_index(u)
 
         self.insert1(dict(**key,
                           ds_index=dsi, ds_pvalue=p_dsi,
@@ -90,7 +90,7 @@ class OsDsIndexesTemplate(dj.Computed):
         sorted_directions_rad = np.deg2rad(np.sort(dir_order))
 
         v, ds_index, pref_dir, avg_sorted_resp = \
-            (self & key).fetch1('v', 'ds_index', 'pref_dir', 'avg_sorted_resp')
+            (self & key).fetch1('dir_component', 'ds_index', 'pref_dir', 'avg_sorted_resp')
 
         fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor='w', subplot_kw=dict(frameon=False))
         axs[1, 1].remove()
@@ -119,7 +119,7 @@ class OsDsIndexesTemplate(dj.Computed):
         return None
 
 
-def _quality_index_ds(raw_sorted_resp_mat):
+def quality_index_ds(raw_sorted_resp_mat):
     """
     This function computes the quality index for responses to moving bar as described in
     Baden et al. 2016. QI is computed for each direction separately and the best QI is taken
@@ -138,7 +138,7 @@ def _quality_index_ds(raw_sorted_resp_mat):
     return np.max(qis)
 
 
-def _sort_response_matrix(snippets, dir_order):
+def sort_response_matrix(snippets, dir_order):
     """
     Sorts the snippets according to stimulus condition and repetition into a time x direction x repetition matrix
     :param snippets: arraylike, time x (directions*repetitions)
@@ -146,7 +146,7 @@ def _sort_response_matrix(snippets, dir_order):
     :returns sorted_responses: array, time x direction x repetitions, relative to sorted directions
     :returns sorted_directions: sorted directions in radians
     """
-
+    
     nreps = snippets.shape[1]
     dir_order = dir_order.flatten()
 
@@ -159,13 +159,14 @@ def _sort_response_matrix(snippets, dir_order):
 
     dir_idx = [np.where(dir_order == d)[0] for d in dir_deg]
 
-    sorted_responses = snippets[:, dir_idx]
+    #sorted_responses = snippets[:, dir_idx]
+    sorted_responses = np.squeeze(snippets[:, dir_idx]) # by yqiu
     sorted_directions_rad = np.deg2rad(dir_deg)
 
     return sorted_responses, sorted_directions_rad
 
 
-def _get_time_dir_kernels(sorted_responses):
+def get_time_dir_kernels(sorted_responses):
     """
     Performs singular value decomposition on the time x direction matrix (averaged across repetitions)
     Uses a heuristic to try to determine whether a sign flip occurred during svd
@@ -179,7 +180,7 @@ def _get_time_dir_kernels(sorted_responses):
     direction_tuning    array, directions x 1 (direction tuning, 1st component of V)
     singular_value  float, 1st singular value
     """
-
+    
     U, S, V = np.linalg.svd(sorted_responses)
     u = U[:, 0]
     v = V[0, :]
@@ -212,7 +213,7 @@ def _get_time_dir_kernels(sorted_responses):
     return u, v, s
 
 
-def _get_si(v, dirs, per):
+def get_si(v, dirs, per):
     """
     Computes direction/orientation selectivity index and preferred direction/orientation
     of a cell by projecting the tuning curve v on a
@@ -241,7 +242,7 @@ def _get_si(v, dirs, per):
     return index, direction
 
 
-def _gen_null_distribution(sorted_response, dirs, per, iters=1000):
+def gen_null_distribution(sorted_response, dirs, per, iters=1000):
     """
     Generates a null distribution of
     """
@@ -252,13 +253,13 @@ def _gen_null_distribution(sorted_response, dirs, per, iters=1000):
     for i in range(iters):
         np.random.shuffle(rand_idx)
         shuffled_response = np.reshape(reshaped[:, rand_idx], (t, d, r))
-        _, v, _ = _get_time_dir_kernels(np.mean(shuffled_response, axis=-1))
-        idx, _, = _get_si(v, dirs, per)
+        _, v, _ = get_time_dir_kernels(np.mean(shuffled_response, axis=-1))
+        idx, _, = get_si(v, dirs, per)
         null_dist[i] = idx
     return null_dist
 
 
-def _get_on_off_index(time_kernel):
+def get_on_off_index(time_kernel):
     """
     Computes a preliminary On-Off Index based on the responses to the On (first half) and the OFF (2nd half) part of
     the responses to the moving bars stimulus
@@ -275,7 +276,7 @@ def _get_on_off_index(time_kernel):
     return on_off
 
 
-def _compute_null_dist(rep_dir_resps, dirs, per, iters=1000):
+def compute_null_dist(rep_dir_resps, dirs, per, iters=1000):
     """Compute null distribution"""
     (rep_n, dir_n) = rep_dir_resps.shape
     flattened = np.reshape(rep_dir_resps, (rep_n * dir_n))
@@ -286,7 +287,7 @@ def _compute_null_dist(rep_dir_resps, dirs, per, iters=1000):
         shuffled = flattened[rand_idx]
         shuffled = np.reshape(shuffled, (rep_n, dir_n))
         normalized_shuffled_mean = normalize_zero_one(np.mean(shuffled, axis=0))
-        dsi, _ = _get_si(normalized_shuffled_mean, dirs, per)
+        dsi, _ = get_si(normalized_shuffled_mean, dirs, per)
         null_dist[i] = dsi
 
     return null_dist
