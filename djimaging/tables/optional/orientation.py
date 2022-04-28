@@ -45,9 +45,10 @@ class OsDsIndexesTemplate(dj.Computed):
 
     def make(self, key):
 
-        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
-        snippets = (self.snippets_table() & key).fetch1('snippets')  # get the response snippets
+        dir_order = (self.stimulus_table() & key).fetch1('trial_info') # shape (8,)
+        snippets = (self.snippets_table() & key).fetch1('snippets')  # get the response snippets, shape (32,24)
 
+        snippets = np.reshape(snippets, (snippets.shape[0], len(dir_order), -1)) # shape (32,8,3)
         sorted_responses, sorted_directions_rad = sort_response_matrix(snippets, dir_order)
         avg_sorted_responses = np.mean(sorted_responses, axis=-1)
         try:
