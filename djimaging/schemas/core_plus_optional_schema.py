@@ -38,12 +38,3 @@ class OsDsIndexes(orientation.OsDsIndexesTemplate):
     stimulus_table = Stimulus
     snippets_table = Snippets
 
-@schema
-class OsDsIndexesV21(orientationV21.OsDsIndexesV21Template):
-    stimulus_table = Stimulus
-    snippets_table = Snippets
-
-@schema
-class OsDsIndexesV22(orientationV22.OsDsIndexesV22Template):
-    stimulus_table = Stimulus
-    snippets_table = Snippets
