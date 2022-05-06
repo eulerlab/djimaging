@@ -1,5 +1,6 @@
 from djimaging.schemas.core_schema import schema, Stimulus, Field, Experiment, Presentation, Snippets, UserInfo
 from djimaging.tables.optional import location, chirp, orientation, orientationV21, orientationV22
+from djimaging.tables.optional import highresolution
 
 
 @schema
@@ -47,3 +48,10 @@ class OsDsIndexesV21(orientationV21.OsDsIndexesV21Template):
 class OsDsIndexesV22(orientationV22.OsDsIndexesV22Template):
     stimulus_table = Stimulus
     snippets_table = Snippets
+
+
+@schema
+class HighRes(highresolution.HighResTemplate):
+    field_table = Field
+    experiment_table = Experiment
+    userinfo_table = UserInfo

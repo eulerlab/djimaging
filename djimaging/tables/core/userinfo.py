@@ -26,6 +26,7 @@ class UserInfoTemplate(dj.Manual):
         data_stack_name='wDataCh0'     :varchar(255)  # name of data stack
         opticdisk_alias='od_opticdisk' :varchar(255)  # alias(es) for optic disk recordings (separated by _)
         outline_alias='outline_edge'   :varchar(255)  # alias(es) for retinal outline / edge recordings (separated by _)
+        highres_alias='hq_hr_highresolution_512' :varchar(255)  # alias(es) for high resolution stack
         """
         return definition
 
@@ -44,11 +45,14 @@ class UserInfoTemplate(dj.Manual):
         if not userdict['data_dir'].endswith('/'):
             userdict['data_dir'] += '/'
 
-        if 'opticdisk_alias' in userdict['data_dir']:
-            userdict['data_dir'] = userdict['data_dir'].lower()
+        if 'opticdisk_alias' in userdict:
+            userdict['opticdisk_alias'] = userdict['opticdisk_alias'].lower()
 
-        if 'outline_alias' in userdict['data_dir']:
-            userdict['data_dir'] = userdict['data_dir'].lower()
+        if 'outline_alias' in userdict:
+            userdict['outline_alias'] = userdict['outline_alias'].lower()
+
+        if 'highres_alias' in userdict:
+            userdict['highres_alias'] = userdict['highres_alias'].lower()
 
         if userdict["experimenter"] not in self.fetch("experimenter"):
             self.insert([userdict])

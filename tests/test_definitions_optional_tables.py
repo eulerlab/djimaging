@@ -1,4 +1,5 @@
 from djimaging.tables.optional import location, chirp, orientation, rgc_classifier
+from djimaging.tables.optional import highresolution
 
 from .utils import _test_definition
 
@@ -41,4 +42,8 @@ def test_definition_CelltypeAssignmentTemplate():
 
 def test_definition_ClassifierMethodTemplate():
     _test_definition(rgc_classifier.ClassifierMethodTemplate)
+
+
+def test_definition_HighResTemplate():
+    _test_definition(highresolution.HighResTemplate)
 
