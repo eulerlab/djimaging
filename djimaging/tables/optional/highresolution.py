@@ -11,12 +11,9 @@ from djimaging.utils.data_utils import list_h5_files, extract_h5_table
 
 def scan_for_highres_h5_filepath(pre_data_path, field, field_loc, highres_alias):
     h5_files = list_h5_files(folder=pre_data_path, hidden=False, field=field, field_loc=field_loc)
-
-    print(h5_files)
-
     for filename in h5_files:
         for alias in highres_alias.split('_'):
-            for fileinfo in filename.split('_')[field_loc:]:
+            for fileinfo in filename.replace('.h5', '').split('_')[field_loc:]:
                 if alias.lower() == fileinfo.lower():
                     filepath = os.path.join(pre_data_path, filename)
                     return filepath
@@ -53,7 +50,8 @@ class HighResTemplate(dj.Computed):
         # High resolution stack information.
         -> self.field_table
         ---
-        stack_avgerage : longblob  # Stack average of the high resolution image
+        fromfile : varchar(255)  # Absolute path to file
+        stack_average : longblob  # Stack average of the high resolution image
         nframes : int  # Number of frames averaged
         """
         return definition
@@ -82,6 +80,7 @@ class HighResTemplate(dj.Computed):
         stack = load_high_res_stack(filepath, data_stack_name=data_stack_name)
 
         highres_key = deepcopy(key)
+        highres_key["fromfile"] = filepath
         highres_key["stack_average"] = np.mean(stack, 2)
         highres_key["nframes"] = stack.shape[2]
 
