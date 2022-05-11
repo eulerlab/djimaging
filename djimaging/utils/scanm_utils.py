@@ -1,6 +1,9 @@
 import numpy as np
 import h5py
 
+from djimaging.utils.data_utils import extract_h5_table
+from djimaging.utils.misc_utils import CapturePrints
+
 
 def get_pixel_size_um(setupid: int, nypix: int, zoom: float) -> float:
     """Get width / height of a pixel in um"""
@@ -106,3 +109,54 @@ def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, allow_drop_las
         triggertimes_snippets[:, i] = triggertimes[i * ntrigger_rep:(i + 1) * ntrigger_rep]
 
     return snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag
+
+
+def load_ch0_ch1_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh1'):
+    """Load high resolution stack channel 0 and 1 from h5 file"""
+    with h5py.File(filepath, 'r', driver="stdio") as h5_file:
+        ch0_stack = np.copy(h5_file[ch0_name])
+        ch1_stack = np.copy(h5_file[ch1_name])
+
+        wparams = dict()
+        if 'wParamsStr' in h5_file.keys():
+            wparams.update(extract_h5_table('wParamsStr', open_file=h5_file, lower_keys=True))
+            wparams.update(extract_h5_table('wParamsNum', open_file=h5_file, lower_keys=True))
+
+        # Check stack average
+        nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
+        nypix = wparams["user_dypix"]
+
+        assert ch0_stack.shape == ch1_stack.shape, 'Stacks must be of equal size'
+        assert ch0_stack.ndim == 3, 'Stack does not match expected shape'
+        assert ch0_stack.shape[:2] == (nxpix, nypix), f'Stack shape error: {ch0_stack.shape} vs {(nxpix, nypix)}'
+
+    return ch0_stack, ch1_stack, wparams
+
+
+def load_ch0_ch1_stacks_from_smp(filepath):
+    """Load high resolution stack channel 0 and 1 from raw file"""
+    try:
+        from scanmsupport.scanm.scanm_smp import SMP
+    except ImportError:
+        print('Failed to load `scanmsupport`: Cannot load raw files.')
+        return None, None, None
+
+    scmf = SMP()
+
+    with CapturePrints():
+        scmf.loadSMH(filepath, verbose=False)
+        scmf.loadSMP(filepath)
+
+    ch0_stack = scmf.getData(ch=0, crop=True).T
+    ch1_stack = scmf.getData(ch=1, crop=True).T
+
+    wparams = dict()
+    for k, v in scmf._kvPairDict.items():
+        wparams[k.lower()] = v[2]
+
+    wparams['user_dxpix'] = scmf.dxFr_pix
+    wparams['user_dypix'] = scmf.dyFr_pix
+    wparams['user_npixretrace'] = scmf.dxRetrace_pix
+    wparams['user_nxpixlineoffs'] = scmf.dxOffs_pix
+
+    return ch0_stack, ch1_stack, wparams

@@ -58,9 +58,9 @@ class FieldTemplate(dj.Computed):
             -> master
             ---
             fromfile: varchar(255)  # info extracted from which file?
-            absx: float  # absolute position in the x axis as recorded by ScanM
-            absy: float  # absolute position in the y axis as recorded by ScanM
-            absz: float  # absolute position in the z axis as recorded by ScanM
+            absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
+            absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
+            absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
             nxpix: int  # number of pixels in x
             nypix: int  # number of pixels in y
             nxpix_offset: int  # number of offset pixels in x
