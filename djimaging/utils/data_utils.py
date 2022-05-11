@@ -36,17 +36,17 @@ def extract_h5_table(*tablename, open_file, lower_keys=False):
     return data_dict
 
 
-def list_h5_files(folder, hidden=False, field=None, field_loc=None):
-    h5_files = []
+def list_data_files(folder, hidden=False, field=None, field_loc=None, ftype='h5'):
+    data_files = []
     for file in os.listdir(folder):
-        if not file.endswith('.h5'):
+        if not file.endswith(f'.{ftype}'):
             continue
         if file.startswith('.') and not hidden:
             continue
         if field is not None:
             assert field_loc is not None
-            if field != file.replace('.h5', '').split("_")[field_loc]:
+            if field != file.replace(f'.{ftype}', '').split("_")[field_loc]:
                 continue
-        h5_files.append(file)
-    return h5_files
+        data_files.append(file)
+    return data_files
 

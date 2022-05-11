@@ -5,7 +5,7 @@ from copy import deepcopy
 import h5py
 from matplotlib import pyplot as plt
 
-from djimaging.utils.data_utils import list_h5_files, extract_h5_table
+from djimaging.utils.data_utils import list_data_files, extract_h5_table
 from djimaging.utils.dj_utils import PlaceholderTable
 
 
@@ -138,7 +138,7 @@ class PresentationTemplate(dj.Computed):
             (self.userinfo_table() & key).fetch1("pre_data_dir"))
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
-        h5_files = list_h5_files(folder=pre_data_path, hidden=False, field=field, field_loc=field_loc)
+        h5_files = list_data_files(folder=pre_data_path, hidden=False, field=field, field_loc=field_loc)
         stim_alias = (self.stimulus_table() & key).fetch1("alias").split('_')
 
         for h5_file in h5_files:
