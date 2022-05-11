@@ -47,7 +47,7 @@ def list_data_files(folder, hidden=False, field=None, field_loc=None, ftype='h5'
             assert field_loc is not None
             fileinfo = file.replace(f'.{ftype}', '').split("_")
 
-            if len(fileinfo) > field_loc and field != fileinfo[field_loc]:
+            if len(fileinfo) < field_loc or field != fileinfo[field_loc]:
                 continue
 
         data_files.append(file)
