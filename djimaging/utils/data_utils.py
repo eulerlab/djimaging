@@ -45,8 +45,11 @@ def list_data_files(folder, hidden=False, field=None, field_loc=None, ftype='h5'
             continue
         if field is not None:
             assert field_loc is not None
-            if field != file.replace(f'.{ftype}', '').split("_")[field_loc]:
+            fileinfo = file.replace(f'.{ftype}', '').split("_")
+
+            if len(fileinfo) > field_loc and field != fileinfo[field_loc]:
                 continue
+
         data_files.append(file)
     return data_files
 
