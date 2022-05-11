@@ -1,3 +1,5 @@
+import warnings
+
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
@@ -26,7 +28,8 @@ def detrend_trace(trace_times, raw_trace, poly_order, window_len_seconds, fs,
         if stim_start > 1000:
             print("Converting triggers from frame base to time base")
             stim_start /= 500
-        assert np.any(trace_times < stim_start), f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}"
+        if not np.any(trace_times < stim_start):
+            raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
 
     if non_negative:
         clip_value = np.percentile(preprocess_trace, q=2.5)
@@ -114,12 +117,15 @@ class PreprocessTracesTemplate(dj.Computed):
         raw_trace = (self.traces_table() & key).fetch1('trace')
         stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
 
-        preprocess_trace, smoothed_trace = detrend_trace(
-            trace_times=trace_times, raw_trace=raw_trace, stim_start=stim_start,
-            poly_order=poly_order, window_len_seconds=window_len_seconds, fs=fs,
-            subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative)
+        try:
+            preprocess_trace, smoothed_trace = detrend_trace(
+                trace_times=trace_times, raw_trace=raw_trace, stim_start=stim_start,
+                poly_order=poly_order, window_len_seconds=window_len_seconds, fs=fs,
+                subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative)
 
-        self.insert1(dict(key, preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
+            self.insert1(dict(key, preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
+        except ValueError as e:
+            warnings.warn(f"{e}\nfor key\n{key}")
 
     def plot1(self, key: dict):
         key = {k: v for k, v in key.items() if k in self.primary_key}
