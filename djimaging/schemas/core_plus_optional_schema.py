@@ -1,5 +1,5 @@
 from djimaging.schemas.core_schema import schema, Stimulus, Field, Experiment, Presentation, Snippets, UserInfo
-from djimaging.tables.optional import location, chirp, orientation, orientationV21, orientationV22
+from djimaging.tables.optional import location, chirp, orientation
 from djimaging.tables.optional import highresolution
 
 
@@ -36,16 +36,6 @@ class ChirpFeatures(chirp.ChirpFeaturesTemplate):
 
 @schema
 class OsDsIndexes(orientation.OsDsIndexesTemplate):
-    stimulus_table = Stimulus
-    snippets_table = Snippets
-
-@schema
-class OsDsIndexesV21(orientationV21.OsDsIndexesV21Template):
-    stimulus_table = Stimulus
-    snippets_table = Snippets
-
-@schema
-class OsDsIndexesV22(orientationV22.OsDsIndexesV22Template):
     stimulus_table = Stimulus
     snippets_table = Snippets
 
