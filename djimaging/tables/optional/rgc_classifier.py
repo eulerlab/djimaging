@@ -322,48 +322,59 @@ class CelltypeAssignmentTemplate(dj.Computed):
              roi_sizes_um[:, np.newaxis]], axis=-1)
 
         # choose the model that applies to the attribute of the cell
-        qi_thres_chirp, qi_thres_bar, cell_selection_constraint = self.cell_filter_parameter_table().fetch1(
+        qi_thres_chirp, qi_thres_bar, cell_selection_constraint = (self.cell_filter_parameter_table() & key).fetch1(
             'qi_thres_chirp', 'qi_thres_bar', 'cell_selection_constraint')
-        X_test = feature_activation_matrix
+
         if cell_selection_constraint == 'and':
-            quality_mask = np.logical_and(bar_qis > qi_thres_bar, chirp_qis > qi_thres_chirp)
+            quality_mask = (bar_qis > qi_thres_bar) & (chirp_qis > qi_thres_chirp)
         elif cell_selection_constraint == 'or':
-            quality_mask = np.logical_or(bar_qis > qi_thres_bar, chirp_qis > qi_thres_chirp)
+            quality_mask = (bar_qis > qi_thres_bar) | (chirp_qis > qi_thres_chirp)
         else:
             raise NotImplementedError(f"cell_selection_constraint={cell_selection_constraint}")
 
-        type_predictions, confidence = self.run_classifier(X_test[quality_mask])
+        if np.any(quality_mask):
+            type_predictions, confidence = self.run_classifier(feature_activation_matrix[quality_mask])
 
-        for i, roi_id in enumerate(roi_ids[quality_mask]):
-            key.pop("roi_id", None)
-            key.update(dict(roi_id=roi_id))
-            self.insert1(dict(key,
-                              celltype=type_predictions[i],
-                              confidence=confidence[i],
-                              preproc_chirp=chirp_traces[quality_mask, :][i],
-                              preproc_bar=bar_traces[quality_mask][i],
-                              ))
-        dummy_confidence = np.ones((1, 46)) * -1
-        sub_quality_mask = np.logical_not(quality_mask)
-        for i, roi_id in enumerate(roi_ids[sub_quality_mask]):
-            key.pop("roi_id", None)
-            key.update(dict(roi_id=roi_id))
-            self.insert1(dict(key,
-                              celltype=-1,
-                              confidence=dummy_confidence,
-                              preproc_chirp=chirp_traces[sub_quality_mask, :][i],
-                              preproc_bar=bar_traces[sub_quality_mask][i],
-                              ))
+            for i, roi_id in enumerate(roi_ids[quality_mask]):
+                key["roi_id"] = roi_id
+                self.insert1(dict(key,
+                                  celltype=type_predictions[i],
+                                  confidence=confidence[i],
+                                  preproc_chirp=chirp_traces[quality_mask, :][i],
+                                  preproc_bar=bar_traces[quality_mask][i],
+                                  ))
+
+        if np.any(~quality_mask):
+            dummy_confidence = np.full((1, 46), -1)
+
+            for i, roi_id in enumerate(roi_ids[~quality_mask]):
+                key["roi_id"] = roi_id
+                self.insert1(dict(key,
+                                  celltype=-1,
+                                  confidence=dummy_confidence,
+                                  preproc_chirp=chirp_traces[~quality_mask, :][i],
+                                  preproc_bar=bar_traces[~quality_mask][i],
+                                  ))
             
     def plot(self):
         from matplotlib import pyplot as plt
-        celltypes = self.fetch("celltype")
+        import pandas as pd
 
-        fig, ax = plt.subplots(1, 1, figsize=(12, 3))
-        ax.hist(celltypes[celltypes > 0], bins=np.arange(1, 47, 0.5), align='left')
-        ax.hist(celltypes[celltypes < 0], bins=[-1, -0.5, 0], align='left', color='red', alpha=0.5)
-        ax.set_xticks(np.append(-1, np.arange(1, 47)))
-        ax.set_xticklabels(np.append("NA", np.arange(1, 47)), rotation=90)
-        ax.set(ylabel='Count', xlabel='celltype')
+        groups = pd.DataFrame(self.fetch()).groupby([
+            'training_data_hash', 'classifier_params_hash', 'cell_filter_params_hash'])
+
+        fig, axs = plt.subplots(len(groups), 1, figsize=(12, 3*len(groups)), squeeze=False)
+        axs = axs.flatten()
+
+        for ax, ((tdh, cph, cfph), df) in zip(axs, groups):
+            celltypes = df["celltype"]
+            ax.hist(celltypes[celltypes > 0], bins=np.arange(1, 47, 0.5), align='left')
+            ax.hist(celltypes[celltypes < 0], bins=[-1, -0.5, 0], align='left', color='red', alpha=0.5)
+            ax.set_xticks(np.append(-1, np.arange(1, 47)))
+            ax.set_xticklabels(np.append("NA", np.arange(1, 47)), rotation=90)
+            ax.set(ylabel='Count', xlabel='celltype')
+            ax.set_title(f"training_data_hash={tdh}\nclassifier_params_hash={cph}\ncell_filter_params_hash={cfph}")
+
+        plt.tight_layout()
         plt.show()
 
