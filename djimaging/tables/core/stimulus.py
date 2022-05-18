@@ -93,7 +93,8 @@ class StimulusTemplate(dj.Manual):
     def add_noise(self, stim_name: str = "noise", stim_family: str = 'noise',
                   framerate: float = 5., ntrigger_rep: int = 1500, isrepeated: bool = False,
                   alias: str = None, pix_n_x: int = None, pix_n_y: int = None,
-                  pix_scale_x_um: float = None, pix_scale_y_um: float = None, skip_duplicates: bool = False) -> None:
+                  pix_scale_x_um: float = None, pix_scale_y_um: float = None, stim_trace=None,
+                  skip_duplicates: bool = False) -> None:
 
         if alias is None:
             alias = f"dn_noise_dn{pix_scale_x_um}m_noise{pix_scale_x_um}m"
@@ -114,6 +115,7 @@ class StimulusTemplate(dj.Manual):
             framerate=framerate,
             skip_duplicates=skip_duplicates,
             unique_alias=True,
+            stim_trace=stim_trace,
             stim_dict=stim_dict,
         )
 
