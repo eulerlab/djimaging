@@ -229,6 +229,7 @@ def get_sets(stim, stimtime, trace, tracetime, frac_train=1., frac_dev=0., fupsa
 def compute_rf(X, y, dur_filter_s, dt, kind='sta'):
     """Compute STA or MLE"""
     assert rfest is not None
+    from rfest.GLM._base import Base as BaseModel
 
     kind = kind.lower()
     assert kind in ['sta', 'mle'], kind
@@ -241,7 +242,7 @@ def compute_rf(X, y, dur_filter_s, dt, kind='sta'):
     X_train_dm = rfest.utils.build_design_matrix(X['train'], dims[0])[burn_in:]
     y_train_dm = y['train'][burn_in:]
 
-    model = rfest.GLM._base.Base(X=X_train_dm, y=y_train_dm, dims=dims, compute_mle=kind == 'mle')
+    model = BaseModel(X=X_train_dm, y=y_train_dm, dims=dims, compute_mle=kind == 'mle')
     rf = model.w_sta if kind == 'sta' else model.w_mle
 
     rf_pred = dict()
