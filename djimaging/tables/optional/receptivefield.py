@@ -10,7 +10,8 @@ from djimaging.utils.dj_utils import PlaceholderTable
 try:
     import rfest
     from jax.lib import xla_bridge
-    BACKEND = xla_bridge.get_backend().platform
+    xla_bridge.get_backend()
+    del xla_bridge
 except ImportError:
     warnings.warn('Failed to import RFEst: Cannot compute receptive fields.')
     rfest = None
