@@ -2,15 +2,19 @@ from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
-from rfest.utils import upsample_data, split_data, build_design_matrix
-from rfest.GLM._base import Base
+import warnings
 
 from djimaging.utils import math_utils
 from djimaging.utils.dj_utils import PlaceholderTable
-import jax
 
-
-BACKEND = jax.lib.xla_bridge.get_backend().platform
+try:
+    import rfest
+    from jax.lib import xla_bridge
+    xla_bridge.get_backend()
+    del xla_bridge
+except ImportError:
+    warnings.warn('Failed to import RFEst: Cannot compute receptive fields.')
+    rfest = None
 
 
 class ReceptiveFieldParamsTemplate(dj.Lookup):
@@ -187,6 +191,7 @@ def resample_trace(tracetime, trace, dt):
 def get_sets(stim, stimtime, trace, tracetime, frac_train=1., frac_dev=0., fupsample=1, gradient=False,
              norm_stim=True, norm_trace=True):
     """Split data into sets"""
+    assert rfest is not None
     assert frac_dev + frac_train <= 1.0
 
     dts = np.diff(tracetime)
@@ -196,7 +201,7 @@ def get_sets(stim, stimtime, trace, tracetime, frac_train=1., frac_dev=0., fupsa
     if (dt_max_diff / dt) > 0.1 or fupsample > 1:  # No large difference between dts
         tracetime, trace = resample_trace(tracetime=tracetime, trace=trace, dt=dt/fupsample)
 
-    X, y, dt = upsample_data(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime, gradient=gradient)
+    X, y, dt = rfest.utils.upsample_data(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime, gradient=gradient)
 
     if norm_stim:
         X = math_utils.normalize_zscore(X)
@@ -204,7 +209,7 @@ def get_sets(stim, stimtime, trace, tracetime, frac_train=1., frac_dev=0., fupsa
     if norm_trace:
         y = math_utils.normalize_zscore(y)
 
-    (X_train, y_train), (X_dev, y_dev), (X_test, y_test) = split_data(
+    (X_train, y_train), (X_dev, y_dev), (X_test, y_test) = rfest.utils.split_data(
         X, y, dt, verbose=False, frac_train=frac_train, frac_dev=frac_dev)
 
     X_dict = dict(train=X_train)
@@ -223,6 +228,9 @@ def get_sets(stim, stimtime, trace, tracetime, frac_train=1., frac_dev=0., fupsa
 
 def compute_rf(X, y, dur_filter_s, dt, kind='sta'):
     """Compute STA or MLE"""
+    assert rfest is not None
+    from rfest.GLM._base import Base as BaseModel
+
     kind = kind.lower()
     assert kind in ['sta', 'mle'], kind
 
@@ -231,10 +239,10 @@ def compute_rf(X, y, dur_filter_s, dt, kind='sta'):
 
     burn_in = dims[0] - 1
 
-    X_train_dm = build_design_matrix(X['train'], dims[0])[burn_in:]
+    X_train_dm = rfest.utils.build_design_matrix(X['train'], dims[0])[burn_in:]
     y_train_dm = y['train'][burn_in:]
 
-    model = Base(X=X_train_dm, y=y_train_dm, dims=dims, compute_mle=kind == 'mle')
+    model = BaseModel(X=X_train_dm, y=y_train_dm, dims=dims, compute_mle=kind == 'mle')
     rf = model.w_sta if kind == 'sta' else model.w_mle
 
     rf_pred = dict()
@@ -245,7 +253,7 @@ def compute_rf(X, y, dur_filter_s, dt, kind='sta'):
     rf_pred['mse_train'] = np.mean((y['train'][burn_in:] - y_pred_train)**2)
 
     if 'test' in X:
-        X_test_dm = build_design_matrix(X['test'], dims[0])[burn_in:]
+        X_test_dm = rfest.utils.build_design_matrix(X['test'], dims[0])[burn_in:]
         y_pred_test = X_test_dm @ rf
         rf_pred['y_pred_test'] = y_pred_test
         rf_pred['cc_test'] = np.corrcoef(y['test'][burn_in:], y_pred_test)[0, 1]
