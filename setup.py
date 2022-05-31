@@ -1,6 +1,7 @@
 from setuptools import setup, find_packages
 
-exec(open('djimaging/version.py').read())
+__version__ = '0.0.0'
+exec(open('djimaging/version.py').read())  # Read version from version file
 
 setup(
     name='djimaging',
