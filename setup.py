@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-exec(open('rfest/version.py').read())
+exec(open('djimaging/version.py').read())
 
 setup(
     name='djimaging',
