@@ -1,8 +1,10 @@
 from setuptools import setup, find_packages
 
+exec(open('rfest/version.py').read())
+
 setup(
     name='djimaging',
-    version='0.0.1',
+    version=__version__,
     packages=find_packages(include=['djimaging']),
     url='',
     license='',
