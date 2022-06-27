@@ -22,7 +22,7 @@ def extract_h5_table(*tablename, open_file, lower_keys=False):
         keys = [v[0] for v in list(open_file[name].attrs.values())[0][1:]]
         values = open_file[name][:]
 
-        assert len(keys) == len(values), 'Lenghts do not match'
+        assert len(keys) == len(values), 'Lengths do not match'
 
         for key, value in zip(keys, values):
             if len(key) > 0:

@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import PlaceholderTable
 from djimaging.utils.data_utils import list_data_files
-from djimaging.utils.scanm_utils import load_ch0_ch1_stacks_from_h5, load_ch0_ch1_stacks_from_smp, get_pixel_size_um
+from djimaging.utils.scanm_utils import load_ch0_ch1_stacks_from_h5, load_ch0_ch1_stacks_from_smp, get_pixel_size_xy_um
 
 
 def load_high_res_stack(pre_data_path, raw_data_path, field, field_loc, highres_alias):
@@ -91,7 +91,7 @@ class HighResTemplate(dj.Computed):
         # Get pixel sizes
         nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
         nypix = wparams["user_dypix"]
-        pixel_size_um = get_pixel_size_um(zoom=wparams["zoom"], setupid=setupid, nypix=nypix)
+        pixel_size_um = get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nypix)
 
         # Insert key
         highres_key = deepcopy(key)

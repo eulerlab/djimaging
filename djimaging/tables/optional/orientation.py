@@ -1,5 +1,6 @@
 import datajoint as dj
 import numpy as np
+from matplotlib import pyplot as plt
 from scipy import stats
 import cmath
 
@@ -265,3 +266,37 @@ class OsDsIndexesTemplate(dj.Computed):
                           time_component=u, dir_component=v,
                           surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
                           avg_sorted_resp=avg_sorted_responses))
+
+    def plot1(self, key):
+        key = {k: v for k, v in key.items() if k in self.primary_key}
+        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
+        sorted_directions_rad = np.deg2rad(np.sort(dir_order))
+
+        dir_component, ds_index, pref_dir, avg_sorted_resp = \
+            (self & key).fetch1('dir_component', 'ds_index', 'pref_dir', 'avg_sorted_resp')
+
+        fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor='w', subplot_kw=dict(frameon=False))
+        axs[1, 1].remove()
+        ax = fig.add_subplot(3, 3, 5, projection='polar', frameon=False)
+        temp = np.max(np.append(dir_component, ds_index))
+        ax.plot((0, np.pi), (temp * 1.2, temp * 1.2), color='gray')
+        ax.plot((np.pi / 2, np.pi / 2 * 3), (temp * 1.2, temp * 1.2), color='gray')
+        ax.plot([0, pref_dir], [0, ds_index * np.sum(dir_component)], color='r')
+        ax.plot(np.append(sorted_directions_rad, sorted_directions_rad[0]),
+                np.append(dir_component, dir_component[0]), color='k')
+        ax.set_rmin(0)
+        ax.set_thetalim([0, 2 * np.pi])
+        ax.set_yticks([])
+        ax.set_xticks([])
+        ax_idxs = [0, 1, 2, 3, 5, 6, 7, 8]
+        dir_idxs = [3, 2, 1, 4, 0, 5, 6, 7]
+        vmin, vmax = avg_sorted_resp.min(), avg_sorted_resp.max()
+
+        for ax_idx, dir_idx in zip(ax_idxs, dir_idxs):
+            ax = axs.flat[ax_idx]
+            ax.plot(avg_sorted_resp[:, dir_idx], color='k')
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_ylim([vmin - vmax * 0.2, vmax * 1.2])
+            ax.set_xlim([-len(avg_sorted_resp) * 0.2, len(avg_sorted_resp) * 1.2])
+        return None

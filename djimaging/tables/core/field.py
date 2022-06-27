@@ -7,7 +7,7 @@ import h5py
 
 from djimaging.utils.data_utils import load_h5_table
 from djimaging.utils.datafile_utils import get_filename_info
-from djimaging.utils.scanm_utils import get_pixel_size_um
+from djimaging.utils.scanm_utils import get_pixel_size_xy_um
 from djimaging.utils.dj_utils import PlaceholderTable
 
 
@@ -63,6 +63,7 @@ class FieldTemplate(dj.Computed):
             absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
             nxpix: int  # number of pixels in x
             nypix: int  # number of pixels in y
+            nzpix: int  # number of pixels in z
             nxpix_offset: int  # number of offset pixels in x
             nxpix_retrace: int  # number of retrace pixels in x
             pixel_size_um :float  # width / height of a pixel in um
@@ -71,12 +72,12 @@ class FieldTemplate(dj.Computed):
             return definition
 
     def make(self, key):
-        self.__add_experiment_fields(key)
+        self.__add_experiment_fields(key, only_new=False, verboselvl=0, suppress_errors=False)
 
-    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0):
+    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False):
         """
         Scan filesystem for new fields and add them to the database.
-        :param restrictions: Restritions for new fields.
+        :param restrictions: Restrictions for new fields.
         :param verboselvl: Defines level of output.
         """
         if restrictions is None:
@@ -86,9 +87,9 @@ class FieldTemplate(dj.Computed):
             key = dict(experimenter=row['experimenter'], date=row['date'], exp_num=row['exp_num'])
             if verboselvl > 0:
                 print('Adding fields for:', key)
-            self.__add_experiment_fields(key, only_new=True, verboselvl=verboselvl)
+            self.__add_experiment_fields(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def __add_experiment_fields(self, key: dict, only_new: bool = False, verboselvl: int = 0):
+    def __add_experiment_fields(self, key, only_new, verboselvl, suppress_errors):
 
         pre_data_path = os.path.join(
             (self.experiment_table() & key).fetch1('header_path'),
@@ -121,7 +122,14 @@ class FieldTemplate(dj.Computed):
 
             if verboselvl > 0:
                 print(f"\tAdding field: {field} with files: {info['files']}")
-            self.__add_field(key=key, field=field, files=info['files'])
+
+            try:
+                self.__add_field(key=key, field=field, files=info['files'])
+            except Exception as e:
+                if suppress_errors:
+                    print("Suppressed Error:", e, '\n\tfor key:', key)
+                else:
+                    raise e
 
     def __add_field(self, key, field, files):
         assert field is not None
@@ -194,7 +202,7 @@ def scan_fields_and_files(pre_data_path: str, user_dict: dict, verbose: bool = F
 
 
 def get_field_roi_mask(pre_data_path, files):
-    # TODO: makes this prefer chirp masks without being so harcoded and ugly
+    # TODO: makes this prefer chirp masks without being so hardcoded and ugly
 
     sorted_files = sorted(files)
 
@@ -231,17 +239,19 @@ def load_scan_info(key, field, pre_data_path, file, data_stack_name, setupid):
 
     nxpix = wparamsnum["User_dxPix"] - wparamsnum["User_nPixRetrace"] - wparamsnum["User_nXPixLineOffs"]
     nypix = wparamsnum["User_dyPix"]
+    nzpix = wparamsnum["User_dzPix"]
 
-    pixel_size_um = get_pixel_size_um(zoom=wparamsnum["Zoom"], setupid=setupid, nypix=nypix)
+    pixel_size_um = get_pixel_size_xy_um(zoom=wparamsnum["Zoom"], setupid=setupid, npix=nxpix)
 
     # Get stack
     with h5py.File(os.path.join(pre_data_path, file), 'r', driver="stdio") as h5_file:
         stack = np.copy(h5_file[data_stack_name])
 
     assert stack.ndim == 3, 'Stack does not match expected shape'
-    assert stack.shape[:2] == (nxpix, nypix), f'Stack shape error: {stack.shape} vs {(nxpix, nypix)}'
+    assert stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)], \
+        f'Stack shape error: {stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]'
 
-    stack_average = np.mean(stack, 2)
+    stack_average = np.mean(stack, -1)
 
     # keys
     field_key = deepcopy(key)
@@ -255,6 +265,7 @@ def load_scan_info(key, field, pre_data_path, file, data_stack_name, setupid):
     fieldinfo_key["absz"] = wparamsnum['ZCoord_um']
     fieldinfo_key["nypix"] = nypix
     fieldinfo_key["nxpix"] = nxpix
+    fieldinfo_key["nzpix"] = nzpix
     fieldinfo_key["nxpix_offset"] = wparamsnum["User_nXPixLineOffs"]
     fieldinfo_key["nxpix_retrace"] = wparamsnum["User_nPixRetrace"]
     fieldinfo_key["pixel_size_um"] = pixel_size_um
