@@ -18,10 +18,10 @@ def load_high_res_stack(pre_data_path, raw_data_path, field, field_loc, highres_
     filepath_smp = scan_for_highres_filepath(
         folder=raw_data_path, field=field, field_loc=field_loc-1, highres_alias=highres_alias, ftype='smp')
 
-    if filepath_h5 is not None and os.path.isdir(filepath_h5):
+    if filepath_h5 is not None:
         filepath = filepath_h5
         ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_h5(filepath_h5)
-    elif filepath_smp is not None and os.path.isdir(filepath_smp):
+    elif filepath_smp is not None:
         filepath = filepath_smp
         ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_smp(filepath_smp)
     else:
@@ -32,6 +32,9 @@ def load_high_res_stack(pre_data_path, raw_data_path, field, field_loc, highres_
 
 def scan_for_highres_filepath(folder, field, field_loc, highres_alias, ftype='h5'):
     """Scan filesystem for files that match the highres alias and are from the same field."""
+    if not os.path.isdir(folder):
+        return None
+
     data_files = list_data_files(folder=folder, hidden=False, field=field, field_loc=field_loc, ftype=ftype)
     for filename in data_files:
         for alias in highres_alias.split('_'):
