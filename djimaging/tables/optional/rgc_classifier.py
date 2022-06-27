@@ -164,10 +164,10 @@ def preprocess_chirp(chirp_traces, samples=249):
     chirp_traces_global = chirp_traces[:, :-7]
 
     # downsample to 249 samples
-    x_chirp = np.linspace(0, 32, chirp_traces_global.shape[-1])
-    f_chirp = interpolate.interp1d(x_chirp, chirp_traces_global)
-    x_chirp = np.linspace(0, 32, samples)
-    chirp_traces = f_chirp(x_chirp)
+    t_chirp = np.linspace(0, 32, chirp_traces_global.shape[-1])
+    f_chirp = interpolate.interp1d(t_chirp, chirp_traces_global)
+    chirp_traces = f_chirp(np.linspace(0, 32, samples))
+
     to_subtract = chirp_traces[:, :8].mean(axis=-1)
     to_subtract = np.tile(to_subtract, [chirp_traces.shape[-1], 1]).transpose()
     chirp_traces -= to_subtract

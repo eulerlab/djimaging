@@ -27,15 +27,15 @@ class ReceptiveFieldParamsTemplate(dj.Lookup):
         ---
         rf_method : enum("sta", "mle", "glm")
         dur_filter_s : float # minimum duration of filter in seconds
-        trace_gradient : tinyint unsigned
-        trace_fupsample : tinyint unsigned
-        norm_stim : tinyint unsigned
-        norm_trace : tinyint unsigned
-        frac_train : float
-        frac_dev : float
-        frac_test : float
-        store_x : enum("data", "shape")
-        store_y : enum("data", "shape")
+        trace_gradient : tinyint unsigned  # Use gradient of signal instead of signal?
+        trace_fupsample : tinyint unsigned  # Upsample trace by integer factor?
+        norm_stim : tinyint unsigned  # Normalize (znorm) stimulus?
+        norm_trace : tinyint unsigned  # Normalize (znorm) trace?
+        frac_train : float  # Fraction of data used for training in (0, 1].
+        frac_dev : float  # Fraction of data used for hyperparameter optimization in [0, 1).
+        frac_test : float  # Fraction of data used for testing [0, 1).
+        store_x : enum("data", "shape")  # Store x (stimulus) as data or shape (less storage)?
+        store_y : enum("data", "shape")  # Store y (response) as data or shape (less storage)?
         """
         return definition
 

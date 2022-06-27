@@ -106,6 +106,16 @@ class ExperimentTemplate(dj.Computed):
                     print('\t\tAlready present:', primary_key)
                 return
 
+        for k, v in restrictions.items():
+            if k not in primary_key:
+                print(f'WARNING: Restriction not in primary key, ignoring {k}')
+                continue
+
+            if primary_key[k] != v:
+                if verboselvl > 0:
+                    print(f'WARNING: Skipping {primary_key} because of restriction: {k}={v}.')
+                return
+
         pre_data_path = header_path + "/" + pre_data_dir + "/"
         assert os.path.isdir(pre_data_path), f"{pre_data_dir} not found {header_path}"
 
