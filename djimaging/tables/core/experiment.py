@@ -43,9 +43,9 @@ class ExperimentTemplate(dj.Computed):
         data_dir, pre_data_dir, raw_data_dir = (self.userinfo_table() & key).fetch1(
             "data_dir", "pre_data_dir", "raw_data_dir")
         self.__add_experiments(key=key, data_dir=data_dir, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
-                               only_new=False, restrictions=None, verboselvl=1)
+                               only_new=False, restrictions=None, verboselvl=1, suppress_errors=False)
 
-    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 1) -> None:
+    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 1, suppress_errors: bool = False) -> None:
         """Scan filesystem for new experiments and add them to the database.
         :param restrictions: Restriction to users table, e.g. to scan only for specific user(s)
         :param verboselvl: Print (0) no / (1) only new data / (2) all data information
@@ -64,9 +64,10 @@ class ExperimentTemplate(dj.Computed):
             self.__add_experiments(
                 key=key, data_dir=row["data_dir"],
                 pre_data_dir=row["pre_data_dir"], raw_data_dir=row["raw_data_dir"],
-                only_new=True, restrictions=restrictions, verboselvl=verboselvl)
+                only_new=True, restrictions=restrictions, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def __add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir, only_new, restrictions, verboselvl):
+    def __add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir,
+                          only_new, restrictions, verboselvl, suppress_errors):
 
         if restrictions is None:
             restrictions = dict()
@@ -74,11 +75,18 @@ class ExperimentTemplate(dj.Computed):
         os_walk_output = find_header_files(data_dir)
 
         for header_path in os_walk_output:
-            self.__add_experiment(
-                key=key, header_path=header_path, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
-                only_new=only_new, restrictions=restrictions, verboselvl=verboselvl)
+            try:
+                self.__add_experiment(
+                    key=key, header_path=header_path, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
+                    only_new=only_new, restrictions=restrictions, verboselvl=verboselvl)
+            except Exception as e:
+                if suppress_errors:
+                    print("Suppressed Error:", e, '\n\tfor key:', key)
+                else:
+                    raise e
 
-    def __add_experiment(self, key, header_path, pre_data_dir, raw_data_dir, only_new, restrictions, verboselvl):
+    def __add_experiment(self, key, header_path, pre_data_dir, raw_data_dir,
+                         only_new, restrictions, verboselvl):
 
         if restrictions is None:
             restrictions = dict()
@@ -86,7 +94,7 @@ class ExperimentTemplate(dj.Computed):
         if verboselvl > 0:
             print('\theader_path:', header_path)
 
-        header_names = [s for s in os.listdir(header_path) if ".ini" in s]
+        header_names = [s for s in os.listdir(header_path) if s.endswith('.ini') and (not s.startswith('.'))]
         if len(header_names) != 1:
             raise ValueError(f'Found {len(header_names)} header files in {header_path}. Expected one.')
         header_name = header_names[0]
@@ -120,7 +128,8 @@ class ExperimentTemplate(dj.Computed):
         assert os.path.isdir(pre_data_path), f"{pre_data_dir} not found {header_path}"
 
         raw_data_path = header_path + "/" + raw_data_dir + "/"
-        assert os.path.isdir(raw_data_path), f"{raw_data_dir} not found {header_path}"
+        if not os.path.isdir(raw_data_path):
+            print(f"WARNING: Folder {raw_data_dir} not found in {header_path}")
 
         exp_key = deepcopy(primary_key)
         exp_key["header_path"] = header_path + "/"

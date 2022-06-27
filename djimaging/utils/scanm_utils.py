@@ -5,18 +5,18 @@ from djimaging.utils.data_utils import extract_h5_table
 from djimaging.utils.misc_utils import CapturePrints
 
 
-def get_pixel_size_um(setupid: int, nypix: int, zoom: float) -> float:
+def get_pixel_size_xy_um(setupid: int, npix: int, zoom: float) -> float:
     """Get width / height of a pixel in um"""
     setupid = int(setupid)
 
     assert 0.15 <= zoom <= 4, zoom
     assert setupid in [1, 2, 3], setupid
-    assert 1 < nypix < 5000, nypix
+    assert 1 <= npix < 5000, npix
 
     if setupid == 1:
-        standard_pixel_size = 112. / nypix
+        standard_pixel_size = 112. / npix
     else:
-        standard_pixel_size = 71.5 / nypix
+        standard_pixel_size = 71.5 / npix
 
     pixel_size = standard_pixel_size / zoom
     return pixel_size
