@@ -32,6 +32,9 @@ def load_high_res_stack(pre_data_path, raw_data_path, field, field_loc, highres_
 
 def scan_for_highres_filepath(folder, field, field_loc, highres_alias, ftype='h5'):
     """Scan filesystem for files that match the highres alias and are from the same field."""
+    if not os.path.isdir(folder):
+        return None
+
     data_files = list_data_files(folder=folder, hidden=False, field=field, field_loc=field_loc, ftype=ftype)
     for filename in data_files:
         for alias in highres_alias.split('_'):
@@ -59,6 +62,7 @@ class HighResTemplate(dj.Computed):
         absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
         nxpix: int  # number of pixels in x
         nypix: int  # number of pixels in y
+        nzpix: int  # number of pixels in z
         nxpix_offset: int  # number of offset pixels in x
         nxpix_retrace: int  # number of retrace pixels in x
         zoom: float  # zoom factor used during recording
@@ -91,7 +95,8 @@ class HighResTemplate(dj.Computed):
         # Get pixel sizes
         nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
         nypix = wparams["user_dypix"]
-        pixel_size_um = get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nypix)
+        nzpix = wparams["user_dzpix"]
+        pixel_size_um = get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nxpix)
 
         # Insert key
         highres_key = deepcopy(key)
@@ -105,6 +110,7 @@ class HighResTemplate(dj.Computed):
 
         highres_key["nxpix"] = nxpix
         highres_key["nypix"] = nypix
+        highres_key["nzpix"] = nzpix
         highres_key["nxpix_offset"] = wparams["user_nxpixlineoffs"]
         highres_key["nxpix_retrace"] = wparams["user_npixretrace"]
 

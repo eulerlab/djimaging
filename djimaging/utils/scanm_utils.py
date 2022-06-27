@@ -125,10 +125,12 @@ def load_ch0_ch1_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh
         # Check stack average
         nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
         nypix = wparams["user_dypix"]
+        nzpix = wparams.get("user_dzpix", 0)
 
         assert ch0_stack.shape == ch1_stack.shape, 'Stacks must be of equal size'
         assert ch0_stack.ndim == 3, 'Stack does not match expected shape'
-        assert ch0_stack.shape[:2] == (nxpix, nypix), f'Stack shape error: {ch0_stack.shape} vs {(nxpix, nypix)}'
+        assert ch0_stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)],\
+            f'Stack shape error: {ch0_stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]'
 
     return ch0_stack, ch1_stack, wparams
 
@@ -156,6 +158,7 @@ def load_ch0_ch1_stacks_from_smp(filepath):
 
     wparams['user_dxpix'] = scmf.dxFr_pix
     wparams['user_dypix'] = scmf.dyFr_pix
+    wparams['user_dzpix'] = scmf.dzFr_pix or 0
     wparams['user_npixretrace'] = scmf.dxRetrace_pix
     wparams['user_nxpixlineoffs'] = scmf.dxOffs_pix
 

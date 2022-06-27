@@ -192,9 +192,11 @@ class PresentationTemplate(dj.Computed):
             try:
                 nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
                 nypix = wparams["user_dypix"]
+                nzpix = wparams["user_dzpix"]
 
                 assert stack.ndim == 3, 'Stack does not match expected shape'
-                assert stack.shape[:2] == (nxpix, nypix), f'Stack shape error: {stack.shape} vs {(nxpix, nypix)}'
+                assert stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)], \
+                    f'Stack shape error: {stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]'
             except KeyError:
                 pass
             pres_key["stack_average"] = np.mean(stack, 2)
