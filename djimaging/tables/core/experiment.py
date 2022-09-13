@@ -1,10 +1,10 @@
 import os
 import numpy as np
 import datajoint as dj
-from configparser import ConfigParser
 from copy import deepcopy
 from datetime import datetime
 
+from djimaging.utils.data_utils import read_config_dict
 from djimaging.utils.dj_utils import PlaceholderTable
 
 
@@ -96,11 +96,17 @@ class ExperimentTemplate(dj.Computed):
 
         header_names = [s for s in os.listdir(header_path) if s.endswith('.ini') and (not s.startswith('.'))]
         if len(header_names) != 1:
-            raise ValueError(f'Found {len(header_names)} header files in {header_path}. Expected one.')
+            # Check if they are equal
+            header_dicts = [read_config_dict(header_path + "/" + hn) for hn in header_names]
+            if any([hd != header_dicts[0] for hd in header_dicts[1:]]):
+                raise ValueError(f'Found {len(header_names)} header files in {header_path} with differences.')
+
         header_name = header_names[0]
 
         if verboselvl > 0:
             print('\t\theader_name:', header_name)
+
+        header_dict = read_config_dict(header_path + "/" + header_name)
 
         primary_key = deepcopy(key)
 
@@ -135,29 +141,22 @@ class ExperimentTemplate(dj.Computed):
         exp_key["header_path"] = header_path + "/"
         exp_key["header_name"] = header_name
 
-        config_dict = dict()
-        parser = ConfigParser()
-        parser.read(header_path + "/" + header_name)
-        for key1 in parser.keys():
-            for key2 in parser[key1].keys():
-                config_dict[key2[key2.find("_") + 1:]] = str(parser[key1][key2])
-
         # Populate ExpInfo table for this experiment
         expinfo_key = deepcopy(primary_key)
-        expinfo_key["eye"] = config_dict["eye"]
-        expinfo_key["projname"] = config_dict["projname"]
-        expinfo_key["setupid"] = config_dict["setupid"]
-        expinfo_key["prep"] = config_dict["prep"]
-        expinfo_key["preprem"] = config_dict["preprem"]
-        expinfo_key["darkadapt_hrs"] = config_dict["darkadapt_hrs"]
-        expinfo_key["slicethickness_um"] = config_dict["slicethickness_um"]
-        expinfo_key["bathtemp_degc"] = config_dict["bathtemp_degc"]
-        expinfo_key["prepwmorient"] = config_dict["prepwmorient"] if config_dict["prepwmorient"] != "" else -1
+        expinfo_key["eye"] = header_dict["eye"]
+        expinfo_key["projname"] = header_dict["projname"]
+        expinfo_key["setupid"] = header_dict["setupid"]
+        expinfo_key["prep"] = header_dict["prep"]
+        expinfo_key["preprem"] = header_dict["preprem"]
+        expinfo_key["darkadapt_hrs"] = header_dict["darkadapt_hrs"]
+        expinfo_key["slicethickness_um"] = header_dict["slicethickness_um"]
+        expinfo_key["bathtemp_degc"] = header_dict["bathtemp_degc"]
+        expinfo_key["prepwmorient"] = header_dict["prepwmorient"] if header_dict["prepwmorient"] != "" else -1
 
         # find optic disk information if available
         odx, ody, odz, od_ini_flag = 0, 0, 0, 0
 
-        odpos_string = config_dict["prepwmopticdiscpos"].strip('() ')
+        odpos_string = header_dict["prepwmopticdiscpos"].strip('() ')
         if len(odpos_string) > 0:
             odpos_list = odpos_string.split(";" if ';' in odpos_string else ',')
 
@@ -182,41 +181,41 @@ class ExperimentTemplate(dj.Computed):
 
         # Populate Animal table for this experiment
         animal_key = deepcopy(primary_key)
-        animal_key["genline"] = config_dict["genline"]
-        animal_key["genbkglinerem"] = config_dict["genbkglinerem"]
-        animal_key["genline_reporter"] = config_dict["genline_reporter"]
-        animal_key["genline_reporterrem"] = config_dict["genline_reporterrem"]
-        animal_key["animspecies"] = config_dict["animspecies"] if config_dict["animspecies"] != "" else "mouse"
-        animal_key["animgender"] = config_dict["animgender"]
-        animal_key["animdob"] = config_dict["animdob"]
-        animal_key["animrem"] = config_dict["animrem"]
+        animal_key["genline"] = header_dict["genline"]
+        animal_key["genbkglinerem"] = header_dict["genbkglinerem"]
+        animal_key["genline_reporter"] = header_dict["genline_reporter"]
+        animal_key["genline_reporterrem"] = header_dict["genline_reporterrem"]
+        animal_key["animspecies"] = header_dict["animspecies"].lower() if header_dict["animspecies"] != "" else "mouse"
+        animal_key["animgender"] = header_dict["animgender"]
+        animal_key["animdob"] = header_dict["animdob"]
+        animal_key["animrem"] = header_dict["animrem"]
 
         # Populate Indicator table for this experiment
         indicator_key = deepcopy(primary_key)
-        indicator_key["isepored"] = config_dict["isepored"]
-        indicator_key["eporrem"] = config_dict["eporrem"]
-        indicator_key["epordye"] = config_dict["epordye"]
-        indicator_key["isvirusinject"] = config_dict["isvirusinject"]
-        indicator_key["virusvect"] = config_dict["virusvect"]
-        indicator_key["virusserotype"] = config_dict["virusserotype"]
-        indicator_key["virustransprotein"] = config_dict["virustransprotein"]
-        indicator_key["virusinjectq"] = config_dict["virusinjectq"]
-        indicator_key["virusinjectrem"] = config_dict["virusinjectrem"]
-        indicator_key["tracer"] = config_dict["tracer"]
-        indicator_key["isbraininject"] = config_dict["isbraininject"]
-        indicator_key["braininjectrem"] = config_dict["braininjectrem"]
-        indicator_key["braininjectq"] = config_dict["braininjectq"]
+        indicator_key["isepored"] = header_dict["isepored"]
+        indicator_key["eporrem"] = header_dict["eporrem"]
+        indicator_key["epordye"] = header_dict["epordye"]
+        indicator_key["isvirusinject"] = header_dict["isvirusinject"]
+        indicator_key["virusvect"] = header_dict["virusvect"]
+        indicator_key["virusserotype"] = header_dict["virusserotype"]
+        indicator_key["virustransprotein"] = header_dict["virustransprotein"]
+        indicator_key["virusinjectq"] = header_dict["virusinjectq"]
+        indicator_key["virusinjectrem"] = header_dict["virusinjectrem"]
+        indicator_key["tracer"] = header_dict["tracer"]
+        indicator_key["isbraininject"] = header_dict["isbraininject"]
+        indicator_key["braininjectrem"] = header_dict["braininjectrem"]
+        indicator_key["braininjectq"] = header_dict["braininjectq"]
 
         # Populate Pharmacology table for this experiment
         pharminfo_key = deepcopy(primary_key)
-        drug = config_dict.get("pharmdrug", "").lower()
+        drug = header_dict.get("pharmdrug", "").lower()
         if drug.lower() in ["", "none"]:
             drug = "none"
         pharminfo_key['drug'] = drug
         pharminfo_key["pharmaflag"] = 0 if drug == 'none' else 1
-        pharminfo_key['pharmconc'] = config_dict.get("pharmdrugconc_um", "")
-        pharminfo_key['preapptime'] = config_dict.get("pretime", "")
-        pharminfo_key['pharmcom'] = config_dict.get("pharmrem", "")
+        pharminfo_key['pharmconc'] = header_dict.get("pharmdrugconc_um", "")
+        pharminfo_key['preapptime'] = header_dict.get("pretime", "")
+        pharminfo_key['pharmcom'] = header_dict.get("pharmrem", "")
 
         if verboselvl > 0:
             print('\t\tAdding:', primary_key)
@@ -263,7 +262,7 @@ class ExperimentTemplate(dj.Computed):
                genbkglinerem             :varchar(255)                     # Comments about background line
                genline_reporter          :varchar(255)                     # Genetic reporter line
                genline_reporterrem       :varchar(255)                     # Comments about reporter line
-               animspecies="mouse"       :enum("mouse","rat","zebrafish")  # animal species
+               animspecies="mouse"       :varchar(255)                     # animal species
                animgender                :varchar(255)                     # gender.
                animdob                   :varchar(255)                     # Whether to have this or DOB?
                animrem                   :varchar(255)                     # Comments about animal

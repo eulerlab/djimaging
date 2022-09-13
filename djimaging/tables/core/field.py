@@ -5,7 +5,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 import h5py
 
-from djimaging.utils.data_utils import load_h5_table
+from djimaging.utils.data_utils import load_h5_table, check_shared_alias_str
 from djimaging.utils.datafile_utils import get_filename_info
 from djimaging.utils.scanm_utils import get_pixel_size_xy_um
 from djimaging.utils.dj_utils import PlaceholderTable
@@ -79,6 +79,7 @@ class FieldTemplate(dj.Computed):
         Scan filesystem for new fields and add them to the database.
         :param restrictions: Restrictions for new fields.
         :param verboselvl: Defines level of output.
+        :param suppress_errors:
         """
         if restrictions is None:
             restrictions = dict()
@@ -91,9 +92,9 @@ class FieldTemplate(dj.Computed):
 
     def __add_experiment_fields(self, key, only_new, verboselvl, suppress_errors):
 
-        pre_data_path = os.path.join(
-            (self.experiment_table() & key).fetch1('header_path'),
-            (self.userinfo_table() & key).fetch1("pre_data_dir"))
+        header_path = (self.experiment_table() & key).fetch1('header_path')
+        pre_data_dir = (self.userinfo_table() & key).fetch1("pre_data_dir")
+        pre_data_path = os.path.join(header_path, pre_data_dir)
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
         if verboselvl > 0:
@@ -124,33 +125,41 @@ class FieldTemplate(dj.Computed):
                 print(f"\tAdding field: {field} with files: {info['files']}")
 
             try:
-                self.__add_field(key=key, field=field, files=info['files'])
+                self.__add_field(key=key, field=field, files=info['files'], verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
                     print("Suppressed Error:", e, '\n\tfor key:', key)
                 else:
                     raise e
 
-    def __add_field(self, key, field, files):
+    def __add_field(self, key, field, files, verboselvl):
         assert field is not None
 
-        pre_data_path = os.path.join(
-            (self.experiment_table() & key).fetch1('header_path'),
-            (self.userinfo_table() & key).fetch1("pre_data_dir"))
+        header_path = (self.experiment_table() & key).fetch1('header_path')
+        pre_data_dir = (self.userinfo_table() & key).fetch1("pre_data_dir")
+        pre_data_path = os.path.join(header_path, pre_data_dir)
+
+        mask_alias = (self.userinfo_table() & key).fetch1("mask_alias")
+        highres_alias = (self.userinfo_table() & key).fetch1("highres_alias")
+
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
         data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
         setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
 
-        roi_mask, file = get_field_roi_mask(pre_data_path, files)
+        roi_mask, roi_file = load_field_roi_mask(
+            pre_data_path, files, mask_alias=mask_alias, highres_alias=highres_alias)
+
+        if verboselvl > 1:
+            print(f"\t\tUsing roi_mask from {roi_file}")
 
         field_key, fieldinfo_key, zstack_key = load_scan_info(
-            key=key, field=field, pre_data_path=pre_data_path, file=file,
+            key=key, field=field, pre_data_path=pre_data_path, file=roi_file,
             data_stack_name=data_stack_name, setupid=setupid)
 
         # subkey for adding Fields to RoiMask
         roimask_key = deepcopy(field_key)
-        roimask_key["fromfile"] = os.path.join(pre_data_path, file) if roi_mask.size > 0 else ''
+        roimask_key["fromfile"] = os.path.join(pre_data_path, roi_file) if roi_mask.size > 0 else ''
         roimask_key["roi_mask"] = roi_mask
 
         self.insert1(field_key, allow_direct_insert=True)
@@ -201,34 +210,39 @@ def scan_fields_and_files(pre_data_path: str, user_dict: dict, verbose: bool = F
     return field2info
 
 
-def get_field_roi_mask(pre_data_path, files):
-    # TODO: makes this prefer chirp masks without being so hardcoded and ugly
+def load_field_roi_mask(pre_data_path, files, mask_alias='', highres_alias=''):
+    """Load ROI mask for field"""
+    files = np.array(files)
+    penalties = np.full(files.size, len(mask_alias.split('_')))
 
-    sorted_files = sorted(files)
+    for i, file in enumerate(files):
+        if check_shared_alias_str(highres_alias, file.lower().replace('.h5', '')):
+            penalties[i] = len(mask_alias.split('_')) + 1
 
-    sort_index = np.zeros(len(sorted_files))
-    for i, file in enumerate(sorted_files):
-        if 'chirp' in file:
-            sort_index[i] = -10
-        if 'mb' in file or 'os' in file or 'movingbar' in file or 'mb' in file:
-            sort_index[i] = -9
+        else:
+            for penalty, alias in enumerate(mask_alias.split('_')):
+                if alias.lower() in file.lower().replace('.h5', '').split('_'):
+                    penalties[i] = penalty
 
-    sorted_files = np.array(sorted_files)[np.argsort(sort_index)]
+    sorted_files = files[np.argsort(penalties)]
 
     for file in sorted_files:
-        with h5py.File(os.path.join(pre_data_path, file), 'r', driver="stdio") as h5_file:
-            if 'rois' in [k.lower() for k in h5_file.keys()]:
-                for h5_keys in h5_file.keys():
-                    if h5_keys.lower() == 'rois':
-                        roi_mask = np.copy(h5_file[h5_keys])
-                        break
-                else:
-                    raise Exception('This should not happen')
-                break
-    else:
-        raise ValueError(f'No ROI mask found in any of the {files}')
+        filepath = os.path.join(pre_data_path, file)
 
-    return roi_mask, file
+        try:
+            with h5py.File(filepath, 'r', driver="stdio") as h5_file:
+                roi_keys = [k for k in h5_file.keys() if 'rois' in k.lower()]
+                if len(roi_keys) == 0:
+                    continue
+                elif len(roi_keys) == 1:
+                    roi_mask = np.copy(h5_file[roi_keys[0]])
+                    return roi_mask, file
+                else:
+                    raise KeyError(f'Multiple ROI masks found in {filepath}')
+        except:
+            pass
+    else:
+        raise ValueError(f'No ROI mask found in any of the {pre_data_path}: {files}')
 
 
 def load_scan_info(key, field, pre_data_path, file, data_stack_name, setupid):

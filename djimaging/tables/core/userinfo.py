@@ -12,21 +12,23 @@ class UserInfoTemplate(dj.Manual):
         definition = """
         # Info for decoding file names
     
-        experimenter                   :varchar(255)  # name of the experimenter
-        ---    
-        data_dir                       :varchar(255)  # path to header file, used for computed tables
-        datatype_loc                   :tinyint       # string location for datatype (eg. SMP)
-        animal_loc                     :tinyint       # string location for number of animal (e.g. M1)
-        region_loc                     :tinyint       # string location for region (eg. LR or RR)
-        field_loc                      :tinyint       # string location for field
-        stimulus_loc                   :tinyint       # string location for stimulus
-        condition_loc                  :tinyint       # string location for (pharmacological) condition
-        pre_data_dir='Pre'             :varchar(255)  # directory for h5 data files
-        raw_data_dir='Raw'             :varchar(255)  # directory for raw data files
-        data_stack_name='wDataCh0'     :varchar(255)  # name of data stack
-        opticdisk_alias='od_opticdisk' :varchar(255)  # alias(es) for optic disk recordings (separated by _)
-        outline_alias='outline_edge'   :varchar(255)  # alias(es) for retinal outline / edge recordings (separated by _)
+        experimenter                    :varchar(255)  # name of the experimenter
+        ---     
+        data_dir                        :varchar(255)  # path to header file, used for computed tables
+        datatype_loc                    :tinyint       # string location for datatype (e.g. SMP)
+        animal_loc                      :tinyint       # string location for number of animal (e.g. M1)
+        region_loc                      :tinyint       # string location for region (e.g. LR or RR)
+        field_loc                       :tinyint       # string location for field
+        stimulus_loc                    :tinyint       # string location for stimulus
+        condition_loc                   :tinyint       # string location for (pharmacological) condition
+        opticdisk_alias='od_opticdisk'  :varchar(255)  # alias(es) for optic disk recordings (separated by _)
+        outline_alias='outline_edge'    :varchar(255)  # alias(es) for retinal outline / edge recordings (separated by _)
         highres_alias='hq_hr_highresolution_512' :varchar(255)  # alias(es) for high resolution stack
+        mask_alias='chirp_mb_movingbar' :varchar(255)  # Ordered alias(es) for field roi mask (separated by _)
+        pre_data_dir='Pre'              :varchar(255)  # directory for h5 data files
+        raw_data_dir='Raw'              :varchar(255)  # directory for smp and smh data files
+        data_stack_name='wDataCh0'      :varchar(255)  # main data channel, e.g. OGB-1
+        alt_stack_name='wDataCh1'       :varchar(255)  # alternative data channel, e.g. SR101
         """
         return definition
 
@@ -45,14 +47,10 @@ class UserInfoTemplate(dj.Manual):
         if not userdict['data_dir'].endswith('/'):
             userdict['data_dir'] += '/'
 
-        if 'opticdisk_alias' in userdict:
-            userdict['opticdisk_alias'] = userdict['opticdisk_alias'].lower()
-
-        if 'outline_alias' in userdict:
-            userdict['outline_alias'] = userdict['outline_alias'].lower()
-
-        if 'highres_alias' in userdict:
-            userdict['highres_alias'] = userdict['highres_alias'].lower()
+        # Change all aliases to lower case
+        for k, v in userdict.items():
+            if 'alias' in k:
+                userdict[k] = v.lower()
 
         if userdict["experimenter"] not in self.fetch("experimenter"):
             self.insert([userdict])

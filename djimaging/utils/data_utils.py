@@ -1,5 +1,6 @@
 import h5py
 import os
+from configparser import ConfigParser
 
 
 def load_h5_data(filename):
@@ -47,9 +48,42 @@ def list_data_files(folder, hidden=False, field=None, field_loc=None, ftype='h5'
             assert field_loc is not None
             fileinfo = file.replace(f'.{ftype}', '').split("_")
 
-            if len(fileinfo) < field_loc or field != fileinfo[field_loc]:
+            if len(fileinfo) <= field_loc or field != fileinfo[field_loc]:
                 continue
 
         data_files.append(file)
     return data_files
 
+
+def read_config_dict(filename):
+    config_dict = dict()
+    parser = ConfigParser()
+    parser.read(filename)
+    for key1 in parser.keys():
+        for key2 in parser[key1].keys():
+            config_dict[key2[key2.find("_") + 1:]] = str(parser[key1][key2])
+    return config_dict
+
+
+def check_shared_alias_str(str1, str2, case_sensitive=False):
+
+    if not case_sensitive:
+        str1 = str1.lower()
+        str2 = str2.lower()
+
+    list1 = str1.split('_')
+    list2 = str2.split('_')
+
+    return check_shared_alias_list(list1, list2)
+
+
+def check_shared_alias_list(list1, list2):
+    set1 = set(list1)
+    set2 = set(list2)
+
+    if '' in set1:
+        set1.remove('')
+    if '' in set2:
+        set2.remove('')
+
+    return bool(set1 & set2)

@@ -1,4 +1,5 @@
 import os
+import warnings
 from copy import deepcopy
 
 import datajoint as dj
@@ -12,22 +13,30 @@ from djimaging.utils.scanm_utils import load_ch0_ch1_stacks_from_h5, load_ch0_ch
 
 def load_high_res_stack(pre_data_path, raw_data_path, field, field_loc, highres_alias):
     """Scan filesystem for file and load data. Tries to load h5 files first, but may also load raw files."""
-    filepath_h5 = scan_for_highres_filepath(
+
+    filepath = scan_for_highres_filepath(
         folder=pre_data_path, field=field, field_loc=field_loc, highres_alias=highres_alias, ftype='h5')
 
-    filepath_smp = scan_for_highres_filepath(
+    if filepath is not None:
+        try:
+            ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_h5(filepath)
+            return filepath, ch0_stack, ch1_stack, wparams
+        except OSError:
+            warnings.warn(f'OSError when reading file: {filepath}')
+            pass
+
+    filepath = scan_for_highres_filepath(
         folder=raw_data_path, field=field, field_loc=field_loc-1, highres_alias=highres_alias, ftype='smp')
 
-    if filepath_h5 is not None:
-        filepath = filepath_h5
-        ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_h5(filepath_h5)
-    elif filepath_smp is not None:
-        filepath = filepath_smp
-        ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_smp(filepath_smp)
-    else:
-        filepath, ch0_stack, ch1_stack, wparams = None, None, None, None
+    if filepath is not None:
+        try:
+            ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_smp(filepath)
+            return filepath, ch0_stack, ch1_stack, wparams
+        except OSError:
+            warnings.warn(f'OSError when reading file: {filepath}')
+            pass
 
-    return filepath, ch0_stack, ch1_stack, wparams
+    return None, None, None, None
 
 
 def scan_for_highres_filepath(folder, field, field_loc, highres_alias, ftype='h5'):

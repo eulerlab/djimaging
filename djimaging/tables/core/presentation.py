@@ -27,8 +27,6 @@ class PresentationTemplate(dj.Computed):
         """
         return definition
 
-    # TODO ADD scan_frequency BACK!!!
-
     field_table = PlaceholderTable
     stimulus_table = PlaceholderTable
     userinfo_table = PlaceholderTable
