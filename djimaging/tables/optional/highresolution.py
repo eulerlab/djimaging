@@ -5,7 +5,6 @@ from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
-from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import PlaceholderTable
 from djimaging.utils.alias_utils import match_file, get_field_files
@@ -18,8 +17,7 @@ def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
     """Scan filesystem for file and load data. Tries to load h5 files first, but may also load raw files."""
 
     filepath = scan_for_highres_filepath(
-        folder=pre_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc,
-        condition=condition, condition_loc=condition_loc, ftype='h5')
+        folder=pre_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc, ftype='h5')
 
     if filepath is not None:
         try:
@@ -30,8 +28,7 @@ def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
             pass
 
     filepath = scan_for_highres_filepath(
-        folder=raw_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc,
-        condition=condition, condition_loc=condition_loc, ftype='smp')
+        folder=raw_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc-1, ftype='smp')
 
     if filepath is not None:
         try:
