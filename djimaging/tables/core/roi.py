@@ -1,8 +1,11 @@
+import random
+
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import PlaceholderTable
+from djimaging.utils.plot_utils import plot_field
 
 
 class RoiTemplate(dj.Computed):
@@ -39,7 +42,7 @@ class RoiTemplate(dj.Computed):
         )
 
         roi_idxs = np.unique(roi_mask)
-        roi_idxs = roi_idxs[(roi_idxs != 0) & (roi_idxs != 1)]  # remove background index (0 or 1)
+        roi_idxs = roi_idxs[roi_idxs < 0]  # remove background indeces (0 or 1)
         roi_idxs = roi_idxs[np.argsort(np.abs(roi_idxs))]  # Sort by value
 
         # add every roi to list and the bulk add to roi table
@@ -55,15 +58,14 @@ class RoiTemplate(dj.Computed):
                 'roi_size_um2': roi_size_um2,
                 'roi_dia_um': roi_dia_um})
 
-    def plot1(self, key):
-        fig, axs = plt.subplots(1, 3, figsize=(15, 3.5))
-        stack_average = (self.field_table.FieldInfo() & key).fetch1("stack_average").T
+    def plot1(self, key=None):
+        if key is not None:
+            key = {k: v for k, v in key.items() if k in self.primary_key}
+        else:
+            key = random.choice(self.fetch(*self.primary_key, as_dict=True))
+
+        ch0_average = (self.field_table.FieldInfo() & key).fetch1("ch0_average").T
+        ch1_average = (self.field_table.FieldInfo() & key).fetch1("ch1_average").T
         roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask").T
-        axs[0].imshow(stack_average)
-        axs[0].set(title='stack_average')
-        roi_mask_im = axs[1].imshow(roi_mask, cmap='jet')
-        plt.colorbar(roi_mask_im, ax=axs[1])
-        axs[1].set(title='roi_mask')
-        axs[2].imshow(roi_mask == -key['roi_id'])
-        axs[2].set(title='ROI')
-        plt.show()
+
+        plot_field(ch0_average, ch1_average, roi_mask=roi_mask, title=key, figsize=(16, 4), highlight_roi=key['roi_id'])

@@ -1,4 +1,5 @@
 import os
+import random
 import warnings
 from copy import deepcopy
 
@@ -7,15 +8,18 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import PlaceholderTable
-from djimaging.utils.data_utils import list_data_files
+from djimaging.utils.alias_utils import match_file, get_field_files
+from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import load_ch0_ch1_stacks_from_h5, load_ch0_ch1_stacks_from_smp, get_pixel_size_xy_um
 
 
-def load_high_res_stack(pre_data_path, raw_data_path, field, field_loc, highres_alias):
+def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
+                        field, field_loc, condition=None, condition_loc=None):
     """Scan filesystem for file and load data. Tries to load h5 files first, but may also load raw files."""
 
     filepath = scan_for_highres_filepath(
-        folder=pre_data_path, field=field, field_loc=field_loc, highres_alias=highres_alias, ftype='h5')
+        folder=pre_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc,
+        condition=condition, condition_loc=condition_loc, ftype='h5')
 
     if filepath is not None:
         try:
@@ -26,7 +30,8 @@ def load_high_res_stack(pre_data_path, raw_data_path, field, field_loc, highres_
             pass
 
     filepath = scan_for_highres_filepath(
-        folder=raw_data_path, field=field, field_loc=field_loc-1, highres_alias=highres_alias, ftype='smp')
+        folder=raw_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc,
+        condition=condition, condition_loc=condition_loc, ftype='smp')
 
     if filepath is not None:
         try:
@@ -39,18 +44,20 @@ def load_high_res_stack(pre_data_path, raw_data_path, field, field_loc, highres_
     return None, None, None, None
 
 
-def scan_for_highres_filepath(folder, field, field_loc, highres_alias, ftype='h5'):
+def scan_for_highres_filepath(folder, field, field_loc, highres_alias, condition=None, condition_loc=None, ftype='h5'):
     """Scan filesystem for files that match the highres alias and are from the same field."""
     if not os.path.isdir(folder):
         return None
 
-    data_files = list_data_files(folder=folder, hidden=False, field=field, field_loc=field_loc, ftype=ftype)
-    for filename in data_files:
-        for alias in highres_alias.split('_'):
-            for fileinfo in filename.replace(f'.{ftype}', '').split('_')[field_loc:]:
-                if alias.lower() == fileinfo.lower():
-                    filepath = os.path.join(folder, filename)
-                    return filepath
+    field_files = get_field_files(folder=folder, field=field, field_loc=field_loc, incl_hidden=False, ftype=ftype)
+
+    for file in field_files:
+        is_highres = match_file(file, pattern=highres_alias, pattern_loc=None, ftype=ftype)
+        is_condition = True if condition is None else \
+            match_file(file, pattern=condition, pattern_loc=condition_loc, ftype=ftype)
+
+        if is_highres & is_condition:
+            return os.path.join(folder, file)
     return None
 
 
@@ -96,7 +103,7 @@ class HighResTemplate(dj.Computed):
 
         filepath, ch0_stack, ch1_stack, wparams = load_high_res_stack(
             pre_data_path=pre_data_path, raw_data_path=raw_data_path,
-            field=field, field_loc=field_loc, highres_alias=highres_alias)
+            highres_alias=highres_alias, field=field, field_loc=field_loc)
 
         if filepath is None or ch0_stack is None or ch1_stack is None:
             return
@@ -130,15 +137,13 @@ class HighResTemplate(dj.Computed):
 
         self.insert1(highres_key)
 
-    def plot1(self, key: dict):
-        fig, axs = plt.subplots(1, 2, figsize=(10, 3.5))
+    def plot1(self, key=None, figsize=(8, 4)):
+        if key is not None:
+            key = {k: v for k, v in key.items() if k in self.primary_key}
+        else:
+            key = random.choice(self.fetch(*self.primary_key, as_dict=True))
+
         ch0_average = (self & key).fetch1("ch0_average").T
         ch1_average = (self & key).fetch1("ch1_average").T
 
-        axs[0].imshow(ch0_average)
-        axs[0].set(title='ch0_average')
-
-        axs[1].imshow(ch1_average)
-        axs[1].set(title='ch1_average')
-
-        plt.show()
+        plot_field(ch0_average, ch1_average, roi_mask=None, title=key, figsize=figsize)

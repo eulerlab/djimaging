@@ -1,13 +1,16 @@
 import os
+import random
 from copy import deepcopy
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 import h5py
 
-from djimaging.utils.data_utils import load_h5_table, check_shared_alias_str
+from djimaging.utils.data_utils import load_h5_table
+from djimaging.utils.alias_utils import check_shared_alias_str
 from djimaging.utils.datafile_utils import get_filename_info
-from djimaging.utils.scanm_utils import get_pixel_size_xy_um
+from djimaging.utils.plot_utils import plot_field
+from djimaging.utils.scanm_utils import get_pixel_size_xy_um, load_ch0_ch1_stacks_from_h5
 from djimaging.utils.dj_utils import PlaceholderTable
 
 
@@ -67,7 +70,8 @@ class FieldTemplate(dj.Computed):
             nxpix_offset: int  # number of offset pixels in x
             nxpix_retrace: int  # number of retrace pixels in x
             pixel_size_um :float  # width / height of a pixel in um
-            stack_average: longblob  # Average of the data stack for visualization
+            ch0_average :longblob # Stack median of channel 0
+            ch1_average :longblob # Stack median of channel 1
             """
             return definition
 
@@ -86,8 +90,6 @@ class FieldTemplate(dj.Computed):
 
         for row in (self.experiment_table() & restrictions):
             key = dict(experimenter=row['experimenter'], date=row['date'], exp_num=row['exp_num'])
-            if verboselvl > 0:
-                print('Adding fields for:', key)
             self.__add_experiment_fields(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
     def __add_experiment_fields(self, key, only_new, verboselvl, suppress_errors):
@@ -98,7 +100,7 @@ class FieldTemplate(dj.Computed):
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
         if verboselvl > 0:
-            print("--> Processing fields in:", pre_data_path)
+            print("Processing fields in:", pre_data_path)
 
         user_dict = (self.userinfo_table() & key).fetch1()
 
@@ -144,7 +146,6 @@ class FieldTemplate(dj.Computed):
 
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
-        data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
         setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
 
         roi_mask, roi_file = load_field_roi_mask(
@@ -154,8 +155,7 @@ class FieldTemplate(dj.Computed):
             print(f"\t\tUsing roi_mask from {roi_file}")
 
         field_key, fieldinfo_key, zstack_key = load_scan_info(
-            key=key, field=field, pre_data_path=pre_data_path, file=roi_file,
-            data_stack_name=data_stack_name, setupid=setupid)
+            key=key, field=field, pre_data_path=pre_data_path, file=roi_file, setupid=setupid)
 
         # subkey for adding Fields to RoiMask
         roimask_key = deepcopy(field_key)
@@ -167,22 +167,21 @@ class FieldTemplate(dj.Computed):
         (self.Zstack & field_key).insert1(zstack_key, allow_direct_insert=True)
         (self.FieldInfo & field_key).insert1(fieldinfo_key, allow_direct_insert=True)
 
-    def plot1(self, key: dict):
-        fig, axs = plt.subplots(1, 2, figsize=(10, 3.5))
-        stack_average = (self.FieldInfo() & key).fetch1("stack_average").T
-        roi_mask = (self.RoiMask() & key).fetch1("roi_mask").T
-        axs[0].imshow(stack_average)
-        axs[0].set(title='stack_average')
+    def plot1(self, key=None, figsize=(16, 4)):
+        if key is not None:
+            key = {k: v for k, v in key.items() if k in self.primary_key}
+        else:
+            key = random.choice(self.fetch(*self.primary_key, as_dict=True))
 
-        if roi_mask.size > 0:
-            roi_mask_im = axs[1].imshow(roi_mask, cmap='jet')
-            plt.colorbar(roi_mask_im, ax=axs[1])
-            axs[1].set(title='roi_mask')
-        plt.show()
+        ch0_average = (self.FieldInfo() & key).fetch1("ch0_average").T
+        ch1_average = (self.FieldInfo() & key).fetch1("ch1_average").T
+        roi_mask = (self.RoiMask() & key).fetch1("roi_mask").T
+
+        plot_field(ch0_average, ch1_average, roi_mask, title=key, figsize=figsize)
 
 
 def scan_fields_and_files(pre_data_path: str, user_dict: dict, verbose: bool = False) -> dict:
-    """Return a dictonary that maps fields to their respective files"""
+    """Return a dictionary that maps fields to their respective files"""
 
     loc_mapper = {k: v for k, v in user_dict.items() if k.endswith('loc')}
 
@@ -245,27 +244,18 @@ def load_field_roi_mask(pre_data_path, files, mask_alias='', highres_alias=''):
         raise ValueError(f'No ROI mask found in any of the {pre_data_path}: {files}')
 
 
-def load_scan_info(key, field, pre_data_path, file, data_stack_name, setupid):
-    # TODO: Clean this
+def load_scan_info(key, field, pre_data_path, file, setupid):
 
-    # Get parameters
-    wparamsnum = load_h5_table('wParamsNum', filename=os.path.join(pre_data_path, file))
+    filepath = os.path.join(pre_data_path, file)
 
-    nxpix = wparamsnum["User_dxPix"] - wparamsnum["User_nPixRetrace"] - wparamsnum["User_nXPixLineOffs"]
-    nypix = wparamsnum["User_dyPix"]
-    nzpix = wparamsnum["User_dzPix"]
+    ch0_stack, ch1_stack, wparams = \
+        load_ch0_ch1_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh1')
 
-    pixel_size_um = get_pixel_size_xy_um(zoom=wparamsnum["Zoom"], setupid=setupid, npix=nxpix)
+    nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
+    nypix = wparams["user_dypix"]
+    nzpix = wparams["user_dzpix"]
 
-    # Get stack
-    with h5py.File(os.path.join(pre_data_path, file), 'r', driver="stdio") as h5_file:
-        stack = np.copy(h5_file[data_stack_name])
-
-    assert stack.ndim == 3, 'Stack does not match expected shape'
-    assert stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)], \
-        f'Stack shape error: {stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]'
-
-    stack_average = np.mean(stack, -1)
+    pixel_size_um = get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nxpix)
 
     # keys
     field_key = deepcopy(key)
@@ -273,21 +263,22 @@ def load_scan_info(key, field, pre_data_path, file, data_stack_name, setupid):
 
     # subkey for fieldinfo
     fieldinfo_key = deepcopy(field_key)
-    fieldinfo_key["fromfile"] = os.path.join(pre_data_path, file)
-    fieldinfo_key["absx"] = wparamsnum['XCoord_um']
-    fieldinfo_key["absy"] = wparamsnum['YCoord_um']
-    fieldinfo_key["absz"] = wparamsnum['ZCoord_um']
+    fieldinfo_key["fromfile"] = filepath
+    fieldinfo_key["absx"] = wparams['xcoord_um']
+    fieldinfo_key["absy"] = wparams['ycoord_um']
+    fieldinfo_key["absz"] = wparams['zcoord_um']
     fieldinfo_key["nypix"] = nypix
     fieldinfo_key["nxpix"] = nxpix
     fieldinfo_key["nzpix"] = nzpix
-    fieldinfo_key["nxpix_offset"] = wparamsnum["User_nXPixLineOffs"]
-    fieldinfo_key["nxpix_retrace"] = wparamsnum["User_nPixRetrace"]
+    fieldinfo_key["nxpix_offset"] = wparams["user_nxpixlineoffs"]
+    fieldinfo_key["nxpix_retrace"] = wparams["user_npixretrace"]
     fieldinfo_key["pixel_size_um"] = pixel_size_um
-    fieldinfo_key['stack_average'] = stack_average
+    fieldinfo_key['ch0_average'] = np.mean(ch0_stack, 2)
+    fieldinfo_key['ch1_average'] = np.mean(ch1_stack, 2)
 
     # subkey for adding Fields to ZStack
     zstack_key = deepcopy(field_key)
-    zstack_key["zstack"] = 1 if wparamsnum['User_ScanType'] == 11 else 0
-    zstack_key["zstep"] = wparamsnum['ZStep_um']
+    zstack_key["zstack"] = 1 if wparams['user_scantype'] == 11 else 0
+    zstack_key["zstep"] = wparams['zstep_um']
 
     return field_key, fieldinfo_key, zstack_key

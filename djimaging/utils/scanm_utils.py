@@ -113,24 +113,31 @@ def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, allow_drop_las
 
 def load_ch0_ch1_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh1'):
     """Load high resolution stack channel 0 and 1 from h5 file"""
+
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        ch0_stack = np.copy(h5_file[ch0_name])
-        ch1_stack = np.copy(h5_file[ch1_name])
+        ch0_stack, ch1_stack, wparams = \
+            extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name=ch0_name, ch1_name=ch1_name)
 
-        wparams = dict()
-        if 'wParamsStr' in h5_file.keys():
-            wparams.update(extract_h5_table('wParamsStr', open_file=h5_file, lower_keys=True))
-            wparams.update(extract_h5_table('wParamsNum', open_file=h5_file, lower_keys=True))
+    return ch0_stack, ch1_stack, wparams
 
-        # Check stack average
-        nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
-        nypix = wparams["user_dypix"]
-        nzpix = wparams.get("user_dzpix", 0)
+def extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name='wDataCh0', ch1_name='wDataCh1'):
+    ch0_stack = np.copy(h5_file[ch0_name])
+    ch1_stack = np.copy(h5_file[ch1_name])
 
-        assert ch0_stack.shape == ch1_stack.shape, 'Stacks must be of equal size'
-        assert ch0_stack.ndim == 3, 'Stack does not match expected shape'
-        assert ch0_stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)],\
-            f'Stack shape error: {ch0_stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]'
+    wparams = dict()
+    if 'wParamsStr' in h5_file.keys():
+        wparams.update(extract_h5_table('wParamsStr', open_file=h5_file, lower_keys=True))
+        wparams.update(extract_h5_table('wParamsNum', open_file=h5_file, lower_keys=True))
+
+    # Check stack average
+    nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
+    nypix = wparams["user_dypix"]
+    nzpix = wparams.get("user_dzpix", 0)
+
+    assert ch0_stack.shape == ch1_stack.shape, 'Stacks must be of equal size'
+    assert ch0_stack.ndim == 3, 'Stack does not match expected shape'
+    assert ch0_stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)],\
+        f'Stack shape error: {ch0_stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]'
 
     return ch0_stack, ch1_stack, wparams
 
