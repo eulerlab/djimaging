@@ -1,8 +1,9 @@
 import os
-import numpy as np
-import datajoint as dj
 from copy import deepcopy
 from datetime import datetime
+
+import datajoint as dj
+import numpy as np
 
 from djimaging.utils.data_utils import read_config_dict
 from djimaging.utils.dj_utils import PlaceholderTable

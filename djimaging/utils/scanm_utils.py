@@ -1,5 +1,5 @@
-import numpy as np
 import h5py
+import numpy as np
 
 from djimaging.utils.data_utils import extract_h5_table
 from djimaging.utils.misc_utils import CapturePrints
@@ -120,6 +120,7 @@ def load_ch0_ch1_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh
 
     return ch0_stack, ch1_stack, wparams
 
+
 def extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name='wDataCh0', ch1_name='wDataCh1'):
     ch0_stack = np.copy(h5_file[ch0_name])
     ch1_stack = np.copy(h5_file[ch1_name])
@@ -136,7 +137,7 @@ def extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name='wDataCh0', ch1_name='wData
 
     assert ch0_stack.shape == ch1_stack.shape, 'Stacks must be of equal size'
     assert ch0_stack.ndim == 3, 'Stack does not match expected shape'
-    assert ch0_stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)],\
+    assert ch0_stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)], \
         f'Stack shape error: {ch0_stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]'
 
     return ch0_stack, ch1_stack, wparams

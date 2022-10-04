@@ -1,9 +1,9 @@
-import numpy as np
 import datajoint as dj
+import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.utils.scanm_utils import load_traces_from_h5_file, split_trace_by_reps
 from djimaging.utils.dj_utils import PlaceholderTable
+from djimaging.utils.scanm_utils import load_traces_from_h5_file, split_trace_by_reps
 
 
 class TracesTemplate(dj.Computed):

@@ -1,14 +1,13 @@
 import os
 import random
-
-import numpy as np
-import datajoint as dj
 from copy import deepcopy
-import h5py
-from matplotlib import pyplot as plt
 
-from djimaging.utils.data_utils import extract_h5_table
+import datajoint as dj
+import h5py
+import numpy as np
+
 from djimaging.utils.alias_utils import get_field_files
+from djimaging.utils.data_utils import extract_h5_table
 from djimaging.utils.dj_utils import PlaceholderTable
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import extract_ch0_ch1_stacks_from_h5

@@ -1,5 +1,6 @@
-import h5py
 from configparser import ConfigParser
+
+import h5py
 
 
 def load_h5_data(filename):

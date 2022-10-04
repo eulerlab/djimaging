@@ -1,6 +1,5 @@
-from djimaging.tables.optional import location, chirp, orientation, rgc_classifier, receptivefield
 from djimaging.tables.optional import highresolution
-
+from djimaging.tables.optional import location, chirp, orientation, rgc_classifier, receptivefield
 from .utils import _test_definition
 
 

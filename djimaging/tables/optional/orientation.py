@@ -1,8 +1,9 @@
+import cmath
+
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy import stats
-import cmath
 
 from djimaging.utils.dj_utils import PlaceholderTable
 
@@ -143,8 +144,6 @@ def get_on_off_index(time_kernel):
     """
     Computes a preliminary On-Off Index based on the responses to the On (first half) and the OFF (2nd half) part of
     the responses to the moving bars stimulus
-    :param avg_response_matrix: average response matrix (average across repetitions per condition), time x directions
-    :return:
     """
     normed_kernel = time_kernel - np.min(time_kernel)
     normed_kernel = normed_kernel / np.max(normed_kernel)

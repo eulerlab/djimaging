@@ -1,6 +1,7 @@
+import warnings
+
 import numpy as np
 import pytest
-import warnings
 
 from djimaging.tables.optional.receptivefield import get_sets, resample_trace, compute_receptive_field
 

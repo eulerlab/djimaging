@@ -1,5 +1,5 @@
-from djimaging.schemas.core_schema import UserInfo, Field, Roi, Presentation, Snippets, PreprocessParams
 from djimaging.schemas.core_plus_optional_schema import schema, ChirpQI, OsDsIndexes
+from djimaging.schemas.core_schema import UserInfo, Field, Roi, Presentation, Snippets, PreprocessParams
 from djimaging.tables.optional import rgc_classifier
 
 

@@ -1,4 +1,5 @@
 from numpy.testing import assert_almost_equal
+
 from djimaging.utils.scanm_utils import get_pixel_size_xy_um, get_retinal_position
 
 

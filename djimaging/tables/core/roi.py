@@ -2,7 +2,6 @@ import random
 
 import datajoint as dj
 import numpy as np
-from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import PlaceholderTable
 from djimaging.utils.plot_utils import plot_field

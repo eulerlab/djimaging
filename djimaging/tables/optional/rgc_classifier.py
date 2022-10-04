@@ -1,16 +1,15 @@
 import os
+import pickle as pkl
+from copy import deepcopy
+from typing import Mapping, Dict, Any
 
 import datajoint as dj
 import numpy as np
-from typing import Mapping, Dict, Any
-import pickle as pkl
-from scipy import interpolate
-from copy import deepcopy
 from cached_property import cached_property
+from scipy import interpolate
 
-from djimaging.utils.import_helpers import dynamic_import, split_module_name
 from djimaging.utils.dj_utils import make_hash, PlaceholderTable
-
+from djimaging.utils.import_helpers import dynamic_import, split_module_name
 
 Key = Dict[str, Any]
 
@@ -57,8 +56,8 @@ class ClassifierMethodTemplate(dj.Lookup):
     import_func = staticmethod(dynamic_import)
     classifier_training_data_table = PlaceholderTable
 
-    def add_classifer(self, classifier_fn: str, classifier_config: Mapping,
-                      comment: str = "", skip_duplicates: bool = False, classifier_seed: int = 42) -> None:
+    def add_classifier(self, classifier_fn: str, classifier_config: Mapping,
+                       comment: str = "", skip_duplicates: bool = False, classifier_seed: int = 42) -> None:
         self.insert1(
             dict(
                 classifier_fn=classifier_fn,
@@ -88,7 +87,7 @@ class ClassifierTrainingDataTemplate(dj.Manual):
     def definition(self):
         definition = """
         # holds feature basis and training data for classifier
-        training_data_hash              :   varchar(32)     # hash of the classifier training data files
+        training_data_hash     :   varchar(32)     # hash of the classifier training data files
         ---
         project                :   enum("True", "False")     # flag whether to project data onto features anew or not
         output_path            :   varchar(255)

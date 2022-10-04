@@ -1,17 +1,16 @@
 import os
 import random
 from copy import deepcopy
-import datajoint as dj
-import numpy as np
-from matplotlib import pyplot as plt
-import h5py
 
-from djimaging.utils.data_utils import load_h5_table
+import datajoint as dj
+import h5py
+import numpy as np
+
 from djimaging.utils.alias_utils import check_shared_alias_str
 from djimaging.utils.datafile_utils import get_filename_info
+from djimaging.utils.dj_utils import PlaceholderTable
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import get_pixel_size_xy_um, load_ch0_ch1_stacks_from_h5
-from djimaging.utils.dj_utils import PlaceholderTable
 
 
 class FieldTemplate(dj.Computed):

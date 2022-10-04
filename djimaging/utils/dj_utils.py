@@ -1,7 +1,8 @@
-import datajoint as dj
 import hashlib
+from collections import OrderedDict
+from collections.abc import Iterable, Mapping
 
-from collections import OrderedDict, Iterable, Mapping
+import datajoint as dj
 
 
 class PlaceholderTable:

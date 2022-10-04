@@ -6,18 +6,19 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 
-from djimaging.utils.dj_utils import PlaceholderTable
 from djimaging.utils.alias_utils import match_file, get_field_files
+from djimaging.utils.dj_utils import PlaceholderTable
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import load_ch0_ch1_stacks_from_h5, load_ch0_ch1_stacks_from_smp, get_pixel_size_xy_um
 
 
 def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
-                        field, field_loc, condition=None, condition_loc=None):
+                        field, field_loc, condition=None, condition_loc=None, allow_raw=True):
     """Scan filesystem for file and load data. Tries to load h5 files first, but may also load raw files."""
 
     filepath = scan_for_highres_filepath(
-        folder=pre_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc, ftype='h5')
+        folder=pre_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc, ftype='h5',
+        condition=condition, condition_loc=condition_loc)
 
     if filepath is not None:
         try:
@@ -27,16 +28,18 @@ def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
             warnings.warn(f'OSError when reading file: {filepath}')
             pass
 
-    filepath = scan_for_highres_filepath(
-        folder=raw_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc-1, ftype='smp')
+    if allow_raw:
+        filepath = scan_for_highres_filepath(
+            folder=raw_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc-1, ftype='smp',
+            condition=condition, condition_loc=condition_loc)
 
-    if filepath is not None:
-        try:
-            ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_smp(filepath)
-            return filepath, ch0_stack, ch1_stack, wparams
-        except OSError:
-            warnings.warn(f'OSError when reading file: {filepath}')
-            pass
+        if filepath is not None:
+            try:
+                ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_smp(filepath)
+                return filepath, ch0_stack, ch1_stack, wparams
+            except OSError:
+                warnings.warn(f'OSError when reading file: {filepath}')
+                pass
 
     return None, None, None, None
 

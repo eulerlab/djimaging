@@ -1,8 +1,8 @@
+import warnings
 from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
-import warnings
 
 from djimaging.utils import math_utils
 from djimaging.utils.dj_utils import PlaceholderTable
