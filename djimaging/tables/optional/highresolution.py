@@ -59,6 +59,7 @@ def scan_for_highres_filepath(folder, field, field_loc, highres_alias, condition
 
 
 class HighResTemplate(dj.Computed):
+    database = ""  # hack to suppress DJ error
 
     @property
     def definition(self):
