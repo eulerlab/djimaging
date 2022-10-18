@@ -10,7 +10,7 @@ def plot_field(ch0_average, ch1_average, roi_mask=None, title='', figsize=(16, 4
     fig, axs = plt.subplots(1, 2 if roi_mask is None else 4, figsize=figsize, sharex='all', sharey='all')
     fig.suptitle(title)
 
-    extent = (0, ch0_average.shape[0], 0, ch0_average.shape[1])
+    extent = (0, ch0_average.shape[1], 0, ch0_average.shape[0])
 
     ax = axs[0]
     ax.imshow(ch0_average, origin='lower', extent=extent)
@@ -46,8 +46,7 @@ def plot_field(ch0_average, ch1_average, roi_mask=None, title='', figsize=(16, 4
 
         for roi in rois_to_plot:
             _rois_us = (rois_us == roi).astype(int) * roi
-            ax.contour(_rois_us, extent=extent, vmin=vmin, vmax=vmax,
-                       levels=[roi-1e-3], alpha=0.8, cmap='jet')
+            ax.contour(_rois_us, extent=extent, vmin=vmin, vmax=vmax, levels=[roi-1e-3], alpha=0.8, cmap='jet')
 
     plt.tight_layout()
     plt.show()

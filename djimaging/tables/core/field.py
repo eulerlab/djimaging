@@ -35,7 +35,6 @@ class FieldTemplate(dj.Computed):
             #was there a zstack in the field
             -> master
             ---
-            zstack      :tinyint    #flag marking whether field was a zstack
             zstep       :float      #size of step size in um
             """
             return definition
@@ -119,11 +118,11 @@ class FieldTemplate(dj.Computed):
             exists = len((self & key & dict(field=field)).fetch()) > 0
             if only_new and exists:
                 if verboselvl > 1:
-                    print(f"\tSkipping field {field} with files: {info['files']}")
+                    print(f"\tSkipping field `{field}` with files: {info['files']}")
                 continue
 
             if verboselvl > 0:
-                print(f"\tAdding field: {field} with files: {info['files']}")
+                print(f"\tAdding field: `{field}` with files: {info['files']}")
 
             try:
                 self.__add_field(key=key, field=field, files=info['files'], verboselvl=verboselvl)
@@ -147,24 +146,31 @@ class FieldTemplate(dj.Computed):
 
         setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
 
-        roi_mask, roi_file = load_field_roi_mask(
-            pre_data_path, files, mask_alias=mask_alias, highres_alias=highres_alias)
-
-        if verboselvl > 1:
-            print(f"\t\tUsing roi_mask from {roi_file}")
+        try:
+            roi_mask, field_file = load_field_roi_mask(
+                pre_data_path, files, mask_alias=mask_alias, highres_alias=highres_alias)
+            if verboselvl > 1:
+                print(f"\t\tUsing roi_mask from {field_file}")
+        except ValueError:
+            roi_mask = None
+            field_file = files[0]
 
         field_key, fieldinfo_key, zstack_key = load_scan_info(
-            key=key, field=field, pre_data_path=pre_data_path, file=roi_file, setupid=setupid)
+            key=key, field=field, pre_data_path=pre_data_path, file=field_file, setupid=setupid)
 
-        # subkey for adding Fields to RoiMask
-        roimask_key = deepcopy(field_key)
-        roimask_key["fromfile"] = os.path.join(pre_data_path, roi_file) if roi_mask.size > 0 else ''
-        roimask_key["roi_mask"] = roi_mask
+        if roi_mask is not None:
+            roimask_key = deepcopy(field_key)
+            roimask_key["fromfile"] = os.path.join(pre_data_path, field_file)
+            roimask_key["roi_mask"] = roi_mask
+        else:
+            roimask_key = None
 
         self.insert1(field_key, allow_direct_insert=True)
-        (self.RoiMask & field_key).insert1(roimask_key, allow_direct_insert=True)
-        (self.Zstack & field_key).insert1(zstack_key, allow_direct_insert=True)
         (self.FieldInfo & field_key).insert1(fieldinfo_key, allow_direct_insert=True)
+        if roimask_key is not None:
+            (self.RoiMask & field_key).insert1(roimask_key, allow_direct_insert=True)
+        if zstack_key is not None:
+            (self.Zstack & field_key).insert1(zstack_key, allow_direct_insert=True)
 
     def plot1(self, key=None, figsize=(16, 4)):
         if key is not None:
@@ -234,13 +240,15 @@ def load_field_roi_mask(pre_data_path, files, mask_alias='', highres_alias=''):
                     continue
                 elif len(roi_keys) == 1:
                     roi_mask = np.copy(h5_file[roi_keys[0]])
+                    if roi_mask.size == 0:
+                        continue
                     return roi_mask, file
                 else:
                     raise KeyError(f'Multiple ROI masks found in {filepath}')
         except:
             pass
     else:
-        raise ValueError(f'No ROI mask found in any of the {pre_data_path}: {files}')
+        raise ValueError(f'No ROI mask found in any file in {pre_data_path}: {files}')
 
 
 def load_scan_info(key, field, pre_data_path, file, setupid):
@@ -276,8 +284,10 @@ def load_scan_info(key, field, pre_data_path, file, setupid):
     fieldinfo_key['ch1_average'] = np.mean(ch1_stack, 2)
 
     # subkey for adding Fields to ZStack
-    zstack_key = deepcopy(field_key)
-    zstack_key["zstack"] = 1 if wparams['user_scantype'] == 11 else 0
-    zstack_key["zstep"] = wparams['zstep_um']
+    if wparams['user_scantype'] == 11:
+        zstack_key = deepcopy(field_key)
+        zstack_key["zstep"] = wparams['zstep_um']
+    else:
+        zstack_key = None
 
     return field_key, fieldinfo_key, zstack_key

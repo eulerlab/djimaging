@@ -50,6 +50,7 @@ class ExperimentTemplate(dj.Computed):
         """Scan filesystem for new experiments and add them to the database.
         :param restrictions: Restriction to users table, e.g. to scan only for specific user(s)
         :param verboselvl: Print (0) no / (1) only new data / (2) all data information
+        :param suppress_errors: Stop on errors or only print?
         """
 
         if restrictions is None:
@@ -70,9 +71,6 @@ class ExperimentTemplate(dj.Computed):
     def __add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir,
                           only_new, restrictions, verboselvl, suppress_errors):
 
-        if restrictions is None:
-            restrictions = dict()
-
         os_walk_output = find_header_files(data_dir)
 
         for header_path in os_walk_output:
@@ -86,11 +84,7 @@ class ExperimentTemplate(dj.Computed):
                 else:
                     raise e
 
-    def __add_experiment(self, key, header_path, pre_data_dir, raw_data_dir,
-                         only_new, restrictions, verboselvl):
-
-        if restrictions is None:
-            restrictions = dict()
+    def __add_experiment(self, key, header_path, pre_data_dir, raw_data_dir, only_new, restrictions, verboselvl):
 
         if verboselvl > 0:
             print('\theader_path:', header_path)
@@ -111,7 +105,13 @@ class ExperimentTemplate(dj.Computed):
 
         primary_key = deepcopy(key)
 
-        primary_key["date"] = datetime.strptime(header_path.split("/")[-2], '%Y%m%d')
+        try:
+            primary_key["date"] = datetime.strptime(header_path.split("/")[-2], '%Y%m%d')
+        except ValueError:
+            if verboselvl >= 0:
+                print(f'WARNING: Failed to convert `{header_path.split("/")[-2]}` to date. Skip this folder.')
+            return
+
         primary_key["exp_num"] = int(header_path.split("/")[-1])
 
         if only_new:
