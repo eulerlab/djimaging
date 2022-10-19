@@ -107,7 +107,7 @@ class RelativeFieldLocationTemplate(dj.Computed):
         od_key.pop('field', None)
 
         odx, ody, odz = (self.opticdisk_table() & od_key).fetch1("odx", "ody", "odz")
-        absx, absy, absz = (self.field_table.FieldInfo() & key).fetch1('absx', 'absy', 'absz')
+        absx, absy, absz = (self.field_table() & key).fetch1('absx', 'absy', 'absz')
 
         loc_key = key.copy()
         loc_key["relx"] = absx - odx

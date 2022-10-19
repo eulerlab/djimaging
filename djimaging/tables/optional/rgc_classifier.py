@@ -220,10 +220,13 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return (self.classifier_training_data_table() * self.classifier_table() *
-                self.field_table() * self.detrend_params_table() * self.cell_filter_parameter_table()) & \
-               (self.snippets_table() & f"stim_name = '{self._stim_name_chirp}'") & \
-               (self.snippets_table() & f"stim_name = '{self._stim_name_bar}'")
+        try:
+            return (self.classifier_training_data_table() * self.classifier_table() *
+                    self.field_table() * self.detrend_params_table() * self.cell_filter_parameter_table()) & \
+                   (self.snippets_table() & f"stim_name = '{self._stim_name_chirp}'") & \
+                   (self.snippets_table() & f"stim_name = '{self._stim_name_bar}'")
+        except TypeError:
+            pass
 
     @property
     def current_model_key(self):

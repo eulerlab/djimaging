@@ -5,7 +5,7 @@ import datajoint as dj
 import numpy as np
 
 from djimaging.utils import math_utils
-from djimaging.utils.dj_utils import PlaceholderTable
+from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
 
 try:
     import rfest
@@ -81,8 +81,11 @@ class ReceptiveFieldTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.receptivefieldparams_table() * self.preprocesstraces_table() & \
-               (self.stimulus_table() & "stim_family = 'noise'")
+        try:
+            return self.receptivefieldparams_table() * self.preprocesstraces_table() & \
+                   (self.stimulus_table() & "stim_family = 'noise'")
+        except TypeError:
+            pass
 
     class DataSet(dj.Part):
         @property
@@ -136,7 +139,9 @@ class ReceptiveFieldTemplate(dj.Computed):
             rf_dataset_key['mse'] = rf_pred[f'mse_{k}']
             self.DataSet().insert1(rf_dataset_key)
 
-    def plot1(self, key):
+    def plot1(self, key=None):
+        key = get_plot_key(table=self, key=key)
+
         from matplotlib import pyplot as plt
 
         data = (self * self.DataSet() & key).fetch()
@@ -163,7 +168,7 @@ def compute_receptive_field(trace, tracetime, stim, stimtime, frac_train, frac_d
     assert trace.ndim == 1
     assert tracetime.ndim == 1
     assert trace.size == tracetime.size
-    assert stim.shape[0] == stimtime.shape[0]
+    assert stim.shape[0] == stimtime.shape[0], f"{stim.shape} vs. {stimtime.shape}"
 
     kind = kind.lower()
 

@@ -1,5 +1,4 @@
 import os
-import random
 from copy import deepcopy
 
 import datajoint as dj
@@ -8,9 +7,9 @@ import numpy as np
 
 from djimaging.utils.alias_utils import check_shared_alias_str
 from djimaging.utils.datafile_utils import get_filename_info
-from djimaging.utils.dj_utils import PlaceholderTable
+from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm_utils import get_pixel_size_xy_um, load_ch0_ch1_stacks_from_h5
+from djimaging.utils.scanm_utils import get_pixel_size_xy_um, load_ch0_ch1_stacks_from_h5, get_npixartifact
 
 
 class FieldTemplate(dj.Computed):
@@ -22,6 +21,20 @@ class FieldTemplate(dj.Computed):
         # Recording fields
         -> self.experiment_table
         field   :varchar(255)          # string identifying files corresponding to field
+        ---
+        fromfile: varchar(255)  # info extracted from which file?
+        absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
+        absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
+        absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
+        npixartifact : int unsigned # Number of pixel with light artifact 
+        nxpix: int unsigned  # number of pixels in x
+        nypix: int unsigned  # number of pixels in y
+        nzpix: int unsigned  # number of pixels in z
+        nxpix_offset: int unsigned  # number of offset pixels in x
+        nxpix_retrace: int unsigned  # number of retrace pixels in x
+        pixel_size_um :float  # width / height of a pixel in um
+        ch0_average :longblob # Stack median of channel 0
+        ch1_average :longblob # Stack median of channel 1
         """
         return definition
 
@@ -48,28 +61,6 @@ class FieldTemplate(dj.Computed):
             ---
             fromfile    :varchar(255)   # from which file the roi mask was extracted from
             roi_mask    :longblob       # roi mask for the recording field
-            """
-            return definition
-
-    class FieldInfo(dj.Part):
-        @property
-        def definition(self):
-            definition = """
-            # Field information
-            -> master
-            ---
-            fromfile: varchar(255)  # info extracted from which file?
-            absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
-            absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
-            absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
-            nxpix: int  # number of pixels in x
-            nypix: int  # number of pixels in y
-            nzpix: int  # number of pixels in z
-            nxpix_offset: int  # number of offset pixels in x
-            nxpix_retrace: int  # number of retrace pixels in x
-            pixel_size_um :float  # width / height of a pixel in um
-            ch0_average :longblob # Stack median of channel 0
-            ch1_average :longblob # Stack median of channel 1
             """
             return definition
 
@@ -146,43 +137,24 @@ class FieldTemplate(dj.Computed):
 
         setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
 
-        try:
-            roi_mask, field_file = load_field_roi_mask(
-                pre_data_path, files, mask_alias=mask_alias, highres_alias=highres_alias)
-            if verboselvl > 1:
-                print(f"\t\tUsing roi_mask from {field_file}")
-        except ValueError:
-            roi_mask = None
-            field_file = files[0]
-
-        field_key, fieldinfo_key, zstack_key = load_scan_info(
-            key=key, field=field, pre_data_path=pre_data_path, file=field_file, setupid=setupid)
-
-        if roi_mask is not None:
-            roimask_key = deepcopy(field_key)
-            roimask_key["fromfile"] = os.path.join(pre_data_path, field_file)
-            roimask_key["roi_mask"] = roi_mask
-        else:
-            roimask_key = None
+        field_key, roimask_key, zstack_key = load_scan_info(
+            key=key, field=field, pre_data_path=pre_data_path, files=files,
+            mask_alias=mask_alias, highres_alias=highres_alias, setupid=setupid, verboselvl=verboselvl)
 
         self.insert1(field_key, allow_direct_insert=True)
-        (self.FieldInfo & field_key).insert1(fieldinfo_key, allow_direct_insert=True)
         if roimask_key is not None:
             (self.RoiMask & field_key).insert1(roimask_key, allow_direct_insert=True)
         if zstack_key is not None:
             (self.Zstack & field_key).insert1(zstack_key, allow_direct_insert=True)
 
     def plot1(self, key=None, figsize=(16, 4)):
-        if key is not None:
-            key = {k: v for k, v in key.items() if k in self.primary_key}
-        else:
-            key = random.choice(self.fetch(*self.primary_key, as_dict=True))
+        key = get_plot_key(table=self, key=key)
 
-        ch0_average = (self.FieldInfo() & key).fetch1("ch0_average").T
-        ch1_average = (self.FieldInfo() & key).fetch1("ch1_average").T
-        roi_mask = (self.RoiMask() & key).fetch1("roi_mask").T
+        ch0_average = (self & key).fetch1("ch0_average")
+        ch1_average = (self & key).fetch1("ch1_average")
+        roi_masks = (self.RoiMask() & key).fetch("roi_mask")
 
-        plot_field(ch0_average, ch1_average, roi_mask, title=key, figsize=figsize)
+        plot_field(ch0_average, ch1_average, roi_masks[0] if len(roi_masks) == 1 else None, title=key, figsize=figsize)
 
 
 def scan_fields_and_files(pre_data_path: str, user_dict: dict, verbose: bool = False) -> dict:
@@ -251,7 +223,16 @@ def load_field_roi_mask(pre_data_path, files, mask_alias='', highres_alias=''):
         raise ValueError(f'No ROI mask found in any file in {pre_data_path}: {files}')
 
 
-def load_scan_info(key, field, pre_data_path, file, setupid):
+def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl=0):
+
+    try:
+        roi_mask, file = load_field_roi_mask(
+            pre_data_path, files, mask_alias=mask_alias, highres_alias=highres_alias)
+        if verboselvl > 1:
+            print(f"\t\tUsing roi_mask from {file}")
+    except ValueError:
+        roi_mask = None
+        file = files[0]
 
     filepath = os.path.join(pre_data_path, file)
 
@@ -263,31 +244,40 @@ def load_scan_info(key, field, pre_data_path, file, setupid):
     nzpix = wparams["user_dzpix"]
 
     pixel_size_um = get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nxpix)
+    npixartifact = get_npixartifact(setupid=setupid)
 
     # keys
     field_key = deepcopy(key)
     field_key["field"] = field
 
-    # subkey for fieldinfo
-    fieldinfo_key = deepcopy(field_key)
-    fieldinfo_key["fromfile"] = filepath
-    fieldinfo_key["absx"] = wparams['xcoord_um']
-    fieldinfo_key["absy"] = wparams['ycoord_um']
-    fieldinfo_key["absz"] = wparams['zcoord_um']
-    fieldinfo_key["nypix"] = nypix
-    fieldinfo_key["nxpix"] = nxpix
-    fieldinfo_key["nzpix"] = nzpix
-    fieldinfo_key["nxpix_offset"] = wparams["user_nxpixlineoffs"]
-    fieldinfo_key["nxpix_retrace"] = wparams["user_npixretrace"]
-    fieldinfo_key["pixel_size_um"] = pixel_size_um
-    fieldinfo_key['ch0_average'] = np.mean(ch0_stack, 2)
-    fieldinfo_key['ch1_average'] = np.mean(ch1_stack, 2)
+    field_key["fromfile"] = filepath
+    field_key["absx"] = wparams['xcoord_um']
+    field_key["absy"] = wparams['ycoord_um']
+    field_key["absz"] = wparams['zcoord_um']
+    field_key["npixartifact"] = npixartifact
+    field_key["nxpix"] = nxpix
+    field_key["nypix"] = nypix
+    field_key["nzpix"] = nzpix
+    field_key["nxpix_offset"] = wparams["user_nxpixlineoffs"]
+    field_key["nxpix_retrace"] = wparams["user_npixretrace"]
+    field_key["pixel_size_um"] = pixel_size_um
+    field_key['ch0_average'] = np.mean(ch0_stack, 2)
+    field_key['ch1_average'] = np.mean(ch1_stack, 2)
 
     # subkey for adding Fields to ZStack
     if wparams['user_scantype'] == 11:
-        zstack_key = deepcopy(field_key)
+        zstack_key = deepcopy(key)
+        zstack_key["field"] = field
         zstack_key["zstep"] = wparams['zstep_um']
     else:
         zstack_key = None
 
-    return field_key, fieldinfo_key, zstack_key
+    if roi_mask is not None:
+        roimask_key = deepcopy(key)
+        roimask_key["field"] = field
+        roimask_key["fromfile"] = os.path.join(pre_data_path, file)
+        roimask_key["roi_mask"] = roi_mask
+    else:
+        roimask_key = None
+
+    return field_key, roimask_key, zstack_key

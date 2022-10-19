@@ -24,14 +24,17 @@ class ChirpQITemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
+        try:
+            return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
+        except TypeError:
+            pass
 
     def make(self, key):
-        snippets = (self.snippets_table() & key).fetch1('snippets')
-        assert snippets.ndim == 2
-        chirp_qi = np.var(np.mean(snippets, axis=1)) / np.mean(np.var(snippets, axis=0))
-        min_qi = 1 / snippets.shape[1]
-        self.insert1(dict(key, chirp_qi=chirp_qi, min_qi=min_qi))
+            snippets = (self.snippets_table() & key).fetch1('snippets')
+            assert snippets.ndim == 2
+            chirp_qi = np.var(np.mean(snippets, axis=1)) / np.mean(np.var(snippets, axis=0))
+            min_qi = 1 / snippets.shape[1]
+            self.insert1(dict(key, chirp_qi=chirp_qi, min_qi=min_qi))
 
 
 class ChirpFeaturesTemplate(dj.Computed):
@@ -56,7 +59,10 @@ class ChirpFeaturesTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
+        try:
+            return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
+        except TypeError:
+            pass
 
     def make(self, key):
         # TODO: Should this depend on pres? Triggertimes are also in snippets and sf can be derived from times

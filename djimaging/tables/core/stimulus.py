@@ -38,17 +38,17 @@ class StimulusTemplate(dj.Manual):
                      skip_duplicates: bool = False, unique_alias: bool = True) -> None:
         """
         Add stimulus to database
-        :param stim_name: See table defintion.
-        :param alias: See table defintion.
-        :param stim_family: See table defintion.
-        :param framerate: See table defintion.
-        :param isrepeated: See table defintion.
-        :param ntrigger_rep: See table defintion.
-        :param stim_path: See table defintion.
-        :param commit_id: See table defintion.
-        :param trial_info: See table defintion.
-        :param stim_trace: See table defintion.
-        :param stim_dict: See table defintion.
+        :param stim_name: See table definition.
+        :param alias: See table definition.
+        :param stim_family: See table definition.
+        :param framerate: See table definition.
+        :param isrepeated: See table definition.
+        :param ntrigger_rep: See table definition.
+        :param stim_path: See table definition.
+        :param commit_id: See table definition.
+        :param trial_info: See table definition.
+        :param stim_trace: See table definition.
+        :param stim_dict: See table definition.
         :param skip_duplicates: Silently skip duplicates.
         :param unique_alias: Check if any of the aliases is already in use.
         """

@@ -1,16 +1,13 @@
 import os
-import random
 from copy import deepcopy
 
 import datajoint as dj
-import h5py
 import numpy as np
 
 from djimaging.utils.alias_utils import get_field_files
-from djimaging.utils.data_utils import extract_h5_table
-from djimaging.utils.dj_utils import PlaceholderTable
+from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm_utils import extract_ch0_ch1_stacks_from_h5
+from djimaging.utils.scanm_utils import get_triggers_and_data
 
 
 class PresentationTemplate(dj.Computed):
@@ -36,6 +33,13 @@ class PresentationTemplate(dj.Computed):
     stimulus_table = PlaceholderTable
     userinfo_table = PlaceholderTable
     experiment_table = PlaceholderTable
+
+    @property
+    def key_source(self):
+        try:
+            return self.field_table.RoiMask() * self.stimulus_table()
+        except TypeError:
+            pass
 
     class ScanInfo(dj.Part):
         @property
@@ -156,38 +160,26 @@ class PresentationTemplate(dj.Computed):
                     key=primary_key, filepath=os.path.join(pre_data_path, h5_file))
 
     def __add_presentation(self, key, filepath):
+
+        triggertimes, triggervalues, ch0_stack, ch1_stack, wparams = get_triggers_and_data(filepath)
+
+        isrepeated, ntrigger_rep = (self.stimulus_table() & key).fetch1("isrepeated", "ntrigger_rep")
+
+        if isrepeated == 0:
+            assert triggertimes.size == ntrigger_rep,\
+                f'Found {triggertimes.size} triggers, expected {ntrigger_rep}: key={key}.'
+        else:
+            assert triggertimes.size >= ntrigger_rep,\
+                f'Found {triggertimes.size} triggers, expected at least {ntrigger_rep} for single rep: key={key}'
+            if triggertimes.size % ntrigger_rep != 0:
+                print(f'WARNING: Found {triggertimes.size} triggers, expected {ntrigger_rep} per rep: key={key}')
+
         pres_key = deepcopy(key)
         pres_key["h5_header"] = filepath
-
-        with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-            key_triggertimes = [k for k in h5_file.keys() if k.lower() == 'triggertimes']
-
-            if len(key_triggertimes) == 1:
-                pres_key["triggertimes"] = h5_file[key_triggertimes[0]][()]
-            elif len(key_triggertimes) == 0:
-                pres_key["triggertimes"] = np.zeros(0)
-            else:
-                raise ValueError('Multiple triggertimes found')
-
-            key_triggervalues = [k for k in h5_file.keys() if k.lower() == 'triggervalues']
-
-            if len(key_triggervalues) == 1:
-                pres_key["triggervalues"] = h5_file[key_triggervalues[0]][()]
-                assert len(pres_key["triggertimes"]) == len(pres_key["triggervalues"]), 'Trigger mismatch'
-            elif len(key_triggervalues) == 0:
-                pres_key["triggervalues"] = np.zeros(0)
-            else:
-                raise ValueError('Multiple triggervalues found')
-
-            os_params = dict()
-            if 'OS_Parameters' in h5_file.keys():
-                os_params.update(extract_h5_table('OS_Parameters', open_file=h5_file, lower_keys=True))
-
-            ch0_stack, ch1_stack, wparams = \
-                extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name='wDataCh0', ch1_name='wDataCh1')
-
-            pres_key["ch0_average"] = np.mean(ch0_stack, 2)
-            pres_key["ch1_average"] = np.mean(ch1_stack, 2)
+        pres_key["triggertimes"] = triggertimes
+        pres_key["triggervalues"] = triggervalues
+        pres_key["ch0_average"] = np.mean(ch0_stack, 2)
+        pres_key["ch1_average"] = np.mean(ch1_stack, 2)
 
         # extract params for scaninfo
         scaninfo_key = deepcopy(key)
@@ -207,13 +199,10 @@ class PresentationTemplate(dj.Computed):
         (self.ScanInfo() & key).insert1(scaninfo_key)
 
     def plot1(self, key=None, figsize=(16, 4)):
-        if key is not None:
-            key = {k: v for k, v in key.items() if k in self.primary_key}
-        else:
-            key = random.choice(self.fetch(*self.primary_key, as_dict=True))
+        key = get_plot_key(table=self, key=key)
 
-        ch0_average = (self & key).fetch1("ch0_average").T
-        ch1_average = (self & key).fetch1("ch1_average").T
-        roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask").T
+        ch0_average = (self & key).fetch1("ch0_average")
+        ch1_average = (self & key).fetch1("ch1_average")
+        roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask")
 
         plot_field(ch0_average, ch1_average, roi_mask, title=key, figsize=figsize)

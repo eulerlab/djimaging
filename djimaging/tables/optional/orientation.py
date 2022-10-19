@@ -5,7 +5,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy import stats
 
-from djimaging.utils.dj_utils import PlaceholderTable
+from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
 
 
 def quality_index_ds(raw_sorted_resp_mat):
@@ -246,7 +246,10 @@ class OsDsIndexesTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.snippets_table() & (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
+        try:
+            return self.snippets_table() & (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
+        except TypeError:
+            pass
 
     def make(self, key):
         dir_order = (self.stimulus_table() & key).fetch1('trial_info')
@@ -266,8 +269,9 @@ class OsDsIndexesTemplate(dj.Computed):
                           surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
                           avg_sorted_resp=avg_sorted_responses))
 
-    def plot1(self, key):
-        key = {k: v for k, v in key.items() if k in self.primary_key}
+    def plot1(self, key=None):
+        key = get_plot_key(table=self, key=key)
+
         dir_order = (self.stimulus_table() & key).fetch1('trial_info')
         sorted_directions_rad = np.deg2rad(np.sort(dir_order))
 

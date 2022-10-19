@@ -3,6 +3,8 @@ from copy import deepcopy
 
 import datajoint as dj
 
+from djimaging.utils.dj_utils import get_plot_key
+
 
 class UserInfoTemplate(dj.Manual):
     database = ""  # hack to suppress DJ error
@@ -61,13 +63,15 @@ class UserInfoTemplate(dj.Manual):
                 print(f"Information for `{userdict['experimenter']}` already uploaded.")
                 print("If you want to change the user entry, delete the existing one first and upload the user again.")
 
-    def plot1(self, key: dict, show_pre: bool = True, show_raw: bool = False, show_header: bool = True) -> None:
+    def plot1(self, key: dict = None, show_pre: bool = True, show_raw: bool = False, show_header: bool = True) -> None:
         """Plot files available for this user
         :param key: Key to plot.
         :param show_pre: Show files in preprocessed data directory?
         :param show_raw: Show files in raw data directory?
         :param show_header: Show header file names?
         """
+        key = get_plot_key(table=self, key=key)
+
         from djimaging.utils import datafile_utils
         data_dir = (self & key).fetch1('data_dir')
 

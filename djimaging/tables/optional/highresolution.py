@@ -1,5 +1,4 @@
 import os
-import random
 import warnings
 from copy import deepcopy
 
@@ -7,7 +6,7 @@ import datajoint as dj
 import numpy as np
 
 from djimaging.utils.alias_utils import match_file, get_field_files
-from djimaging.utils.dj_utils import PlaceholderTable
+from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import load_ch0_ch1_stacks_from_h5, load_ch0_ch1_stacks_from_smp, get_pixel_size_xy_um
 
@@ -139,12 +138,9 @@ class HighResTemplate(dj.Computed):
         self.insert1(highres_key)
 
     def plot1(self, key=None, figsize=(8, 4)):
-        if key is not None:
-            key = {k: v for k, v in key.items() if k in self.primary_key}
-        else:
-            key = random.choice(self.fetch(*self.primary_key, as_dict=True))
+        key = get_plot_key(table=self, key=key)
 
-        ch0_average = (self & key).fetch1("ch0_average").T
-        ch1_average = (self & key).fetch1("ch1_average").T
+        ch0_average = (self & key).fetch1("ch0_average")
+        ch1_average = (self & key).fetch1("ch1_average")
 
         plot_field(ch0_average, ch1_average, roi_mask=None, title=key, figsize=figsize)

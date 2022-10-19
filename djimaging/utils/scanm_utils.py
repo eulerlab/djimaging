@@ -5,6 +5,22 @@ from djimaging.utils.data_utils import extract_h5_table
 from djimaging.utils.misc_utils import CapturePrints
 
 
+def get_npixartifact(setupid):
+    setupid = int(setupid)
+    assert setupid in [1, 2, 3], setupid
+
+    if setupid == 1:
+        npixartifact = 1
+    elif setupid == 3:
+        npixartifact = 3
+    elif setupid == 2:
+        npixartifact = 4
+    else:
+        npixartifact = 0
+
+    return npixartifact
+
+
 def get_pixel_size_xy_um(setupid: int, npix: int, zoom: float) -> float:
     """Get width / height of a pixel in um"""
     setupid = int(setupid)
@@ -51,9 +67,8 @@ def load_traces_from_h5_file(filepath, roi_ids):
         else:
             raise ValueError(f'Traces not found in {filepath}')
 
+    assert np.all(roi_ids >= 1)
     assert traces.shape == traces_times.shape, f'Inconsistent traces and tracetimes in {filepath}'
-    assert np.all(np.isfinite(traces)), f'NaN traces in {filepath}'
-    assert np.all(np.isfinite(traces_times)), f'NaN tracetimess in {filepath}'
 
     roi2trace = dict()
 
@@ -63,17 +78,21 @@ def load_traces_from_h5_file(filepath, roi_ids):
         if traces.ndim == 3 and idx < traces.shape[-1]:
             trace = traces[:, :, idx]
             trace_times = traces_times[:, :, idx]
-            trace_flag = 1
+            valid_flag = 1
         elif traces.ndim == 2 and idx < traces.shape[-1]:
             trace = traces[:, idx]
             trace_times = traces_times[:, idx]
-            trace_flag = 1
+            valid_flag = 1
         else:
-            trace_flag = 0
+            valid_flag = 0
             trace = np.zeros(0)
             trace_times = np.zeros(0)
 
-        roi2trace[roi_id] = dict(trace=trace, trace_times=trace_times, trace_flag=trace_flag)
+        if np.any(~np.isfinite(trace)) or np.any(~np.isfinite(trace_times)):
+            print(f'WARNING: NaN trace or tracetime in {filepath} for ROI{roi_id}.')
+            valid_flag = 0
+
+        roi2trace[roi_id] = dict(trace=trace, trace_times=trace_times, valid_flag=valid_flag)
 
     return roi2trace
 
@@ -171,3 +190,34 @@ def load_ch0_ch1_stacks_from_smp(filepath):
     wparams['user_nxpixlineoffs'] = scmf.dxOffs_pix
 
     return ch0_stack, ch1_stack, wparams
+
+
+def get_triggers_and_data(filepath):
+    with h5py.File(filepath, 'r', driver="stdio") as h5_file:
+        key_triggertimes = [k for k in h5_file.keys() if k.lower() == 'triggertimes']
+
+        if len(key_triggertimes) == 1:
+            triggertimes = h5_file[key_triggertimes[0]][()]
+        elif len(key_triggertimes) == 0:
+            triggertimes = np.zeros(0)
+        else:
+            raise ValueError('Multiple triggertimes found')
+
+        key_triggervalues = [k for k in h5_file.keys() if k.lower() == 'triggervalues']
+
+        if len(key_triggervalues) == 1:
+            triggervalues = h5_file[key_triggervalues[0]][()]
+            assert len(triggertimes) == len(triggervalues), 'Trigger mismatch'
+        elif len(key_triggervalues) == 0:
+            triggervalues = np.zeros(0)
+        else:
+            raise ValueError('Multiple triggervalues found')
+
+        os_params = dict()
+        if 'OS_Parameters' in h5_file.keys():
+            os_params.update(extract_h5_table('OS_Parameters', open_file=h5_file, lower_keys=True))
+
+        ch0_stack, ch1_stack, wparams = \
+            extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name='wDataCh0', ch1_name='wDataCh1')
+
+    return triggertimes, triggervalues, ch0_stack, ch1_stack, wparams

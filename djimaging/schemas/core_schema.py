@@ -32,9 +32,6 @@ class Field(field.FieldTemplate):
     userinfo_table = UserInfo
     experiment_table = Experiment
 
-    class FieldInfo(field.FieldTemplate.FieldInfo):
-        pass
-
     class RoiMask(field.FieldTemplate.RoiMask):
         pass
 

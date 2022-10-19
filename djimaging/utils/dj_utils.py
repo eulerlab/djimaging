@@ -1,4 +1,5 @@
 import hashlib
+import random
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 
@@ -14,19 +15,15 @@ class PlaceholderTable:
 
     @classmethod
     def ExpInfo(cls):
-        pass
+        return PlaceholderTable()
 
     @classmethod
     def RoiMask(cls):
-        pass
-
-    @classmethod
-    def FieldInfo(cls):
-        pass
+        return PlaceholderTable()
 
     @classmethod
     def ScanInfo(cls):
-        pass
+        return PlaceholderTable()
 
     def fetch1(self, *args, **kwargs):
         pass
@@ -107,3 +104,11 @@ def make_hash(obj: object) -> str:
         hashed.update(str(obj).encode())
 
     return hashed.hexdigest()
+
+
+def get_plot_key(table, key):
+    if key is not None:
+        key = {k: v for k, v in key.items() if k in table.primary_key}
+    else:
+        key = random.choice(table.fetch(*table.primary_key, as_dict=True))
+    return key
