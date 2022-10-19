@@ -90,5 +90,8 @@ def plot_trace_and_trigger(time, trace, triggertimes, trace_norm=None, title='',
 
     if trace_norm is not None:
         tax = ax.twinx()
-        tax.plot(time, trace_norm)
+        tax.plot(time, trace_norm, ':')
+        tax.vlines(triggertimes,
+                   np.min(trace_norm) - 0.1 * (np.max(trace_norm) - np.min(trace_norm)), np.min(trace_norm),
+                   color='r', label='trigger', ls=':')
         tax.set(ylabel='normalized')
