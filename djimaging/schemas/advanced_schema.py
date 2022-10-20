@@ -1,35 +1,33 @@
-from djimaging.schemas.core_schema import schema, Stimulus, Field, Experiment, Presentation, Snippets, UserInfo, \
-    Traces, PreprocessTraces
-from djimaging.tables.optional import highresolution
-from djimaging.tables.optional import location, chirp, orientation, receptivefield
+from djimaging.schemas.core_schema import *
+from djimaging.tables.optional import *
 
 
 @schema
-class OpticDisk(location.OpticDiskTemplate):
-    experiment_table = Experiment
+class OpticDisk(OpticDiskTemplate):
     userinfo_table = UserInfo
+    experiment_table = Experiment
 
 
 @schema
-class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
+class RelativeFieldLocation(RelativeFieldLocationTemplate):
     field_table = Field
     opticdisk_table = OpticDisk
 
 
 @schema
-class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
+class RetinalFieldLocation(RetinalFieldLocationTemplate):
     relativefieldlocalation_table = RelativeFieldLocation
     expinfo_table = Experiment.ExpInfo
 
 
 @schema
-class ChirpQI(chirp.ChirpQITemplate):
+class ChirpQI(ChirpQITemplate):
     stimulus_table = Stimulus
     snippets_table = Snippets
 
 
 @schema
-class ChirpFeatures(chirp.ChirpFeaturesTemplate):
+class ChirpFeatures(ChirpFeaturesTemplate):
     stimulus_table = Stimulus
     snippets_table = Snippets
     presentation_table = Presentation

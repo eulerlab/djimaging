@@ -206,7 +206,8 @@ def get_sets(stim, stimtime, trace, tracetime, frac_train=1., frac_dev=0., fupsa
     if (dt_max_diff / dt) > 0.1 or fupsample > 1:  # No large difference between dts
         tracetime, trace = resample_trace(tracetime=tracetime, trace=trace, dt=dt/fupsample)
 
-    X, y, dt = rfest.utils.upsample_data(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime, gradient=gradient)
+    X, y, dt = rfest.utils.upsample_data(stim=stim, stimtime=stimtime, trace=trace,
+                                         tracetime=tracetime, gradient=gradient)
 
     if norm_stim:
         X = math_utils.normalize_zscore(X)

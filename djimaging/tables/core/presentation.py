@@ -22,6 +22,7 @@ class PresentationTemplate(dj.Computed):
         condition             :varchar(255)     # condition (pharmacological or other)
         ---
         h5_header             :varchar(255)     # path to h5 file
+        trigger_flag          :tinyint unsigned # Are triggers as expected (1) or not (0)?
         triggertimes          :longblob         # triggertimes in each presentation
         triggervalues         :longblob         # values of the recorded triggers
         ch0_average           :longblob         # Stack median of channel 0
@@ -166,16 +167,16 @@ class PresentationTemplate(dj.Computed):
         isrepeated, ntrigger_rep = (self.stimulus_table() & key).fetch1("isrepeated", "ntrigger_rep")
 
         if isrepeated == 0:
-            assert triggertimes.size == ntrigger_rep,\
-                f'Found {triggertimes.size} triggers, expected {ntrigger_rep}: key={key}.'
+            trigger_flag = triggertimes.size == ntrigger_rep
         else:
-            assert triggertimes.size >= ntrigger_rep,\
-                f'Found {triggertimes.size} triggers, expected at least {ntrigger_rep} for single rep: key={key}'
-            if triggertimes.size % ntrigger_rep != 0:
-                print(f'WARNING: Found {triggertimes.size} triggers, expected {ntrigger_rep} per rep: key={key}')
+            trigger_flag = triggertimes.size % ntrigger_rep == 0
+
+        if trigger_flag == 0:
+            print(f'WARNING: Found {triggertimes.size} triggers, expected {ntrigger_rep} (per rep): key={key}.')
 
         pres_key = deepcopy(key)
         pres_key["h5_header"] = filepath
+        pres_key["trigger_flag"] = int(trigger_flag)
         pres_key["triggertimes"] = triggertimes
         pres_key["triggervalues"] = triggervalues
         pres_key["ch0_average"] = np.mean(ch0_stack, 2)

@@ -54,7 +54,6 @@ def plot_field(ch0_average, ch1_average, roi_mask=None, title='', figsize=(16, 4
 
 
 def plot_field_and_traces(ch0_average, ch1_average, roi_mask, title='', figsize=(16, 8), highlight_roi=None):
-
     fig = plt.figure(figsize=figsize)
     field_axs = [
         plt.subplot2grid((2, 4), (0, 0)),
@@ -79,7 +78,7 @@ def plot_trace_and_trigger(time, trace, triggertimes, trace_norm=None, title='',
     title = str(title)
 
     if '\n' not in title and len(title) > 50:
-        title = title[:len(title)//2] + '\n' + title[len(title)//2:]
+        title = title[:len(title) // 2] + '\n' + title[len(title) // 2:]
 
     ax.set(title=title)
     ax.plot(time, trace)
@@ -95,3 +94,32 @@ def plot_trace_and_trigger(time, trace, triggertimes, trace_norm=None, title='',
                    np.min(trace_norm) - 0.1 * (np.max(trace_norm) - np.min(trace_norm)), np.min(trace_norm),
                    color='r', label='trigger', ls=':')
         tax.set(ylabel='normalized')
+
+
+def plot_srf(srf, ax=None, vabsmax=None, pixelsize=None):
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+    if vabsmax is None:
+        vabsmax = np.max(np.abs(srf))
+
+    if pixelsize is not None:
+        extent = np.array([-srf.shape[1] / 2., srf.shape[1] / 2., -srf.shape[0] / 2., srf.shape[0] / 2.]) * pixelsize
+    else:
+        extent = None
+
+    ax.set(title='sRF')
+    im = ax.imshow(srf.T, vmin=-vabsmax, vmax=vabsmax, cmap='bwr', origin='lower', extent=extent)
+    plt.colorbar(im, ax=ax)
+
+    return ax
+
+
+def plot_trf(trf, ax=None):
+    # TODO: plot actual time
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+
+    ax.set(title='tRF')
+    ax.plot(trf)
+
+    return ax

@@ -5,7 +5,8 @@ from djimaging.utils import math_utils
 from djimaging.utils.dj_utils import PlaceholderTable
 
 
-class RoiBrightnessTemaplte(dj.Computed):
+class RoiBrightnessTemplate(dj.Computed):
+    database = ""  # hack to suppress DJ error
 
     @property
     def definition(self):

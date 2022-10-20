@@ -20,8 +20,8 @@ class TracesTemplate(dj.Computed):
         ---
         trace          :longblob              # array of raw trace
         trace_times    :longblob              # numerical array of trace times
-        trace_flag     :tinyint unsigned      # flag if values in trace are correct(1) or not (0)
-        trigger_flag   :tinyint unsigned      # flag if triggertimes aren't outside tracetimes
+        trace_flag     :tinyint unsigned      # Are values in trace correct (1) or not (0)?
+        trigger_flag   :tinyint unsigned      # Are triggertimes inside trace_times (1) or not (0)?
         """
         return definition
 
