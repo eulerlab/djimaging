@@ -210,9 +210,57 @@ class SplitRFTemplate(dj.Computed):
         plt.show()
 
 
-class FitGauss2DRFTemplate(dj.Computed):
+class Fit2DRFBaseTemplate(dj.Computed):
     database = ""  # hack to suppress DJ error
 
+    @property
+    def definition(self):
+        definition = """
+        -> self.split_rf_table
+        ---
+        srf_fit: longblob
+        x_mean_um: float # x-distance to center in um
+        y_mean_um: float # y-distance to center in um
+        x_std_um: float
+        y_std_um: float
+        theta: float # Angle of 2D covariance matrix
+        rf_cdia_um: float # Circle equivalent diameter
+        rf_area_um2: float # Area covered by 2 standard deviations
+        rf_qidx: float # Quality index as explained variance of the sRF estimation between 0 and 1
+        """
+        return definition
+
+    split_rf_table = PlaceholderTable
+    stimulus_table = PlaceholderTable
+
+    def make(self, key):
+        raise NotImplementedError()
+
+    def plot1(self, key=None):
+        key = get_plot_key(table=self, key=key)
+        srf = (self.split_rf_table() & key).fetch1("srf")
+        srf_fit, rf_qidx = (self & key).fetch1("srf_fit", 'rf_qidx')
+
+        vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
+
+        fig, axs = plt.subplots(1, 3, figsize=(10, 3))
+        ax = axs[0]
+        plot_srf(srf, ax=ax, vabsmax=vabsmax)
+        ax.set_title('sRF')
+
+        ax = axs[1]
+        plot_srf(srf_fit, ax=ax, vabsmax=vabsmax)
+        ax.set_title('sRF fit')
+
+        ax = axs[2]
+        plot_srf(srf - srf_fit, ax=ax, vabsmax=vabsmax)
+        ax.set_title(f'Difference: QI={rf_qidx:.2f}')
+
+        plt.tight_layout()
+        plt.show()
+
+
+class FitGauss2DRFTemplate(Fit2DRFBaseTemplate):
     @property
     def definition(self):
         definition = """
@@ -265,26 +313,36 @@ class FitGauss2DRFTemplate(dj.Computed):
 
         self.insert1(fit_key)
 
-    def plot1(self, key=None):
-        key = get_plot_key(table=self, key=key)
+
+class FitDoG2DRFTemplate(Fit2DRFBaseTemplate):
+    def make(self, key):
         srf = (self.split_rf_table() & key).fetch1("srf")
-        srf_fit, rf_qidx = (self & key).fetch1("srf_fit", 'rf_qidx')
 
-        vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
+        # Get stimulus parameters
+        stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
+        pix_scale_x_um = stim_dict["pix_scale_x_um"]
+        piy_scale_y_um = stim_dict["pix_scale_y_um"]
 
-        fig, axs = plt.subplots(1, 3, figsize=(10, 3))
-        ax = axs[0]
-        plot_srf(srf, ax=ax, vabsmax=vabsmax)
-        ax.set_title('sRF')
+        srf_fit, srf_params = fit_rf_model(srf, kind='dog', polarity=None, bind_mean=True, bind_cov=True)
 
-        ax = axs[1]
-        plot_srf(srf_fit, ax=ax, vabsmax=vabsmax)
-        ax.set_title('sRF fit')
+        x_std = srf_params['x_stddev_0']
+        y_std = srf_params['y_stddev_0']
 
-        ax = axs[2]
-        plot_srf(srf - srf_fit, ax=ax, vabsmax=vabsmax)
-        ax.set_title(f'Difference: QI={rf_qidx:.2f}')
+        area = np.pi * (2. * x_std * pix_scale_x_um) * (2. * y_std * piy_scale_y_um)
+        diameter = np.sqrt(area / np.pi) * 2
 
-        plt.tight_layout()
-        plt.show()
+        qi = compute_explained_rf(srf, srf_fit)
 
+        # Save
+        fit_key = deepcopy(key)
+        fit_key['srf_fit'] = srf_fit
+        fit_key['theta'] = srf_params['theta_0']
+        fit_key['x_mean_um'] = (srf_params['x_mean_0'] - srf.shape[1] / 2.) * pix_scale_x_um
+        fit_key['y_mean_um'] = (srf_params['y_mean_0'] - srf.shape[0] / 2.) * piy_scale_y_um
+        fit_key['x_std_um'] = x_std * pix_scale_x_um
+        fit_key['y_std_um'] = y_std * piy_scale_y_um
+        fit_key['rf_cdia_um'] = diameter
+        fit_key['rf_area_um2'] = area
+        fit_key['rf_qidx'] = qi
+
+        self.insert1(fit_key)

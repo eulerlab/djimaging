@@ -20,14 +20,6 @@ class FitGauss2DRF(FitGauss2DRFTemplate):
 
 
 @schema
-class RFGLMParams(RFGLMParamsTemplate):
-    pass
-
-
-@schema
-class RFGLM(RFGLMTemplate):
-    params_table = RFGLMParams
-    preprocesstraces_table = PreprocessTraces
+class FitDoG2DRF(FitDoG2DRFTemplate):
+    split_rf_table = SplitRF
     stimulus_table = Stimulus
-    presentation_table = Presentation
-    traces_table = Traces

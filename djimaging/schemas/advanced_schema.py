@@ -34,30 +34,30 @@ class ChirpFeatures(ChirpFeaturesTemplate):
 
 
 @schema
-class OsDsIndexes(orientation.OsDsIndexesTemplate):
+class OsDsIndexes(OsDsIndexesTemplate):
     stimulus_table = Stimulus
     snippets_table = Snippets
 
 
 @schema
-class HighRes(highresolution.HighResTemplate):
+class HighRes(HighResTemplate):
     field_table = Field
     experiment_table = Experiment
     userinfo_table = UserInfo
 
 
 @schema
-class ReceptiveFieldParams(receptivefield.ReceptiveFieldParamsTemplate):
+class ReceptiveFieldParams(STAParamsTemplate):
     pass
 
 
 @schema
-class ReceptiveField(receptivefield.ReceptiveFieldTemplate):
+class ReceptiveField(STATemplate):
     stimulus_table = Stimulus
     presentation_table = Presentation
     traces_table = Traces
     preprocesstraces_table = PreprocessTraces
     receptivefieldparams_table = ReceptiveFieldParams
 
-    class DataSet(receptivefield.ReceptiveFieldTemplate.DataSet):
+    class DataSet(STATemplate.DataSet):
         pass

@@ -1,5 +1,5 @@
 from djimaging.tables.optional import highresolution
-from djimaging.tables.optional import location, chirp, orientation, rgc_classifier, receptivefield
+from djimaging.tables.optional import location, chirp, orientation, rgc_classifier
 from .utils import _test_definition
 
 
@@ -48,8 +48,8 @@ def test_definition_HighResTemplate():
 
 
 def test_definition_ReceptiveFieldParamsTemplate():
-    _test_definition(receptivefield.ReceptiveFieldParamsTemplate)
+    _test_definition(receptivefield.STAParamsTemplate)
 
 
 def test_definition_ReceptiveFieldTemplate():
-    _test_definition(receptivefield.ReceptiveFieldTemplate)
+    _test_definition(receptivefield.STATemplate)

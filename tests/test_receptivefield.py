@@ -3,7 +3,7 @@ import warnings
 import numpy as np
 import pytest
 
-from djimaging.tables.optional.receptivefield import get_sets, resample_trace, compute_receptive_field
+from djimaging.tables.optional.sta_utils import compute_receptive_field, resample_trace, get_sets
 
 try:
     import rfest

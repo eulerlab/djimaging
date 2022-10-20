@@ -42,11 +42,11 @@ class RFGLMParamsTemplate(dj.Lookup):
         tolerance = 5: int unsigned
         alpha = 1: float
         metric = "mse": enum("mse", "cc")
-        fit_verbose = 100 : int unsigned
+        fit_verbose = 0 : int unsigned
         """
         return definition
 
-    def add_default(self, skip_duplicates=False):
+    def add_default(self, skip_duplicates=False, **update_kw):
         """Add default preprocess parameter to table"""
         key = {
             'rf_glm_params_id': 1,
@@ -61,6 +61,7 @@ class RFGLMParamsTemplate(dj.Lookup):
             'frac_dev': 0.1,
             'frac_test': 0.1,
         }
+        key.update(**update_kw)
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
