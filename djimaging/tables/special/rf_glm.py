@@ -30,18 +30,17 @@ class RFGLMParamsTemplate(dj.Lookup):
 
         norm_stim : tinyint unsigned  # Normalize (znorm) stimulus?
         norm_trace : tinyint unsigned  # Normalize (znorm) trace?
+        filter_trace: tinyint unsigned  # Low pass filter trace?
+        cutoff = 10: float  # Cutoff frequency low pass filter
 
         kfold : tinyint unsigned        
-        frac_train : float  # Fraction of data used for training in (0, 1].
-        frac_dev : float  # Fraction of data used for hyperparameter optimization in [0, 1).
-        frac_test : float  # Fraction of data used for testing [0, 1).
         
         min_iters = 50: int unsigned 
         max_iters = 1000: int unsigned
         step_size = 0.1: float
         tolerance = 5: int unsigned
         alpha = 1: float
-        metric = "mse": enum("mse", "cc")
+        metric = "mse": enum("mse", "corrcoef")
         fit_verbose = 0 : int unsigned
         """
         return definition
@@ -50,16 +49,13 @@ class RFGLMParamsTemplate(dj.Lookup):
         """Add default preprocess parameter to table"""
         key = {
             'rf_glm_params_id': 1,
-            'dur_filter_s': 0.8,
+            'dur_filter_s': 1.0,
             'df_ts': [8],
             'df_ws': [9],
-            'betas': [0.001, 0.002, 0.004, 0.006, 0.008, 0.01],
+            'betas': [0.001, 0.002, 0.006, 0.01, 0.02, 0.06, 0.1],
             'norm_stim': 1,
             'norm_trace': 1,
             'kfold': 1,
-            'frac_train': 0.8,
-            'frac_dev': 0.1,
-            'frac_test': 0.1,
         }
         key.update(**update_kw)
         self.insert1(key, skip_duplicates=skip_duplicates)
@@ -112,9 +108,10 @@ class RFGLMTemplate(dj.Computed):
             betas=params['betas'], kfold=params['kfold'], alpha=params['alpha'], metric=params['metric'],
             tolerance=params['tolerance'], verbose=params['fit_verbose'],
             norm_stim=params['norm_trace'], norm_trace=params['norm_trace'],
+            filter_trace=params['filter_trace'], cutoff=params['cutoff'],
             min_iters=params['min_iters'], max_iters=params['max_iters'], step_size=params['step_size'],
             p_keep=1., gradient=False, output_nonlinearity='none', fupsample=0, init_method=None,
-            n_perm=20, min_cc=0.2, seed=42, logger=None, fit_R=True, fit_intercept=True)
+            n_perm=20, min_cc=0.2, seed=42, logger=None, fit_R=False, fit_intercept=True)
 
         rf_key = deepcopy(key)
         rf_key['rf'] = rf

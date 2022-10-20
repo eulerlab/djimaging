@@ -5,7 +5,10 @@ import numpy as np
 from scipy.stats import ttest_1samp
 from sklearn.model_selection import KFold
 
+from djimaging.tables.optional import sta_utils
 from djimaging.utils import math_utils
+
+# TODO: remove redundancy between logger and prints
 
 try:
     import rfest
@@ -20,7 +23,7 @@ ALPHA = 1.
 
 def compute_glm_receptive_field(
         stim, triggertime, trace, tracetime, dur_tfilter, df_ts, df_ws, betas, alpha, metric, tolerance,
-        step_size, max_iters, min_iters, kfold, norm_stim=True, norm_trace=True,
+        step_size, max_iters, min_iters, kfold, norm_stim=True, norm_trace=True, filter_trace=False, cutoff=10.,
         p_keep=1., gradient=False, output_nonlinearity='none', fupsample=0, init_method=None,
         n_perm=20, min_cc=0.2, seed=42, verbose=0, logger=None, fit_R=False, fit_intercept=True):
 
@@ -37,17 +40,17 @@ def compute_glm_receptive_field(
         X_train, y_train, X_test, y_test, _, _, dt = get_sets(
             stim, triggertime, trace, tracetime, frac_train=0.8, frac_dev=0.2,
             p_keep=p_keep, gradient=gradient, fupsample=fupsample,
-            norm_stim=norm_stim, norm_trace=norm_trace)
+            norm_stim=norm_stim, norm_trace=norm_trace, filter_trace=filter_trace, cutoff=cutoff)
     elif kfold == 1:
         X_train, y_train, X_dev, y_dev, X_test, y_test, dt = get_sets(
             stim, triggertime, trace, tracetime, frac_train=0.6, frac_dev=0.2,
             p_keep=p_keep, gradient=gradient, fupsample=fupsample,
-            norm_stim=norm_stim, norm_trace=norm_trace)
+            norm_stim=norm_stim, norm_trace=norm_trace, filter_trace=filter_trace, cutoff=cutoff)
     else:
         X_train, y_train, X_test, y_test, _, _, dt = get_sets(
             stim, triggertime, trace, tracetime, frac_train=0.8, frac_dev=0.2,
             p_keep=p_keep, gradient=gradient, fupsample=fupsample,
-            norm_stim=norm_stim, norm_trace=norm_trace)
+            norm_stim=norm_stim, norm_trace=norm_trace, filter_trace=filter_trace, cutoff=cutoff)
 
     model, metric_dev_opt_hp_sets = compute_best_rf_model(
         X_train, y_train, X_dev=X_dev, y_dev=y_dev,
@@ -88,29 +91,31 @@ def compute_glm_receptive_field(
     w = np.array(w.reshape(model.dims['stimulus']))
 
     model_dict = dict(
-        df=model.df, dims=model.dims, shift=model.shift,
-        alpha=model.alpha, beta=model.beta,
-        metric=model.metric,
+        df=model.df, dims=model.dims, shift=model.shift, alpha=model.alpha, beta=model.beta, metric=model.metric,
         intercept={k: float(v) for k, v in model.get_intercept(model.p['opt']).items()},
         R={k: float(v) for k, v in model.get_R(model.p['opt']).items()},
         return_model=model.return_model,
-        metric_train=np.array(model.metric_train),
-        cost_train=np.array(model.cost_train),
-        metric_dev=np.array(model.metric_dev) if np.any(model.metric_dev) else np.zeros(0),
-        cost_dev=np.array(model.cost_dev) if np.any(model.cost_dev) else np.zeros(0),
+        metric_train=np.array(model.metric_train).astype(np.float32),
+        cost_train=np.array(model.cost_train).astype(np.float32),
         metric_dev_opt=float(model.metric_dev_opt),
         best_iteration=int(model.best_iteration),
         train_stop=model.train_stop,
         p_keep=p_keep, dt=dt,
-        y_test=np.array(y_test[model.burn_in:]),
-        y_pred=np.array(y_test_pred),
-        y_train=np.array(y_train[model.burn_in:]),
-        y_pred_train=np.array(y_pred_train),
+        y_test=np.array(y_test[model.burn_in:]).astype(np.float32),
+        y_pred=np.array(y_test_pred).astype(np.float32),
+        y_train=np.array(y_train[model.burn_in:]).astype(np.float32),
+        y_pred_train=np.array(y_pred_train).astype(np.float32),
     )
 
+    if np.any(np.isfinite(model.metric_dev)):
+        model_dict['metric_dev'] = np.array(model.metric_dev).astype(np.float32)
+
+    if np.any(np.isfinite(model.cost_dev)):
+        model_dict['cost_dev'] = np.array(model.cost_dev).astype(np.float32)
+
     if kfold == 1:
-        model_dict['y_dev'] = np.array(y_dev[model.burn_in:])
-        model_dict['y_pred_dev'] = np.array(y_pred_dev)
+        model_dict['y_dev'] = np.array(y_dev[model.burn_in:]).astype(np.float32)
+        model_dict['y_pred_dev'] = np.array(y_pred_dev).astype(np.float32)
 
     model_dict['df_ts'] = df_ts
     model_dict['df_ws'] = df_ws
@@ -118,12 +123,15 @@ def compute_glm_receptive_field(
     model_dict['metrics_dev_opt'] = metric_dev_opt_hp_sets
 
     quality_dict['quality'] = \
+        quality_dict.get('corrcoef_train', np.inf) > min_cc and \
         quality_dict.get('corrcoef_dev', np.inf) > min_cc and \
         quality_dict.get('corrcoef_test', np.inf) > min_cc and \
         quality_dict.get('perm_test_success', True)
 
     if logger is not None:
         logger.info(f' Total Time Elapsed: {time.time() - starttime:.0f} sec')
+    elif verbose > 0:
+        print(f'Total Time Elapsed: {time.time() - starttime:.0f} sec\n')
 
     return w, quality_dict, model_dict
 
@@ -150,7 +158,10 @@ def compute_best_rf_model(
     df_ws = clip_dfs(df_ws, wdims, logger)
 
     if (logger is not None) and (betas.size > 1):
-        logger.info(f' ---OPTIMIZE DF--- trying {df_ts.size * df_ws.size} combination: df_ts={df_ts} and df_ws={df_ws}')
+        logger.info()
+    elif verbose > 0:
+        print(f"################## Optimizing dfs ##################\n" +\
+              f"\tTrying {df_ts.size * df_ws.size} combination: df_ts={df_ts} and df_ws={df_ws}")
 
     n_burn = np.maximum(int(t_burn / dt), int(np.ceil(dur_tfilter / dt)))
 
@@ -182,10 +193,14 @@ def compute_best_rf_model(
     for idx_dfs, df in enumerate(dfs):
         if logger is not None:
             logger.info(f' Optimize for df={df}')
+        elif verbose > 0:
+            print(f'############ Optimize for df={df} ############')
 
         for idx_kf, (X_train_k, y_train_k, X_dev_k, y_dev_k) in enumerate(splits):
             if logger is not None and kfold > 1:
                 logger.info(f"\tFold: {idx_kf + 1}/{kfold}")
+            elif verbose > 0:
+                print(f"###### Fold: {idx_kf + 1}/{kfold} ######")
 
             best_model, metric_dev_opt_hp_sets = create_and_fit_glm(
                 X_train=X_train_k, y_train=y_train_k, X_dev=X_dev_k, y_dev=y_dev_k, init_method=init_method,
@@ -220,9 +235,12 @@ def compute_best_rf_model(
     if logger is not None:
         logger.info(f' ---OPTIMIZE on all data with best HPs---\n' +
                     f' df={best_df} and beta={best_beta:.4g}')
+    elif verbose > 0:
+        print(f'###### Optimize on all data with best HPs ######\n' +
+              f'\tdf={best_df} and beta={best_beta:.4g}')
 
     if kfold >= 1:
-        best_model, metric_dev_opt_hp_sets = create_and_fit_glm(
+        best_model, _ = create_and_fit_glm(
             X_train=X_train, y_train=y_train, X_dev=None, y_dev=None,  init_method=init_method,
             dt=dt, alphas=[alpha], betas=[best_beta], df=best_df, tfilterdims=tfilterdims, verbose=verbose,
             step_size=step_size, max_iters=max_iters, min_iters=min_iters, logger=logger,
@@ -236,6 +254,11 @@ def compute_best_rf_model(
             f' ###### Finished HP optimization ######' +
             f' {metric}={np.mean(metrics_dev_opt[:, best_df_idx, best_beta_idx]):.3f}'
             f'+-{np.std(metrics_dev_opt[:, best_df_idx, best_beta_idx]) / np.sqrt(kfold):.3f}')
+    elif verbose > 0:
+        print(
+            f'################## Finished HP optimization ##################\n' +
+            f'\t{metric}={np.mean(metrics_dev_opt[:, best_df_idx, best_beta_idx]):.3f}'
+            f'\t+-{np.std(metrics_dev_opt[:, best_df_idx, best_beta_idx]) / np.sqrt(kfold):.3f}\n')
 
     return best_model, metric_dev_opt_hp_sets
 
@@ -344,7 +367,7 @@ def fit_glm(
             y={'train': y_train, 'dev': y_dev},
             num_iters=max_iters, verbose=verbose, tolerance=tolerance, metric=metric,
             step_size=step_size, alphas=alphas, betas=betas, min_iters=min_iters,
-            min_iters_other=min_iters_other)
+            min_iters_other=min_iters_other, atol=ATOL)
 
     return model, metric_dev_opt_hp_sets
 
@@ -374,7 +397,7 @@ def get_b_from_w(S, w):
 
 
 def get_sets(stim, triggertime, trace, tracetime, frac_train, frac_dev, p_keep=1.0, fupsample=0, gradient=False,
-             norm_stim=True, norm_trace=True):
+             norm_stim=True, norm_trace=True, filter_trace=False, cutoff=10.):
     """Split data into sets"""
 
     assert triggertime.ndim == 1, triggertime.shape
@@ -395,6 +418,9 @@ def get_sets(stim, triggertime, trace, tracetime, frac_train, frac_dev, p_keep=1
 
     if norm_stim:
         X = math_utils.normalize_zscore(X)
+
+    if filter_trace:
+        y = sta_utils.filter_trace(y, dt=dt, cutoff=cutoff)
 
     if norm_trace:
         y = math_utils.normalize_zscore(y)

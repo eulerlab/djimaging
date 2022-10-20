@@ -1,8 +1,7 @@
 import warnings
 
 import numpy as np
-from djimaging.utils import math_utils
-
+from djimaging.utils import math_utils, filter_utils
 
 # TODO: Merge with rf_glm_utils
 
@@ -37,6 +36,11 @@ def compute_receptive_field(trace, tracetime, stim, stimtime, frac_train, frac_d
         raise NotImplementedError(f"kind={kind}")
 
     return rf, rf_pred, X, y, dt
+
+
+def filter_trace(trace, dt, cutoff):
+    flt = filter_utils.LowPassFilter(fs=1 / dt, cutoff=cutoff, direction='ff')
+    return flt.filter_data(trace)
 
 
 def resample_trace(tracetime, trace, dt):
