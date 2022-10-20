@@ -1,4 +1,3 @@
-import warnings
 from copy import deepcopy
 
 import datajoint as dj
@@ -6,15 +5,6 @@ import numpy as np
 
 from djimaging.tables.optional.sta_utils import compute_receptive_field
 from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
-
-try:
-    import rfest
-    from jax.lib import xla_bridge
-    xla_bridge.get_backend()
-    del xla_bridge
-except ImportError:
-    warnings.warn('Failed to import RFEst: Cannot compute receptive fields.')
-    rfest = None
 
 
 class STAParamsTemplate(dj.Lookup):

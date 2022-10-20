@@ -1,10 +1,19 @@
-import numpy as np
+import warnings
 
-from djimaging.tables.optional.sta import rfest
+import numpy as np
 from djimaging.utils import math_utils
 
 
 # TODO: Merge with rf_glm_utils
+
+try:
+    import rfest
+    from jax.lib import xla_bridge
+    xla_bridge.get_backend()
+    del xla_bridge
+except ImportError:
+    warnings.warn('Failed to import RFEst: Cannot compute receptive fields.')
+    rfest = None
 
 
 def compute_receptive_field(trace, tracetime, stim, stimtime, frac_train, frac_dev, dur_filter_s,
