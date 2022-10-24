@@ -1,4 +1,6 @@
 from djimaging.schemas.advanced_schema import *
+from djimaging.tables.morphology.morphology import SWCTemplate, MorphPathsTemplate, IPLTemplate, StratificationTemplate, \
+    LineStackTemplate
 from djimaging.tables.optional.location_from_table import RetinalFieldLocationTableParamsTemplate, \
     RetinalFieldLocationFromTableTemplate
 from djimaging.tables.special import *
@@ -64,3 +66,34 @@ class RetinalFieldLocationFromTable(RetinalFieldLocationFromTableTemplate):
     field_table = Field
     params_table = RetinalFieldLocationTableParams
     expinfo_table = Experiment.ExpInfo
+
+
+@schema
+class SWC(SWCTemplate):
+    field_table = Field
+    experiment_table = Experiment
+
+
+@schema
+class MorphPaths(MorphPathsTemplate):
+    field_table = Field
+    swc_table = SWC
+
+
+@schema
+class IPL(IPLTemplate):
+    field_table = Field
+    experiment_table = Experiment
+
+
+@schema
+class Stratification(StratificationTemplate):
+    field_table = Field
+    experiment_table = Experiment
+
+
+@schema
+class LineStack(LineStackTemplate):
+    morph_table = MorphPaths
+    field_table = Field
+    ipl_table = IPL

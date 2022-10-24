@@ -4,23 +4,10 @@ from copy import deepcopy
 from datetime import datetime
 
 import datajoint as dj
-import numpy as np
 
 from djimaging.utils.data_utils import read_config_dict
+from djimaging.utils.datafile_utils import find_folders_with_file_of_type
 from djimaging.utils.dj_utils import PlaceholderTable
-
-
-def find_header_files(data_dir: str) -> list:
-    """
-    Search for header files in folder in given path.
-    :param data_dir: Root folder.
-    :return: List of header files.
-    """
-    os_walk_output = []
-    for folder, subfolders, files in os.walk(data_dir):
-        if np.any([f.endswith('.ini') for f in files]):
-            os_walk_output.append(folder)
-    return os_walk_output
 
 
 class ExperimentTemplate(dj.Computed):
@@ -72,7 +59,7 @@ class ExperimentTemplate(dj.Computed):
     def __add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir,
                           only_new, restrictions, verboselvl, suppress_errors):
 
-        os_walk_output = find_header_files(data_dir)
+        os_walk_output = find_folders_with_file_of_type(data_dir)
 
         for header_path in os_walk_output:
             try:

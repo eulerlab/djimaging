@@ -3,10 +3,10 @@ from configparser import ConfigParser
 import h5py
 
 
-def load_h5_data(filename):
+def load_h5_data(filename, lower_keys=False):
     """Helper function to load h5 file."""
     with h5py.File(filename, 'r') as f:
-        return {key: f[key][:] for key in list(f.keys())}
+        return {key.lower() if lower_keys else key: f[key][:] for key in list(f.keys())}
 
 
 def load_h5_table(*tablename, filename, lower_keys=False):

@@ -1,5 +1,7 @@
 import os
 
+import numpy as np
+
 
 def get_filename_info(filename, datatype_loc, animal_loc, region_loc, field_loc, stimulus_loc, condition_loc):
     """Extract information from filename"""
@@ -15,7 +17,6 @@ def get_filename_info(filename, datatype_loc, animal_loc, region_loc, field_loc,
 
 
 def print_tree(startpath, include_types=None, exclude_types=None, nmax=200):
-
     if exclude_types is not None:
         exclude_types = [t.lower().strip('.') for t in exclude_types]
 
@@ -42,3 +43,16 @@ def print_tree(startpath, include_types=None, exclude_types=None, nmax=200):
     if len(paths) > nmax:
         print('...')
 
+
+def find_folders_with_file_of_type(data_dir: str, ending: str = '.ini') -> list:
+    """
+    Search for header files in folder in given path.
+    :param data_dir: Root folder.
+    :param ending. File ending to search.
+    :return: List of header files.
+    """
+    os_walk_output = []
+    for folder, subfolders, files in os.walk(data_dir):
+        if np.any([f.endswith(ending) for f in files]):
+            os_walk_output.append(folder)
+    return os_walk_output

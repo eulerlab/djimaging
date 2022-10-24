@@ -94,6 +94,7 @@ class RetinalFieldLocationFromTableTemplate(dj.Computed):
 
         if len(rows) == 0:
             warnings.warn(f'Did not find entry for k={key} in {params["table_path"]}')
+            return
 
         row = rows.iloc[0]
 
