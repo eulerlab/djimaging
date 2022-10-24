@@ -8,7 +8,6 @@ class CellFilterParams(rgc_classifier.CellFilterParamsTemplate):
 
 @schema
 class ClassifierTrainingData(rgc_classifier.ClassifierTrainingDataTemplate):
-    store = "classifier_input"
     pass
 
 
@@ -19,7 +18,6 @@ class ClassifierMethod(rgc_classifier.ClassifierMethodTemplate):
 
 @schema
 class Classifier(rgc_classifier.ClassifierTemplate):
-    store = "classifier_output"
     classifier_training_data_table = ClassifierTrainingData
     classifier_method_table = ClassifierMethod
 

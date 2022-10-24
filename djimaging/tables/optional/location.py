@@ -1,4 +1,5 @@
 import os
+import warnings
 
 import datajoint as dj
 from matplotlib import pyplot as plt
@@ -68,7 +69,7 @@ class OpticDiskTemplate(dj.Computed):
             fromfile = os.path.join(*(self.experiment_table() & key).fetch1("header_path", "header_name"))
 
         else:
-            print(f'WARNING: No optic disk information found for {key}')
+            warnings.warn(f'No optic disk information found for {key}')
             return
 
         loc_key = key.copy()
@@ -138,7 +139,7 @@ class RetinalFieldLocationTemplate(dj.Computed):
         # location of the recorded fields relative to the optic disk
         # XCoord_um is the relative position from back towards curtain, i.e. larger XCoord_um means closer curtain
         # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
-        
+
         -> self.relativefieldlocalation_table
         ---
         ventral_dorsal_pos_um       :float      # position on the ventral-dorsal axis, greater 0 means dorsal

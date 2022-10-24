@@ -1,40 +1,20 @@
 import datajoint as dj
 import numpy as np
+from matplotlib import pyplot as plt
 from scipy import signal
 
-from djimaging.utils.dj_utils import PlaceholderTable
+from djimaging.tables.optional.quality_index import QITemplate
+from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
+from djimaging.utils.plot_utils import plot_trace_and_trigger
 
 
-class ChirpQITemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
-
-    @property
-    def definition(self):
-        definition = '''
-        #Computes the QI index for chirp responses as described in Baden et al. (2016)
-        -> self.snippets_table
-        ---
-        chirp_qi:   float   # chirp quality index
-        min_qi:     float   # minimum quality index as 1/r (r = #repetitions)
-        '''
-        return definition
-
-    stimulus_table = PlaceholderTable
-    snippets_table = PlaceholderTable
-
+class ChirpQITemplate(QITemplate):
     @property
     def key_source(self):
         try:
             return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
         except TypeError:
             pass
-
-    def make(self, key):
-            snippets = (self.snippets_table() & key).fetch1('snippets')
-            assert snippets.ndim == 2
-            chirp_qi = np.var(np.mean(snippets, axis=1)) / np.mean(np.var(snippets, axis=0))
-            min_qi = 1 / snippets.shape[1]
-            self.insert1(dict(key, chirp_qi=chirp_qi, min_qi=min_qi))
 
 
 class ChirpFeaturesTemplate(dj.Computed):
@@ -66,8 +46,7 @@ class ChirpFeaturesTemplate(dj.Computed):
 
     def make(self, key):
         # TODO: Should this depend on pres? Triggertimes are also in snippets and sf can be derived from times
-        snippets = (self.snippets_table() & key).fetch1('snippets')
-        snippets_times = (self.snippets_table() & key).fetch1('snippets_times')
+        snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
         trigger_times = (self.presentation_table() & key).fetch1('triggertimes')
         sf = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
 
@@ -75,6 +54,40 @@ class ChirpFeaturesTemplate(dj.Computed):
         transience_index = compute_transience_index(snippets, snippets_times, trigger_times, sf)
 
         self.insert1(dict(key, on_off_index=on_off_index, transience_index=transience_index))
+
+    def plot1(self, key=None):
+        key = get_plot_key(table=self, key=key)
+
+        snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
+            "snippets", "snippets_times", "triggertimes_snippets")
+
+        on_off_index, transience_index = (self & key).fetch1('on_off_index', 'transience_index')
+
+        ax = plot_trace_and_trigger(
+            time=snippets_times, trace=snippets, triggertimes=triggertimes_snippets, title=str(key))
+
+        ax.set(title=f"on_off_index={on_off_index:.2f}\ntransience_index={transience_index:.2f}")
+
+        plt.tight_layout()
+        plt.show()
+
+    def plot(self, restriction=None):
+        if restriction is None:
+            restriction = dict()
+
+        on_off_index, transience_index = (self & restriction).fetch('on_off_index', 'transience_index')
+
+        fig, axs = plt.subplots(1, 2, figsize=(8, 3))
+        ax = axs[0]
+        ax.set(title='on_off_index')
+        ax.hist(on_off_index)
+
+        ax = axs[1]
+        ax.set(title='transience_index')
+        ax.hist(transience_index)
+
+        plt.tight_layout()
+        plt.show()
 
 
 def compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1):

@@ -2,10 +2,13 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 
-def plot_field(ch0_average, ch1_average, roi_mask=None, title='', figsize=(16, 4), highlight_roi=None,
-               fig=None, axs=None):
+def plot_field(ch0_average, ch1_average, roi_mask=None, roi_ch_average=None,
+               title='', figsize=(16, 4), highlight_roi=None, fig=None, axs=None):
     if roi_mask is not None and roi_mask.size == 0:
         roi_mask = None
+
+    if roi_ch_average is None:
+        roi_ch_average = ch0_average
 
     if (fig is None) or (axs is None):
         fig, axs = plt.subplots(1, 2 if roi_mask is None else 4, figsize=figsize, sharex='all', sharey='all')
@@ -34,17 +37,17 @@ def plot_field(ch0_average, ch1_average, roi_mask=None, title='', figsize=(16, 4
 
         ax = axs[3]
 
-        ax.imshow(ch0_average.T, cmap='viridis', origin='lower', extent=extent)
+        ax.imshow(roi_ch_average.T, cmap='viridis', origin='lower', extent=extent)
         rois_us = np.repeat(np.repeat(rois, 10, axis=0), 10, axis=1)
         vmin = np.min(rois)
         vmax = np.max(rois)
 
         if highlight_roi is not None:
             rois_to_plot = [highlight_roi]
-            ax.set(title=f'roi{highlight_roi} + ch0')
+            ax.set(title=f'roi{highlight_roi} + data')
         else:
             rois_to_plot = np.unique(rois[rois > 0])
-            ax.set(title='roi_mask + ch0')
+            ax.set(title='roi_mask + data')
 
         for roi in rois_to_plot:
             _rois_us = (rois_us == roi).astype(int) * roi
@@ -95,6 +98,8 @@ def plot_trace_and_trigger(time, trace, triggertimes, trace_norm=None, title='',
                    color='r', label='trigger', ls=':')
         tax.set(ylabel='normalized')
 
+    return ax
+
 
 def plot_srf(srf, ax=None, vabsmax=None, pixelsize=None):
     if ax is None:
@@ -114,12 +119,38 @@ def plot_srf(srf, ax=None, vabsmax=None, pixelsize=None):
     return ax
 
 
-def plot_trf(trf, ax=None):
-    # TODO: plot actual time
+def plot_trf(trf, dt=1., peak_idxs=None, ax=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(6, 6))
 
+    t_trf = np.arange(-trf.size + 1, 1) * dt
+
+    vabsmax = np.max(np.abs(trf))
+
     ax.set(title='tRF')
-    ax.plot(trf)
+    ax.fill_between(t_trf, trf)
+    if peak_idxs is not None:
+        for peak_idx in peak_idxs:
+            ax.axvline(t_trf[peak_idx], color='r')
+    ax.set(ylim=(-1.1 * vabsmax, 1.1 * vabsmax))
 
     return ax
+
+
+def plot_signals_heatmap(signals, ax=None):
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(8, 3))
+
+    from sklearn.decomposition import PCA
+
+    vabsmax = np.max(np.abs(signals))
+    ax.imshow(signals[np.argsort(PCA(n_components=1).fit_transform(signals).flat)], aspect='auto',
+              vmin=-vabsmax, vmax=vabsmax, cmap='coolwarm')
+    return ax
+
+
+def plot_df_cols_as_histograms(df):
+    fig, axs = plt.subplots(1, len(df.columns), figsize=(8, 3))
+    for ax, col in zip(axs, df.columns):
+        df.hist(column=col, ax=ax)
+    return axs

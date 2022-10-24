@@ -1,3 +1,5 @@
+import warnings
+
 import datajoint as dj
 import numpy as np
 
@@ -61,8 +63,8 @@ class StimulusTemplate(dj.Manual):
         if stim_dict is not None:
             missing_info = [k for k, v in stim_dict.items() if v is None]
             if len(missing_info) > 0:
-                print(f'WARNING: Values for {missing_info} in `stim_dict` for stimulus `{stim_name}` are None. '
-                      + 'This may cause problems downstream.')
+                warnings.warn(f'Values for {missing_info} in `stim_dict` for stimulus `{stim_name}` are None. '
+                              + 'This may cause problems downstream.')
 
         key = {
             "stim_name": stim_name,

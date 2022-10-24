@@ -1,4 +1,5 @@
 import os
+import warnings
 from copy import deepcopy
 
 import datajoint as dj
@@ -172,7 +173,7 @@ class PresentationTemplate(dj.Computed):
             trigger_flag = triggertimes.size % ntrigger_rep == 0
 
         if trigger_flag == 0:
-            print(f'WARNING: Found {triggertimes.size} triggers, expected {ntrigger_rep} (per rep): key={key}.')
+            warnings.warn(f'Found {triggertimes.size} triggers, expected {ntrigger_rep} (per rep): key={key}.')
 
         pres_key = deepcopy(key)
         pres_key["h5_header"] = filepath

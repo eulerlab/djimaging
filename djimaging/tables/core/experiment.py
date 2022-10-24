@@ -1,4 +1,5 @@
 import os
+import warnings
 from copy import deepcopy
 from datetime import datetime
 
@@ -109,7 +110,7 @@ class ExperimentTemplate(dj.Computed):
             primary_key["date"] = datetime.strptime(header_path.split("/")[-2], '%Y%m%d')
         except ValueError:
             if verboselvl >= 0:
-                print(f'WARNING: Failed to convert `{header_path.split("/")[-2]}` to date. Skip this folder.')
+                warnings.warn(f'Failed to convert `{header_path.split("/")[-2]}` to date. Skip this folder.')
             return
 
         primary_key["exp_num"] = int(header_path.split("/")[-1])
@@ -123,12 +124,12 @@ class ExperimentTemplate(dj.Computed):
 
         for k, v in restrictions.items():
             if k not in primary_key:
-                print(f'WARNING: Restriction not in primary key, ignoring {k}')
+                warnings.warn(f'Restriction not in primary key, ignoring {k}')
                 continue
 
             if primary_key[k] != v:
                 if verboselvl > 0:
-                    print(f'WARNING: Skipping {primary_key} because of restriction: {k}={v}.')
+                    warnings.warn(f'Skipping {primary_key} because of restriction: {k}={v}.')
                 return
 
         pre_data_path = header_path + "/" + pre_data_dir + "/"

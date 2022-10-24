@@ -1,15 +1,13 @@
 from copy import deepcopy
-
+import warnings
 import datajoint as dj
 
-from djimaging.tables.special.rf_glm_utils import compute_glm_receptive_field
-from djimaging.utils.dj_utils import PlaceholderTable
+from djimaging.tables.special.rf_glm_utils import compute_glm_receptive_field, plot_rf_summary
+from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
 
 try:
     import rfest
 except ImportError:
-    import warnings
-
     warnings.warn('Did not find RFEst package. Install it to estimates RFs.')
     rfest = None
 
@@ -52,7 +50,7 @@ class RFGLMParamsTemplate(dj.Lookup):
             'dur_filter_s': 1.0,
             'df_ts': [8],
             'df_ws': [9],
-            'betas': [0.001, 0.002, 0.006, 0.01, 0.02, 0.06, 0.1],
+            'betas': [0.001, 0.01, 0.1],
             'norm_stim': 1,
             'norm_trace': 1,
             'kfold': 1,
@@ -72,6 +70,7 @@ class RFGLMTemplate(dj.Computed):
         -> self.params_table
         ---
         rf: longblob  # spatio-temporal receptive field
+        dt: float
         model_dict: longblob
         quality_dict: longblob
         '''
@@ -94,11 +93,13 @@ class RFGLMTemplate(dj.Computed):
     def make(self, key):
         stim = (self.stimulus_table() & key).fetch1("stim_trace")
         stimtime = (self.presentation_table() & key).fetch1('triggertimes')
-
         assert stim is not None, "stim_trace in stimulus table must be set."
 
-        trace = (self.preprocesstraces_table() & key).fetch1('preprocess_trace')
-        tracetime = (self.traces_table() & key).fetch1('trace_times')
+        if stim.shape[0] != stimtime.size:
+            warnings.warn(f'Stimulus length ({stim.shape[0]}) does not match stimtime ({stimtime.size}).')
+            stim = stim[:stimtime.size]
+
+        trace, tracetime = (self.preprocesstraces_table() & key).fetch1('preprocess_trace', 'preprocess_trace_times')
 
         params = (self.params_table() & key).fetch1()
 
@@ -115,9 +116,15 @@ class RFGLMTemplate(dj.Computed):
 
         rf_key = deepcopy(key)
         rf_key['rf'] = rf
+        rf_key['dt'] = model_dict.pop('dt')
         rf_key['model_dict'] = model_dict
         rf_key['quality_dict'] = quality_dict
 
         self.insert1(rf_key)
+
+    def plot1(self, key=None):
+        key = get_plot_key(table=self, key=key)
+        rf, quality_dict, model_dict = (self & key).fetch1('rf', 'quality_dict', 'model_dict')
+        plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict, title="")
 
 

@@ -1,5 +1,6 @@
 from djimaging.schemas.core_schema import *
 from djimaging.tables.optional import *
+from djimaging.tables.optional import RetinalFieldLocationTemplate
 
 
 @schema
@@ -57,7 +58,7 @@ class ReceptiveField(STATemplate):
     presentation_table = Presentation
     traces_table = Traces
     preprocesstraces_table = PreprocessTraces
-    receptivefieldparams_table = ReceptiveFieldParams
+    params_table = ReceptiveFieldParams
 
     class DataSet(STATemplate.DataSet):
         pass

@@ -2,11 +2,12 @@ import itertools
 import time
 
 import numpy as np
+import seaborn as sns
+from matplotlib import pyplot as plt
 from scipy.stats import ttest_1samp
 from sklearn.model_selection import KFold
 
-from djimaging.tables.optional import sta_utils
-from djimaging.utils import math_utils
+from djimaging.utils.rf_utils import get_sets, split_strf
 
 # TODO: remove redundancy between logger and prints
 
@@ -14,6 +15,7 @@ try:
     import rfest
 except ImportError:
     import warnings
+
     warnings.warn('Did not find RFEst package. Install it to estimates RFs.')
     rfest = None
 
@@ -26,31 +28,36 @@ def compute_glm_receptive_field(
         step_size, max_iters, min_iters, kfold, norm_stim=True, norm_trace=True, filter_trace=False, cutoff=10.,
         p_keep=1., gradient=False, output_nonlinearity='none', fupsample=0, init_method=None,
         n_perm=20, min_cc=0.2, seed=42, verbose=0, logger=None, fit_R=False, fit_intercept=True):
-
     """Estimate RF for given data. Return RF and quality."""
     np.random.seed(seed)
 
     starttime = time.time()
 
     # Split data
-    X_dev, y_dev = None, None
-
     if kfold == 0:
         assert len(betas) == 1
-        X_train, y_train, X_test, y_test, _, _, dt = get_sets(
+        X_dict, y_dict, dt = get_sets(
             stim, triggertime, trace, tracetime, frac_train=0.8, frac_dev=0.2,
-            p_keep=p_keep, gradient=gradient, fupsample=fupsample,
+            gradient=gradient, fupsample=fupsample,
             norm_stim=norm_stim, norm_trace=norm_trace, filter_trace=filter_trace, cutoff=cutoff)
     elif kfold == 1:
-        X_train, y_train, X_dev, y_dev, X_test, y_test, dt = get_sets(
+        X_dict, y_dict, dt = get_sets(
             stim, triggertime, trace, tracetime, frac_train=0.6, frac_dev=0.2,
-            p_keep=p_keep, gradient=gradient, fupsample=fupsample,
+            gradient=gradient, fupsample=fupsample,
             norm_stim=norm_stim, norm_trace=norm_trace, filter_trace=filter_trace, cutoff=cutoff)
     else:
-        X_train, y_train, X_test, y_test, _, _, dt = get_sets(
-            stim, triggertime, trace, tracetime, frac_train=0.8, frac_dev=0.2,
-            p_keep=p_keep, gradient=gradient, fupsample=fupsample,
+        X_dict, y_dict, dt = get_sets(
+            stim, triggertime, trace, tracetime, frac_train=0.8, frac_dev=0.0,
+            gradient=gradient, fupsample=fupsample,
             norm_stim=norm_stim, norm_trace=norm_trace, filter_trace=filter_trace, cutoff=cutoff)
+
+    X_train = X_dict.get('train', None)
+    X_dev = X_dict.get('dev', None)
+    X_test = X_dict.get('test', None)
+
+    y_train = y_dict.get('train', None)
+    y_dev = y_dict.get('dev', None)
+    y_test = y_dict.get('test', None)
 
     model, metric_dev_opt_hp_sets = compute_best_rf_model(
         X_train, y_train, X_dev=X_dev, y_dev=y_dev,
@@ -160,7 +167,7 @@ def compute_best_rf_model(
     if (logger is not None) and (betas.size > 1):
         logger.info()
     elif verbose > 0:
-        print(f"################## Optimizing dfs ##################\n" +\
+        print(f"################## Optimizing dfs ##################\n" + \
               f"\tTrying {df_ts.size * df_ws.size} combination: df_ts={df_ts} and df_ws={df_ws}")
 
     n_burn = np.maximum(int(t_burn / dt), int(np.ceil(dur_tfilter / dt)))
@@ -188,7 +195,6 @@ def compute_best_rf_model(
     metrics_dev_opt = np.zeros((np.maximum(kfold, 1), len(dfs), len(betas)))
 
     best_model = None
-    metric_dev_opt_hp_sets = None
 
     for idx_dfs, df in enumerate(dfs):
         if logger is not None:
@@ -202,7 +208,7 @@ def compute_best_rf_model(
             elif verbose > 0:
                 print(f"###### Fold: {idx_kf + 1}/{kfold} ######")
 
-            best_model, metric_dev_opt_hp_sets = create_and_fit_glm(
+            best_model, metrics_dev_opt_i = create_and_fit_glm(
                 X_train=X_train_k, y_train=y_train_k, X_dev=X_dev_k, y_dev=y_dev_k, init_method=init_method,
                 dt=dt, alphas=[alpha], betas=betas, df=df, tfilterdims=tfilterdims, verbose=verbose,
                 step_size=step_size, max_iters=max_iters, min_iters=min_iters,
@@ -210,7 +216,7 @@ def compute_best_rf_model(
                 early_stopping=False, num_subunits=1, output_nonlinearity=output_nonlinearity,
                 metric=metric, tolerance=tolerance)
 
-            metrics_dev_opt[idx_kf, idx_dfs, :] = metric_dev_opt_hp_sets
+            metrics_dev_opt[idx_kf, idx_dfs, :] = metrics_dev_opt_i
 
     if kfold > 0:
         assert np.all(np.isfinite(metrics_dev_opt)), metrics_dev_opt
@@ -241,7 +247,7 @@ def compute_best_rf_model(
 
     if kfold >= 1:
         best_model, _ = create_and_fit_glm(
-            X_train=X_train, y_train=y_train, X_dev=None, y_dev=None,  init_method=init_method,
+            X_train=X_train, y_train=y_train, X_dev=None, y_dev=None, init_method=init_method,
             dt=dt, alphas=[alpha], betas=[best_beta], df=best_df, tfilterdims=tfilterdims, verbose=verbose,
             step_size=step_size, max_iters=max_iters, min_iters=min_iters, logger=logger,
             fit_R=fit_R, fit_intercept=fit_intercept,
@@ -260,7 +266,7 @@ def compute_best_rf_model(
             f'\t{metric}={np.mean(metrics_dev_opt[:, best_df_idx, best_beta_idx]):.3f}'
             f'\t+-{np.std(metrics_dev_opt[:, best_df_idx, best_beta_idx]) / np.sqrt(kfold):.3f}\n')
 
-    return best_model, metric_dev_opt_hp_sets
+    return best_model, metrics_dev_opt
 
 
 def clip_dfs(dfs, dims, logger):
@@ -396,66 +402,6 @@ def get_b_from_w(S, w):
     return b
 
 
-def get_sets(stim, triggertime, trace, tracetime, frac_train, frac_dev, p_keep=1.0, fupsample=0, gradient=False,
-             norm_stim=True, norm_trace=True, filter_trace=False, cutoff=10.):
-    """Split data into sets"""
-
-    assert triggertime.ndim == 1, triggertime.shape
-    assert trace.ndim == 1, trace.shape
-    assert tracetime.ndim == 1, tracetime.shape
-    assert stim.shape[0] == triggertime.size
-    assert trace.size == tracetime.size
-
-    dts = np.diff(tracetime)
-    assert np.mean(dts) > 10 * np.std(
-        dts), f'Highly variable sampling rate, std={np.std(dts):g} vs mu={np.mean(dts):.4g}'
-
-    if fupsample > 1:
-        tracetime, trace = upsample_trace(tracetime=tracetime, trace=trace, fupsample=fupsample)
-
-    # Make stimulus have same time as trace
-    X, y, dt = rfest.utils.upsample_data(stim, triggertime, trace, tracetime, gradient=gradient, threshold=gradient)
-
-    if norm_stim:
-        X = math_utils.normalize_zscore(X)
-
-    if filter_trace:
-        y = sta_utils.filter_trace(y, dt=dt, cutoff=cutoff)
-
-    if norm_trace:
-        y = math_utils.normalize_zscore(y)
-
-    if p_keep < 1.0:
-        assert X.shape[0] == y.shape[0]
-        X = X[:int(X.shape[0] * p_keep)]
-        y = y[:int(y.shape[0] * p_keep)]
-
-    (X_train, y_train), (X_dev, y_dev), (X_test, y_test) = rfest.utils.split_data(
-        X, y, dt, verbose=False, frac_train=frac_train, frac_dev=frac_dev)  # Changed order
-
-    return X_train, y_train, X_dev, y_dev, X_test, y_test, dt
-
-
-def upsample_trace(tracetime, trace, fupsample):
-    assert isinstance(fupsample, int)
-    assert fupsample > 1
-
-    dt = np.mean(np.diff(tracetime))
-    tracetime_upsampled = np.tile(tracetime, (fupsample, 1)).T
-    tracetime_upsampled += np.linspace(0, 1, fupsample, endpoint=False) * dt
-    tracetime_upsampled = tracetime_upsampled.flatten()
-
-    diffs = np.diff(tracetime_upsampled)
-    mu = np.mean(diffs)
-    std = np.std(diffs)
-    assert np.isclose(mu, dt / fupsample, atol=mu/10.), f"{mu} {dt} {fupsample}"
-    assert mu > 10 * std
-
-    trace_upsampled = np.interp(tracetime_upsampled, tracetime, trace)
-
-    return tracetime_upsampled, trace_upsampled
-
-
 def _get_model_info(model):
     info = f"{model.metric}={model.metric_dev_opt:.4f} "
     info += f"for HP-set: alpha={model.alpha:.5g}, beta={model.beta:.5g}, df={model.df}, dims={model.dims}"
@@ -472,3 +418,155 @@ def quality_test(score_trueX, score_permX, metric):
 
     _, p_value = ttest_1samp(score_permX, score_trueX, nan_policy='raise', alternative=alternative)
     return p_value
+
+
+def plot_rf_summary(rf, quality_dict, model_dict, title=""):
+    """Plot tRF and sRFs and quality test"""
+
+    # Create figure and axes
+    n_rows = 5
+    fig, axs = plt.subplots(n_rows, 4, figsize=(8, n_rows * 1.9), gridspec_kw=dict(height_ratios=(1.0, 1.5, 1, 1, 1)))
+
+    axs_big = []
+    for i in np.arange(2, n_rows):
+        for ax in axs[i, :].flat:
+            ax.remove()
+        ax_big = fig.add_subplot(axs[0, 0].get_gridspec()[i, :])
+        axs_big.append(ax_big)
+    axs = np.append(axs.flatten(), np.array(axs_big))
+
+    # Summarize RF
+    if rf.ndim == 3:
+        srf, trf = split_strf(rf)
+        vabsmax = np.max([np.max(np.abs(srf)), np.max(np.abs(rf))])
+    elif rf.ndim == 1:
+        trf = rf.flatten()
+        srf = None
+        vabsmax = 1
+    else:
+        raise NotImplementedError(rf.shape)
+
+    assert trf.size == rf.shape[0]
+
+    # Plot
+    ax = axs[0]
+    ax.set(title='tRF')
+    t_tRF = np.arange(-trf.size + 1, 0 + 1)
+    if 'dt' in model_dict:
+        t_tRF = t_tRF.astype(float) * model_dict['dt']
+        ax.set_xlabel('Time')
+    else:
+        ax.set_xlabel('Frames')
+    ax.fill_between(t_tRF, np.zeros_like(trf), trf)
+    ax.set_ylim(-np.max(np.abs(trf)) * 1.1, np.max(np.abs(trf)) * 1.1)
+    for line in [t_tRF[np.argmin(trf)], t_tRF[np.argmax(trf)]]:
+        ax.axvline(line, color='red')
+
+    if srf is not None:
+        ax = axs[1]
+        ax.set(title='sRF')
+        im = ax.imshow(srf.T, cmap='bwr', vmin=-vabsmax, vmax=vabsmax, origin='lower')
+        plt.colorbar(im, ax=ax)
+
+        ax = axs[2]
+        ax.set(title='pos. peak frame')
+        im = ax.imshow(rf[np.argmax(trf)].T, cmap='bwr', vmin=-vabsmax, vmax=vabsmax, origin='lower')
+        plt.colorbar(im, ax=ax)
+
+        ax = axs[3]
+        ax.set(title='neg. peak frame')
+        im = ax.imshow(rf[np.argmin(trf)].T, cmap='bwr', vmin=-vabsmax, vmax=vabsmax, origin='lower')
+        plt.colorbar(im, ax=ax)
+
+    if not model_dict:
+        return
+
+    if model_dict is not None:
+        ax = axs[4]
+        ax.set(title=f"Metrics\n{model_dict['return_model']}", xlabel='Iteration', ylabel='Corrcoef')
+        ax.plot(model_dict['metric_train'], label='train', c='blue')
+        ax.axvline(model_dict['best_iteration'], ls='-', c='orange')
+        if model_dict.get('metric_dev', False):
+            ax.plot(model_dict.get('metric_dev', np.zeros(0)), label='dev', c='red')
+        if model_dict.get('metric_dev_opt', False):
+            ax.axhline(model_dict['metric_dev_opt'], label='dev-opt', ls='--', c='red')
+        ax.legend()
+
+        ax = axs[5]
+        ax.set(title=f"Cost\n{model_dict['return_model']}", xlabel='Iteration', ylabel='Cost')
+        ax.plot(model_dict['cost_train'], label='train', c='blue')
+        ax.axvline(model_dict['best_iteration'], ls='-', c='orange')
+        if model_dict.get('cost_dev', False):
+            ax.plot(model_dict.get['cost_dev'], label='dev', c='red', marker='.')
+
+        ax = axs[6]
+        ax.set(title=f"loglog-Cost\n{model_dict['return_model']}", xlabel='Iteration', ylabel='Cost')
+        ax.loglog(np.arange(1, model_dict['cost_train'].size + 1), model_dict['cost_train'], label='train', c='blue')
+        ax.axvline(1 + model_dict['best_iteration'], ls='-', c='orange')
+        if model_dict.get('cost_dev', False):
+            ax.loglog(np.arange(1, model_dict['cost_dev'].size + 1), model_dict['cost_dev'], 'r.', label='dev')
+
+    if (quality_dict is not None) and ('score_permX' in quality_dict):
+        plot_test_rf_quality(
+            ax=axs[7], score_permX=quality_dict['score_permX'],
+            score_test=quality_dict.get('score_test', np.nan),
+            cc_test=quality_dict.get('corrcoef_test', None),
+            cc_dev=quality_dict.get('corrcoef_dev', None),
+        )
+        title += f"\nquality={quality_dict['quality']}"
+        title_kw = dict(backgroundcolor='green' if quality_dict['quality'] else 'red')
+    else:
+        title_kw = dict()
+        axs[7].axis('off')
+
+    for i, (y_type, ax) in enumerate(zip(['train', 'dev', 'test'], axs_big)):
+        y_data = model_dict.get(f'y_{y_type}', None)
+        y_pred = model_dict.get(f'y_pred_{y_type}', model_dict.get(f'y_pred', None))
+
+        cc = quality_dict.get(f'corrcoef_{y_type}', np.nan)
+        mse = quality_dict.get(f'mse_{y_type}', np.nan)
+
+        if y_data is None or y_pred is None:
+            ax.set_title(y_type + ' data not found')
+            continue
+
+        time = np.arange(0, y_data.size) * model_dict.get('dt', 1)
+
+        ax.plot(time, y_data, label='data')
+        ax.plot(time, y_pred, label='prediction', alpha=0.7)
+        ax.legend(frameon=True)
+        ax.set_title(f'{y_type} data and prediction: cc={cc:.2f}, mse={mse:.2f}')
+
+    plt.tight_layout(rect=(0.01, 0.01, 0.99, 0.90), h_pad=0.2, w_pad=0.2)
+    plt.suptitle(title, y=0.99, va='top', **title_kw)
+
+    return fig, axs
+
+
+def plot_test_rf_quality(score_permX, score_test, cc_test=None, cc_dev=None, ax=None, metric=''):
+    """Plot test results"""
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+    sns.boxplot(y=score_permX, ax=ax, width=0.8)
+    sns.swarmplot(y=score_permX, ax=ax, color='k', alpha=0.5, label='perm X')
+    ax.axhline(score_test, c='r', label=f'test {metric}', alpha=0.5, zorder=100)
+
+    mu = np.mean(score_permX)
+    std = np.std(score_permX)
+
+    for i in range(0, 4):
+        ax.axhline(mu + i * std, c='c', ls=':', alpha=0.5, zorder=0, label='_')
+
+    title = ""
+    if cc_dev is not None:
+        title += f"cc_dev={cc_dev: .4f}"
+    if cc_test is not None:
+        title += f"\ncc_test={cc_test:.4f}"
+
+    ax.set(title=title, ylabel='score')
+
+    ax.set_xlim(-0.4, 0.4)
+    ax.set_ylim(np.min([mu - 0.03, mu - 4 * std, score_test - 0.01]),
+                np.max([mu + 0.03, mu + 4 * std, score_test + 0.01]))
+
+    return ax

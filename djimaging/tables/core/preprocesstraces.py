@@ -137,6 +137,7 @@ class PreprocessTracesTemplate(dj.Computed):
         -> self.traces_table
         -> self.preprocessparams_table
         ---
+        preprocess_trace_times: longblob    # Time of preprocessed trace, if not resampled same as in trace.
         preprocess_trace:      longblob    # preprocessed trace
         smoothed_trace:        longblob    # output of savgol filter which is subtracted from the raw trace
         """
@@ -176,14 +177,16 @@ class PreprocessTracesTemplate(dj.Computed):
                 poly_order=poly_order, window_len_seconds=window_len_seconds, fs=fs,
                 subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative)
 
-            self.insert1(dict(key, preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
+            self.insert1(dict(key, preprocess_trace_times=trace_times,
+                              preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
         except ValueError as e:
             warnings.warn(f"{e}\nfor key\n{key}")
 
     def plot1(self, key=None):
         key = get_plot_key(self, key)
 
-        preprocess_trace, smoothed_trace = (self & key).fetch1("preprocess_trace", "smoothed_trace")
+        preprocess_trace_times, preprocess_trace, smoothed_trace = (self & key).fetch1(
+            "preprocess_trace_times", "preprocess_trace", "smoothed_trace")
         trace_times, trace = (self.traces_table() & key).fetch1("trace_times", "trace")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
 
@@ -200,7 +203,7 @@ class PreprocessTracesTemplate(dj.Computed):
         ax.set(ylabel='mean subtracted\ntrend')
 
         ax = axs[2]
-        plot_trace_and_trigger(time=trace_times, trace=preprocess_trace, triggertimes=triggertimes, ax=ax)
+        plot_trace_and_trigger(time=preprocess_trace_times, trace=preprocess_trace, triggertimes=triggertimes, ax=ax)
         ax.set(ylabel='preprocessed\ntrace')
 
         plt.show()

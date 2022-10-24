@@ -67,8 +67,12 @@ class RoiTemplate(dj.Computed):
     def plot1(self, key=None):
         key = get_plot_key(table=self, key=key)
 
+        data_stack_name = (self.field_table.userinfo_table() & key).fetch1('data_stack_name')
+
         ch0_average = (self.field_table() & key).fetch1("ch0_average")
         ch1_average = (self.field_table() & key).fetch1("ch1_average")
         roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask")
 
-        plot_field(ch0_average, ch1_average, roi_mask=roi_mask, title=key, figsize=(16, 4), highlight_roi=key['roi_id'])
+        plot_field(ch0_average, ch1_average, roi_mask=roi_mask,
+                   roi_ch_average=ch1_average if '1' in data_stack_name else ch0_average,
+                   title=key, figsize=(16, 4), highlight_roi=key['roi_id'])

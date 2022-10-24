@@ -1,8 +1,11 @@
+import warnings
+
 import datajoint as dj
 import numpy as np
+from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
-from djimaging.utils.plot_utils import plot_trace_and_trigger
+from djimaging.utils.plot_utils import plot_trace_and_trigger, plot_signals_heatmap
 from djimaging.utils.scanm_utils import load_traces_from_h5_file, split_trace_by_reps
 
 
@@ -184,3 +187,20 @@ class AveragesTemplate(dj.Computed):
 
         plot_trace_and_trigger(
             time=average_times, trace=average, triggertimes=triggertimes_rel, trace_norm=average_norm, title=str(key))
+
+    def plot(self, restriction=None):
+        if restriction is None:
+            restriction = dict()
+
+        average = (self & restriction).fetch('average')
+
+        sizes = [a.size for a in average]
+
+        if np.unique(sizes).size > 1:
+            warnings.warn('Traces do not have the same size. Are you plotting multiple stimuli?')
+        min_size = np.min(sizes)
+
+        ax = plot_signals_heatmap(signals=np.stack([a[:min_size] for a in average]))
+        ax.set(title='Averages')
+        plt.show()
+

@@ -14,6 +14,26 @@ from djimaging.utils.import_helpers import dynamic_import, split_module_name
 Key = Dict[str, Any]
 
 
+def prepare_dj_config_rgc_classifier(output_folder, input_folder="/gpfs01/euler/data/Resources/Classifier"):
+    stores_dict = {
+        "classifier_input": {"protocol": "file", "location": input_folder, "stage": input_folder},
+        "classifier_output": {"protocol": "file", "location": output_folder, "stage": output_folder},
+    }
+
+    # Make sure folders exits
+    for store, store_dict in stores_dict.items():
+        for name in store_dict.keys():
+            if name in ["location", "stage"]:
+                assert os.path.isdir(store_dict[name]), f'This must be a folder you have access to: {store_dict[name]}'
+
+    os.environ["DJ_SUPPORT_FILEPATH_MANAGEMENT"] = "TRUE"
+    dj.config['enable_python_native_blobs'] = True
+
+    dj_config_stores = dj.config['stores'] or dict()
+    dj_config_stores.update(stores_dict)
+    dj.config['stores'] = dj_config_stores
+
+
 class CellFilterParamsTemplate(dj.Lookup):
     database = ""
 
@@ -81,7 +101,7 @@ class ClassifierMethodTemplate(dj.Lookup):
 
 class ClassifierTrainingDataTemplate(dj.Manual):
     database = ""
-    store = None
+    store = "classifier_input"
 
     @property
     def definition(self):
@@ -100,6 +120,7 @@ class ClassifierTrainingDataTemplate(dj.Manual):
 
     def add_trainingdata(self, project: str, output_path: str, chirp_feats_file: str, bar_feats_file: str,
                          baden_data_file: str, training_data_file: str, skip_duplicates: bool = False) -> None:
+
         key = dict(
             project=project,
             output_path=output_path,
@@ -122,7 +143,7 @@ class ClassifierTrainingDataTemplate(dj.Manual):
 
 class ClassifierTemplate(dj.Computed):
     database = ""
-    store = None
+    store = "classifier_output"
 
     @property
     def definition(self):
@@ -216,7 +237,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
     _stim_name_chirp = 'gChirp'
     _stim_name_bar = 'movingbar'
-    _chirp_qi_key = 'chirp_qi'
+    _chirp_qi_key = 'qidx'
 
     @property
     def key_source(self):
@@ -357,7 +378,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                                   preproc_chirp=chirp_traces[~quality_mask, :][i],
                                   preproc_bar=bar_traces[~quality_mask][i],
                                   ))
-            
+
     def plot(self):
         from matplotlib import pyplot as plt
         import pandas as pd
@@ -365,7 +386,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
         groups = pd.DataFrame(self.fetch()).groupby([
             'training_data_hash', 'classifier_params_hash', 'cell_filter_params_hash'])
 
-        fig, axs = plt.subplots(len(groups), 1, figsize=(12, 3*len(groups)), squeeze=False)
+        fig, axs = plt.subplots(len(groups), 1, figsize=(12, 3 * len(groups)), squeeze=False)
         axs = axs.flatten()
 
         for ax, ((tdh, cph, cfph), df) in zip(axs, groups):
@@ -379,4 +400,3 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         plt.tight_layout()
         plt.show()
-

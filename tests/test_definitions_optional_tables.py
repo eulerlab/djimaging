@@ -1,4 +1,5 @@
 from djimaging.tables.optional import *
+from djimaging.tables.optional import RetinalFieldLocationTemplate
 from .utils import _test_definition
 
 

@@ -1,3 +1,5 @@
+import warnings
+
 import h5py
 import numpy as np
 
@@ -89,7 +91,7 @@ def load_traces_from_h5_file(filepath, roi_ids):
             trace_times = np.zeros(0)
 
         if np.any(~np.isfinite(trace)) or np.any(~np.isfinite(trace_times)):
-            print(f'WARNING: NaN trace or tracetime in {filepath} for ROI{roi_id}.')
+            warnings.warn(f'NaN trace or tracetime in {filepath} for ROI{roi_id}.')
             valid_flag = 0
 
         roi2trace[roi_id] = dict(trace=trace, trace_times=trace_times, valid_flag=valid_flag)
@@ -97,10 +99,10 @@ def load_traces_from_h5_file(filepath, roi_ids):
     return roi2trace
 
 
-def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, allow_drop_last=True):
+def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.1, allow_drop_last=True):
     """Split trace in snippets, using triggertimes"""
 
-    t_idxs = [np.argwhere(np.isclose(times, t, atol=1e-01))[0][0] for t in triggertimes[::ntrigger_rep]]
+    t_idxs = [np.argwhere(np.isclose(times, tt+delay, atol=atol))[0][0] for tt in triggertimes[::ntrigger_rep]]
 
     assert len(t_idxs) > 1, 'Cannot split a single repetition'
 

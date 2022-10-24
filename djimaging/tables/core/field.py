@@ -150,11 +150,16 @@ class FieldTemplate(dj.Computed):
     def plot1(self, key=None, figsize=(16, 4)):
         key = get_plot_key(table=self, key=key)
 
+        data_stack_name = (self.userinfo_table() & key).fetch1('data_stack_name')
+
         ch0_average = (self & key).fetch1("ch0_average")
         ch1_average = (self & key).fetch1("ch1_average")
+
         roi_masks = (self.RoiMask() & key).fetch("roi_mask")
 
-        plot_field(ch0_average, ch1_average, roi_masks[0] if len(roi_masks) == 1 else None, title=key, figsize=figsize)
+        plot_field(ch0_average, ch1_average, roi_masks[0] if len(roi_masks) == 1 else None,
+                   roi_ch_average=ch1_average if '1' in data_stack_name else ch0_average,
+                   title=key, figsize=figsize)
 
 
 def scan_fields_and_files(pre_data_path: str, user_dict: dict, verbose: bool = False) -> dict:
