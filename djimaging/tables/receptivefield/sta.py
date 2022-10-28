@@ -3,7 +3,7 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 
-from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
+from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
 from djimaging.utils.rf_utils import get_sets, rfest
 
 
@@ -129,7 +129,7 @@ class STATemplate(dj.Computed):
             self.DataSet().insert1(rf_dataset_key)
 
     def plot1(self, key=None):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
 
         from matplotlib import pyplot as plt
 

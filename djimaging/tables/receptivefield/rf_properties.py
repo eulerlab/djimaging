@@ -7,10 +7,10 @@ from astropy.modeling.fitting import SLSQPLSQFitter
 from astropy.modeling.models import Gaussian2D
 from matplotlib import pyplot as plt
 
+from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
+from djimaging.utils.plot_utils import plot_srf, plot_trf, plot_signals_heatmap
 from djimaging.utils.rf_utils import compute_explained_rf, resize_srf, split_strf, \
     compute_polarity_and_peak_idxs, merge_strf
-from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
-from djimaging.utils.plot_utils import plot_srf, plot_trf, plot_signals_heatmap
 
 
 class SplitRFParamsTemplate(dj.Lookup):
@@ -89,7 +89,7 @@ class SplitRFTemplate(dj.Computed):
         self.insert1(rf_key)
 
     def plot1(self, key=None):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
 
         dt = (self.rf_table() & key).fetch1("dt")
         srf, trf, peak_idxs = (self & key).fetch1("srf", "trf", "trf_peak_idxs")
@@ -123,11 +123,6 @@ class Fit2DRFBaseTemplate(dj.Computed):
         -> self.split_rf_table
         ---
         srf_fit: longblob
-        x_mean_um: float # x-distance to center in um
-        y_mean_um: float # y-distance to center in um
-        x_std_um: float
-        y_std_um: float
-        theta: float # Angle of 2D covariance matrix
         rf_cdia_um: float # Circle equivalent diameter
         rf_area_um2: float # Area covered by 2 standard deviations
         rf_qidx: float # Quality index as explained variance of the sRF estimation between 0 and 1
@@ -141,7 +136,7 @@ class Fit2DRFBaseTemplate(dj.Computed):
         raise NotImplementedError()
 
     def plot1(self, key=None):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
         srf = (self.split_rf_table() & key).fetch1("srf")
         srf_fit, rf_qidx = (self & key).fetch1("srf_fit", 'rf_qidx')
 
@@ -190,19 +185,14 @@ class FitGauss2DRFTemplate(Fit2DRFBaseTemplate):
         -> self.split_rf_table
         ---
         srf_fit: longblob
-        x_mean_um: float # x-distance to center in um
-        y_mean_um: float # y-distance to center in um
-        x_std_um: float
-        y_std_um: float
-        theta: float # Angle of 2D covariance matrix
+        srf_params: longblob
         rf_cdia_um: float # Circle equivalent diameter
         rf_area_um2: float # Area covered by 2 standard deviations
         rf_qidx: float # Quality index as explained variance of the sRF estimation between 0 and 1
         """
         return definition
 
-    split_rf_table = PlaceholderTable
-    stimulus_table = PlaceholderTable
+    polarity = None
 
     def make(self, key):
         srf = (self.split_rf_table() & key).fetch1("srf")
@@ -212,7 +202,7 @@ class FitGauss2DRFTemplate(Fit2DRFBaseTemplate):
         pix_scale_x_um = stim_dict["pix_scale_x_um"]
         piy_scale_y_um = stim_dict["pix_scale_y_um"]
 
-        srf_fit, srf_params = fit_rf_model(srf, kind='gauss', polarity=None)
+        srf_fit, srf_params = fit_rf_model(srf, kind='gauss', polarity=self.polarity)
 
         x_std = srf_params['x_stddev']
         y_std = srf_params['y_stddev']
@@ -225,11 +215,7 @@ class FitGauss2DRFTemplate(Fit2DRFBaseTemplate):
         # Save
         fit_key = deepcopy(key)
         fit_key['srf_fit'] = srf_fit
-        fit_key['theta'] = srf_params['theta']
-        fit_key['x_mean_um'] = (srf_params['x_mean'] - srf.shape[1] / 2.) * pix_scale_x_um
-        fit_key['y_mean_um'] = (srf_params['y_mean'] - srf.shape[0] / 2.) * piy_scale_y_um
-        fit_key['x_std_um'] = x_std * pix_scale_x_um
-        fit_key['y_std_um'] = y_std * piy_scale_y_um
+        fit_key['srf_params'] = srf_params
         fit_key['rf_cdia_um'] = diameter
         fit_key['rf_area_um2'] = area
         fit_key['rf_qidx'] = qi
@@ -237,7 +223,29 @@ class FitGauss2DRFTemplate(Fit2DRFBaseTemplate):
         self.insert1(fit_key)
 
 
+def compute_surround_index(srf, srf_center_fit):
+    return np.sum(srf - srf_center_fit) / np.sum(np.abs(srf))
+
+
 class FitDoG2DRFTemplate(Fit2DRFBaseTemplate):
+
+    @property
+    def definition(self):
+        definition = """
+        -> self.split_rf_table
+        ---
+        srf_fit: longblob
+        srf_center_fit: longblob
+        srf_surround_fit: longblob
+        srf_params: longblob
+        rf_cdia_um: float # Circle equivalent diameter
+        rf_area_um2: float # Area covered by 2 standard deviations
+        surround_index: float # Strength of surround in sRF
+        rf_qidx: float # Quality index as explained variance of the sRF estimation between 0 and 1
+        """
+        return definition
+
+    polarity = None
 
     def make(self, key):
         srf = (self.split_rf_table() & key).fetch1("srf")
@@ -247,7 +255,8 @@ class FitDoG2DRFTemplate(Fit2DRFBaseTemplate):
         pix_scale_x_um = stim_dict["pix_scale_x_um"]
         piy_scale_y_um = stim_dict["pix_scale_y_um"]
 
-        srf_fit, srf_params = fit_rf_model(srf, kind='dog', polarity=None, bind_mean=True, bind_cov=True)
+        srf_fit, srf_center_fit, srf_surround_fit, srf_params = fit_rf_model(
+            srf, kind='dog', polarity=self.polarity, bind_mean=True, bind_cov=True)
 
         x_std = srf_params['x_stddev_0']
         y_std = srf_params['y_stddev_0']
@@ -256,20 +265,52 @@ class FitDoG2DRFTemplate(Fit2DRFBaseTemplate):
         diameter = np.sqrt(area / np.pi) * 2
 
         qi = compute_explained_rf(srf, srf_fit)
+        surround_index = compute_surround_index(srf, srf_center_fit)
 
         # Save
         fit_key = deepcopy(key)
         fit_key['srf_fit'] = srf_fit
-        fit_key['theta'] = srf_params['theta_0']
-        fit_key['x_mean_um'] = (srf_params['x_mean_0'] - srf.shape[1] / 2.) * pix_scale_x_um
-        fit_key['y_mean_um'] = (srf_params['y_mean_0'] - srf.shape[0] / 2.) * piy_scale_y_um
-        fit_key['x_std_um'] = x_std * pix_scale_x_um
-        fit_key['y_std_um'] = y_std * piy_scale_y_um
+        fit_key['srf_center_fit'] = srf_center_fit
+        fit_key['srf_surround_fit'] = srf_surround_fit
+        fit_key['srf_params'] = srf_params
         fit_key['rf_cdia_um'] = diameter
         fit_key['rf_area_um2'] = area
+        fit_key['surround_index'] = surround_index
         fit_key['rf_qidx'] = qi
 
         self.insert1(fit_key)
+
+    def plot1(self, key=None):
+        key = get_primary_key(table=self, key=key)
+        srf = (self.split_rf_table() & key).fetch1("srf")
+        srf_fit, srf_center_fit, srf_surround_fit, rf_qidx = (self & key).fetch1(
+            "srf_fit", 'srf_center_fit', 'srf_surround_fit', 'rf_qidx')
+
+        vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
+
+        fig, axs = plt.subplots(1, 5, figsize=(20, 3))
+        ax = axs[0]
+        plot_srf(srf, ax=ax, vabsmax=vabsmax)
+        ax.set_title('sRF')
+
+        ax = axs[1]
+        plot_srf(srf_fit, ax=ax, vabsmax=vabsmax)
+        ax.set_title('sRF fit')
+
+        ax = axs[2]
+        plot_srf(srf - srf_fit, ax=ax, vabsmax=vabsmax)
+        ax.set_title(f'Difference: QI={rf_qidx:.2f}')
+
+        ax = axs[3]
+        plot_srf(srf_center_fit, ax=ax, vabsmax=vabsmax)
+        ax.set_title('sRF center fit')
+
+        ax = axs[4]
+        plot_srf(srf_surround_fit, ax=ax, vabsmax=vabsmax)
+        ax.set_title('sRF surround fit')
+
+        plt.tight_layout()
+        plt.show()
 
 
 def fit_rf_model(srf, kind='gaussian', polarity=None, **model_kws):
@@ -278,7 +319,7 @@ def fit_rf_model(srf, kind='gaussian', polarity=None, **model_kws):
     if kind == 'gauss':
         model = srf_gauss_model(srf, polarity=polarity)
     elif kind == 'dog':
-        model = srf_dog_model(srf, **model_kws)
+        model = srf_dog_model(srf, polarity=polarity, **model_kws)
     else:
         raise NotImplementedError(kind)
 
@@ -291,10 +332,15 @@ def fit_rf_model(srf, kind='gaussian', polarity=None, **model_kws):
     model_params = {k: v for k, v in zip(model.param_names, model.param_sets.flatten())}
     model_fit = model(xx, yy)
 
-    return model_fit, model_params
+    if kind == 'gauss':
+        return model_fit, model_params
+    elif kind == 'dog':
+        model_center_fit = model[0](xx, yy)
+        model_surround_fit = model[1](xx, yy)
+        return model_fit, model_center_fit, model_surround_fit, model_params
 
 
-def estimate_srf_center_model_init_params(srf, polarity=None):
+def estimate_srf_center_model_init_params(srf, polarity=None, amplimscale=2.):
     assert srf.ndim == 2, 'Provide 2d RF'
 
     if polarity is None:
@@ -315,15 +361,15 @@ def estimate_srf_center_model_init_params(srf, polarity=None):
 
     if polarity is None:
         amp0 = srf.flat[np.argmax(np.abs(srf))]
-        amplim = (-2. * np.abs(amp0), 2. * np.abs(amp0))
+        amplim = (-amplimscale * np.abs(amp0), amplimscale * np.abs(amp0))
     elif polarity == 1:
         amp0 = np.max(srf)
         assert amp0 > 0
-        amplim = (0., 2. * amp0)
+        amplim = (0., amplimscale * amp0)
     elif polarity == -1:
         amp0 = np.min(srf)
         assert amp0 < 0
-        amplim = (2. * amp0, 0.)
+        amplim = (amplimscale * amp0, 0.)
     else:
         raise NotImplementedError(polarity)
 
@@ -333,7 +379,8 @@ def estimate_srf_center_model_init_params(srf, polarity=None):
 def srf_gauss_model(srf, polarity=None):
     assert srf.ndim == 2, 'Provide 2d RF'
 
-    x0, y0, amp0, std0, xlim, ylim, amplim = estimate_srf_center_model_init_params(srf=srf, polarity=polarity)
+    x0, y0, amp0, std0, xlim, ylim, amplim = estimate_srf_center_model_init_params(
+        srf=srf, polarity=polarity, amplimscale=2.)
 
     model = Gaussian2D(
         amplitude=amp0, x_mean=x0, y_mean=y0, x_stddev=std0, y_stddev=std0,
@@ -345,11 +392,11 @@ def srf_gauss_model(srf, polarity=None):
 def srf_dog_model(srf, polarity=None, bind_mean=True, bind_cov=False):
     assert srf.ndim == 2, 'Provide 2d RF'
 
-    x0, y0, amp0, std0, xlim, ylim, amplim = estimate_srf_center_model_init_params(srf=srf, polarity=polarity)
+    x0, y0, amp0, std0, xlim, ylim, amplim = estimate_srf_center_model_init_params(
+        srf=srf, polarity=polarity, amplimscale=10.)
 
     xlim = (np.maximum(xlim[0], x0 - std0), np.minimum(xlim[1], x0 + std0))
     ylim = (np.maximum(ylim[0], y0 - std0), np.minimum(ylim[1], y0 + std0))
-    amplim = (10. * amplim[0], 10. * amplim[1])
     stdlim = (0.1 * std0, 10. * std0)
 
     f_c = Gaussian2D(
@@ -358,7 +405,7 @@ def srf_dog_model(srf, polarity=None, bind_mean=True, bind_cov=False):
 
     f_s = Gaussian2D(
         amplitude=1. / 50. * amp0, x_mean=x0, y_mean=y0, x_stddev=5. * std0, y_stddev=5. * std0,
-        bounds={'amplitude': amplim, 'x_mean': xlim, 'y_mean': ylim})
+        bounds={'amplitude': np.sort(-np.asarray(amplim)), 'x_mean': xlim, 'y_mean': ylim})
 
     model = f_c - f_s
 

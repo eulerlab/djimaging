@@ -1,6 +1,6 @@
+import morphkit
 import numpy as np
 from scipy.ndimage.measurements import center_of_mass
-import morphkit
 
 
 def get_linestack(df_paths, stack_shape):

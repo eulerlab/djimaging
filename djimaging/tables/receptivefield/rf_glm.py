@@ -1,9 +1,11 @@
-from copy import deepcopy
 import warnings
-import datajoint as dj
+from copy import deepcopy
 
-from djimaging.tables.special.rf_glm_utils import compute_glm_receptive_field, plot_rf_summary
-from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
+import datajoint as dj
+from matplotlib import pyplot as plt
+
+from djimaging.tables.receptivefield.rf_glm_utils import compute_glm_receptive_field, plot_rf_summary
+from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
 
 try:
     import rfest
@@ -114,6 +116,13 @@ class RFGLMTemplate(dj.Computed):
             p_keep=1., gradient=False, output_nonlinearity='none', fupsample=0, init_method=None,
             n_perm=20, min_cc=0.2, seed=42, logger=None, fit_R=False, fit_intercept=True)
 
+        from IPython.display import clear_output
+        clear_output(wait=True)
+
+        plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
+                        title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
+        plt.show()
+
         rf_key = deepcopy(key)
         rf_key['rf'] = rf
         rf_key['dt'] = model_dict.pop('dt')
@@ -123,8 +132,10 @@ class RFGLMTemplate(dj.Computed):
         self.insert1(rf_key)
 
     def plot1(self, key=None):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
         rf, quality_dict, model_dict = (self & key).fetch1('rf', 'quality_dict', 'model_dict')
-        plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict, title="")
+        plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
+                        title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
+        plt.show()
 
 

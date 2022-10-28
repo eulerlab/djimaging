@@ -3,7 +3,7 @@ from copy import deepcopy
 
 import datajoint as dj
 
-from djimaging.utils.dj_utils import get_plot_key
+from djimaging.utils.dj_utils import get_primary_key
 
 
 class UserInfoTemplate(dj.Manual):
@@ -39,7 +39,7 @@ class UserInfoTemplate(dj.Manual):
         for userdict in userdicts:
             self.upload_user(userdict)
 
-    def upload_user(self, userdict: dict):
+    def upload_user(self, userdict: dict, verbose=1):
         """Upload one user"""
         assert "experimenter" in userdict, 'Set username'
         assert "data_dir" in userdict, 'Set data_dir'
@@ -59,7 +59,7 @@ class UserInfoTemplate(dj.Manual):
         else:
             entry = (self & dict(experimenter=userdict["experimenter"])).fetch1()
 
-            if entry != userdict:
+            if entry != userdict and verbose > 0:
                 print(f"Information for `{userdict['experimenter']}` already uploaded.")
                 print("If you want to change the user entry, delete the existing one first and upload the user again.")
 
@@ -70,7 +70,7 @@ class UserInfoTemplate(dj.Manual):
         :param show_raw: Show files in raw data directory?
         :param show_header: Show header file names?
         """
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
 
         from djimaging.utils import datafile_utils
         data_dir = (self & key).fetch1('data_dir')

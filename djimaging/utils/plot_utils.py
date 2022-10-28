@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 
-def plot_field(ch0_average, ch1_average, roi_mask=None, roi_ch_average=None,
+def plot_field(ch0_average, ch1_average, roi_mask=None, roi_ch_average=None, npixartifact=0,
                title='', figsize=(16, 4), highlight_roi=None, fig=None, axs=None):
     if roi_mask is not None and roi_mask.size == 0:
         roi_mask = None
@@ -37,7 +37,10 @@ def plot_field(ch0_average, ch1_average, roi_mask=None, roi_ch_average=None,
 
         ax = axs[3]
 
-        ax.imshow(roi_ch_average.T, cmap='viridis', origin='lower', extent=extent)
+        _roi_ch_average = roi_ch_average.copy()
+        _roi_ch_average[:npixartifact] = np.nan
+
+        ax.imshow(_roi_ch_average.T, cmap='viridis', origin='lower', extent=extent)
         rois_us = np.repeat(np.repeat(rois, 10, axis=0), 10, axis=1)
         vmin = np.min(rois)
         vmax = np.max(rois)

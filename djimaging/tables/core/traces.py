@@ -4,7 +4,7 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
+from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger, plot_signals_heatmap
 from djimaging.utils.scanm_utils import load_traces_from_h5_file, split_trace_by_reps
 
@@ -73,7 +73,7 @@ class TracesTemplate(dj.Computed):
             self.insert1(trace_key)
 
     def plot1(self, key=None):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
         trace_times, trace = (self & key).fetch1("trace_times", "trace")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
 
@@ -130,7 +130,7 @@ class SnippetsTemplate(dj.Computed):
         ))
 
     def plot1(self, key=None):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
         snippets, snippets_times, triggertimes_snippets = (self & key).fetch1(
             "snippets", "snippets_times", "triggertimes_snippets")
 
@@ -181,7 +181,7 @@ class AveragesTemplate(dj.Computed):
         ))
 
     def plot1(self, key=None):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
         average, average_norm, average_times, triggertimes_rel = \
             (self & key).fetch1('average', 'average_norm', 'average_times', 'triggertimes_rel')
 

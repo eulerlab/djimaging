@@ -1,5 +1,4 @@
 from djimaging.schemas.advanced_schema import *
-from djimaging.tables.special import *
 
 
 @schema

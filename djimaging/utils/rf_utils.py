@@ -1,10 +1,10 @@
 import warnings
+
 import numpy as np
 from rfest import get_spatial_and_temporal_filters
 from scipy.signal import find_peaks
 
 from djimaging.utils import math_utils, filter_utils
-
 
 try:
     import rfest

@@ -23,20 +23,35 @@ def get_npixartifact(setupid):
     return npixartifact
 
 
-def get_pixel_size_xy_um(setupid: int, npix: int, zoom: float) -> float:
-    """Get width / height of a pixel in um"""
+def get_setup_xscale(setupid: int):
     setupid = int(setupid)
-
-    assert 0.15 <= zoom <= 4, zoom
     assert setupid in [1, 2, 3], setupid
-    assert 1 <= npix < 5000, npix
 
     if setupid == 1:
-        standard_pixel_size = 112. / npix
+        setup_xscale = 112.
     else:
-        standard_pixel_size = 71.5 / npix
+        setup_xscale = 71.5
 
+    return setup_xscale
+
+
+def extract_roi_idxs(roi_mask, npixartifact=0):
+    """Return roi idxs as in ROI mask (i.e. negative values)"""
+    assert roi_mask.ndim == 2
+    roi_idxs = np.unique(roi_mask[npixartifact:, :])
+    roi_idxs = roi_idxs[roi_idxs < 0]  # remove background indexes (0 or 1)
+    roi_idxs = roi_idxs[np.argsort(np.abs(roi_idxs))]  # Sort by value
+    return roi_idxs.astype(int)
+
+
+def get_pixel_size_xy_um(setupid: int, npix: int, zoom: float) -> float:
+    """Get width / height of a pixel in um"""
+    assert 0.15 <= zoom <= 4, zoom
+    assert 1 <= npix < 5000, npix
+
+    standard_pixel_size = get_setup_xscale(setupid) / npix
     pixel_size = standard_pixel_size / zoom
+
     return pixel_size
 
 
@@ -102,7 +117,7 @@ def load_traces_from_h5_file(filepath, roi_ids):
 def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.1, allow_drop_last=True):
     """Split trace in snippets, using triggertimes"""
 
-    t_idxs = [np.argwhere(np.isclose(times, tt+delay, atol=atol))[0][0] for tt in triggertimes[::ntrigger_rep]]
+    t_idxs = [np.argwhere(np.isclose(times, tt + delay, atol=atol))[0][0] for tt in triggertimes[::ntrigger_rep]]
 
     assert len(t_idxs) > 1, 'Cannot split a single repetition'
 

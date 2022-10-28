@@ -7,7 +7,7 @@ import numpy as np
 
 from djimaging.utils.alias_utils import check_shared_alias_str
 from djimaging.utils.datafile_utils import get_filename_info
-from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
+from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import get_pixel_size_xy_um, load_ch0_ch1_stacks_from_h5, get_npixartifact
 
@@ -148,7 +148,7 @@ class FieldTemplate(dj.Computed):
             (self.Zstack & field_key).insert1(zstack_key, allow_direct_insert=True)
 
     def plot1(self, key=None, figsize=(16, 4)):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
 
         data_stack_name = (self.userinfo_table() & key).fetch1('data_stack_name')
 

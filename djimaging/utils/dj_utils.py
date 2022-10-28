@@ -35,6 +35,14 @@ class PlaceholderTable:
     def Zstack(cls):
         pass
 
+    @classmethod
+    def RoiStackPos(cls):
+        pass
+
+    @classmethod
+    def RoiCalibratedStackPos(cls):
+        pass
+
 
 def get_class_attributes(class_):
     class_attrs = [attr for attr in class_.__dict__.keys() if attr[:2] != '__']
@@ -110,7 +118,7 @@ def make_hash(obj: object) -> str:
     return hashed.hexdigest()
 
 
-def get_plot_key(table, key):
+def get_primary_key(table, key=None):
     if key is not None:
         key = {k: v for k, v in key.items() if k in table.primary_key}
     else:

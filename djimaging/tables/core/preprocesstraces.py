@@ -5,7 +5,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy import signal
 
-from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
+from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 
 
@@ -183,7 +183,7 @@ class PreprocessTracesTemplate(dj.Computed):
             warnings.warn(f"{e}\nfor key\n{key}")
 
     def plot1(self, key=None):
-        key = get_plot_key(self, key)
+        key = get_primary_key(self, key)
 
         preprocess_trace_times, preprocess_trace, smoothed_trace = (self & key).fetch1(
             "preprocess_trace_times", "preprocess_trace", "smoothed_trace")

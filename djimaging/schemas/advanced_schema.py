@@ -1,6 +1,7 @@
 from djimaging.schemas.core_schema import *
 from djimaging.tables.optional import *
 from djimaging.tables.optional import RetinalFieldLocationTemplate
+from djimaging.tables.receptivefield import STAParamsTemplate, STATemplate
 
 
 @schema

@@ -1,15 +1,13 @@
 import datajoint as dj
 import numpy as np
-import pandas as pd
 from matplotlib import pyplot as plt
 
-from djimaging.tables.optional.quality_index import QITemplate
-from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
+from djimaging.tables.optional import ChirpQITemplate
+from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
 from djimaging.utils.math_utils import normalize_soft_zero_one
-from djimaging.utils.plot_utils import plot_trace_and_trigger, plot_df_cols_as_histograms
 
 
-class SineSpotQITemplate(QITemplate):
+class SineSpotQITemplate(ChirpQITemplate):
     @property
     def key_source(self):
         try:
@@ -56,7 +54,7 @@ class SineSpotFeaturesTemplate(dj.Computed):
         self.insert1(dict(key, suppression_index=suppression_idx, response_rep_x_dir=response_rep_x_dir))
 
     def plot1(self, key=None):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
 
         response_rep_x_dir, suppression_index = (self & key).fetch1("response_rep_x_dir", "suppression_index")
 

@@ -5,7 +5,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy import stats
 
-from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
+from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
 
 
 def quality_index_ds(raw_sorted_resp_mat):
@@ -270,7 +270,7 @@ class OsDsIndexesTemplate(dj.Computed):
                           avg_sorted_resp=avg_sorted_responses))
 
     def plot1(self, key=None):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
 
         dir_order = (self.stimulus_table() & key).fetch1('trial_info')
         sorted_directions_rad = np.deg2rad(np.sort(dir_order))

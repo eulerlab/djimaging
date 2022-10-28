@@ -1,8 +1,9 @@
 import datajoint as dj
 import numpy as np
 
-from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
+from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
 from djimaging.utils.plot_utils import plot_field
+from djimaging.utils.scanm_utils import extract_roi_idxs
 
 
 class RoiTemplate(dj.Computed):
@@ -44,9 +45,7 @@ class RoiTemplate(dj.Computed):
             field=key["field"],
         )
 
-        roi_idxs = np.unique(roi_mask)
-        roi_idxs = roi_idxs[roi_idxs < 0]  # remove background indexes (0 or 1)
-        roi_idxs = roi_idxs[np.argsort(np.abs(roi_idxs))]  # Sort by value
+        roi_idxs = extract_roi_idxs(roi_mask)
 
         # add every roi to list and the bulk add to roi table
         for roi_idx in roi_idxs:
@@ -65,9 +64,10 @@ class RoiTemplate(dj.Computed):
                 'roi_dia_um': roi_dia_um})
 
     def plot1(self, key=None):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
 
         data_stack_name = (self.field_table.userinfo_table() & key).fetch1('data_stack_name')
+        npixartifact = (self.field_table() & key).fetch1('npixartifact')
 
         ch0_average = (self.field_table() & key).fetch1("ch0_average")
         ch1_average = (self.field_table() & key).fetch1("ch1_average")
@@ -75,4 +75,4 @@ class RoiTemplate(dj.Computed):
 
         plot_field(ch0_average, ch1_average, roi_mask=roi_mask,
                    roi_ch_average=ch1_average if '1' in data_stack_name else ch0_average,
-                   title=key, figsize=(16, 4), highlight_roi=key['roi_id'])
+                   title=key, figsize=(16, 4), highlight_roi=key['roi_id'], npixartifact=npixartifact)

@@ -6,7 +6,7 @@ import datajoint as dj
 import numpy as np
 
 from djimaging.utils.alias_utils import get_field_files
-from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
+from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import get_triggers_and_data
 
@@ -201,10 +201,11 @@ class PresentationTemplate(dj.Computed):
         (self.ScanInfo() & key).insert1(scaninfo_key)
 
     def plot1(self, key=None, figsize=(16, 4)):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
 
         ch0_average = (self & key).fetch1("ch0_average")
         ch1_average = (self & key).fetch1("ch1_average")
         roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask")
+        npixartifact = (self.field_table() & key).fetch1('npixartifact')
 
-        plot_field(ch0_average, ch1_average, roi_mask, title=key, figsize=figsize)
+        plot_field(ch0_average, ch1_average, roi_mask, title=key, figsize=figsize, npixartifact=npixartifact)

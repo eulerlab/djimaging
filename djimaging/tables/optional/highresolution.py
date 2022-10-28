@@ -6,7 +6,7 @@ import datajoint as dj
 import numpy as np
 
 from djimaging.utils.alias_utils import match_file, get_field_files
-from djimaging.utils.dj_utils import PlaceholderTable, get_plot_key
+from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import load_ch0_ch1_stacks_from_h5, load_ch0_ch1_stacks_from_smp, get_pixel_size_xy_um
 
@@ -138,7 +138,7 @@ class HighResTemplate(dj.Computed):
         self.insert1(highres_key)
 
     def plot1(self, key=None, figsize=(8, 4)):
-        key = get_plot_key(table=self, key=key)
+        key = get_primary_key(table=self, key=key)
 
         ch0_average = (self & key).fetch1("ch0_average")
         ch1_average = (self & key).fetch1("ch1_average")

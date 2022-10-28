@@ -1,8 +1,7 @@
 from djimaging.schemas.advanced_schema import *
-from djimaging.tables.morphology.morphology import SWCTemplate, MorphPathsTemplate, IPLTemplate, StratificationTemplate, \
-    LineStackTemplate
-from djimaging.tables.optional.location_from_table import RetinalFieldLocationTableParamsTemplate, \
-    RetinalFieldLocationFromTableTemplate
+from djimaging.tables.morphology import *
+from djimaging.tables.optional.location_from_table import *
+from djimaging.tables.receptivefield import *
 from djimaging.tables.special import *
 
 
@@ -94,6 +93,49 @@ class Stratification(StratificationTemplate):
 
 @schema
 class LineStack(LineStackTemplate):
+    experiment_table = Experiment
     morph_table = MorphPaths
     field_table = Field
     ipl_table = IPL
+
+
+@schema
+class RoiStackPosParams(RoiStackPosParamsTemplate):
+    pass
+
+
+@schema
+class FieldStackPos(FieldStackPosTemplate):
+    userinfo_table = UserInfo
+    experiment_table = Experiment
+    field_table = Field
+    linestack_table = LineStack
+    params_table = RoiStackPosParams
+    morph_table = MorphPaths
+
+    class RoiStackPos(FieldStackPosTemplate.RoiStackPos):
+        roi_table = Roi
+
+    class FitInfo(FieldStackPosTemplate.FitInfo):
+        pass
+
+
+@schema
+class FieldCalibratedStackPos(FieldCalibratedStackPosTemplate):
+    fieldstackpos_table = FieldStackPos
+    linestack_table = LineStack
+    field_table = Field
+    morph_table = MorphPaths
+    params_table = RoiStackPosParams
+
+    class RoiCalibratedStackPos(FieldCalibratedStackPosTemplate.RoiCalibratedStackPos):
+        roi_table = Roi
+
+
+@schema
+class FieldPosMetrics(FieldPosMetricsTemplate):
+    fieldcalibratedstackpos_table = FieldCalibratedStackPos
+    morph_table = MorphPaths
+
+    class RoiPosMetrics(FieldPosMetricsTemplate.RoiPosMetrics):
+        roi_table = Roi
