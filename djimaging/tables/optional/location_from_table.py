@@ -63,8 +63,8 @@ class RetinalFieldLocationFromTableTemplate(dj.Computed):
             # XCoord_um is the relative position from back towards curtain, i.e. larger XCoord_um means closer curtain
             # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
 
-            -> self.params_table
             -> self.field_table
+            -> self.params_table
             ---
             ventral_dorsal_pos   :float      # position on the ventral-dorsal axis, greater 0 means dorsal
             temporal_nasal_pos   :float      # position on the temporal-nasal axis, greater 0 means nasal

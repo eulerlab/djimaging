@@ -2,7 +2,9 @@ import os
 import warnings
 
 import datajoint as dj
+import pandas as pd
 from matplotlib import pyplot as plt
+import seaborn as sns
 
 from djimaging.tables.core.field import scan_fields_and_files
 from djimaging.utils.data_utils import load_h5_table
@@ -131,7 +133,7 @@ class RelativeFieldLocationTemplate(dj.Computed):
 
 
 class RetinalFieldLocationTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -172,5 +174,65 @@ class RetinalFieldLocationTemplate(dj.Computed):
             ax.scatter(ktemporal_nasal_pos_um, kventral_dorsal_pos_um, label='key')
             ax.legend()
         ax.set(xlabel="temporal_nasal_pos_um", ylabel="ventral_dorsal_pos_um")
+        ax.set_aspect(aspect="equal", adjustable="datalim")
+        plt.show()
+
+
+class RetinalFieldLocationCatTemplate(dj.Computed):
+    database = ""
+
+    @property
+    def definition(self):
+        definition = """
+        -> self.retinalfieldlocalation_table
+        ---
+        nt_side  : enum('nasal', 'center', 'temporal')
+        vd_side  : enum('ventral', 'center', 'dorsal')
+        ntvd_side : enum('nv', 'nc', 'nd', 'cv', 'cc', 'cd', 'tv', 'tc', 'td')
+        """
+        return definition
+
+    retinalfieldlocalation_table = PlaceholderTable
+    _ventral_dorsal_key = 'ventral_dorsal_pos_um'
+    _temporal_nasal_key = 'temporal_nasal_pos_um'
+    _center_dist = 100.
+
+    def make(self, key):
+        ventral_dorsal, temporal_nasal = (self.retinalfieldlocalation_table() & key).fetch1(
+            self._ventral_dorsal_key, self._temporal_nasal_key)
+
+        if temporal_nasal < -self._center_dist:
+            nt_side = 'temporal'
+        elif temporal_nasal > self._center_dist:
+            nt_side = 'nasal'
+        else:
+            nt_side = 'center'
+
+        if ventral_dorsal < -self._center_dist:
+            vd_side = 'ventral'
+        elif ventral_dorsal > self._center_dist:
+            vd_side = 'dorsal'
+        else:
+            vd_side = 'center'
+
+        rfl_key = key.copy()
+        rfl_key['nt_side'] = nt_side
+        rfl_key['vd_side'] = vd_side
+        rfl_key['ntvd_side'] = nt_side[0] + vd_side[0]
+        self.insert1(rfl_key)
+
+    def plot(self, restriction=None):
+
+        if restriction is None:
+            restriction = dict()
+
+        df_plot = pd.DataFrame((self * self.retinalfieldlocalation_table()) & restriction)
+
+        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+
+        sns.scatterplot(
+            ax=ax, data=df_plot, x=self._temporal_nasal_key, y=self._ventral_dorsal_key, hue='ntvd_side')
+
+        ax.set(xlabel="temporal_nasal", ylabel="ventral_dorsal")
         ax.set_aspect(aspect="equal", adjustable="datalim")
         plt.show()

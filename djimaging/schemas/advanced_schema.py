@@ -1,7 +1,5 @@
 from djimaging.schemas.core_schema import *
 from djimaging.tables.optional import *
-from djimaging.tables.optional import RetinalFieldLocationTemplate
-from djimaging.tables.receptivefield import STAParamsTemplate, STATemplate
 
 
 @schema
@@ -47,19 +45,3 @@ class HighRes(HighResTemplate):
     experiment_table = Experiment
     userinfo_table = UserInfo
 
-
-@schema
-class ReceptiveFieldParams(STAParamsTemplate):
-    pass
-
-
-@schema
-class ReceptiveField(STATemplate):
-    stimulus_table = Stimulus
-    presentation_table = Presentation
-    traces_table = Traces
-    preprocesstraces_table = PreprocessTraces
-    params_table = ReceptiveFieldParams
-
-    class DataSet(STATemplate.DataSet):
-        pass

@@ -2,28 +2,28 @@ from djimaging.schemas.advanced_schema import *
 
 
 @schema
-class CellFilterParams(rgc_classifier.CellFilterParamsTemplate):
+class CellFilterParams(CellFilterParamsTemplate):
     pass
 
 
 @schema
-class ClassifierTrainingData(rgc_classifier.ClassifierTrainingDataTemplate):
+class ClassifierTrainingData(ClassifierTrainingDataTemplate):
     pass
 
 
 @schema
-class ClassifierMethod(rgc_classifier.ClassifierMethodTemplate):
+class ClassifierMethod(ClassifierMethodTemplate):
     classifier_training_data_table = ClassifierTrainingData
 
 
 @schema
-class Classifier(rgc_classifier.ClassifierTemplate):
+class Classifier(ClassifierTemplate):
     classifier_training_data_table = ClassifierTrainingData
     classifier_method_table = ClassifierMethod
 
 
 @schema
-class CelltypeAssignment(rgc_classifier.CelltypeAssignmentTemplate):
+class CelltypeAssignment(CelltypeAssignmentTemplate):
     classifier_training_data_table = ClassifierTrainingData
     cell_filter_parameter_table = CellFilterParams
     classifier_table = Classifier

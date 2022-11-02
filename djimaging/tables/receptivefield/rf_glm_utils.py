@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 from scipy.stats import ttest_1samp
 from sklearn.model_selection import KFold
 
-from djimaging.utils.rf_utils import get_sets, split_strf
+from djimaging.tables.receptivefield.rf_utils import get_sets, split_strf
 
 # TODO: remove redundancy between logger and prints
 

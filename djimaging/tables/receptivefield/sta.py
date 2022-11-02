@@ -4,7 +4,7 @@ import datajoint as dj
 import numpy as np
 
 from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
-from djimaging.utils.rf_utils import get_sets, rfest
+from djimaging.tables.receptivefield.rf_utils import compute_sta
 
 
 class STAParamsTemplate(dj.Lookup):
@@ -107,7 +107,7 @@ class STATemplate(dj.Computed):
 
         assert np.isclose(frac_train + frac_dev + frac_test, 1.0)
 
-        rf, rf_pred, X, y, dt = compute_receptive_field(
+        rf, rf_pred, X, y, dt = compute_sta(
             trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
             frac_train=frac_train, frac_dev=frac_dev, dur_filter_s=dur_filter_s,
             norm_stim=norm_stim, norm_trace=norm_trace)
@@ -152,60 +152,3 @@ class STATemplate(dj.Computed):
         plt.tight_layout()
 
 
-def compute_receptive_field(trace, tracetime, stim, stimtime, frac_train, frac_dev, dur_filter_s,
-                            kind='sta', fupsample=1, gradient=False, norm_stim=True, norm_trace=True):
-    assert trace.ndim == 1
-    assert tracetime.ndim == 1
-    assert trace.size == tracetime.size
-    assert stim.shape[0] == stimtime.shape[0], f"{stim.shape} vs. {stimtime.shape}"
-
-    kind = kind.lower()
-
-    X, y, dt = get_sets(
-        stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime,
-        frac_train=frac_train, frac_dev=frac_dev, fupsample=fupsample, gradient=gradient,
-        norm_stim=norm_stim, norm_trace=norm_trace)
-
-    if kind in ['sta', 'mle']:
-        assert 'dev' not in X and 'dev' not in y, 'Development sets are not use for these rfs'
-        rf, rf_pred = fit_sta(X, y, dur_filter_s, dt, kind=kind)
-    else:
-        raise NotImplementedError(f"kind={kind}")
-
-    return rf, rf_pred, X, y, dt
-
-
-def fit_sta(X, y, dur_filter_s, dt, kind='sta'):
-    """Compute STA or MLE"""
-    assert rfest is not None
-    from rfest.GLM._base import Base as BaseModel
-
-    kind = kind.lower()
-    assert kind in ['sta', 'mle'], kind
-
-    dim_t = int(np.ceil(dur_filter_s / dt))
-    dims = (dim_t,) + X['train'].shape[1:]
-
-    burn_in = dims[0] - 1
-
-    X_train_dm = rfest.utils.build_design_matrix(X['train'], dims[0])[burn_in:]
-    y_train_dm = y['train'][burn_in:]
-
-    model = BaseModel(X=X_train_dm, y=y_train_dm, dims=dims, compute_mle=kind == 'mle')
-    rf = model.w_sta if kind == 'sta' else model.w_mle
-
-    rf_pred = dict()
-    rf_pred['burn_in'] = burn_in
-    y_pred_train = X_train_dm @ rf
-    rf_pred['y_pred_train'] = y_pred_train
-    rf_pred['cc_train'] = np.corrcoef(y['train'][burn_in:], y_pred_train)[0, 1]
-    rf_pred['mse_train'] = np.mean((y['train'][burn_in:] - y_pred_train) ** 2)
-
-    if 'test' in X:
-        X_test_dm = rfest.utils.build_design_matrix(X['test'], dims[0])[burn_in:]
-        y_pred_test = X_test_dm @ rf
-        rf_pred['y_pred_test'] = y_pred_test
-        rf_pred['cc_test'] = np.corrcoef(y['test'][burn_in:], y_pred_test)[0, 1]
-        rf_pred['mse_test'] = np.mean((y['test'][burn_in:] - y_pred_test) ** 2)
-
-    return rf.reshape(dims), rf_pred

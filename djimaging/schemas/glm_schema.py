@@ -1,4 +1,5 @@
 from djimaging.schemas.advanced_schema import *
+from djimaging.tables.receptivefield import *
 
 
 @schema
@@ -13,6 +14,17 @@ class RFGLM(RFGLMTemplate):
     stimulus_table = Stimulus
     presentation_table = Presentation
     traces_table = Traces
+
+
+@schema
+class RFGLMQualityParams(RFGLMQualityParamsTemplate):
+    pass
+
+
+@schema
+class RFGLMQuality(RFGLMQualityTemplate):
+    glm_table = RFGLM
+    params_table = RFGLMQualityParams
 
 
 @schema

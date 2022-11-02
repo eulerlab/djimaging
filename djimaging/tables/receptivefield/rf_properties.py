@@ -3,13 +3,13 @@ from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
-from astropy.modeling.fitting import SLSQPLSQFitter
-from astropy.modeling.models import Gaussian2D
 from matplotlib import pyplot as plt
 
+from djimaging.tables.receptivefield.rf_properties_utils import compute_gauss_srf_area, compute_surround_index, \
+    fit_rf_model
 from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
 from djimaging.utils.plot_utils import plot_srf, plot_trf, plot_signals_heatmap
-from djimaging.utils.rf_utils import compute_explained_rf, resize_srf, split_strf, \
+from djimaging.tables.receptivefield.rf_utils import compute_explained_rf, resize_srf, split_strf, \
     compute_polarity_and_peak_idxs, merge_strf
 
 
@@ -114,71 +114,37 @@ class SplitRFTemplate(dj.Computed):
         plt.show()
 
 
-class Fit2DRFBaseTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+class RFContoursParamsTemplate(dj.Lookup):
+    database = ""
 
     @property
     def definition(self):
         definition = """
-        -> self.split_rf_table
+        rf_contours_params_id: int # unique param set id
         ---
-        srf_fit: longblob
-        rf_cdia_um: float # Circle equivalent diameter
-        rf_area_um2: float # Area covered by 2 standard deviations
-        rf_qidx: float # Quality index as explained variance of the sRF estimation between 0 and 1
+        normalize_srf : enum('none', 'zeroone', 'zscore')
+        levels : blob
         """
         return definition
 
-    split_rf_table = PlaceholderTable
-    stimulus_table = PlaceholderTable
-
-    def make(self, key):
-        raise NotImplementedError()
-
-    def plot1(self, key=None):
-        key = get_primary_key(table=self, key=key)
-        srf = (self.split_rf_table() & key).fetch1("srf")
-        srf_fit, rf_qidx = (self & key).fetch1("srf_fit", 'rf_qidx')
-
-        vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
-
-        fig, axs = plt.subplots(1, 3, figsize=(10, 3))
-        ax = axs[0]
-        plot_srf(srf, ax=ax, vabsmax=vabsmax)
-        ax.set_title('sRF')
-
-        ax = axs[1]
-        plot_srf(srf_fit, ax=ax, vabsmax=vabsmax)
-        ax.set_title('sRF fit')
-
-        ax = axs[2]
-        plot_srf(srf - srf_fit, ax=ax, vabsmax=vabsmax)
-        ax.set_title(f'Difference: QI={rf_qidx:.2f}')
-
-        plt.tight_layout()
-        plt.show()
-
-    def plot(self, restriction=None, qi_threshold=0.7):
-        if restriction is None:
-            restriction = dict()
-
-        rf_qidx, rf_cdia_um = (self & restriction).fetch('rf_qidx', 'rf_cdia_um')
-
-        fig, axs = plt.subplots(1, 2, figsize=(8, 3))
-
-        ax = axs[0]
-        ax.set(xlabel="rf_qidx")
-        ax.hist(rf_qidx)
-
-        ax = axs[1]
-        ax.set(xlabel="rf_cdia_um", title=f'rf_qidx>{qi_threshold}')
-        ax.hist(rf_cdia_um[rf_qidx >= qi_threshold])
-
-        plt.tight_layout()
-        plt.show()
+    def add_default(self, skip_duplicates=False):
+        """Add default preprocess parameter to table"""
+        key = {
+            'normalize_srf': 'none',
+            'blur_std': 1.,
+            'blur_npix': 1,
+            'upsample_srf_scale': 0,
+            'peak_nstd': 1,
+        }
+        self.insert1(key, skip_duplicates=skip_duplicates)
 
 
-class FitGauss2DRFTemplate(Fit2DRFBaseTemplate):
+class RFContoursTemplate(dj.Computed):
+    database = ""
+    # TODO: Implement
+
+
+class FitGauss2DRFTemplate(dj.Computed):
     @property
     def definition(self):
         definition = """
@@ -186,92 +152,32 @@ class FitGauss2DRFTemplate(Fit2DRFBaseTemplate):
         ---
         srf_fit: longblob
         srf_params: longblob
-        rf_cdia_um: float # Circle equivalent diameter
         rf_area_um2: float # Area covered by 2 standard deviations
-        rf_qidx: float # Quality index as explained variance of the sRF estimation between 0 and 1
-        """
-        return definition
-
-    polarity = None
-
-    def make(self, key):
-        srf = (self.split_rf_table() & key).fetch1("srf")
-
-        # Get stimulus parameters
-        stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
-        pix_scale_x_um = stim_dict["pix_scale_x_um"]
-        piy_scale_y_um = stim_dict["pix_scale_y_um"]
-
-        srf_fit, srf_params = fit_rf_model(srf, kind='gauss', polarity=self.polarity)
-
-        x_std = srf_params['x_stddev']
-        y_std = srf_params['y_stddev']
-
-        area = np.pi * (2. * x_std * pix_scale_x_um) * (2. * y_std * piy_scale_y_um)
-        diameter = np.sqrt(area / np.pi) * 2
-
-        qi = compute_explained_rf(srf, srf_fit)
-
-        # Save
-        fit_key = deepcopy(key)
-        fit_key['srf_fit'] = srf_fit
-        fit_key['srf_params'] = srf_params
-        fit_key['rf_cdia_um'] = diameter
-        fit_key['rf_area_um2'] = area
-        fit_key['rf_qidx'] = qi
-
-        self.insert1(fit_key)
-
-
-def compute_surround_index(srf, srf_center_fit):
-    return np.sum(srf - srf_center_fit) / np.sum(np.abs(srf))
-
-
-class FitDoG2DRFTemplate(Fit2DRFBaseTemplate):
-
-    @property
-    def definition(self):
-        definition = """
-        -> self.split_rf_table
-        ---
-        srf_fit: longblob
-        srf_center_fit: longblob
-        srf_surround_fit: longblob
-        srf_params: longblob
         rf_cdia_um: float # Circle equivalent diameter
-        rf_area_um2: float # Area covered by 2 standard deviations
         surround_index: float # Strength of surround in sRF
         rf_qidx: float # Quality index as explained variance of the sRF estimation between 0 and 1
         """
         return definition
 
-    polarity = None
+    _polarity = None
+    split_rf_table = PlaceholderTable
+    stimulus_table = PlaceholderTable
 
     def make(self, key):
         srf = (self.split_rf_table() & key).fetch1("srf")
-
-        # Get stimulus parameters
         stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
-        pix_scale_x_um = stim_dict["pix_scale_x_um"]
-        piy_scale_y_um = stim_dict["pix_scale_y_um"]
 
-        srf_fit, srf_center_fit, srf_surround_fit, srf_params = fit_rf_model(
-            srf, kind='dog', polarity=self.polarity, bind_mean=True, bind_cov=True)
+        # Fit RF model
+        srf_fit, srf_params = fit_rf_model(srf, kind='gauss', polarity=self._polarity)
 
-        x_std = srf_params['x_stddev_0']
-        y_std = srf_params['y_stddev_0']
-
-        area = np.pi * (2. * x_std * pix_scale_x_um) * (2. * y_std * piy_scale_y_um)
-        diameter = np.sqrt(area / np.pi) * 2
-
+        # Compute properties
+        area, diameter = compute_gauss_srf_area(srf_params, stim_dict["pix_scale_x_um"], stim_dict["pix_scale_y_um"])
         qi = compute_explained_rf(srf, srf_fit)
-        surround_index = compute_surround_index(srf, srf_center_fit)
+        surround_index = compute_surround_index(srf, srf_fit)
 
         # Save
         fit_key = deepcopy(key)
         fit_key['srf_fit'] = srf_fit
-        fit_key['srf_center_fit'] = srf_center_fit
-        fit_key['srf_surround_fit'] = srf_surround_fit
         fit_key['srf_params'] = srf_params
         fit_key['rf_cdia_um'] = diameter
         fit_key['rf_area_um2'] = area
@@ -283,12 +189,12 @@ class FitDoG2DRFTemplate(Fit2DRFBaseTemplate):
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
         srf = (self.split_rf_table() & key).fetch1("srf")
-        srf_fit, srf_center_fit, srf_surround_fit, rf_qidx = (self & key).fetch1(
-            "srf_fit", 'srf_center_fit', 'srf_surround_fit', 'rf_qidx')
+        srf_fit, rf_qidx = (self & key).fetch1("srf_fit", 'rf_qidx')
 
         vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
 
-        fig, axs = plt.subplots(1, 5, figsize=(20, 3))
+        fig, axs = plt.subplots(1, 3, figsize=(10, 3))
+
         ax = axs[0]
         plot_srf(srf, ax=ax, vabsmax=vabsmax)
         ax.set_title('sRF')
@@ -301,119 +207,104 @@ class FitDoG2DRFTemplate(Fit2DRFBaseTemplate):
         plot_srf(srf - srf_fit, ax=ax, vabsmax=vabsmax)
         ax.set_title(f'Difference: QI={rf_qidx:.2f}')
 
-        ax = axs[3]
-        plot_srf(srf_center_fit, ax=ax, vabsmax=vabsmax)
-        ax.set_title('sRF center fit')
-
-        ax = axs[4]
-        plot_srf(srf_surround_fit, ax=ax, vabsmax=vabsmax)
-        ax.set_title('sRF surround fit')
-
         plt.tight_layout()
         plt.show()
 
 
-def fit_rf_model(srf, kind='gaussian', polarity=None, **model_kws):
-    assert srf.ndim == 2, 'Provide 2d RF'
+class FitDoG2DRFTemplate(dj.Computed):
 
-    if kind == 'gauss':
-        model = srf_gauss_model(srf, polarity=polarity)
-    elif kind == 'dog':
-        model = srf_dog_model(srf, polarity=polarity, **model_kws)
-    else:
-        raise NotImplementedError(kind)
+    @property
+    def definition(self):
+        definition = """
+        -> self.split_rf_table
+        ---
+        srf_fit: longblob
+        srf_center_fit: longblob
+        srf_surround_fit: longblob
+        srf_params: longblob
+        srf_eff_center: longblob
+        rf_qidx: float
+        rf_area_um2: float # Area covered by 2 standard deviations
+        rf_cdia_um: float # Circle equivalent diameter
+        surround_index: float # Strength of surround in sRF
+        """
+        return definition
 
-    xx, yy = np.meshgrid(np.arange(0, srf.shape[1]), np.arange(0, srf.shape[0]))
+    _polarity = None
+    split_rf_table = PlaceholderTable
+    stimulus_table = PlaceholderTable
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        model = SLSQPLSQFitter()(model, xx, yy, srf, verblevel=0)
+    def make(self, key):
+        srf = (self.split_rf_table() & key).fetch1("srf")
+        stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
 
-    model_params = {k: v for k, v in zip(model.param_names, model.param_sets.flatten())}
-    model_fit = model(xx, yy)
+        srf_fit, srf_center_fit, srf_surround_fit, srf_params, eff_polarity = fit_rf_model(
+            srf, kind='dog', polarity=self._polarity)
 
-    if kind == 'gauss':
-        return model_fit, model_params
-    elif kind == 'dog':
-        model_center_fit = model[0](xx, yy)
-        model_surround_fit = model[1](xx, yy)
-        return model_fit, model_center_fit, model_surround_fit, model_params
+        qi = compute_explained_rf(srf, srf_fit)
 
+        if (self._polarity is None) or (eff_polarity == self._polarity):
+            srf_eff_center = eff_polarity * np.clip(eff_polarity * srf_fit, 0, None)
+        else:
+            srf_eff_center = np.zeros_like(srf_fit)
 
-def estimate_srf_center_model_init_params(srf, polarity=None, amplimscale=2.):
-    assert srf.ndim == 2, 'Provide 2d RF'
+        if np.allclose(srf_eff_center, 0.):
+            warnings.warn(f'Failed to fit DoG to key={key}')
+            return
 
-    if polarity is None:
-        y0, x0 = np.unravel_index(np.argmax(np.abs(srf)), shape=srf.shape)
-    elif polarity == 1:
-        y0, x0 = np.unravel_index(np.argmax(srf), shape=srf.shape)
-    elif polarity == -1:
-        y0, x0 = np.unravel_index(np.argmin(srf), shape=srf.shape)
-    else:
-        raise NotImplementedError(polarity)
+        surround_index = compute_surround_index(srf=srf, srf_center=srf_eff_center)
+        # Compute area from gaussian fit to effective center? TODO: is this really necessary?
+        _, srf_gauss_params = fit_rf_model(srf_eff_center, kind='gauss', polarity=self._polarity)
+        area, diameter = compute_gauss_srf_area(
+            srf_gauss_params, stim_dict["pix_scale_x_um"], stim_dict["pix_scale_y_um"])
 
-    srf_cut = np.abs(srf[:, int(x0)] - np.min(srf[:, int(x0)]))
-    srf_cut_profile = np.cumsum(srf_cut) / np.sum(srf_cut)
-    std0 = np.maximum(1, 0.5 * (np.argmin(np.abs(srf_cut_profile - 0.7)) - np.argmin(np.abs(srf_cut_profile - 0.3))))
+        # Save
+        fit_key = deepcopy(key)
+        fit_key['srf_fit'] = srf_fit
+        fit_key['srf_center_fit'] = srf_center_fit
+        fit_key['srf_surround_fit'] = srf_surround_fit
+        fit_key['srf_params'] = srf_params
+        fit_key['srf_eff_center'] = srf_eff_center
+        fit_key['rf_cdia_um'] = diameter
+        fit_key['rf_area_um2'] = area
+        fit_key['surround_index'] = surround_index
+        fit_key['rf_qidx'] = qi
 
-    xlim = (0, srf.shape[1])
-    ylim = (0, srf.shape[0])
+        self.insert1(fit_key)
 
-    if polarity is None:
-        amp0 = srf.flat[np.argmax(np.abs(srf))]
-        amplim = (-amplimscale * np.abs(amp0), amplimscale * np.abs(amp0))
-    elif polarity == 1:
-        amp0 = np.max(srf)
-        assert amp0 > 0
-        amplim = (0., amplimscale * amp0)
-    elif polarity == -1:
-        amp0 = np.min(srf)
-        assert amp0 < 0
-        amplim = (amplimscale * amp0, 0.)
-    else:
-        raise NotImplementedError(polarity)
+    def plot1(self, key=None):
+        key = get_primary_key(table=self, key=key)
+        srf = (self.split_rf_table() & key).fetch1("srf")
+        srf_fit, srf_center_fit, srf_surround_fit, srf_eff_center, rf_qidx = (self & key).fetch1(
+            "srf_fit", 'srf_center_fit', 'srf_surround_fit', 'srf_eff_center', 'rf_qidx')
 
-    return x0, y0, amp0, std0, xlim, ylim, amplim
+        vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
 
+        fig, axs = plt.subplots(2, 3, figsize=(10, 6))
 
-def srf_gauss_model(srf, polarity=None):
-    assert srf.ndim == 2, 'Provide 2d RF'
+        ax = axs[0, 0]
+        plot_srf(srf, ax=ax, vabsmax=vabsmax)
+        ax.set_title('sRF')
 
-    x0, y0, amp0, std0, xlim, ylim, amplim = estimate_srf_center_model_init_params(
-        srf=srf, polarity=polarity, amplimscale=2.)
+        ax = axs[0, 1]
+        plot_srf(srf_fit, ax=ax, vabsmax=vabsmax)
+        ax.set_title('sRF fit')
 
-    model = Gaussian2D(
-        amplitude=amp0, x_mean=x0, y_mean=y0, x_stddev=std0, y_stddev=std0,
-        bounds={'amplitude': amplim, 'x_mean': xlim, 'y_mean': ylim})
+        ax = axs[0, 2]
+        plot_srf(srf - srf_fit, ax=ax, vabsmax=vabsmax)
+        ax.set_title(f'Difference: QI={rf_qidx:.2f}')
 
-    return model
+        ax = axs[1, 0]
+        plot_srf(srf_center_fit, ax=ax, vabsmax=vabsmax)
+        ax.set_title('sRF center fit')
 
+        ax = axs[1, 1]
+        plot_srf(srf_surround_fit, ax=ax, vabsmax=vabsmax)
+        ax.set_title('sRF surround fit')
 
-def srf_dog_model(srf, polarity=None, bind_mean=True, bind_cov=False):
-    assert srf.ndim == 2, 'Provide 2d RF'
+        ax = axs[1, 2]
+        plot_srf(srf_eff_center, ax=ax, vabsmax=vabsmax)
+        ax.set_title('sRF effective center')
 
-    x0, y0, amp0, std0, xlim, ylim, amplim = estimate_srf_center_model_init_params(
-        srf=srf, polarity=polarity, amplimscale=10.)
-
-    xlim = (np.maximum(xlim[0], x0 - std0), np.minimum(xlim[1], x0 + std0))
-    ylim = (np.maximum(ylim[0], y0 - std0), np.minimum(ylim[1], y0 + std0))
-    stdlim = (0.1 * std0, 10. * std0)
-
-    f_c = Gaussian2D(
-        amplitude=amp0, x_mean=x0, y_mean=y0, x_stddev=std0, y_stddev=std0,
-        bounds={'amplitude': amplim, 'x_mean': xlim, 'y_mean': ylim, 'x_stddev': stdlim, 'y_stddev': stdlim})
-
-    f_s = Gaussian2D(
-        amplitude=1. / 50. * amp0, x_mean=x0, y_mean=y0, x_stddev=5. * std0, y_stddev=5. * std0,
-        bounds={'amplitude': np.sort(-np.asarray(amplim)), 'x_mean': xlim, 'y_mean': ylim})
-
-    model = f_c - f_s
-
-    if bind_mean:
-        f_s.x_mean.tied = lambda _model: _model.x_mean_0
-        f_s.y_mean.tied = lambda _model: _model.y_mean_0
-    if bind_cov:
-        f_s.theta.tied = lambda _model: _model.theta_0
-        f_s.x_stddev.tied = lambda _model: _model.y_stddev_1 * _model.x_stddev_0 / _model.y_stddev_0
-
-    return model
+        plt.tight_layout()
+        plt.show()

@@ -3,8 +3,7 @@ import warnings
 import numpy as np
 import pytest
 
-from djimaging.tables.receptivefield.sta import compute_receptive_field
-from djimaging.utils.rf_utils import resample_trace, get_sets
+from djimaging.tables.receptivefield.rf_utils import resample_trace, get_sets, compute_sta
 
 try:
     import rfest
@@ -93,7 +92,7 @@ def test_resample_trace():
 @pytest.mark.skipif(rfest is None, reason="requires rfest")
 def test_sta():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=4897)
-    rf, rf_pred, X, y, dt = compute_receptive_field(
+    rf, rf_pred, X, y, dt = compute_sta(
         trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
         frac_train=0.6, frac_dev=0.0, dur_filter_s=1.0,
         kind='sta', fupsample=1, gradient=False)
@@ -107,7 +106,7 @@ def test_sta():
 @pytest.mark.skipif(rfest is None, reason="requires rfest")
 def test_sta_overfitting():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=4897)
-    rf, rf_pred, X, y, dt = compute_receptive_field(
+    rf, rf_pred, X, y, dt = compute_sta(
         trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
         frac_train=0.6, frac_dev=0.0, dur_filter_s=3.0,
         kind='sta', fupsample=1, gradient=False)
@@ -121,7 +120,7 @@ def test_sta_overfitting():
 @pytest.mark.skipif(rfest is None, reason="requires rfest")
 def test_mle():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=1324)
-    rf, rf_pred, X, y, dt = compute_receptive_field(
+    rf, rf_pred, X, y, dt = compute_sta(
         trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
         frac_train=0.6, frac_dev=0.0, dur_filter_s=0.2,
         kind='mle', fupsample=1, gradient=True)
@@ -135,7 +134,7 @@ def test_mle():
 @pytest.mark.skipif(rfest is None, reason="requires rfest")
 def test_mle_overfitting():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=1324)
-    rf, rf_pred, X, y, dt = compute_receptive_field(
+    rf, rf_pred, X, y, dt = compute_sta(
         trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
         frac_train=0.6, frac_dev=0.0, dur_filter_s=2.0,
         kind='mle', fupsample=1, gradient=True)

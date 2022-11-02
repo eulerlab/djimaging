@@ -27,7 +27,7 @@ class SineSpotFeaturesTemplate(dj.Computed):
         -> self.preprocesstraces_table
         ---
         suppression_index:  float   # index for suppression of larger spot
-        response_rep_x_dir: longblob   # index indicating transience of response
+        response_rep_x_dir: longblob  # Response matrix used to compute suppression
         '''
         return definition
 
