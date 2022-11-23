@@ -14,7 +14,7 @@ from djimaging.tables.receptivefield.rf_utils import compute_explained_rf, resiz
 
 
 class SplitRFParamsTemplate(dj.Lookup):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -41,7 +41,7 @@ class SplitRFParamsTemplate(dj.Lookup):
 
 
 class SplitRFTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -145,6 +145,8 @@ class RFContoursTemplate(dj.Computed):
 
 
 class FitGauss2DRFTemplate(dj.Computed):
+    database = ""
+
     @property
     def definition(self):
         definition = """
@@ -212,6 +214,7 @@ class FitGauss2DRFTemplate(dj.Computed):
 
 
 class FitDoG2DRFTemplate(dj.Computed):
+    database = ""
 
     @property
     def definition(self):
