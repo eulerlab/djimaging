@@ -1,12 +1,13 @@
 import os
 import warnings
+from abc import abstractmethod
 from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
 
 from djimaging.utils.alias_utils import match_file, get_field_files
-from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
+from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import load_ch0_ch1_stacks_from_h5, load_ch0_ch1_stacks_from_smp, get_pixel_size_xy_um
 
@@ -29,7 +30,7 @@ def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
 
     if allow_raw:
         filepath = scan_for_highres_filepath(
-            folder=raw_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc-1, ftype='smp',
+            folder=raw_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc - 1, ftype='smp',
             condition=condition, condition_loc=condition_loc)
 
         if filepath is not None:
@@ -61,7 +62,7 @@ def scan_for_highres_filepath(folder, field, field_loc, highres_alias, condition
 
 
 class HighResTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -86,9 +87,17 @@ class HighResTemplate(dj.Computed):
         """
         return definition
 
-    field_table = PlaceholderTable
-    experiment_table = PlaceholderTable
-    userinfo_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def field_table(self): pass
+
+    @property
+    @abstractmethod
+    def experiment_table(self): pass
+
+    @property
+    @abstractmethod
+    def userinfo_table(self): pass
 
     def make(self, key):
         field = (self.field_table() & key).fetch1("field")

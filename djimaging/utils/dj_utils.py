@@ -6,44 +6,6 @@ from collections.abc import Iterable, Mapping
 import datajoint as dj
 
 
-class PlaceholderTable:
-    def __and__(self, other):
-        return True
-
-    def __mul__(self, other):
-        return other
-
-    @classmethod
-    def ExpInfo(cls):
-        return PlaceholderTable()
-
-    @classmethod
-    def RoiMask(cls):
-        return PlaceholderTable()
-
-    @classmethod
-    def ScanInfo(cls):
-        return PlaceholderTable()
-
-    def fetch1(self, *args, **kwargs):
-        pass
-
-    def fetch(self, *args, **kwargs):
-        pass
-
-    @classmethod
-    def Zstack(cls):
-        pass
-
-    @classmethod
-    def RoiStackPos(cls):
-        pass
-
-    @classmethod
-    def RoiCalibratedStackPos(cls):
-        pass
-
-
 def get_class_attributes(class_):
     class_attrs = [attr for attr in class_.__dict__.keys() if attr[:2] != '__']
     return class_attrs

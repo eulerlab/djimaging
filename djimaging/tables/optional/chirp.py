@@ -1,15 +1,16 @@
+from abc import abstractmethod
+
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy import signal
 
-from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
+from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 
 
 class ChirpQITemplate(dj.Computed):
-
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -22,8 +23,15 @@ class ChirpQITemplate(dj.Computed):
         '''
         return definition
 
-    stimulus_table = PlaceholderTable
-    snippets_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
 
     @property
     def key_source(self):
@@ -60,7 +68,7 @@ class ChirpQITemplate(dj.Computed):
 class ChirpFeaturesTemplate(dj.Computed):
     # TODO: Add more features
 
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -73,9 +81,20 @@ class ChirpFeaturesTemplate(dj.Computed):
         '''
         return definition
 
-    stimulus_table = PlaceholderTable
-    snippets_table = PlaceholderTable
-    presentation_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
 
     @property
     def key_source(self):

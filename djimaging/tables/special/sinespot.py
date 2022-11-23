@@ -1,9 +1,11 @@
+from abc import abstractmethod
+
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.optional import ChirpQITemplate
-from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
+from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.math_utils import normalize_soft_zero_one
 
 
@@ -18,7 +20,7 @@ class SineSpotQITemplate(ChirpQITemplate):
 
 
 class SineSpotFeaturesTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -31,9 +33,20 @@ class SineSpotFeaturesTemplate(dj.Computed):
         '''
         return definition
 
-    stimulus_table = PlaceholderTable
-    preprocesstraces_table = PlaceholderTable
-    presentation_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def preprocesstraces_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
 
     @property
     def key_source(self):

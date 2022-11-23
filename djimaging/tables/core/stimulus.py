@@ -5,7 +5,7 @@ import numpy as np
 
 
 class StimulusTemplate(dj.Manual):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):

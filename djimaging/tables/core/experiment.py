@@ -1,5 +1,6 @@
 import os
 import warnings
+from abc import abstractmethod
 from copy import deepcopy
 from datetime import datetime
 
@@ -7,11 +8,10 @@ import datajoint as dj
 
 from djimaging.utils.data_utils import read_config_dict
 from djimaging.utils.datafile_utils import find_folders_with_file_of_type
-from djimaging.utils.dj_utils import PlaceholderTable
 
 
 class ExperimentTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -26,7 +26,10 @@ class ExperimentTemplate(dj.Computed):
         """
         return definition
 
-    userinfo_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def userinfo_table(self):
+        pass
 
     def make(self, key: dict) -> None:
         data_dir, pre_data_dir, raw_data_dir = (self.userinfo_table() & key).fetch1(
@@ -295,4 +298,3 @@ class ExperimentTemplate(dj.Computed):
             pharmcom        :varchar(255)     # experimenter comments
             """
             return definition
-

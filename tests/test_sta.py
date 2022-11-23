@@ -8,6 +8,7 @@ from djimaging.tables.receptivefield.rf_utils import resample_trace, get_sets, c
 try:
     import rfest
     from jax.lib import xla_bridge
+
     xla_bridge.get_backend()
     del xla_bridge
 except ImportError:

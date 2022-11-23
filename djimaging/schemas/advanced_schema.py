@@ -44,4 +44,3 @@ class HighRes(HighResTemplate):
     field_table = Field
     experiment_table = Experiment
     userinfo_table = UserInfo
-

@@ -7,7 +7,7 @@ from djimaging.utils.dj_utils import get_primary_key
 
 
 class UserInfoTemplate(dj.Manual):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):

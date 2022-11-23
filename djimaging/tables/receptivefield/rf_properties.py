@@ -1,4 +1,5 @@
 import warnings
+from abc import abstractmethod
 from copy import deepcopy
 
 import datajoint as dj
@@ -7,10 +8,10 @@ from matplotlib import pyplot as plt
 
 from djimaging.tables.receptivefield.rf_properties_utils import compute_gauss_srf_area, compute_surround_index, \
     fit_rf_model
-from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
-from djimaging.utils.plot_utils import plot_srf, plot_trf, plot_signals_heatmap
 from djimaging.tables.receptivefield.rf_utils import compute_explained_rf, resize_srf, split_strf, \
     compute_polarity_and_peak_idxs, merge_strf
+from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.plot_utils import plot_srf, plot_trf, plot_signals_heatmap
 
 
 class SplitRFParamsTemplate(dj.Lookup):
@@ -57,8 +58,15 @@ class SplitRFTemplate(dj.Computed):
         '''
         return definition
 
-    rf_table = PlaceholderTable
-    split_rf_params_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def rf_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def split_rf_params_table(self):
+        pass
 
     def make(self, key):
         # Get data
@@ -162,8 +170,14 @@ class FitGauss2DRFTemplate(dj.Computed):
         return definition
 
     _polarity = None
-    split_rf_table = PlaceholderTable
-    stimulus_table = PlaceholderTable
+
+    @property
+    @abstractmethod
+    def split_rf_table(self): pass
+
+    @property
+    @abstractmethod
+    def stimulus_table(self): pass
 
     def make(self, key):
         srf = (self.split_rf_table() & key).fetch1("srf")
@@ -234,8 +248,16 @@ class FitDoG2DRFTemplate(dj.Computed):
         return definition
 
     _polarity = None
-    split_rf_table = PlaceholderTable
-    stimulus_table = PlaceholderTable
+
+    @property
+    @abstractmethod
+    def split_rf_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
 
     def make(self, key):
         srf = (self.split_rf_table() & key).fetch1("srf")

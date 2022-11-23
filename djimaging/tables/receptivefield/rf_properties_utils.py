@@ -33,7 +33,7 @@ def fit_rf_model(srf, kind='gaussian', polarity=None):
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        model = SLSQPLSQFitter()(model, xx, yy, srf, verblevel=0)
+        model = SLSQPLSQFitter()(model=model, x=xx, y=yy, z=srf, verblevel=0)
 
     model_params = {k: v for k, v in zip(model.param_names, model.param_sets.flatten())}
     model_fit = model(xx, yy)
@@ -126,7 +126,6 @@ def srf_dog_model(srf, polarity=None):
 
 
 def srf_dog_model_from_params(params):
-
     f_c = Gaussian2D(
         amplitude=params['amplitude_0'], x_mean=params['x_mean_0'], y_mean=params['y_mean_0'],
         x_stddev=params['x_stddev_0'], y_stddev=params['y_stddev_0'])

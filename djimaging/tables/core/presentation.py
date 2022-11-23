@@ -1,18 +1,19 @@
 import os
 import warnings
+from abc import abstractmethod
 from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
 
 from djimaging.utils.alias_utils import get_field_files
-from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
+from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import get_triggers_and_data
 
 
 class PresentationTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -31,10 +32,25 @@ class PresentationTemplate(dj.Computed):
         """
         return definition
 
-    field_table = PlaceholderTable
-    stimulus_table = PlaceholderTable
-    userinfo_table = PlaceholderTable
-    experiment_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def field_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def userinfo_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def experiment_table(self):
+        pass
 
     @property
     def key_source(self):

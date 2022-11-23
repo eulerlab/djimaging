@@ -1,5 +1,4 @@
 from djimaging.tables.optional import *
-from djimaging.tables.optional import RetinalFieldLocationTemplate
 from .utils import _test_definition
 
 
@@ -45,11 +44,3 @@ def test_definition_ClassifierMethodTemplate():
 
 def test_definition_HighResTemplate():
     _test_definition(HighResTemplate)
-
-
-def test_definition_ReceptiveFieldParamsTemplate():
-    _test_definition(STAParamsTemplate)
-
-
-def test_definition_ReceptiveFieldTemplate():
-    _test_definition(STATemplate)

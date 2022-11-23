@@ -1,16 +1,17 @@
 import warnings
+from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
+from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger, plot_signals_heatmap
 from djimaging.utils.scanm_utils import load_traces_from_h5_file, split_trace_by_reps
 
 
 class TracesTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -28,9 +29,20 @@ class TracesTemplate(dj.Computed):
         """
         return definition
 
-    presentation_table = PlaceholderTable
-    field_table = PlaceholderTable
-    roi_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def field_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def roi_table(self):
+        pass
 
     _include_artifacts = False
 
@@ -82,7 +94,7 @@ class TracesTemplate(dj.Computed):
 
 
 class SnippetsTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -97,10 +109,25 @@ class SnippetsTemplate(dj.Computed):
         """
         return definition
 
-    preprocesstraces_table = PlaceholderTable
-    stimulus_table = PlaceholderTable
-    presentation_table = PlaceholderTable
-    traces_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def preprocesstraces_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def traces_table(self):
+        pass
 
     @property
     def key_source(self):
@@ -139,7 +166,7 @@ class SnippetsTemplate(dj.Computed):
 
 
 class AveragesTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -155,7 +182,10 @@ class AveragesTemplate(dj.Computed):
         """
         return definition
 
-    snippets_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
 
     def make(self, key):
         snippets, times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
@@ -203,4 +233,3 @@ class AveragesTemplate(dj.Computed):
         ax = plot_signals_heatmap(signals=np.stack([a[:min_size] for a in average]))
         ax.set(title='Averages')
         plt.show()
-

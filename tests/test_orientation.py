@@ -45,5 +45,3 @@ def test_nonds():
     assert np.isclose(p_dsi, 0.982, atol=0.01, rtol=0.01)
     assert np.isclose(osi, 0.7038211435585239, atol=0.01, rtol=0.01)
     assert np.isclose(p_osi, 0.002, atol=0.01, rtol=0.01)
-
-

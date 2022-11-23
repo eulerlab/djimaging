@@ -1,12 +1,13 @@
 import os
 import warnings
+from abc import abstractmethod
 from datetime import datetime
 
 import datajoint as dj
 import pandas as pd
 from matplotlib import pyplot as plt
 
-from djimaging.utils.dj_utils import PlaceholderTable, make_hash
+from djimaging.utils.dj_utils import make_hash
 
 
 def prepare_dj_config_location_from_table(input_folder):
@@ -27,7 +28,7 @@ def prepare_dj_config_location_from_table(input_folder):
 
 
 class RetinalFieldLocationTableParamsTemplate(dj.Lookup):
-    database = ""  # hack to suppress DJ error
+    database = ""
     store = "location_table_input"
 
     @property
@@ -54,7 +55,7 @@ class RetinalFieldLocationTableParamsTemplate(dj.Lookup):
 
 
 class RetinalFieldLocationFromTableTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -71,9 +72,20 @@ class RetinalFieldLocationFromTableTemplate(dj.Computed):
             """
         return definition
 
-    field_table = PlaceholderTable
-    params_table = PlaceholderTable
-    expinfo_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def field_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def params_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def expinfo_table(self):
+        pass
 
     def make(self, key):
         params = (self.params_table() & key).fetch1()

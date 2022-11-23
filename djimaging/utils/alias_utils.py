@@ -2,7 +2,6 @@ import os
 
 
 def check_shared_alias_str(str1, str2, case_sensitive=False, sep='_'):
-
     if not case_sensitive:
         str1 = str1.lower()
         str2 = str2.lower()

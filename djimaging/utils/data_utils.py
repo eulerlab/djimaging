@@ -45,5 +45,3 @@ def read_config_dict(filename):
         for key2 in parser[key1].keys():
             config_dict[key2[key2.find("_") + 1:]] = str(parser[key1][key2])
     return config_dict
-
-

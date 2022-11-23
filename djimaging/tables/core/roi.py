@@ -1,13 +1,15 @@
+from abc import abstractmethod
+
 import datajoint as dj
 import numpy as np
 
-from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
+from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import extract_roi_idxs
 
 
 class RoiTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -23,7 +25,10 @@ class RoiTemplate(dj.Computed):
         """
         return definition
 
-    field_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def field_table(self):
+        pass
 
     @property
     def key_source(self):

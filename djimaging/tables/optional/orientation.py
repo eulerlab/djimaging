@@ -1,11 +1,12 @@
 import cmath
+from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy import stats
 
-from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
+from djimaging.utils.dj_utils import get_primary_key
 
 
 def quality_index_ds(raw_sorted_resp_mat):
@@ -214,7 +215,7 @@ def compute_osdsindexes(snippets, dir_order):
 
 
 class OsDsIndexesTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -241,13 +242,21 @@ class OsDsIndexesTemplate(dj.Computed):
         """
         return definition
 
-    stimulus_table = PlaceholderTable
-    snippets_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
 
     @property
     def key_source(self):
         try:
-            return self.snippets_table() & (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
+            return self.snippets_table() & \
+                   (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
         except TypeError:
             pass
 

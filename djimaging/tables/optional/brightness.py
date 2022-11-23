@@ -1,12 +1,13 @@
+from abc import abstractmethod
+
 import datajoint as dj
 import numpy as np
 
 from djimaging.utils import math_utils
-from djimaging.utils.dj_utils import PlaceholderTable
 
 
 class RoiBrightnessTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -19,9 +20,17 @@ class RoiBrightnessTemplate(dj.Computed):
         """
         return definition
 
-    field_table = PlaceholderTable
-    presentation_table = PlaceholderTable
-    roi_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def field_table(self): pass
+
+    @property
+    @abstractmethod
+    def presentation_table(self): pass
+
+    @property
+    @abstractmethod
+    def roi_table(self): pass
 
     def make(self, key):
         roi_mask = (self.field_table.RoiMask() & key).fetch1('roi_mask')

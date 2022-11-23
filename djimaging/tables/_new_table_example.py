@@ -1,5 +1,6 @@
+from abc import abstractmethod
+
 import datajoint as dj
-from djimaging.utils.dj_utils import PlaceholderTable
 
 
 def compute_something(data):
@@ -9,7 +10,7 @@ def compute_something(data):
 
 
 class ExampleTableTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -23,7 +24,9 @@ class ExampleTableTemplate(dj.Computed):
         """
         return definition
 
-    field_table = PlaceholderTable  # A Placeholder table, must be replaced in schema with real table
+    @property
+    @abstractmethod
+    def field_table(self): pass  # A place-holder table, must be replaced in schema with real table
 
     def make(self, key):
         # Fetch something. Use fetch1
@@ -41,5 +44,3 @@ class ExampleTableTemplate(dj.Computed):
 
         # Insert data to table
         self.insert1(new_key)
-
-

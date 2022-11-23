@@ -44,6 +44,3 @@ def test_definition_snippets():
 # presentation
 def test_definition_presentation():
     _test_definition(PresentationTemplate)
-
-
-

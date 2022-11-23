@@ -1,5 +1,6 @@
 import os
 import pickle as pkl
+from abc import abstractmethod
 from copy import deepcopy
 from typing import Mapping, Dict, Any
 
@@ -8,7 +9,7 @@ import numpy as np
 from cached_property import cached_property
 from scipy import interpolate
 
-from djimaging.utils.dj_utils import make_hash, PlaceholderTable
+from djimaging.utils.dj_utils import make_hash
 from djimaging.utils.import_helpers import dynamic_import, split_module_name
 
 Key = Dict[str, Any]
@@ -74,7 +75,10 @@ class ClassifierMethodTemplate(dj.Lookup):
         return definition
 
     import_func = staticmethod(dynamic_import)
-    classifier_training_data_table = PlaceholderTable
+
+    @property
+    @abstractmethod
+    def classifier_training_data_table(self): pass
 
     def add_classifier(self, classifier_fn: str, classifier_config: Mapping,
                        comment: str = "", skip_duplicates: bool = False, classifier_seed: int = 42) -> None:
@@ -155,8 +159,13 @@ class ClassifierTemplate(dj.Computed):
         """.format(store=self.store)
         return definition
 
-    classifier_training_data_table = PlaceholderTable
-    classifier_method_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def classifier_training_data_table(self): pass
+
+    @property
+    @abstractmethod
+    def classifier_method_table(self): pass
 
     def make(self, key):
         output_path = (self.classifier_training_data_table() & key).fetch1("output_path")
@@ -222,18 +231,65 @@ class CelltypeAssignmentTemplate(dj.Computed):
         """
         return definition
 
-    cell_filter_parameter_table = PlaceholderTable
-    classifier_training_data_table = PlaceholderTable
-    classifier_table = PlaceholderTable
-    roi_table = PlaceholderTable
-    presentation_table = PlaceholderTable
-    chirp_qi_table = PlaceholderTable
-    snippets_table = PlaceholderTable
-    or_dir_index_table = PlaceholderTable
-    user_info_table = PlaceholderTable
-    detrend_params_table = PlaceholderTable
-    field_table = PlaceholderTable
-    exp_info_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def cell_filter_parameter_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def classifier_training_data_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def classifier_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def roi_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def chirp_qi_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def or_dir_index_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def user_info_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def detrend_params_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def field_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def exp_info_table(self):
+        pass
 
     _stim_name_chirp = 'gChirp'
     _stim_name_bar = 'movingbar'

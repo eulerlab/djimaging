@@ -9,6 +9,7 @@ from djimaging.utils import math_utils, filter_utils
 try:
     import rfest
     from jax.lib import xla_bridge
+
     xla_bridge.get_backend()
     del xla_bridge
 except ImportError:
@@ -41,7 +42,7 @@ def upsample_trace(tracetime, trace, fupsample):
     diffs = np.diff(tracetime_upsampled)
     mu = np.mean(diffs)
     std = np.std(diffs)
-    assert np.isclose(mu, dt / fupsample, atol=mu/10.), f"{mu} {dt} {fupsample}"
+    assert np.isclose(mu, dt / fupsample, atol=mu / 10.), f"{mu} {dt} {fupsample}"
     assert mu > 10 * std
 
     trace_upsampled = np.interp(tracetime_upsampled, tracetime, trace)

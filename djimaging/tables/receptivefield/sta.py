@@ -1,14 +1,15 @@
+from abc import abstractmethod
 from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
 
-from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
 from djimaging.tables.receptivefield.rf_utils import compute_sta
+from djimaging.utils.dj_utils import get_primary_key
 
 
 class STAParamsTemplate(dj.Lookup):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -49,7 +50,7 @@ class STAParamsTemplate(dj.Lookup):
 
 
 class STATemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -63,11 +64,30 @@ class STATemplate(dj.Computed):
         '''
         return definition
 
-    stimulus_table = PlaceholderTable
-    presentation_table = PlaceholderTable
-    traces_table = PlaceholderTable
-    preprocesstraces_table = PlaceholderTable
-    params_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def traces_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def preprocesstraces_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def params_table(self):
+        pass
 
     @property
     def key_source(self):
@@ -150,5 +170,3 @@ class STATemplate(dj.Computed):
 
         axs[-1].set(xlabel='Time')
         plt.tight_layout()
-
-

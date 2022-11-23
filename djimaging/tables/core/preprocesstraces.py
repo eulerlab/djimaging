@@ -1,11 +1,12 @@
 import warnings
+from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy import signal
 
-from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
+from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 
 
@@ -41,7 +42,7 @@ def drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace
         else:
             r_ndrop = np.argmin(r_oor[::-1])
         if r_ndrop > 0:
-            trace[-r_ndrop:] = trace[-(r_ndrop+1)]
+            trace[-r_ndrop:] = trace[-(r_ndrop + 1)]
 
     if drop_nmin_lr[0] > 0:
         trace[:drop_nmin_lr[0]] = trace[drop_nmin_lr[0]]
@@ -99,7 +100,7 @@ def detrend_trace(trace_times, trace, poly_order, window_len_seconds, fs,
 
 
 class PreprocessParamsTemplate(dj.Lookup):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -128,7 +129,7 @@ class PreprocessParamsTemplate(dj.Lookup):
 
 
 class PreprocessTracesTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -143,9 +144,20 @@ class PreprocessTracesTemplate(dj.Computed):
         """
         return definition
 
-    traces_table = PlaceholderTable
-    preprocessparams_table = PlaceholderTable
-    presentation_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def traces_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def preprocessparams_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
 
     @property
     def key_source(self):
@@ -193,12 +205,12 @@ class PreprocessTracesTemplate(dj.Computed):
         fig, axs = plt.subplots(3, 1, figsize=(10, 6), sharex='all')
 
         ax = axs[0]
-        plot_trace_and_trigger(time=trace_times, trace=trace-np.mean(smoothed_trace),
+        plot_trace_and_trigger(time=trace_times, trace=trace - np.mean(smoothed_trace),
                                triggertimes=triggertimes, ax=ax, title=str(key))
         ax.set(ylabel='mean subtracted\nraw trace')
 
         ax = axs[1]
-        plot_trace_and_trigger(time=trace_times, trace=smoothed_trace-np.mean(smoothed_trace),
+        plot_trace_and_trigger(time=trace_times, trace=smoothed_trace - np.mean(smoothed_trace),
                                triggertimes=triggertimes, ax=ax)
         ax.set(ylabel='mean subtracted\ntrend')
 

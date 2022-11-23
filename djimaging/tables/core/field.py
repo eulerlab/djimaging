@@ -1,4 +1,5 @@
 import os
+from abc import abstractmethod
 from copy import deepcopy
 
 import datajoint as dj
@@ -7,13 +8,13 @@ import numpy as np
 
 from djimaging.utils.alias_utils import check_shared_alias_str
 from djimaging.utils.datafile_utils import get_filename_info
-from djimaging.utils.dj_utils import PlaceholderTable, get_primary_key
+from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import get_pixel_size_xy_um, load_ch0_ch1_stacks_from_h5, get_npixartifact
 
 
 class FieldTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -38,8 +39,15 @@ class FieldTemplate(dj.Computed):
         """
         return definition
 
-    experiment_table = PlaceholderTable
-    userinfo_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def experiment_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def userinfo_table(self):
+        pass
 
     class Zstack(dj.Part):
         @property
@@ -229,7 +237,6 @@ def load_field_roi_mask(pre_data_path, files, mask_alias='', highres_alias=''):
 
 
 def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl=0):
-
     try:
         roi_mask, file = load_field_roi_mask(
             pre_data_path, files, mask_alias=mask_alias, highres_alias=highres_alias)

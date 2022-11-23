@@ -1,14 +1,14 @@
 import os
 import warnings
+from abc import abstractmethod
 
 import datajoint as dj
 import pandas as pd
-from matplotlib import pyplot as plt
 import seaborn as sns
+from matplotlib import pyplot as plt
 
 from djimaging.tables.core.field import scan_fields_and_files
 from djimaging.utils.data_utils import load_h5_table
-from djimaging.utils.dj_utils import PlaceholderTable
 from djimaging.utils.scanm_utils import get_retinal_position
 
 
@@ -30,8 +30,15 @@ class OpticDiskTemplate(dj.Computed):
         """
         return definition
 
-    experiment_table = PlaceholderTable
-    userinfo_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def experiment_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def userinfo_table(self):
+        pass
 
     def make(self, key):
         user_dict = (self.userinfo_table() & key).fetch1()
@@ -84,7 +91,7 @@ class OpticDiskTemplate(dj.Computed):
 
 
 class RelativeFieldLocationTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -102,8 +109,13 @@ class RelativeFieldLocationTemplate(dj.Computed):
         """
         return definition
 
-    opticdisk_table = PlaceholderTable
-    field_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def opticdisk_table(self): pass
+
+    @property
+    @abstractmethod
+    def field_table(self): pass
 
     def make(self, key):
         od_key = key.copy()
@@ -142,18 +154,23 @@ class RetinalFieldLocationTemplate(dj.Computed):
         # XCoord_um is the relative position from back towards curtain, i.e. larger XCoord_um means closer curtain
         # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
 
-        -> self.relativefieldlocalation_table
+        -> self.relativefieldlocation_table
         ---
         ventral_dorsal_pos_um       :float      # position on the ventral-dorsal axis, greater 0 means dorsal
         temporal_nasal_pos_um       :float      # position on the temporal-nasal axis, greater 0 means nasal
         """
         return definition
 
-    relativefieldlocalation_table = PlaceholderTable
-    expinfo_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def relativefieldlocation_table(self): pass
+
+    @property
+    @abstractmethod
+    def expinfo_table(self): pass
 
     def make(self, key):
-        relx, rely = (self.relativefieldlocalation_table() & key).fetch1('relx', 'rely')
+        relx, rely = (self.relativefieldlocation_table() & key).fetch1('relx', 'rely')
         eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
 
         ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(
@@ -184,7 +201,7 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
     @property
     def definition(self):
         definition = """
-        -> self.retinalfieldlocalation_table
+        -> self.retinalfieldlocation_table
         ---
         nt_side  : enum('nasal', 'center', 'temporal')
         vd_side  : enum('ventral', 'center', 'dorsal')
@@ -192,13 +209,16 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
         """
         return definition
 
-    retinalfieldlocalation_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def retinalfieldlocation_table(self): pass
+
     _ventral_dorsal_key = 'ventral_dorsal_pos_um'
     _temporal_nasal_key = 'temporal_nasal_pos_um'
     _center_dist = 100.
 
     def make(self, key):
-        ventral_dorsal, temporal_nasal = (self.retinalfieldlocalation_table() & key).fetch1(
+        ventral_dorsal, temporal_nasal = (self.retinalfieldlocation_table() & key).fetch1(
             self._ventral_dorsal_key, self._temporal_nasal_key)
 
         if temporal_nasal < -self._center_dist:
@@ -226,7 +246,7 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        df_plot = pd.DataFrame((self * self.retinalfieldlocalation_table()) & restriction)
+        df_plot = pd.DataFrame((self * self.retinalfieldlocation_table()) & restriction)
 
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
 
