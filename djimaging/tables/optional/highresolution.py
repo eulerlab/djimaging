@@ -108,7 +108,7 @@ class HighResTemplate(dj.Computed):
         pre_data_path = os.path.join(header_path, (self.userinfo_table() & key).fetch1("pre_data_dir"))
         raw_data_path = os.path.join(header_path, (self.userinfo_table() & key).fetch1("raw_data_dir"))
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
-        setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
+        setupid = (self.experiment_table().ExpInfo() & key).fetch1("setupid")
 
         filepath, ch0_stack, ch1_stack, wparams = load_high_res_stack(
             pre_data_path=pre_data_path, raw_data_path=raw_data_path,

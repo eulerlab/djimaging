@@ -55,7 +55,7 @@ class PresentationTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.field_table.RoiMask() * self.stimulus_table()
+            return self.field_table().RoiMask() * self.stimulus_table()
         except TypeError:
             pass
 
@@ -221,7 +221,7 @@ class PresentationTemplate(dj.Computed):
 
         ch0_average = (self & key).fetch1("ch0_average")
         ch1_average = (self & key).fetch1("ch1_average")
-        roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask")
+        roi_mask = (self.field_table().RoiMask() & key).fetch1("roi_mask")
         npixartifact = (self.field_table() & key).fetch1('npixartifact')
 
         plot_field(ch0_average, ch1_average, roi_mask, title=key, figsize=figsize, npixartifact=npixartifact)

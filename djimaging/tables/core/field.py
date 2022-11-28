@@ -143,7 +143,7 @@ class FieldTemplate(dj.Computed):
 
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
-        setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
+        setupid = (self.experiment_table().ExpInfo() & key).fetch1("setupid")
 
         field_key, roimask_key, zstack_key = load_scan_info(
             key=key, field=field, pre_data_path=pre_data_path, files=files,

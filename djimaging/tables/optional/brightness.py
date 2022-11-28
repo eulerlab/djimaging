@@ -33,7 +33,7 @@ class RoiBrightnessTemplate(dj.Computed):
     def roi_table(self): pass
 
     def make(self, key):
-        roi_mask = (self.field_table.RoiMask() & key).fetch1('roi_mask')
+        roi_mask = (self.field_table().RoiMask() & key).fetch1('roi_mask')
         stack_average = math_utils.normalize_zero_one((self.presentation_table() & key).fetch1('stack_average'))
         brightness = np.mean(stack_average[roi_mask == -key['roi_id']])
 

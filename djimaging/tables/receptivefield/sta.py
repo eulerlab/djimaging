@@ -4,7 +4,7 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 
-from djimaging.tables.receptivefield.rf_utils import compute_sta
+from djimaging.tables.receptivefield.rf_utils import compute_sta, prepare_trace
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -18,8 +18,7 @@ class STAParamsTemplate(dj.Lookup):
         ---
         rf_method : enum("sta", "mle")
         dur_filter_s : float # minimum duration of filter in seconds
-        trace_gradient : tinyint unsigned  # Use gradient of signal instead of signal?
-        trace_fupsample : tinyint unsigned  # Upsample trace by integer factor?
+        fit_kind : enum("trace", "gradient", "events", "spikes")
         norm_stim : tinyint unsigned  # Normalize (znorm) stimulus?
         norm_trace : tinyint unsigned  # Normalize (znorm) trace?
         frac_train : float  # Fraction of data used for training in (0, 1].
@@ -30,22 +29,22 @@ class STAParamsTemplate(dj.Lookup):
         """
         return definition
 
-    def add_default(self, skip_duplicates=False):
+    def add_default(
+            self, rfparams_id=1, rf_method="sta", dur_filter_s=1.0, norm_trace=0, norm_stim=1,
+            fit_kind="events", frac_train=0.8, frac_dev=0., frac_test=0.2, store_x='data', store_y='data',
+            skip_duplicates=False):
         """Add default preprocess parameter to table"""
-        key = {
-            'rfparams_id': 1,
-            'rf_method': "sta",
-            'dur_filter_s': 1.0,
-            'norm_trace': 1,
-            'norm_stim': 1,
-            'trace_gradient': 0,
-            'trace_fupsample': 1,
-            'frac_train': 0.8,
-            'frac_dev': 0.,
-            'frac_test': 0.2,
-            'store_x': 'data',
-            'store_y': 'data',
-        }
+
+        key = dict(
+            rfparams_id=rfparams_id,
+            rf_method=rf_method,
+            dur_filter_s=dur_filter_s,
+            norm_trace=norm_trace, norm_stim=norm_stim,
+            fit_kind=fit_kind,
+            frac_train=frac_train, frac_dev=frac_dev, frac_test=frac_test,
+            store_x=store_x, store_y=store_y,
+        )
+
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
@@ -120,17 +119,16 @@ class STATemplate(dj.Computed):
         assert stim is not None, "stim_trace in stimulus table must be set."
 
         trace, tracetime = (self.preprocesstraces_table() & key).fetch1('preprocess_trace', 'preprocess_trace_times')
-
-        frac_train, frac_dev, frac_test, norm_stim, norm_trace, dur_filter_s, store_x, store_y = \
-            (self.params_table() & key).fetch1(
-                "frac_train", "frac_dev", "frac_test", "norm_stim", "norm_trace", "dur_filter_s", "store_x", "store_y")
-
+        frac_train, frac_dev, frac_test = (self.params_table() & key).fetch1("frac_train", "frac_dev", "frac_test")
         assert np.isclose(frac_train + frac_dev + frac_test, 1.0)
+
+        norm_stim, norm_trace, fit_kind = (self.params_table() & key).fetch1("norm_stim", "norm_trace", "fit_kind")
+        dur_filter_s, store_x, store_y = (self.params_table() & key).fetch1("dur_filter_s", "store_x", "store_y")
 
         rf, rf_pred, X, y, dt = compute_sta(
             trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
             frac_train=frac_train, frac_dev=frac_dev, dur_filter_s=dur_filter_s,
-            norm_stim=norm_stim, norm_trace=norm_trace)
+            norm_stim=norm_stim, norm_trace=norm_trace, fit_kind=fit_kind)
 
         rf_key = deepcopy(key)
         rf_key['rf'] = rf

@@ -32,11 +32,11 @@ class RoiTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.field_table.RoiMask()
+        return self.field_table().RoiMask()
 
     def make(self, key):
         # load roi_mask for insert roi for a specific experiment and field
-        roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask")
+        roi_mask = (self.field_table().RoiMask() & key).fetch1("roi_mask")
         pixel_size_um = (self.field_table() & key).fetch1("pixel_size_um")
         npixartifact = (self.field_table() & key).fetch1("npixartifact")
 
@@ -71,12 +71,12 @@ class RoiTemplate(dj.Computed):
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
-        data_stack_name = (self.field_table.userinfo_table() & key).fetch1('data_stack_name')
+        data_stack_name = (self.field_table().userinfo_table() & key).fetch1('data_stack_name')
         npixartifact = (self.field_table() & key).fetch1('npixartifact')
 
         ch0_average = (self.field_table() & key).fetch1("ch0_average")
         ch1_average = (self.field_table() & key).fetch1("ch1_average")
-        roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask")
+        roi_mask = (self.field_table().RoiMask() & key).fetch1("roi_mask")
 
         plot_field(ch0_average, ch1_average, roi_mask=roi_mask,
                    roi_ch_average=ch1_average if '1' in data_stack_name else ch0_average,

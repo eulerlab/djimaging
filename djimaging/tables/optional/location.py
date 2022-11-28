@@ -73,8 +73,8 @@ class OpticDiskTemplate(dj.Computed):
 
             fromfile = filepath
 
-        elif (self.experiment_table.ExpInfo() & key).fetch1("od_ini_flag") == 1:
-            odx, ody, odz = (self.experiment_table.ExpInfo() & key).fetch1("odx", "ody", "odz")
+        elif (self.experiment_table().ExpInfo() & key).fetch1("od_ini_flag") == 1:
+            odx, ody, odz = (self.experiment_table().ExpInfo() & key).fetch1("odx", "ody", "odz")
             fromfile = os.path.join(*(self.experiment_table() & key).fetch1("header_path", "header_name"))
 
         else:

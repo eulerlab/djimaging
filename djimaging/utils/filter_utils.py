@@ -59,3 +59,30 @@ class LowPassFilter:
 
         plt.subplots_adjust(hspace=0.35)
         plt.show()
+
+
+def resample_trace(tracetime, trace, dt):
+    """Resample trace through linear interpolation"""
+    tracetime_resampled = np.arange(tracetime[0], np.nextafter(tracetime[-1], tracetime[-1] + dt), dt)
+    trace_resampled = np.interp(x=tracetime_resampled, xp=tracetime, fp=trace)
+    return tracetime_resampled, trace_resampled
+
+
+def upsample_trace(tracetime, trace, fupsample):
+    assert isinstance(fupsample, int)
+    assert fupsample > 1
+
+    dt = np.mean(np.diff(tracetime))
+    tracetime_upsampled = np.tile(tracetime, (fupsample, 1)).T
+    tracetime_upsampled += np.linspace(0, 1, fupsample, endpoint=False) * dt
+    tracetime_upsampled = tracetime_upsampled.flatten()
+
+    diffs = np.diff(tracetime_upsampled)
+    mu = np.mean(diffs)
+    std = np.std(diffs)
+    assert np.isclose(mu, dt / fupsample, atol=mu / 10.), f"{mu} {dt} {fupsample}"
+    assert mu > 10 * std
+
+    trace_upsampled = np.interp(tracetime_upsampled, tracetime, trace)
+
+    return tracetime_upsampled, trace_upsampled

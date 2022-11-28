@@ -107,7 +107,7 @@ class ChirpFeaturesTemplate(dj.Computed):
         # TODO: Should this depend on pres? Triggertimes are also in snippets and sf can be derived from times
         snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
         trigger_times = (self.presentation_table() & key).fetch1('triggertimes')
-        sf = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
+        sf = (self.presentation_table().ScanInfo() & key).fetch1('scan_frequency')
 
         on_off_index = compute_on_off_index(snippets, snippets_times, trigger_times, sf)
         transience_index = compute_transience_index(snippets, snippets_times, trigger_times, sf)

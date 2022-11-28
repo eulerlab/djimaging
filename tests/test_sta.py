@@ -3,17 +3,17 @@ import warnings
 import numpy as np
 import pytest
 
-from djimaging.tables.receptivefield.rf_utils import resample_trace, get_sets, compute_sta
+from djimaging.tables.receptivefield.rf_utils import get_sets, compute_sta
+from djimaging.utils.filter_utils import resample_trace
 
 try:
     import rfest
-    from jax.lib import xla_bridge
-
-    xla_bridge.get_backend()
-    del xla_bridge
+    import jax
+    jax.config.update('jax_platform_name', 'cpu')
 except ImportError:
     warnings.warn('Failed to import RFEst: Cannot compute receptive fields.')
     rfest = None
+    jax = None
 
 
 def generate_data_3d(seed, trace_dt=0.1, trace_trng=(0.3, 64), dims_xy=(6, 8), stim_dt=0.33, stim_trng=(1, 55)):

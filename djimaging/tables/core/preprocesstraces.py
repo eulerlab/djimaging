@@ -7,6 +7,7 @@ from matplotlib import pyplot as plt
 from scipy import signal
 
 from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.filter_utils import LowPassFilter
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 
 
@@ -52,51 +53,91 @@ def drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace
     return trace
 
 
-def detrend_trace(trace_times, trace, poly_order, window_len_seconds, fs,
-                  subtract_baseline: bool, standardize: bool, non_negative: bool, stim_start: float = None,
-                  drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3)):
-    """Detrend trace"""
-    raw_trace = drop_left_and_right(trace, drop_nmin_lr=drop_nmin_lr, drop_nmax_lr=drop_nmax_lr, inplace=False)
-
+def detrend_trace(trace, window_len_seconds, fs, poly_order):
     window_len_frames = np.ceil(window_len_seconds * fs)
+
     if window_len_frames % 2 == 0:
         window_len_frames -= 1
+
     window_len_frames = int(window_len_frames)
-    if len(raw_trace) >= window_len_frames:
-        smoothed_trace = signal.savgol_filter(raw_trace, window_length=window_len_frames, polyorder=poly_order)
+
+    if len(trace) >= window_len_frames:
+        smoothed_trace = signal.savgol_filter(
+            trace, window_length=window_len_frames, polyorder=poly_order, mode='interp')
     else:
-        smoothed_trace = signal.savgol_filter(raw_trace, window_length=window_len_frames, polyorder=poly_order,
-                                              mode='nearest')
+        smoothed_trace = signal.savgol_filter(
+            trace, window_length=window_len_frames, polyorder=poly_order, mode='nearest')
 
-    preprocess_trace = raw_trace - smoothed_trace
+    detrended_trace = trace - smoothed_trace
 
-    if standardize or subtract_baseline:
+    return detrended_trace, smoothed_trace
+
+
+def non_negative_trace(trace, trace_times, standardize, stim_start):
+    """Make trace positive, remove lowest 2.5 percentile (and standardize by STD of baseline)"""
+
+    clip_value = np.percentile(trace, q=2.5)
+    trace[trace < clip_value] = clip_value
+    trace = trace - clip_value
+
+    if standardize:
+        # find last frame recorded before stimulus started
+        baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
+        baseline = trace[:baseline_end]
+        trace = trace / np.std(baseline)
+
+    return trace
+
+
+def subtract_baseline_trace(trace, trace_times, standardize, stim_start):
+    """Subtract baseline of trace (and standardize by STD of baseline)"""
+
+    baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
+    baseline = trace[:baseline_end]
+    trace = trace - np.median(baseline)
+
+    if standardize:
+        trace = trace / np.std(baseline)
+
+    return trace
+
+
+def process_trace(trace_times, trace, poly_order, window_len_seconds, fs,
+                  subtract_baseline: bool, standardize: bool, non_negative: bool, stim_start: float = None,
+                  f_cutoff: float = None, fs_resample: float = None, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3)):
+    """Detrend and preprocess trace"""
+    trace = np.asarray(trace).copy()
+
+    trace = drop_left_and_right(trace, drop_nmin_lr=drop_nmin_lr, drop_nmax_lr=drop_nmax_lr, inplace=False)
+
+    if (f_cutoff is not None) and (f_cutoff > 0):
+        trace = LowPassFilter(fs=fs, cutoff=f_cutoff, order=6, direction='ff').filter_data(trace)
+
+    trace, smoothed_trace = detrend_trace(trace, window_len_seconds, fs, poly_order)
+
+    if stim_start is not None:
+
         # heuristic to find out whether triggers are in time base or in frame base
         if stim_start > 1000:
             print("Converting triggers from frame base to time base")
             stim_start /= 500
+
         if not np.any(trace_times < stim_start):
             raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
 
     if non_negative:
-        clip_value = np.percentile(preprocess_trace, q=2.5)
-        preprocess_trace[preprocess_trace < clip_value] = clip_value
-        preprocess_trace = preprocess_trace - clip_value
-        if standardize:
-            # find last frame recorded before stimulus started
-            baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
-            baseline = preprocess_trace[:baseline_end]
-            preprocess_trace = preprocess_trace / np.std(baseline)
+        trace = non_negative_trace(trace, trace_times, standardize, stim_start)
     elif subtract_baseline:
-        # find last frame recorded before stimulus started
-        baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
-        baseline = preprocess_trace[:baseline_end]
-        preprocess_trace = preprocess_trace - np.median(baseline)
+        trace = subtract_baseline_trace(trace, trace_times, standardize, stim_start)
 
-        if standardize:
-            preprocess_trace = preprocess_trace / np.std(baseline)
+    if (fs_resample is not None) and (fs_resample > 0):
+        trace_times_resampled = np.arange(
+            trace_times[0], np.nextafter(trace_times[-1], trace_times[-1] + fs_resample), 1./fs_resample)
 
-    return preprocess_trace, smoothed_trace
+        trace = np.interp(trace_times_resampled, trace_times, trace)
+        trace_times = trace_times_resampled
+
+    return trace_times, trace, smoothed_trace
 
 
 class PreprocessParamsTemplate(dj.Lookup):
@@ -112,19 +153,25 @@ class PreprocessParamsTemplate(dj.Lookup):
         non_negative:        tinyint unsigned
         subtract_baseline:   tinyint unsigned
         standardize:         tinyint unsigned  # whether to standardize (divide by sd)
+        f_cutoff = 0 : float  # Cutoff frequency for low pass filter, only applied when > 0.
+        fs_resample = 0 : float  # Resampling frequency, only applied when > 0.
         """
         return definition
 
-    def add_default(self, skip_duplicates=False):
+    def add_default(self, preprocess_id=1, window_length=60, poly_order=3, non_negative=False,
+                    subtract_baseline=True, standardize=True, f_cutoff=None, fs_resample=None,
+                    skip_duplicates=False):
+        key = dict(
+            preprocess_id=preprocess_id,
+            window_length=window_length,
+            poly_order=int(poly_order),
+            non_negative=int(non_negative),
+            subtract_baseline=int(subtract_baseline),
+            standardize=int(standardize),
+            f_cutoff=f_cutoff if f_cutoff is not None else 0,
+            fs_resample=fs_resample if fs_resample is not None else 0,
+        )
         """Add default preprocess parameter to table"""
-        key = {
-            'preprocess_id': 1,
-            'window_length': 60,
-            'poly_order': 3,
-            'non_negative': 0,
-            'subtract_baseline': 1,
-            'standardize': 1,
-        }
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
@@ -138,7 +185,7 @@ class PreprocessTracesTemplate(dj.Computed):
         -> self.traces_table
         -> self.preprocessparams_table
         ---
-        preprocess_trace_times: longblob    # Time of preprocessed trace, if not resampled same as in trace.
+        preprocess_trace_times: longblob   # Time of preprocessed trace, if not resampled same as in trace.
         preprocess_trace:      longblob    # preprocessed trace
         smoothed_trace:        longblob    # output of savgol filter which is subtracted from the raw trace
         """
@@ -167,16 +214,16 @@ class PreprocessTracesTemplate(dj.Computed):
             pass
 
     def make(self, key):
-        window_len_seconds = (self.preprocessparams_table() & key).fetch1('window_length')
-        poly_order = (self.preprocessparams_table() & key).fetch1('poly_order')
-        subtract_baseline = (self.preprocessparams_table() & key).fetch1('subtract_baseline')
-        non_negative = (self.preprocessparams_table() & key).fetch1('non_negative')
-        standardize = (self.preprocessparams_table() & key).fetch1('standardize')
-        fs = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
+        window_len_seconds, poly_order, subtract_baseline, non_negative, standardize, f_cutoff, fs_resample = \
+            (self.preprocessparams_table() & key).fetch1(
+                'window_length', 'poly_order', 'subtract_baseline', 'non_negative', 'standardize',
+                'f_cutoff', 'fs_resample')
+
+        fs = (self.presentation_table().ScanInfo() & key).fetch1('scan_frequency')
 
         assert not (non_negative and subtract_baseline), \
             "You are trying to populate with an invalid parameter set"
-        assert (np.logical_or(standardize == non_negative, standardize == subtract_baseline)), \
+        assert (standardize == non_negative) or (standardize == subtract_baseline), \
             "You are trying to populate with an invalid parameter set"
 
         trace_times = (self.traces_table() & key).fetch1('trace_times')
@@ -184,9 +231,9 @@ class PreprocessTracesTemplate(dj.Computed):
         stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
 
         try:
-            preprocess_trace, smoothed_trace = detrend_trace(
+            trace_times, preprocess_trace, smoothed_trace = process_trace(
                 trace_times=trace_times, trace=trace, stim_start=stim_start,
-                poly_order=poly_order, window_len_seconds=window_len_seconds, fs=fs,
+                poly_order=poly_order, window_len_seconds=window_len_seconds, fs=fs, f_cutoff=f_cutoff,
                 subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative)
 
             self.insert1(dict(key, preprocess_trace_times=trace_times,
