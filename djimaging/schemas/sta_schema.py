@@ -3,16 +3,26 @@ from djimaging.tables.receptivefield import *
 
 
 @schema
+class DNoiseTraceParams(DNoiseTraceParamsTemplate):
+    pass
+
+
+@schema
+class DNoiseTrace(DNoiseTraceTemplate):
+    presentation_table = Presentation
+    stimulus_table = Stimulus
+    traces_table = PreprocessTraces
+    params_table = DNoiseTraceParams
+
+
+@schema
 class STAParams(STAParamsTemplate):
     pass
 
 
 @schema
 class STA(STATemplate):
-    stimulus_table = Stimulus
-    presentation_table = Presentation
-    traces_table = Traces
-    preprocesstraces_table = PreprocessTraces
+    noise_traces_table = DNoiseTrace
     params_table = STAParams
 
     class DataSet(STATemplate.DataSet):

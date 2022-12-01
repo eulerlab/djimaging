@@ -1,19 +1,26 @@
-import warnings
-
 import numpy as np
 import pytest
 
-from djimaging.tables.receptivefield.rf_utils import get_sets, compute_sta
+from djimaging.tables.receptivefield import rf_utils
+from djimaging.tables.receptivefield.rf_utils import prepare_data, split_data
 from djimaging.utils.filter_utils import resample_trace
 
 try:
     import rfest
-    import jax
-    jax.config.update('jax_platform_name', 'cpu')
 except ImportError:
-    warnings.warn('Failed to import RFEst: Cannot compute receptive fields.')
     rfest = None
-    jax = None
+
+
+def compute_norm_mse(w1, w2):
+    return np.mean((rfest.utils.uvec(w1.flat) - rfest.utils.uvec(w2.flat)) ** 2)
+
+
+def compare_fits(w_true, w_fit):
+    random_rfs = [np.random.normal(np.mean(rfest.utils.uvec(w_true)), np.std(rfest.utils.uvec(w_true)), w_true.shape)
+                  for _ in range(100)]
+    random_mses = [compute_norm_mse(w1=random_rf, w2=w_true) for random_rf in random_rfs]
+    fit_mse = compute_norm_mse(w1=w_fit, w2=w_true)
+    return fit_mse, random_mses
 
 
 def generate_data_3d(seed, trace_dt=0.1, trace_trng=(0.3, 64), dims_xy=(6, 8), stim_dt=0.33, stim_trng=(1, 55)):
@@ -35,47 +42,57 @@ def generate_data_3d(seed, trace_dt=0.1, trace_trng=(0.3, 64), dims_xy=(6, 8), s
     return stim, stimtime, trace, tracetime, trace_dt
 
 
-@pytest.mark.skipif(rfest is None, reason="requires rfest")
 def test_split_train():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=42)
-    X_dict, y_dict, dt = get_sets(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime,
-                                  frac_train=1., frac_dev=0., fupsample=1, gradient=False)
-    assert set(X_dict.keys()) == {'train'}
+    stim, trace, dt, t0 = prepare_data(
+        trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
+        fupsample=2, fit_kind='trace', lowpass_cutoff=0)
+
+    x_dict, y_dict = split_data(x=stim, y=trace, frac_train=1., frac_dev=0., as_dict=True)
+    assert set(x_dict.keys()) == {'train'}
 
 
-@pytest.mark.skipif(rfest is None, reason="requires rfest")
 def test_split_train_dev():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=42)
-    X_dict, y_dict, dt = get_sets(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime,
-                                  frac_train=0.8, frac_dev=0.2, fupsample=2, gradient=False)
 
-    assert set(X_dict.keys()) == {'train', 'dev'}
+    stim, trace, dt, t0 = prepare_data(
+        trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
+        fupsample=2, fit_kind='trace', lowpass_cutoff=0)
+
+    x_dict, y_dict = split_data(x=stim, y=trace, frac_train=0.8, frac_dev=0.2, as_dict=True)
+
+    assert set(x_dict.keys()) == {'train', 'dev'}
     assert np.isclose(y_dict['dev'].size / y_dict['train'].size, 0.2 / 0.8, atol=0.01, rtol=0.01)
 
 
-@pytest.mark.skipif(rfest is None, reason="requires rfest")
 def test_split_train_test():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=461)
-    X_dict, y_dict, dt = get_sets(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime,
-                                  frac_train=0.8, frac_dev=0.0, fupsample=2, gradient=False)
 
-    assert set(X_dict.keys()) == {'train', 'test'}
+    stim, trace, dt, t0 = prepare_data(
+        trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
+        fupsample=2, fit_kind='trace', lowpass_cutoff=0)
+
+    x_dict, y_dict = split_data(x=stim, y=trace, frac_train=0.8, frac_dev=0.0, as_dict=True)
+
+    assert set(x_dict.keys()) == {'train', 'test'}
     assert np.isclose(y_dict['test'].size / y_dict['train'].size, 0.2 / 0.8, atol=0.01, rtol=0.01)
 
 
-@pytest.mark.skipif(rfest is None, reason="requires rfest")
 def test_split_train_dev_test():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=50)
-    X_dict, y_dict, dt = get_sets(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime,
-                                  frac_train=0.6, frac_dev=0.2, fupsample=1, gradient=True)
 
-    assert set(X_dict.keys()) == {'train', 'dev', 'test'}
+    stim, trace, dt, t0 = prepare_data(
+        trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
+        fupsample=1, fit_kind='trace', lowpass_cutoff=0)
+
+    x_dict, y_dict = split_data(x=stim, y=trace, frac_train=0.6, frac_dev=0.2, as_dict=True)
+
+    assert set(x_dict.keys()) == {'train', 'dev', 'test'}
     assert np.isclose(y_dict['dev'].size / y_dict['train'].size, 0.2 / 0.6, atol=0.01, rtol=0.01)
     assert np.isclose(y_dict['test'].size / y_dict['train'].size, 0.2 / 0.6, atol=0.01, rtol=0.01)
     assert np.isclose(y_dict['dev'].size / y_dict['test'].size, 1., atol=0.01, rtol=0.01)
 
 
-@pytest.mark.skipif(rfest is None, reason="requires rfest")
 def test_resample_trace():
     dt_old = 0.1
     dt_new = 0.01
@@ -91,56 +108,83 @@ def test_resample_trace():
 
 
 @pytest.mark.skipif(rfest is None, reason="requires rfest")
-def test_sta():
-    stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=4897)
-    rf, rf_pred, X, y, dt = compute_sta(
-        trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
-        frac_train=0.6, frac_dev=0.0, dur_filter_s=1.0,
-        kind='sta', fupsample=1, gradient=False)
+def test_sta_fit():
+    np.random.seed(13488)
 
-    assert rf_pred['y_pred_train'].size + rf_pred['burn_in'] == y['train'].size
-    assert rf_pred['y_pred_test'].size + rf_pred['burn_in'] == y['test'].size
-    assert 0.5 < rf_pred['cc_train'] < 1.0
-    assert 0.1 < rf_pred['cc_test'] < 1.0
+    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
+        stim_noise='white', rf_kind='gauss', response_noise='none', design_matrix=True,
+        n_stim_frames=500, n_reps_per_frame=3, shift=0)
 
-
-@pytest.mark.skipif(rfest is None, reason="requires rfest")
-def test_sta_overfitting():
-    stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=4897)
-    rf, rf_pred, X, y, dt = compute_sta(
-        trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
-        frac_train=0.6, frac_dev=0.0, dur_filter_s=3.0,
-        kind='sta', fupsample=1, gradient=False)
-
-    assert rf_pred['y_pred_train'].size + rf_pred['burn_in'] == y['train'].size
-    assert rf_pred['y_pred_test'].size + rf_pred['burn_in'] == y['test'].size
-    assert 0.5 < rf_pred['cc_train']
-    assert rf_pred['cc_test'] + 0.1 < rf_pred['cc_train']
+    w_fit = rf_utils.compute_rf_sta(X=X, y=y)
+    fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
+    assert fit_mse < np.mean(random_mses) - 2 * np.std(random_mses)
 
 
 @pytest.mark.skipif(rfest is None, reason="requires rfest")
-def test_mle():
-    stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=1324)
-    rf, rf_pred, X, y, dt = compute_sta(
-        trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
-        frac_train=0.6, frac_dev=0.0, dur_filter_s=0.2,
-        kind='mle', fupsample=1, gradient=True)
+def test_sta_fit_few_datapoints():
+    np.random.seed(364)
 
-    assert rf_pred['y_pred_train'].size + rf_pred['burn_in'] == y['train'].size
-    assert rf_pred['y_pred_test'].size + rf_pred['burn_in'] == y['test'].size
-    assert 0.1 < rf_pred['cc_train'] < 0.8
-    assert 0.1 < rf_pred['cc_test'] < 0.8
+    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
+        stim_noise='white', rf_kind='gauss', response_noise='gaussian', design_matrix=True,
+        n_stim_frames=13, n_reps_per_frame=3, shift=0)
+
+    w_fit = rf_utils.compute_rf_sta(X=X, y=y)
+    fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
+    assert fit_mse < np.mean(random_mses)
 
 
 @pytest.mark.skipif(rfest is None, reason="requires rfest")
-def test_mle_overfitting():
-    stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=1324)
-    rf, rf_pred, X, y, dt = compute_sta(
-        trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
-        frac_train=0.6, frac_dev=0.0, dur_filter_s=2.0,
-        kind='mle', fupsample=1, gradient=True)
+def test_sta_fit_shift():
+    np.random.seed(434)
 
-    assert rf_pred['y_pred_train'].size + rf_pred['burn_in'] == y['train'].size
-    assert rf_pred['y_pred_test'].size + rf_pred['burn_in'] == y['test'].size
-    assert 0.99 < rf_pred['cc_train']
-    assert 0.1 < rf_pred['cc_test'] < 1.0
+    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
+        stim_noise='white', rf_kind='gauss', response_noise='gaussian', design_matrix=True,
+        n_stim_frames=1000, n_reps_per_frame=1, shift=5)
+
+    w_fit = rf_utils.compute_rf_sta(X=X, y=y)
+    fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
+    assert fit_mse < np.mean(random_mses)
+
+
+@pytest.mark.skipif(rfest is None, reason="requires rfest")
+def test_sta_response():
+    np.random.seed(12234)
+
+    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
+        stim_noise='white', rf_kind='gauss', response_noise='gaussian', design_matrix=True,
+        n_stim_frames=1000, n_reps_per_frame=1, shift=5)
+    w_fit = rf_utils.compute_rf_sta(X=X, y=y)
+    y_pred = rf_utils.predict_linear_rf_response(w_fit.flat, X, threshold=False, dtype=np.float32)
+    assert np.corrcoef(y, y_pred)[0, 1] > 0.5
+
+
+@pytest.mark.skipif(rfest is None, reason="requires rfest")
+def test_sta_response_splits():
+    np.random.seed(42)
+
+    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
+        stim_noise='white', rf_kind='gauss', response_noise='gaussian', design_matrix=True,
+        n_stim_frames=3000, n_reps_per_frame=1, shift=5)
+
+    (x_trn, y_trn), (_, _), (x_tst, y_tst) = split_data(X, y, frac_train=0.8, frac_dev=0.)
+
+    w_fit = rf_utils.compute_rf_sta(X=x_trn, y=y_trn)
+
+    y_pred_train = rf_utils.predict_linear_rf_response(w_fit.flat, x_trn, threshold=False, dtype=np.float32)
+    y_pred_test = rf_utils.predict_linear_rf_response(w_fit.flat, x_tst, threshold=False, dtype=np.float32)
+
+    assert np.corrcoef(y_trn, y_pred_train)[0, 1] > 0.5
+    assert np.corrcoef(y_tst, y_pred_test)[0, 1] > 0.25
+
+
+@pytest.mark.skipif(rfest is None, reason="requires rfest")
+def test_mle_fit():
+    np.random.seed(366)
+
+    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
+        stim_noise='pink', rf_kind='gauss', response_noise='none', design_matrix=True,
+        n_stim_frames=500, n_reps_per_frame=3, shift=3)
+
+    w_fit = rf_utils.compute_rf_mle(X=X, y=y)
+    fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
+    assert fit_mse < np.mean(random_mses) - 2 * np.std(random_mses)

@@ -1,53 +1,48 @@
 import warnings
 
 import numpy as np
-from rfest import get_spatial_and_temporal_filters
+from numba import jit
+from scipy.ndimage import gaussian_filter
 from scipy.signal import find_peaks
+from sklearn.decomposition import randomized_svd
+from sklearn.model_selection import KFold
 
 from djimaging.utils import math_utils
-from djimaging.utils.filter_utils import resample_trace
-
-try:
-    import rfest
-    import jax
-
-    jax.config.update('jax_platform_name', 'cpu')
-except ImportError:
-    warnings.warn('Failed to import RFEst: Cannot compute receptive fields.')
-    rfest = None
-    jax = None
+from djimaging.utils.filter_utils import resample_trace, LowPassFilter
 
 
-def compute_sta(trace, tracetime, stim, stimtime, frac_train, frac_dev, dur_filter_s,
-                kind='sta', norm_stim=True, norm_trace=True, fit_kind='trace'):
+def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
+                      filter_dur_s_past, filter_dur_s_future=0., kind='sta', threshold_pred=False, dtype=np.float32):
     kind = kind.lower()
 
-    assert trace.ndim == 1
-    assert tracetime.ndim == 1
-    assert trace.size == tracetime.size
-    assert stim.shape[0] == stimtime.shape[0], f"{stim.shape} vs. {stimtime.shape}"
+    assert trace.size == stim.shape[0]
     assert kind in ['sta', 'mle'], f"kind={kind}"
-    assert rfest is not None
-    from rfest.GLM._base import Base as BaseModel
 
-    trace = prepare_trace(trace, kind=fit_kind)
+    x, y = split_data(x=stim, y=trace, frac_train=frac_train, frac_dev=frac_dev, as_dict=True)
 
-    x, y, dt = get_sets(
-        trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
-        frac_train=frac_train, frac_dev=frac_dev, norm_stim=norm_stim, norm_trace=norm_trace)
+    n_t_past = int(np.ceil(filter_dur_s_past / dt))
+    n_t_future = int(np.ceil(filter_dur_s_future / dt))
 
-    dim_t = int(np.ceil(dur_filter_s / dt))
+    shift = -n_t_future
+    dim_t = n_t_past + n_t_future
     dims = (dim_t,) + x['train'].shape[1:]
 
-    burn_in = dims[0] - 1
+    rf_time = np.arange(-n_t_past + 1, n_t_future + 1) * dt
 
-    X_train_dm = rfest.utils.build_design_matrix(x['train'], dims[0])[burn_in:]
-    y_train_dm = y['train'][burn_in:]
+    burn_in = n_t_past
 
-    model = BaseModel(X=X_train_dm, y=y_train_dm, dims=dims, compute_mle=kind == 'mle')
-    rf = model.w_sta if kind == 'sta' else model.w_mle
+    x_train_dm = build_design_matrix(x['train'], n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
+    y_train_dm = y['train'][burn_in:].astype(dtype)
 
-    y_pred_train = predict_sta_response(rf=rf, x=X_train_dm, fit_kind=fit_kind)
+    if kind.lower() == 'sta':
+        rf = compute_rf_sta(X=x_train_dm, y=y_train_dm, is_spikes=False)
+    elif kind.lower() == 'mle':
+        rf = compute_rf_mle(X=x_train_dm, y=y_train_dm)
+    else:
+        raise NotImplementedError()
+
+    y_pred_train = predict_linear_rf_response(
+        rf=rf, stim_design_matrix=x_train_dm, threshold=threshold_pred, dtype=dtype)
 
     model_eval = dict()
     model_eval['burn_in'] = burn_in
@@ -56,45 +51,139 @@ def compute_sta(trace, tracetime, stim, stimtime, frac_train, frac_dev, dur_filt
     model_eval['mse_train'] = np.mean((y['train'][burn_in:] - y_pred_train) ** 2)
 
     if 'test' in x:
-        x_test_dm = rfest.utils.build_design_matrix(x['test'], dims[0])[burn_in:]
-        y_pred_test = predict_sta_response(rf=rf, x=x_test_dm, fit_kind=fit_kind)
+        x_test_dm = build_design_matrix(x['test'], n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
+        y_pred_test = predict_linear_rf_response(
+            rf=rf, stim_design_matrix=x_test_dm, threshold=threshold_pred, dtype=dtype)
 
         model_eval['y_pred_test'] = y_pred_test
         model_eval['cc_test'] = np.corrcoef(y['test'][burn_in:], y_pred_test)[0, 1]
         model_eval['mse_test'] = np.mean((y['test'][burn_in:] - y_pred_test) ** 2)
 
     rf = rf.reshape(dims)
-    return rf, model_eval, x, y, dt
+    return rf, rf_time, model_eval, x, y, shift
 
 
-def predict_sta_response(rf, x, fit_kind='trace'):
-    y_pred = x @ rf
+@jit(nopython=True)
+def compute_rf_sta(X, y, is_spikes=False):
+    """From RFEst"""
+    XtY = X.T @ y
+    if is_spikes:
+        w = XtY / np.sum(y)
+    else:
+        w = XtY / len(y)
 
-    if fit_kind in ['gradient', 'events']:
+    return w
+
+
+@jit(nopython=True)
+def compute_rf_mle(X, y):
+    """From RFEst"""
+    XtY = X.T @ y
+    XtX = X.T @ X
+    w = np.linalg.lstsq(XtX, XtY)[0]
+    return w
+
+
+def predict_linear_rf_response(rf, stim_design_matrix, threshold=False, dtype=np.float32):
+    y_pred = stim_design_matrix @ rf
+
+    if threshold:
         y_pred = np.clip(y_pred, 0, None)
 
-    return y_pred
+    return y_pred.astype(dtype)
 
 
-def prepare_trace(trace, kind='trace'):
+def prepare_data(stim, stimtime, trace, tracetime, fupsample=None, fit_kind='trace',
+                 lowpass_cutoff=0, ref_time='trace', pre_blur_sigma_s=0, post_blur_sigma_s=0):
+
+    assert stimtime.ndim == 1, stimtime.shape
+    assert trace.ndim == 1, trace.shape
+    assert tracetime.ndim == 1, tracetime.shape
+    assert stim.shape[0] == stimtime.size, f"stim-len {stim.shape[0]} != stimtime-len {stimtime.size}"
+    assert trace.size == tracetime.size
+
+    dts = np.diff(tracetime)
+    dt = np.mean(dts)
+    dt_max_diff = np.max(dts) - np.max(dts)
+
+    trace_dt_inconsistent = (dt_max_diff / dt) > 0.1
+
+    if trace_dt_inconsistent:
+        warnings.warn('Inconsistent step-sizes in trace, resample trace.')
+        tracetime, trace = resample_trace(tracetime=tracetime, trace=trace, dt=dt)
+
+    if lowpass_cutoff > 0:
+        trace = LowPassFilter(
+            fs=1. / dt, cutoff=lowpass_cutoff, order=6, direction='ff').filter_data(trace)
+
+    if pre_blur_sigma_s > 0:
+        trace = gaussian_filter(trace, sigma=pre_blur_sigma_s / dt, mode='nearest')
+
+    tracetime, trace = prepare_trace(tracetime, trace, kind=fit_kind, fupsample=fupsample, dt=dt)
+
+    if ref_time == 'trace':
+        stim, trace, dt, t0 = align_stim_to_trace(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime)
+    elif ref_time == 'stim':
+        stim, trace, dt, t0 = align_trace_to_stim(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime)
+    else:
+        raise NotImplementedError
+
+    if post_blur_sigma_s > 0:
+        trace = gaussian_filter(trace, sigma=post_blur_sigma_s / dt, mode='nearest')
+
+    if 'int' in str(stim.dtype) or 'bool' in str(stim.dtype):
+        stim = stim - np.mean(stim, dtype='int16')
+    else:
+        stim = math_utils.normalize_zscore(stim)
+
+    return stim, trace, dt, t0
+
+
+def prepare_trace(tracetime, trace, kind='trace', fupsample=None, dt=None):
+    if fupsample is None:
+        fupsample = 1
+    else:
+        assert dt is not None
+
+    trace = trace / np.std(trace)
+
     if kind == 'trace':
-        fit_trace = trace
+        if fupsample > 1:
+            fit_tracetime, fit_trace = resample_trace(tracetime=tracetime, trace=trace, dt=dt / fupsample)
+        else:
+            fit_tracetime, fit_trace = tracetime, trace
+
     elif kind == 'gradient':
-        fit_trace = np.clip(np.append(0, np.diff(trace)), 0, None)
+        diff_trace = np.append(0, np.diff(trace))
+        if fupsample > 1:
+            fit_tracetime, fit_trace = resample_trace(tracetime=tracetime, trace=diff_trace, dt=dt / fupsample)
+        else:
+            fit_tracetime, fit_trace = tracetime, diff_trace
+
+        fit_trace = np.clip(fit_trace, 0, None)
+
     elif kind == 'events':
         # Baden et al 2016
         diff_trace = np.append(0, np.diff(trace))
+        if fupsample > 1:
+            fit_tracetime, diff_trace = resample_trace(tracetime=tracetime, trace=diff_trace, dt=dt / fupsample)
+        else:
+            fit_tracetime = tracetime
+
         robust_std = np.median(np.abs(diff_trace)) / 0.6745
-        peaks, _ = find_peaks(diff_trace, height=robust_std)
-        fit_trace = np.zeros(diff_trace.size)
-        fit_trace[peaks] = np.clip(diff_trace[peaks], 0, None)
+        peaks, props = find_peaks(diff_trace, height=robust_std)
+
+        fit_trace = np.zeros(fit_tracetime.size)
+        fit_trace[peaks] = props['peak_heights']
     else:
         raise NotImplementedError(kind)
 
-    return fit_trace
+    assert fit_tracetime.size == fit_trace.size, f"{fit_tracetime.size} != {fit_trace.size}"
+
+    return fit_tracetime, fit_trace
 
 
-def align_data(stim, stimtime, trace, tracetime):
+def align_stim_to_trace(stim, stimtime, trace, tracetime):
     """Align stimulus and trace.
      Modified from RFEst"""
     dt = np.mean(np.diff(tracetime))
@@ -111,10 +200,26 @@ def align_data(stim, stimtime, trace, tracetime):
     return aligned_stim, aligned_trace, dt, t0
 
 
+def align_trace_to_stim(stim, stimtime, trace, tracetime):
+    """Align stimulus and trace."""
+    dts = np.diff(stimtime)
+    dt = np.mean(dts)
+    assert ((np.max(dts) - np.max(dts)) / dt) < 0.1, 'not implemented for varying frame times'
+
+    aligned_trace = np.zeros(stimtime.size)
+
+    t0 = stimtime[0]
+    aligned_stim = stim
+
+    for i, (t_a, t_b) in enumerate(zip(stimtime,  np.append(stimtime[1:], stimtime[-1] + dt))):
+        aligned_trace[i] = np.sum(trace[(tracetime >= t_a) & (tracetime < t_b)])
+
+    return aligned_stim, aligned_trace, dt, t0
+
+
 def split_data(x, y, frac_train=0.8, frac_dev=0.1, as_dict=False):
     """ Split data into training, development and test set.
      Modified from RFEst"""
-
     assert x.shape[0] == y.shape[0], 'X and y must be of same length.'
     assert frac_train + frac_dev <= 1, '`frac_train` + `frac_dev` must be < 1.'
 
@@ -143,40 +248,32 @@ def split_data(x, y, frac_train=0.8, frac_dev=0.1, as_dict=False):
         return x_dict, y_dict
 
 
-def get_sets(stim, stimtime, trace, tracetime, frac_train=1., frac_dev=0.,
-             fupsample=None, norm_stim=False, norm_trace=False):
-    """Split data into sets"""
-    assert rfest is not None
-    assert frac_dev + frac_train <= 1.0
+def get_split_kfold_indices(n_frames, frac_test, kfolds=None, n_burn=0):
+    """Get indices to split data into train, dev and test splits. Train indexes will be the same for all splits."""
+    assert frac_test < 1
 
-    assert stimtime.ndim == 1, stimtime.shape
-    assert trace.ndim == 1, trace.shape
-    assert tracetime.ndim == 1, tracetime.shape
-    assert stim.shape[0] == stimtime.size
-    assert trace.size == tracetime.size
+    if kfolds == 0:
+        kfolds = 1
 
-    dts = np.diff(tracetime)
-    dt = np.mean(dts)
-    dt_max_diff = np.max(dts) - np.max(dts)
+    idxs = np.arange(n_frames)
 
-    if fupsample is None:
-        fupsample = 1
+    idx0_test = int(n_frames * (1 - frac_test))
 
-    if (dt_max_diff / dt) > 0.1 or fupsample > 1:  # No large difference between dts
-        if fupsample <= 1:
-            warnings.warn('Inconsistent step-sizes in trace, resample trace.')
-        tracetime, trace = resample_trace(tracetime=tracetime, trace=trace, dt=dt / fupsample)
+    idxs_train_dev = idxs[:idx0_test].copy()
+    idxs_test = idxs[idx0_test:].copy()
 
-    stim, trace, dt, t0 = align_data(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime)
+    idxs_train_splits = []
+    idxs_dev_splits = []
 
-    if norm_stim:
-        stim = math_utils.normalize_zscore(stim)
+    pseudo_x = np.empty((idxs_train_dev.size,))
+    for idxs_train, idxs_dev in KFold(n_splits=kfolds, shuffle=False).split(pseudo_x, pseudo_x):
+        if n_burn > 0:
+            idxs_train = idxs_train[(idxs_train < np.min(idxs_dev)) | (idxs_train > np.max(idxs_dev) + n_burn)]
 
-    if norm_trace:
-        trace = math_utils.normalize_zscore(trace)
+        idxs_train_splits.append(idxs_train)
+        idxs_dev_splits.append(idxs_dev)
 
-    x_dict, y_dict = split_data(stim, trace, frac_train=frac_train, frac_dev=frac_dev, as_dict=True)
-    return x_dict, y_dict, dt
+    return idxs_train_splits, idxs_dev_splits, idxs_test
 
 
 def compute_explained_rf(rf, rf_fit):
@@ -196,19 +293,6 @@ def resize_srf(srf, scale=None, output_shape=None):
     else:
         assert output_shape is not None
     return resize(srf, output_shape=output_shape, mode='constant', order=1)
-
-
-def split_strf(strf, blur_std: float = 0, blur_npix: int = 1, upsample_srf_scale: int = 0):
-    """Split STRF into sRF and tRF"""
-    if blur_std > 0:
-        strf = np.stack([smooth_rf(rf=srf_i, blur_std=blur_std, blur_npix=blur_npix) for srf_i in strf])
-
-    srf, trf = get_spatial_and_temporal_filters(strf, strf.shape)
-
-    if upsample_srf_scale > 1:
-        srf = resize_srf(srf, scale=upsample_srf_scale)
-
-    return srf, trf
 
 
 def compute_polarity_and_peak_idxs(trf, nstd=1.):
@@ -236,3 +320,71 @@ def merge_strf(srf, trf):
     assert srf.ndim == 2, srf.ndim
     rf = np.kron(trf, srf.flat).reshape(trf.shape + srf.shape)
     return rf
+
+
+def build_design_matrix(X, n_lag, shift=0, n_c=1, dtype=np.float32):
+    """
+    Build design matrix.
+    Modified from RFEst.
+    """
+
+    n_sample = X.shape[0]
+    n_feature = np.product(X.shape[1:])
+    X = np.reshape(X, (n_sample, n_feature))
+
+    if n_lag + shift > 0:
+        X_padded = np.vstack([np.zeros([n_lag + shift - 1, n_feature]), X])
+    else:
+        X_padded = X
+
+    if shift < 0:
+        X_padded = np.vstack([X_padded, np.zeros([-shift, n_feature])])
+
+    X_design = np.hstack([X_padded[i:n_sample + i] for i in range(n_lag)])
+
+    if n_c > 1:
+        X_design = np.reshape(X_design, (X_design.shape[0], -1, n_c)).astype(dtype)
+    else:
+        X_design = X_design.astype(dtype)
+
+    return X_design
+
+
+def split_strf(strf, blur_std: float = 0, blur_npix: int = 1, upsample_srf_scale: int = 0):
+    """Split STRF into sRF and tRF"""
+    if blur_std > 0:
+        strf = np.stack([smooth_rf(rf=srf_i, blur_std=blur_std, blur_npix=blur_npix) for srf_i in strf])
+
+    srf, trf = svd_rf(strf)
+
+    if upsample_srf_scale > 1:
+        srf = resize_srf(srf, scale=upsample_srf_scale)
+
+    return srf, trf
+
+
+def svd_rf(w):
+    """
+    Assuming an RF is time-space separable, get spatial and temporal filters using SVD.
+    From RFEst.
+    """
+    dims = w.shape
+
+    if len(dims) == 3:
+        dims_tRF = dims[0]
+        dims_sRF = dims[1:]
+        U, S, Vt = randomized_svd(w.reshape(dims_tRF, np.prod(dims_sRF)), 3, random_state=0)
+        srf = Vt[0].reshape(*dims_sRF)
+        trf = U[:, 0]
+
+    elif len(dims) == 2:
+        dims_tRF = dims[0]
+        dims_sRF = dims[1]
+        U, S, Vt = randomized_svd(w.reshape(dims_tRF, dims_sRF), 3, random_state=0)
+        srf = Vt[0]
+        trf = U[:, 0]
+
+    else:
+        raise NotImplementedError
+
+    return srf, trf

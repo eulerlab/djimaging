@@ -68,6 +68,13 @@ def resample_trace(tracetime, trace, dt):
     return tracetime_resampled, trace_resampled
 
 
+def upsample_stim(stimtime, stim, fupsample):
+    dt = np.mean(np.diff(stimtime))
+    stimtime = np.sort(np.concatenate([stimtime, stimtime + dt/2]))
+    stim = np.repeat(stim, fupsample, axis=0)
+    return stimtime, stim
+
+
 def upsample_trace(tracetime, trace, fupsample):
     assert isinstance(fupsample, int)
     assert fupsample > 1

@@ -29,15 +29,16 @@ class SplitRFParamsTemplate(dj.Lookup):
         """
         return definition
 
-    def add_default(self, skip_duplicates=False):
+    def add_default(self, skip_duplicates=False, **params):
         """Add default preprocess parameter to table"""
-        key = {
-            'split_rf_params_id': 1,
-            'blur_std': 1.,
-            'blur_npix': 1,
-            'upsample_srf_scale': 0,
-            'peak_nstd': 1,
-        }
+        key = dict(
+            split_rf_params_id=1,
+            blur_std=1.,
+            blur_npix=1,
+            upsample_srf_scale=0,
+            peak_nstd=1,
+        )
+        key.update(**params)
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
@@ -99,7 +100,7 @@ class SplitRFTemplate(dj.Computed):
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
-        dt = (self.rf_table() & key).fetch1("dt")
+        t_trf = (self.rf_table() & key).fetch1("rf_time")
         srf, trf, peak_idxs = (self & key).fetch1("srf", "trf", "trf_peak_idxs")
 
         fig, axs = plt.subplots(1, 2, figsize=(8, 3))
@@ -107,7 +108,7 @@ class SplitRFTemplate(dj.Computed):
         plot_srf(srf, ax=ax)
 
         ax = axs[1]
-        plot_trf(trf, dt=dt, peak_idxs=peak_idxs, ax=ax)
+        plot_trf(trf, t_trf=t_trf, peak_idxs=peak_idxs, ax=ax)
 
         plt.tight_layout()
         plt.show()
@@ -135,15 +136,16 @@ class RFContoursParamsTemplate(dj.Lookup):
         """
         return definition
 
-    def add_default(self, skip_duplicates=False):
+    def add_default(self, skip_duplicates=False, **params):
         """Add default preprocess parameter to table"""
-        key = {
-            'normalize_srf': 'none',
-            'blur_std': 1.,
-            'blur_npix': 1,
-            'upsample_srf_scale': 0,
-            'peak_nstd': 1,
-        }
+        key = dict(
+            normalize_srf='none',
+            blur_std=1.,
+            blur_npix=1,
+            upsample_srf_scale=0,
+            peak_nstd=1,
+        )
+        key.update(**params)
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
@@ -278,7 +280,7 @@ class FitDoG2DRFTemplate(dj.Computed):
             return
 
         surround_index = compute_surround_index(srf=srf, srf_center=srf_eff_center)
-        # Compute area from gaussian fit to effective center? TODO: is this really necessary?
+        # Compute area from gaussian fit to effective center?
         _, srf_gauss_params = fit_rf_model(srf_eff_center, kind='gauss', polarity=self._polarity)
         area, diameter = compute_gauss_srf_area(
             srf_gauss_params, stim_dict["pix_scale_x_um"], stim_dict["pix_scale_y_um"])

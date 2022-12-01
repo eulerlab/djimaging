@@ -4,7 +4,7 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 
-from djimaging.tables.receptivefield.rf_utils import compute_sta, prepare_trace
+from djimaging.tables.receptivefield.rf_utils import compute_linear_rf
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -14,13 +14,11 @@ class STAParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        rfparams_id: int # unique param set id
+        sta_params_id: int # unique param set id
         ---
         rf_method : enum("sta", "mle")
-        dur_filter_s : float # minimum duration of filter in seconds
-        fit_kind : enum("trace", "gradient", "events", "spikes")
-        norm_stim : tinyint unsigned  # Normalize (znorm) stimulus?
-        norm_trace : tinyint unsigned  # Normalize (znorm) trace?
+        filter_dur_s_past : float # filter duration in seconds into the past
+        filter_dur_s_future : float # filter duration in seconds into the future
         frac_train : float  # Fraction of data used for training in (0, 1].
         frac_dev : float  # Fraction of data used for hyperparameter optimization in [0, 1).
         frac_test : float  # Fraction of data used for testing [0, 1).
@@ -30,17 +28,14 @@ class STAParamsTemplate(dj.Lookup):
         return definition
 
     def add_default(
-            self, rfparams_id=1, rf_method="sta", dur_filter_s=1.0, norm_trace=0, norm_stim=1,
-            fit_kind="events", frac_train=0.8, frac_dev=0., frac_test=0.2, store_x='data', store_y='data',
+            self, sta_params_id=1, rf_method="sta", filter_dur_s_past=1., filter_dur_s_future=0.,
+            frac_train=0.8, frac_dev=0., frac_test=0.2, store_x='data', store_y='data',
             skip_duplicates=False):
         """Add default preprocess parameter to table"""
 
         key = dict(
-            rfparams_id=rfparams_id,
-            rf_method=rf_method,
-            dur_filter_s=dur_filter_s,
-            norm_trace=norm_trace, norm_stim=norm_stim,
-            fit_kind=fit_kind,
+            sta_params_id=sta_params_id,
+            rf_method=rf_method, filter_dur_s_past=filter_dur_s_past, filter_dur_s_future=filter_dur_s_future,
             frac_train=frac_train, frac_dev=frac_dev, frac_test=frac_test,
             store_x=store_x, store_y=store_y,
         )
@@ -55,46 +50,25 @@ class STATemplate(dj.Computed):
     def definition(self):
         definition = '''
         # Compute basic receptive fields
-        -> self.preprocesstraces_table
+        -> self.noise_traces_table
         -> self.params_table
         ---
         rf: longblob  # spatio-temporal receptive field
-        dt : float  # Time-step of time component
+        rf_time: longblob #  time of RF, depends from dt and shift
+        dt: float  # Time step between frames
+        shift: int  # Shift of stimulus relative to trace. If negative, prediction looks into future.
         '''
         return definition
 
     @property
     @abstractmethod
-    def stimulus_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def presentation_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def traces_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def preprocesstraces_table(self):
+    def noise_traces_table(self):
         pass
 
     @property
     @abstractmethod
     def params_table(self):
         pass
-
-    @property
-    def key_source(self):
-        try:
-            return self.params_table() * self.preprocesstraces_table() & \
-                   (self.stimulus_table() & "stim_family = 'noise'")
-        except TypeError:
-            pass
 
     class DataSet(dj.Part):
         @property
@@ -113,40 +87,37 @@ class STATemplate(dj.Computed):
             return definition
 
     def make(self, key):
-        stim = (self.stimulus_table() & key).fetch1("stim_trace")
-        stimtime = (self.presentation_table() & key).fetch1('triggertimes')
-
-        assert stim is not None, "stim_trace in stimulus table must be set."
-
-        trace, tracetime = (self.preprocesstraces_table() & key).fetch1('preprocess_trace', 'preprocess_trace_times')
+        filter_dur_s_past, filter_dur_s_future, rf_method = (self.params_table() & key).fetch1(
+            "filter_dur_s_past", "filter_dur_s_future", "rf_method")
+        store_x, store_y = (self.params_table() & key).fetch1("store_x", "store_y")
         frac_train, frac_dev, frac_test = (self.params_table() & key).fetch1("frac_train", "frac_dev", "frac_test")
+        dt, time, trace, stim = (self.noise_traces_table() & key).fetch1('dt', 'time', 'trace', 'stim')
         assert np.isclose(frac_train + frac_dev + frac_test, 1.0)
 
-        norm_stim, norm_trace, fit_kind = (self.params_table() & key).fetch1("norm_stim", "norm_trace", "fit_kind")
-        dur_filter_s, store_x, store_y = (self.params_table() & key).fetch1("dur_filter_s", "store_x", "store_y")
-
-        rf, rf_pred, X, y, dt = compute_sta(
-            trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
-            frac_train=frac_train, frac_dev=frac_dev, dur_filter_s=dur_filter_s,
-            norm_stim=norm_stim, norm_trace=norm_trace, fit_kind=fit_kind)
+        rf, rf_time, rf_pred, x, y, shift = compute_linear_rf(
+            dt=dt, trace=trace, stim=stim, frac_train=frac_train, frac_dev=frac_dev, kind=rf_method,
+            filter_dur_s_past=filter_dur_s_past, filter_dur_s_future=filter_dur_s_future,
+            threshold_pred=np.all(trace >= 0))
 
         rf_key = deepcopy(key)
         rf_key['rf'] = rf
+        rf_key['rf_time'] = rf_time
         rf_key['dt'] = dt
+        rf_key['shift'] = shift
         self.insert1(rf_key)
 
-        for k in X.keys():
+        for k in x.keys():
             rf_dataset_key = deepcopy(key)
             rf_dataset_key['kind'] = k
             rf_dataset_key['burn_in'] = rf_pred['burn_in']
-            rf_dataset_key['x'] = X[k] if store_x == 'data' else X[k].shape
+            rf_dataset_key['x'] = x[k] if store_x == 'data' else x[k].shape
             rf_dataset_key['y'] = y[k] if store_y == 'data' else y[k].shape
             rf_dataset_key['y_pred'] = rf_pred[f'y_pred_{k}'] if store_y == 'data' else rf_pred[f'y_pred_{k}'].shape
             rf_dataset_key['cc'] = rf_pred[f'cc_{k}']
             rf_dataset_key['mse'] = rf_pred[f'mse_{k}']
             self.DataSet().insert1(rf_dataset_key)
 
-    def plot1(self, key=None):
+    def plot1(self, key=None, xlim=None):
         key = get_primary_key(table=self, key=key)
 
         from matplotlib import pyplot as plt
@@ -165,6 +136,7 @@ class STATemplate(dj.Computed):
             ax.plot(time[burn_in:], row['y'][burn_in:], label='data', c='C0')
             ax.plot(time[burn_in:], row['y_pred'], label='pred', alpha=0.8, c='C1')
             ax.legend(loc='upper left', bbox_to_anchor=(1, 1))
+            ax.set_xlim(xlim)
 
         axs[-1].set(xlabel='Time')
         plt.tight_layout()
