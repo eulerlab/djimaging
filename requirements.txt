@@ -1,19 +1,17 @@
 datajoint>=0.13
-numpy~=1.23.3
-h5py~=3.7.0
-scipy~=1.9.1
+numpy
+h5py
+scipy
 cached_property
 
-pytest~=7.1.3
-rfest~=2.1.3
-jax~=0.3.20
-matplotlib~=3.6.0
-pandas~=1.5.0
-seaborn~=0.12.0
-scikit-learn~=1.1.2
-opencv-python~=4.6.0.66
-scikit-image~=0.19.3
-astropy~=5.1
+pytest
+matplotlib
+pandas
+seaborn
+scikit-learn
+opencv-python
+scikit-image
+astropy
 
 ipython
 numba
