@@ -1,16 +1,19 @@
 import os
-import numpy as np
-import datajoint as dj
+import warnings
+from abc import abstractmethod
 from copy import deepcopy
-import h5py
-from matplotlib import pyplot as plt
 
-from djimaging.utils.data_utils import list_data_files, extract_h5_table
-from djimaging.utils.dj_utils import PlaceholderTable
+import datajoint as dj
+import numpy as np
+
+from djimaging.utils.alias_utils import get_field_files
+from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.plot_utils import plot_field
+from djimaging.utils.scanm_utils import get_triggers_and_data
 
 
 class PresentationTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -21,18 +24,40 @@ class PresentationTemplate(dj.Computed):
         condition             :varchar(255)     # condition (pharmacological or other)
         ---
         h5_header             :varchar(255)     # path to h5 file
+        trigger_flag          :tinyint unsigned # Are triggers as expected (1) or not (0)?
         triggertimes          :longblob         # triggertimes in each presentation
         triggervalues         :longblob         # values of the recorded triggers
-        stack_average         :longblob         # data stack average
+        ch0_average           :longblob         # Stack median of channel 0
+        ch1_average           :longblob         # Stack median of channel 1
         """
         return definition
 
-    # TODO ADD scan_frequency BACK!!!
+    @property
+    @abstractmethod
+    def field_table(self):
+        pass
 
-    field_table = PlaceholderTable
-    stimulus_table = PlaceholderTable
-    userinfo_table = PlaceholderTable
-    experiment_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def userinfo_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def experiment_table(self):
+        pass
+
+    @property
+    def key_source(self):
+        try:
+            return self.field_table().RoiMask() * self.stimulus_table()
+        except TypeError:
+            pass
 
     class ScanInfo(dj.Part):
         @property
@@ -131,14 +156,13 @@ class PresentationTemplate(dj.Computed):
         field = (self.field_table() & key).fetch1("field")
         stim_loc, field_loc, condition_loc = (self.userinfo_table() & key).fetch1(
             "stimulus_loc", "field_loc", "condition_loc")
-        data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
 
         pre_data_path = os.path.join(
             (self.experiment_table() & key).fetch1('header_path'),
             (self.userinfo_table() & key).fetch1("pre_data_dir"))
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
-        h5_files = list_data_files(folder=pre_data_path, hidden=False, field=field, field_loc=field_loc)
+        h5_files = get_field_files(folder=pre_data_path, field=field, field_loc=field_loc, incl_hidden=False)
         stim_alias = (self.stimulus_table() & key).fetch1("alias").split('_')
 
         for h5_file in h5_files:
@@ -151,55 +175,29 @@ class PresentationTemplate(dj.Computed):
 
             if stim.lower() in stim_alias:
                 self.__add_presentation(
-                    key=primary_key, filepath=os.path.join(pre_data_path, h5_file), data_stack_name=data_stack_name)
+                    key=primary_key, filepath=os.path.join(pre_data_path, h5_file))
 
-    def __add_presentation(self, key, filepath, data_stack_name):
+    def __add_presentation(self, key, filepath):
+
+        triggertimes, triggervalues, ch0_stack, ch1_stack, wparams = get_triggers_and_data(filepath)
+
+        isrepeated, ntrigger_rep = (self.stimulus_table() & key).fetch1("isrepeated", "ntrigger_rep")
+
+        if isrepeated == 0:
+            trigger_flag = triggertimes.size == ntrigger_rep
+        else:
+            trigger_flag = triggertimes.size % ntrigger_rep == 0
+
+        if trigger_flag == 0:
+            warnings.warn(f'Found {triggertimes.size} triggers, expected {ntrigger_rep} (per rep): key={key}.')
+
         pres_key = deepcopy(key)
         pres_key["h5_header"] = filepath
-
-        with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-            key_triggertimes = [k for k in h5_file.keys() if k.lower() == 'triggertimes']
-
-            if len(key_triggertimes) == 1:
-                pres_key["triggertimes"] = h5_file[key_triggertimes[0]][()]
-            elif len(key_triggertimes) == 0:
-                pres_key["triggertimes"] = np.zeros(0)
-            else:
-                raise ValueError('Multiple triggertimes found')
-
-            key_triggervalues = [k for k in h5_file.keys() if k.lower() == 'triggervalues']
-
-            if len(key_triggervalues) == 1:
-                pres_key["triggervalues"] = h5_file[key_triggervalues[0]][()]
-                assert len(pres_key["triggertimes"]) == len(pres_key["triggervalues"]), 'Trigger mismatch'
-            elif len(key_triggervalues) == 0:
-                pres_key["triggervalues"] = np.zeros(0)
-            else:
-                raise ValueError('Multiple triggervalues found')
-
-            stack = np.copy(h5_file[data_stack_name])
-
-            os_params = dict()
-            if 'OS_Parameters' in h5_file.keys():
-                os_params.update(extract_h5_table('OS_Parameters', open_file=h5_file, lower_keys=True))
-
-            wparams = dict()
-            if 'wParamsStr' in h5_file.keys():
-                wparams.update(extract_h5_table('wParamsStr', open_file=h5_file, lower_keys=True))
-                wparams.update(extract_h5_table('wParamsNum', open_file=h5_file, lower_keys=True))
-
-            # Check stack average
-            try:
-                nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
-                nypix = wparams["user_dypix"]
-                nzpix = wparams["user_dzpix"]
-
-                assert stack.ndim == 3, 'Stack does not match expected shape'
-                assert stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)], \
-                    f'Stack shape error: {stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]'
-            except KeyError:
-                pass
-            pres_key["stack_average"] = np.mean(stack, 2)
+        pres_key["trigger_flag"] = int(trigger_flag)
+        pres_key["triggertimes"] = triggertimes
+        pres_key["triggervalues"] = triggervalues
+        pres_key["ch0_average"] = np.mean(ch0_stack, 2)
+        pres_key["ch1_average"] = np.mean(ch1_stack, 2)
 
         # extract params for scaninfo
         scaninfo_key = deepcopy(key)
@@ -218,17 +216,12 @@ class PresentationTemplate(dj.Computed):
         self.insert1(pres_key)
         (self.ScanInfo() & key).insert1(scaninfo_key)
 
-    def plot1(self, key):
-        key = {k: v for k, v in key.items() if k in self.primary_key}
+    def plot1(self, key=None, figsize=(16, 4)):
+        key = get_primary_key(table=self, key=key)
 
-        fig, axs = plt.subplots(1, 2, figsize=(10, 3.5))
-        stack_average = (self & key).fetch1("stack_average").T
-        roi_mask = (self.field_table.RoiMask() & key).fetch1("roi_mask").T
-        axs[0].imshow(stack_average)
-        axs[0].set(title='stack_average')
+        ch0_average = (self & key).fetch1("ch0_average")
+        ch1_average = (self & key).fetch1("ch1_average")
+        roi_mask = (self.field_table().RoiMask() & key).fetch1("roi_mask")
+        npixartifact = (self.field_table() & key).fetch1('npixartifact')
 
-        if roi_mask.size > 0:
-            roi_mask_im = axs[1].imshow(roi_mask, cmap='jet')
-            plt.colorbar(roi_mask_im, ax=axs[1])
-            axs[1].set(title='roi_mask')
-        plt.show()
+        plot_field(ch0_average, ch1_average, roi_mask, title=key, figsize=figsize, npixartifact=npixartifact)

@@ -1,13 +1,17 @@
-import numpy as np
+import warnings
+from abc import abstractmethod
+
 import datajoint as dj
+import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.plot_utils import plot_trace_and_trigger, plot_signals_heatmap
 from djimaging.utils.scanm_utils import load_traces_from_h5_file, split_trace_by_reps
-from djimaging.utils.dj_utils import PlaceholderTable
 
 
 class TracesTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -20,14 +24,37 @@ class TracesTemplate(dj.Computed):
         ---
         trace          :longblob              # array of raw trace
         trace_times    :longblob              # numerical array of trace times
-        trace_flag     :tinyint unsigned      # flag if values in trace are correct(1) or not(0)
-        trigger_flag   :tinyint unsigned      # flag if triggertimes aren't outside tracetimes
+        trace_flag     :tinyint unsigned      # Are values in trace correct (1) or not (0)?
+        trigger_flag   :tinyint unsigned      # Are triggertimes inside trace_times (1) or not (0)?
         """
         return definition
 
-    presentation_table = PlaceholderTable
-    field_table = PlaceholderTable
-    roi_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def field_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def roi_table(self):
+        pass
+
+    _include_artifacts = False
+
+    @property
+    def key_source(self):
+        try:
+            if self._include_artifacts:
+                return self.roi_table() * self.presentation_table()
+            else:
+                return (self.roi_table() & 'artifact_flag=0') * self.presentation_table()
+        except TypeError:
+            pass
 
     def make(self, key):
 
@@ -43,7 +70,7 @@ class TracesTemplate(dj.Computed):
             trace_key['roi_id'] = roi_id
             trace_key['trace'] = roi_data['trace']
             trace_key['trace_times'] = roi_data['trace_times']
-            trace_key['trace_flag'] = roi_data['trace_flag']
+            trace_key['trace_flag'] = roi_data['valid_flag']
 
             if trace_key['trace_flag']:
                 if triggertimes[0] < trace_key['trace_times'][0]:
@@ -57,20 +84,17 @@ class TracesTemplate(dj.Computed):
 
             self.insert1(trace_key)
 
-    def plot1(self, key):
+    def plot1(self, key=None):
+        key = get_primary_key(table=self, key=key)
         trace_times, trace = (self & key).fetch1("trace_times", "trace")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
 
-        fig, ax = plt.subplots(1, 1, figsize=(10, 2))
-        ax.plot(trace_times, trace)
-        ax.set(xlabel='trace_times', ylabel='trace')
-        ax.vlines(triggertimes, np.min(trace), np.max(trace), color='r', label='trigger')
-        ax.legend(loc='upper right')
-        plt.show()
+        plot_trace_and_trigger(
+            time=trace_times, trace=trace, triggertimes=triggertimes, title=str(key))
 
 
 class SnippetsTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -85,14 +109,32 @@ class SnippetsTemplate(dj.Computed):
         """
         return definition
 
-    preprocesstraces_table = PlaceholderTable
-    stimulus_table = PlaceholderTable
-    presentation_table = PlaceholderTable
-    traces_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def preprocesstraces_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def traces_table(self):
+        pass
 
     @property
     def key_source(self):
-        return self.preprocesstraces_table() * (self.stimulus_table() & "isrepeated=1")
+        try:
+            return self.preprocesstraces_table() * (self.stimulus_table() & "isrepeated=1")
+        except TypeError:
+            pass
 
     def make(self, key):
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
@@ -114,23 +156,17 @@ class SnippetsTemplate(dj.Computed):
             droppedlastrep_flag=droppedlastrep_flag,
         ))
 
-    def plot1(self, key):
-        key = {k: v for k, v in key.items() if k in self.primary_key}
-
+    def plot1(self, key=None):
+        key = get_primary_key(table=self, key=key)
         snippets, snippets_times, triggertimes_snippets = (self & key).fetch1(
             "snippets", "snippets_times", "triggertimes_snippets")
 
-        fig, ax = plt.subplots(1, 1, figsize=(10, 2))
-        ax.plot(snippets_times - snippets_times[0, :], snippets)
-        ax.set(ylabel='preprocess_trace')
-        ax.vlines(triggertimes_snippets - triggertimes_snippets[0, :],
-                  np.min(snippets), np.max(snippets), color='r', label='trigger')
-        ax.legend(loc='upper right')
-        plt.show()
+        plot_trace_and_trigger(
+            time=snippets_times, trace=snippets, triggertimes=triggertimes_snippets, title=str(key))
 
 
 class AveragesTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -146,7 +182,10 @@ class AveragesTemplate(dj.Computed):
         """
         return definition
 
-    snippets_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
 
     def make(self, key):
         snippets, times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
@@ -171,18 +210,26 @@ class AveragesTemplate(dj.Computed):
             triggertimes_rel=triggertimes_rel,
         ))
 
-    def plot1(self, key):
-        key = {k: v for k, v in key.items() if k in self.primary_key}
-
+    def plot1(self, key=None):
+        key = get_primary_key(table=self, key=key)
         average, average_norm, average_times, triggertimes_rel = \
             (self & key).fetch1('average', 'average_norm', 'average_times', 'triggertimes_rel')
 
-        fig, ax = plt.subplots(1, 1, figsize=(10, 2))
-        ax.plot(average_times, average)
-        ax.set(xlabel='average_times', ylabel='average')
-        ax.vlines(triggertimes_rel, np.min(average), np.max(average), color='r', label='trigger')
-        ax.legend(loc='upper right')
-        tax = ax.twinx()
-        tax.plot(average_times, average_norm)
-        tax.set(ylabel='average_norm')
+        plot_trace_and_trigger(
+            time=average_times, trace=average, triggertimes=triggertimes_rel, trace_norm=average_norm, title=str(key))
+
+    def plot(self, restriction=None):
+        if restriction is None:
+            restriction = dict()
+
+        average = (self & restriction).fetch('average')
+
+        sizes = [a.size for a in average]
+
+        if np.unique(sizes).size > 1:
+            warnings.warn('Traces do not have the same size. Are you plotting multiple stimuli?')
+        min_size = np.min(sizes)
+
+        ax = plot_signals_heatmap(signals=np.stack([a[:min_size] for a in average]))
+        ax.set(title='Averages')
         plt.show()

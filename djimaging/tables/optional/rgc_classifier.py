@@ -1,18 +1,38 @@
 import os
+import pickle as pkl
+from abc import abstractmethod
+from copy import deepcopy
+from typing import Mapping, Dict, Any
 
 import datajoint as dj
 import numpy as np
-from typing import Mapping, Dict, Any
-import pickle as pkl
-from scipy import interpolate
-from copy import deepcopy
 from cached_property import cached_property
+from scipy import interpolate
 
+from djimaging.utils.dj_utils import make_hash
 from djimaging.utils.import_helpers import dynamic_import, split_module_name
-from djimaging.utils.dj_utils import make_hash, PlaceholderTable
-
 
 Key = Dict[str, Any]
+
+
+def prepare_dj_config_rgc_classifier(output_folder, input_folder="/gpfs01/euler/data/Resources/Classifier"):
+    stores_dict = {
+        "classifier_input": {"protocol": "file", "location": input_folder, "stage": input_folder},
+        "classifier_output": {"protocol": "file", "location": output_folder, "stage": output_folder},
+    }
+
+    # Make sure folders exits
+    for store, store_dict in stores_dict.items():
+        for name in store_dict.keys():
+            if name in ["location", "stage"]:
+                assert os.path.isdir(store_dict[name]), f'This must be a folder you have access to: {store_dict[name]}'
+
+    os.environ["DJ_SUPPORT_FILEPATH_MANAGEMENT"] = "TRUE"
+    dj.config['enable_python_native_blobs'] = True
+
+    dj_config_stores = dj.config['stores'] or dict()
+    dj_config_stores.update(stores_dict)
+    dj.config['stores'] = dj_config_stores
 
 
 class CellFilterParamsTemplate(dj.Lookup):
@@ -23,6 +43,7 @@ class CellFilterParamsTemplate(dj.Lookup):
         definition = """
         cell_filter_params_hash         :  varchar(32)         # hash of the classifier params config
         ---
+        condition = 'control'           :  varchar(255)        # Condition to classify
         qi_thres_chirp                  :  float               # QI threshold for full-field chirp response
         qi_thres_bar                    :  float               # QI threshold for moving bar response
         cell_selection_constraint       :  enum("and", "or")   # constraint flag (and, or) for QI 
@@ -30,10 +51,9 @@ class CellFilterParamsTemplate(dj.Lookup):
         return definition
 
     def add_parameters(self, qi_thres_chirp: float, qi_thres_bar: float, cell_selection_constraint: str,
-                       skip_duplicates: bool = False) -> None:
-        insert_dict = dict(qi_thres_chirp=qi_thres_chirp,
-                           qi_thres_bar=qi_thres_bar,
-                           cell_selection_constraint=cell_selection_constraint)
+                       skip_duplicates: bool = False, condition: str = 'control') -> None:
+        insert_dict = dict(qi_thres_chirp=qi_thres_chirp, qi_thres_bar=qi_thres_bar,
+                           cell_selection_constraint=cell_selection_constraint, condition=condition)
         cell_filter_params_hash = make_hash(insert_dict)
         insert_dict.update(dict(cell_filter_params_hash=cell_filter_params_hash))
         self.insert1(insert_dict, skip_duplicates=skip_duplicates)
@@ -55,10 +75,13 @@ class ClassifierMethodTemplate(dj.Lookup):
         return definition
 
     import_func = staticmethod(dynamic_import)
-    classifier_training_data_table = PlaceholderTable
 
-    def add_classifer(self, classifier_fn: str, classifier_config: Mapping,
-                      comment: str = "", skip_duplicates: bool = False, classifier_seed: int = 42) -> None:
+    @property
+    @abstractmethod
+    def classifier_training_data_table(self): pass
+
+    def add_classifier(self, classifier_fn: str, classifier_config: Mapping,
+                       comment: str = "", skip_duplicates: bool = False, classifier_seed: int = 42) -> None:
         self.insert1(
             dict(
                 classifier_fn=classifier_fn,
@@ -82,13 +105,13 @@ class ClassifierMethodTemplate(dj.Lookup):
 
 class ClassifierTrainingDataTemplate(dj.Manual):
     database = ""
-    store = None
+    store = "classifier_input"
 
     @property
     def definition(self):
         definition = """
         # holds feature basis and training data for classifier
-        training_data_hash              :   varchar(32)     # hash of the classifier training data files
+        training_data_hash     :   varchar(32)     # hash of the classifier training data files
         ---
         project                :   enum("True", "False")     # flag whether to project data onto features anew or not
         output_path            :   varchar(255)
@@ -101,6 +124,7 @@ class ClassifierTrainingDataTemplate(dj.Manual):
 
     def add_trainingdata(self, project: str, output_path: str, chirp_feats_file: str, bar_feats_file: str,
                          baden_data_file: str, training_data_file: str, skip_duplicates: bool = False) -> None:
+
         key = dict(
             project=project,
             output_path=output_path,
@@ -123,7 +147,7 @@ class ClassifierTrainingDataTemplate(dj.Manual):
 
 class ClassifierTemplate(dj.Computed):
     database = ""
-    store = None
+    store = "classifier_output"
 
     @property
     def definition(self):
@@ -135,8 +159,13 @@ class ClassifierTemplate(dj.Computed):
         """.format(store=self.store)
         return definition
 
-    classifier_training_data_table = PlaceholderTable
-    classifier_method_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def classifier_training_data_table(self): pass
+
+    @property
+    @abstractmethod
+    def classifier_method_table(self): pass
 
     def make(self, key):
         output_path = (self.classifier_training_data_table() & key).fetch1("output_path")
@@ -202,29 +231,64 @@ class CelltypeAssignmentTemplate(dj.Computed):
         """
         return definition
 
-    cell_filter_parameter_table = PlaceholderTable
-    classifier_training_data_table = PlaceholderTable
-    classifier_table = PlaceholderTable
-    roi_table = PlaceholderTable
-    presentation_table = PlaceholderTable
-    chirp_qi_table = PlaceholderTable
-    snippets_table = PlaceholderTable
-    or_dir_index_table = PlaceholderTable
-    user_info_table = PlaceholderTable
-    detrend_params_table = PlaceholderTable
-    field_table = PlaceholderTable
-    exp_info_table = PlaceholderTable
-
     _stim_name_chirp = 'gChirp'
     _stim_name_bar = 'movingbar'
-    _chirp_qi_key = 'chirp_qi'
+    _chirp_qi_key = 'qidx'
+
+    @property
+    @abstractmethod
+    def cell_filter_parameter_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def classifier_training_data_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def classifier_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def roi_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def field_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def chirp_qi_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def or_dir_index_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def detrend_params_table(self):
+        pass
 
     @property
     def key_source(self):
-        return (self.classifier_training_data_table() * self.classifier_table() *
-                self.field_table() * self.detrend_params_table() * self.cell_filter_parameter_table()) & \
-               (self.snippets_table() & f"stim_name = '{self._stim_name_chirp}'") & \
-               (self.snippets_table() & f"stim_name = '{self._stim_name_bar}'")
+        try:
+            return (self.field_table() * self.detrend_params_table() * self.classifier_training_data_table() *
+                    self.classifier_table() * self.cell_filter_parameter_table()) & \
+                   ((self.snippets_table() & f"stim_name = '{self._stim_name_chirp}'").proj(chirp='stim_name') *
+                    (self.snippets_table() & f"stim_name = '{self._stim_name_bar}'").proj(bar='stim_name'))
+        except TypeError:
+            pass
 
     @property
     def current_model_key(self):
@@ -275,7 +339,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         self.current_model_key = model_key
 
-        if key.get("roi_id", False):
+        if "roi_id" in key:
             self.run_cell_type_assignment(key, mode="roi")
         else:
             self.run_cell_type_assignment(key, mode="field")
@@ -288,30 +352,42 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
     def run_cell_type_assignment(self, key, mode):
         if mode == "roi":
-            raise NotImplementedError
+            raise NotImplementedError('mode == "roi"')
 
+        # Fetch selection parameters
+        qi_thres_chirp, qi_thres_bar, cell_selection_constraint, condition = (
+            self.cell_filter_parameter_table() & key).fetch1(
+                'qi_thres_chirp', 'qi_thres_bar', 'cell_selection_constraint', 'condition')
+
+        # Define subkeys
         chirp_key = deepcopy(key)
         chirp_key['stim_name'] = self._stim_name_chirp
+        chirp_key['condition'] = condition
 
-        chirp_traces, roi_ids = (self.snippets_table() & chirp_key).fetch('snippets', "roi_id")
+        bar_key = deepcopy(key)
+        bar_key['stim_name'] = self._stim_name_bar
+        bar_key['condition'] = condition
+
+        roi_ids = ((self.roi_table() & (self.snippets_table() & chirp_key)) & (self.snippets_table() & bar_key)).fetch(
+            'roi_id')
+
+        restr = [f'roi_id={roi_id}' for roi_id in roi_ids]
+
+        # Fetch chirp data
+        chirp_traces = (self.snippets_table() & chirp_key & restr).fetch('snippets')
         chirp_traces = np.asarray([chirp_trace for chirp_trace in chirp_traces])
         chirp_traces = preprocess_chirp(chirp_traces)
 
-        # Bar Response
-        bar_key = deepcopy(key)
-        bar_key['stim_name'] = self._stim_name_bar
-        bar_traces = (self.or_dir_index_table() & bar_key).fetch('time_component')
+        chirp_qis = (self.chirp_qi_table() & chirp_key & restr).fetch(self._chirp_qi_key)
 
-        # shift by 5 frames backwards
+        # Fetch bar data, shift by 5 frames backwards
+        bar_traces, ds_pvalues, bar_qis = (self.or_dir_index_table() & bar_key & restr).fetch(
+            'time_component', 'ds_pvalue', 'd_qi')
         bar_traces = np.asarray([bar for bar in bar_traces])
         bar_traces = np.roll(bar_traces, -5)
 
-        # fetch more parameters
-        ds_pvalues, bar_qis = (self.or_dir_index_table() & bar_key).fetch('ds_pvalue', 'd_qi')
-        chirp_qis = (self.chirp_qi_table() & chirp_key).fetch(self._chirp_qi_key)
-
         # Get ROI size
-        roi_sizes_um = (self.roi_table() & key).fetch('roi_size_um2')
+        roi_sizes_um = (self.roi_table() & key & restr).fetch('roi_size_um2')
 
         # feature activation matrix
         feature_activation_bar = np.dot(bar_traces, self.bar_features)
@@ -320,10 +396,6 @@ class CelltypeAssignmentTemplate(dj.Computed):
         feature_activation_matrix = np.concatenate(
             [feature_activation_chirp, feature_activation_bar, ds_pvalues[:, np.newaxis],
              roi_sizes_um[:, np.newaxis]], axis=-1)
-
-        # choose the model that applies to the attribute of the cell
-        qi_thres_chirp, qi_thres_bar, cell_selection_constraint = (self.cell_filter_parameter_table() & key).fetch1(
-            'qi_thres_chirp', 'qi_thres_bar', 'cell_selection_constraint')
 
         if cell_selection_constraint == 'and':
             quality_mask = (bar_qis > qi_thres_bar) & (chirp_qis > qi_thres_chirp)
@@ -343,7 +415,6 @@ class CelltypeAssignmentTemplate(dj.Computed):
                                   preproc_chirp=chirp_traces[quality_mask, :][i],
                                   preproc_bar=bar_traces[quality_mask][i],
                                   ))
-
         if np.any(~quality_mask):
             dummy_confidence = np.full((1, 46), -1)
 
@@ -355,7 +426,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                                   preproc_chirp=chirp_traces[~quality_mask, :][i],
                                   preproc_bar=bar_traces[~quality_mask][i],
                                   ))
-            
+
     def plot(self):
         from matplotlib import pyplot as plt
         import pandas as pd
@@ -363,7 +434,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
         groups = pd.DataFrame(self.fetch()).groupby([
             'training_data_hash', 'classifier_params_hash', 'cell_filter_params_hash'])
 
-        fig, axs = plt.subplots(len(groups), 1, figsize=(12, 3*len(groups)), squeeze=False)
+        fig, axs = plt.subplots(len(groups), 1, figsize=(12, 3 * len(groups)), squeeze=False)
         axs = axs.flatten()
 
         for ax, ((tdh, cph, cfph), df) in zip(axs, groups):
@@ -377,4 +448,3 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         plt.tight_layout()
         plt.show()
-

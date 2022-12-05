@@ -3,3 +3,15 @@ numpy
 h5py
 scipy
 cached_property
+
+pytest
+matplotlib
+pandas
+seaborn
+scikit-learn
+opencv-python
+scikit-image
+astropy
+
+ipython
+numba

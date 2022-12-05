@@ -1,1 +1,1 @@
-# TODO: add more advanced tables here
+from .sinespot import SineSpotQITemplate, SineSpotFeaturesTemplate

@@ -1,89 +1,86 @@
 import datajoint as dj
 
-from djimaging.tables.core import stimulus, traces, preprocesstraces, userinfo, presentation, experiment, field, roi
+from djimaging.tables.core import *
 
 schema = dj.Schema()
 
 
 @schema
-class UserInfo(userinfo.UserInfoTemplate):
+class UserInfo(UserInfoTemplate):
     pass
 
 
 @schema
-class Experiment(experiment.ExperimentTemplate):
+class Experiment(ExperimentTemplate):
     userinfo_table = UserInfo
 
-    class ExpInfo(experiment.ExperimentTemplate.ExpInfo):
+    class ExpInfo(ExperimentTemplate.ExpInfo):
         pass
 
-    class Animal(experiment.ExperimentTemplate.Animal):
+    class Animal(ExperimentTemplate.Animal):
         pass
 
-    class Indicator(experiment.ExperimentTemplate.Indicator):
+    class Indicator(ExperimentTemplate.Indicator):
         pass
 
-    class PharmInfo(experiment.ExperimentTemplate.PharmInfo):
+    class PharmInfo(ExperimentTemplate.PharmInfo):
         pass
 
 
 @schema
-class Field(field.FieldTemplate):
+class Field(FieldTemplate):
     userinfo_table = UserInfo
     experiment_table = Experiment
 
-    class FieldInfo(field.FieldTemplate.FieldInfo):
+    class RoiMask(FieldTemplate.RoiMask):
         pass
 
-    class RoiMask(field.FieldTemplate.RoiMask):
-        pass
-
-    class Zstack(field.FieldTemplate.Zstack):
+    class Zstack(FieldTemplate.Zstack):
         pass
 
 
 @schema
-class Roi(roi.RoiTemplate):
+class Roi(RoiTemplate):
     field_table = Field
 
 
 @schema
-class Stimulus(stimulus.StimulusTemplate):
+class Stimulus(StimulusTemplate):
     pass
 
 
 @schema
-class Presentation(presentation.PresentationTemplate):
+class Presentation(PresentationTemplate):
     experiment_table = Experiment
     userinfo_table = UserInfo
     field_table = Field
     stimulus_table = Stimulus
 
-    class ScanInfo(presentation.PresentationTemplate.ScanInfo):
+    class ScanInfo(PresentationTemplate.ScanInfo):
         pass
 
 
 @schema
-class Traces(traces.TracesTemplate):
+class Traces(TracesTemplate):
     presentation_table = Presentation
     field_table = Field
     roi_table = Roi
 
 
 @schema
-class PreprocessParams(preprocesstraces.PreprocessParamsTemplate):
+class PreprocessParams(PreprocessParamsTemplate):
     pass
 
 
 @schema
-class PreprocessTraces(preprocesstraces.PreprocessTracesTemplate):
+class PreprocessTraces(PreprocessTracesTemplate):
     presentation_table = Presentation
     preprocessparams_table = PreprocessParams
     traces_table = Traces
 
 
 @schema
-class Snippets(traces.SnippetsTemplate):
+class Snippets(SnippetsTemplate):
     stimulus_table = Stimulus
     presentation_table = Presentation
     traces_table = Traces
@@ -91,5 +88,5 @@ class Snippets(traces.SnippetsTemplate):
 
 
 @schema
-class Averages(traces.AveragesTemplate):
+class Averages(AveragesTemplate):
     snippets_table = Snippets

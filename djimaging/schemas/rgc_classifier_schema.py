@@ -1,40 +1,34 @@
-from djimaging.schemas.core_schema import UserInfo, Field, Roi, Presentation, Snippets, PreprocessParams
-from djimaging.schemas.core_plus_optional_schema import schema, ChirpQI, OsDsIndexes
-from djimaging.tables.optional import rgc_classifier
+from djimaging.schemas.advanced_schema import *
 
 
 @schema
-class CellFilterParams(rgc_classifier.CellFilterParamsTemplate):
+class CellFilterParams(CellFilterParamsTemplate):
     pass
 
 
 @schema
-class ClassifierTrainingData(rgc_classifier.ClassifierTrainingDataTemplate):
-    store = "classifier_input"
+class ClassifierTrainingData(ClassifierTrainingDataTemplate):
     pass
 
 
 @schema
-class ClassifierMethod(rgc_classifier.ClassifierMethodTemplate):
+class ClassifierMethod(ClassifierMethodTemplate):
     classifier_training_data_table = ClassifierTrainingData
 
 
 @schema
-class Classifier(rgc_classifier.ClassifierTemplate):
-    store = "classifier_output"
+class Classifier(ClassifierTemplate):
     classifier_training_data_table = ClassifierTrainingData
     classifier_method_table = ClassifierMethod
 
 
 @schema
-class CelltypeAssignment(rgc_classifier.CelltypeAssignmentTemplate):
+class CelltypeAssignment(CelltypeAssignmentTemplate):
+    field_table = Field
     classifier_training_data_table = ClassifierTrainingData
     cell_filter_parameter_table = CellFilterParams
     classifier_table = Classifier
-    user_info_table = UserInfo
-    field_table = Field
     roi_table = Roi
-    presentation_table = Presentation
     snippets_table = Snippets
     chirp_qi_table = ChirpQI
     or_dir_index_table = OsDsIndexes

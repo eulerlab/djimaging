@@ -1,51 +1,68 @@
 import os
+import warnings
+from abc import abstractmethod
 from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
-from matplotlib import pyplot as plt
 
-from djimaging.utils.dj_utils import PlaceholderTable
-from djimaging.utils.data_utils import list_data_files
+from djimaging.utils.alias_utils import match_file, get_field_files
+from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm_utils import load_ch0_ch1_stacks_from_h5, load_ch0_ch1_stacks_from_smp, get_pixel_size_xy_um
 
 
-def load_high_res_stack(pre_data_path, raw_data_path, field, field_loc, highres_alias):
+def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
+                        field, field_loc, condition=None, condition_loc=None, allow_raw=True):
     """Scan filesystem for file and load data. Tries to load h5 files first, but may also load raw files."""
-    filepath_h5 = scan_for_highres_filepath(
-        folder=pre_data_path, field=field, field_loc=field_loc, highres_alias=highres_alias, ftype='h5')
 
-    filepath_smp = scan_for_highres_filepath(
-        folder=raw_data_path, field=field, field_loc=field_loc-1, highres_alias=highres_alias, ftype='smp')
+    filepath = scan_for_highres_filepath(
+        folder=pre_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc, ftype='h5',
+        condition=condition, condition_loc=condition_loc)
 
-    if filepath_h5 is not None:
-        filepath = filepath_h5
-        ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_h5(filepath_h5)
-    elif filepath_smp is not None:
-        filepath = filepath_smp
-        ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_smp(filepath_smp)
-    else:
-        filepath, ch0_stack, ch1_stack, wparams = None, None, None, None
+    if filepath is not None:
+        try:
+            ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_h5(filepath)
+            return filepath, ch0_stack, ch1_stack, wparams
+        except OSError:
+            warnings.warn(f'OSError when reading file: {filepath}')
+            pass
 
-    return filepath, ch0_stack, ch1_stack, wparams
+    if allow_raw:
+        filepath = scan_for_highres_filepath(
+            folder=raw_data_path, highres_alias=highres_alias, field=field, field_loc=field_loc - 1, ftype='smp',
+            condition=condition, condition_loc=condition_loc)
+
+        if filepath is not None:
+            try:
+                ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_smp(filepath)
+                return filepath, ch0_stack, ch1_stack, wparams
+            except OSError:
+                warnings.warn(f'OSError when reading file: {filepath}')
+                pass
+
+    return None, None, None, None
 
 
-def scan_for_highres_filepath(folder, field, field_loc, highres_alias, ftype='h5'):
+def scan_for_highres_filepath(folder, field, field_loc, highres_alias, condition=None, condition_loc=None, ftype='h5'):
     """Scan filesystem for files that match the highres alias and are from the same field."""
     if not os.path.isdir(folder):
         return None
 
-    data_files = list_data_files(folder=folder, hidden=False, field=field, field_loc=field_loc, ftype=ftype)
-    for filename in data_files:
-        for alias in highres_alias.split('_'):
-            for fileinfo in filename.replace(f'.{ftype}', '').split('_')[field_loc:]:
-                if alias.lower() == fileinfo.lower():
-                    filepath = os.path.join(folder, filename)
-                    return filepath
+    field_files = get_field_files(folder=folder, field=field, field_loc=field_loc, incl_hidden=False, ftype=ftype)
+
+    for file in field_files:
+        is_highres = match_file(file, pattern=highres_alias, pattern_loc=None, ftype=ftype)
+        is_condition = True if condition is None else \
+            match_file(file, pattern=condition, pattern_loc=condition_loc, ftype=ftype)
+
+        if is_highres & is_condition:
+            return os.path.join(folder, file)
     return None
 
 
 class HighResTemplate(dj.Computed):
+    database = ""
 
     @property
     def definition(self):
@@ -70,9 +87,17 @@ class HighResTemplate(dj.Computed):
         """
         return definition
 
-    field_table = PlaceholderTable
-    experiment_table = PlaceholderTable
-    userinfo_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def field_table(self): pass
+
+    @property
+    @abstractmethod
+    def experiment_table(self): pass
+
+    @property
+    @abstractmethod
+    def userinfo_table(self): pass
 
     def make(self, key):
         field = (self.field_table() & key).fetch1("field")
@@ -83,11 +108,11 @@ class HighResTemplate(dj.Computed):
         pre_data_path = os.path.join(header_path, (self.userinfo_table() & key).fetch1("pre_data_dir"))
         raw_data_path = os.path.join(header_path, (self.userinfo_table() & key).fetch1("raw_data_dir"))
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
-        setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
+        setupid = (self.experiment_table().ExpInfo() & key).fetch1("setupid")
 
         filepath, ch0_stack, ch1_stack, wparams = load_high_res_stack(
             pre_data_path=pre_data_path, raw_data_path=raw_data_path,
-            field=field, field_loc=field_loc, highres_alias=highres_alias)
+            highres_alias=highres_alias, field=field, field_loc=field_loc)
 
         if filepath is None or ch0_stack is None or ch1_stack is None:
             return
@@ -121,15 +146,10 @@ class HighResTemplate(dj.Computed):
 
         self.insert1(highres_key)
 
-    def plot1(self, key: dict):
-        fig, axs = plt.subplots(1, 2, figsize=(10, 3.5))
-        ch0_average = (self & key).fetch1("ch0_average").T
-        ch1_average = (self & key).fetch1("ch1_average").T
+    def plot1(self, key=None, figsize=(8, 4)):
+        key = get_primary_key(table=self, key=key)
 
-        axs[0].imshow(ch0_average)
-        axs[0].set(title='ch0_average')
+        ch0_average = (self & key).fetch1("ch0_average")
+        ch1_average = (self & key).fetch1("ch1_average")
 
-        axs[1].imshow(ch1_average)
-        axs[1].set(title='ch1_average')
-
-        plt.show()
+        plot_field(ch0_average, ch1_average, roi_mask=None, title=key, figsize=figsize)

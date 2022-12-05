@@ -1,37 +1,9 @@
-import datajoint as dj
 import hashlib
+import random
+from collections import OrderedDict
+from collections.abc import Iterable, Mapping
 
-from collections import OrderedDict, Iterable, Mapping
-
-
-class PlaceholderTable:
-    def __and__(self, other):
-        return True
-
-    def __mul__(self, other):
-        return other
-
-    @classmethod
-    def ExpInfo(cls):
-        pass
-
-    @classmethod
-    def RoiMask(cls):
-        pass
-
-    @classmethod
-    def FieldInfo(cls):
-        pass
-
-    @classmethod
-    def ScanInfo(cls):
-        pass
-
-    def fetch1(self, *args, **kwargs):
-        pass
-
-    def fetch(self, *args, **kwargs):
-        pass
+import datajoint as dj
 
 
 def get_class_attributes(class_):
@@ -106,3 +78,11 @@ def make_hash(obj: object) -> str:
         hashed.update(str(obj).encode())
 
     return hashed.hexdigest()
+
+
+def get_primary_key(table, key=None):
+    if key is not None:
+        key = {k: v for k, v in key.items() if k in table.primary_key}
+    else:
+        key = random.choice(table.fetch(*table.primary_key, as_dict=True))
+    return key

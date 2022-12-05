@@ -1,43 +1,74 @@
+from abc import abstractmethod
+
 import datajoint as dj
 import numpy as np
+from matplotlib import pyplot as plt
 from scipy import signal
 
-from djimaging.utils.dj_utils import PlaceholderTable
+from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.plot_utils import plot_trace_and_trigger
 
 
 class ChirpQITemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
-        definition = '''
-        #Computes the QI index for chirp responses as described in Baden et al. (2016)
+        definition = f'''
+        #Computes the QI index for (chirp) responses as described in Baden et al. (2016) for chirp
         -> self.snippets_table
         ---
-        chirp_qi:   float   # chirp quality index
-        min_qi:     float   # minimum quality index as 1/r (r = #repetitions)
+        qidx: float   # chirp quality index
+        min_qidx: float   # minimum quality index as 1/r (r = #repetitions)
         '''
         return definition
 
-    stimulus_table = PlaceholderTable
-    snippets_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
 
     @property
     def key_source(self):
-        return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
+        try:
+            return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
+        except TypeError:
+            pass
 
     def make(self, key):
         snippets = (self.snippets_table() & key).fetch1('snippets')
         assert snippets.ndim == 2
-        chirp_qi = np.var(np.mean(snippets, axis=1)) / np.mean(np.var(snippets, axis=0))
-        min_qi = 1 / snippets.shape[1]
-        self.insert1(dict(key, chirp_qi=chirp_qi, min_qi=min_qi))
+        qidx = np.var(np.mean(snippets, axis=1)) / np.mean(np.var(snippets, axis=0))
+        min_qidx = 1 / snippets.shape[1]
+        self.insert1(dict(key, qidx=qidx, min_qidx=min_qidx))
+
+    def plot(self, restriction=None):
+        if restriction is None:
+            restriction = dict()
+
+        qidx, min_qidx = (self & restriction).fetch('qidx', 'min_qidx')
+        fig, axs = plt.subplots(1, 2, figsize=(8, 3))
+        ax = axs[0]
+        ax.set(title='qidx')
+        ax.hist(qidx)
+
+        ax = axs[1]
+        ax.set(title='qidx > min_qidx')
+        ax.hist(np.array(qidx > min_qidx).astype(int))
+
+        plt.tight_layout()
+        plt.show()
 
 
 class ChirpFeaturesTemplate(dj.Computed):
     # TODO: Add more features
 
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -50,25 +81,72 @@ class ChirpFeaturesTemplate(dj.Computed):
         '''
         return definition
 
-    stimulus_table = PlaceholderTable
-    snippets_table = PlaceholderTable
-    presentation_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
 
     @property
     def key_source(self):
-        return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
+        try:
+            return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
+        except TypeError:
+            pass
 
     def make(self, key):
         # TODO: Should this depend on pres? Triggertimes are also in snippets and sf can be derived from times
-        snippets = (self.snippets_table() & key).fetch1('snippets')
-        snippets_times = (self.snippets_table() & key).fetch1('snippets_times')
+        snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
         trigger_times = (self.presentation_table() & key).fetch1('triggertimes')
-        sf = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
+        sf = (self.presentation_table().ScanInfo() & key).fetch1('scan_frequency')
 
         on_off_index = compute_on_off_index(snippets, snippets_times, trigger_times, sf)
         transience_index = compute_transience_index(snippets, snippets_times, trigger_times, sf)
 
         self.insert1(dict(key, on_off_index=on_off_index, transience_index=transience_index))
+
+    def plot1(self, key=None):
+        key = get_primary_key(table=self, key=key)
+
+        snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
+            "snippets", "snippets_times", "triggertimes_snippets")
+
+        on_off_index, transience_index = (self & key).fetch1('on_off_index', 'transience_index')
+
+        ax = plot_trace_and_trigger(
+            time=snippets_times, trace=snippets, triggertimes=triggertimes_snippets, title=str(key))
+
+        ax.set(title=f"on_off_index={on_off_index:.2f}\ntransience_index={transience_index:.2f}")
+
+        plt.tight_layout()
+        plt.show()
+
+    def plot(self, restriction=None):
+        if restriction is None:
+            restriction = dict()
+
+        on_off_index, transience_index = (self & restriction).fetch('on_off_index', 'transience_index')
+
+        fig, axs = plt.subplots(1, 2, figsize=(8, 3))
+        ax = axs[0]
+        ax.set(title='on_off_index')
+        ax.hist(on_off_index)
+
+        ax = axs[1]
+        ax.set(title='transience_index')
+        ax.hist(transience_index)
+
+        plt.tight_layout()
+        plt.show()
 
 
 def compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1):

@@ -1,10 +1,12 @@
+import cmath
+from abc import abstractmethod
+
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy import stats
-import cmath
 
-from djimaging.utils.dj_utils import PlaceholderTable
+from djimaging.utils.dj_utils import get_primary_key
 
 
 def quality_index_ds(raw_sorted_resp_mat):
@@ -143,8 +145,6 @@ def get_on_off_index(time_kernel):
     """
     Computes a preliminary On-Off Index based on the responses to the On (first half) and the OFF (2nd half) part of
     the responses to the moving bars stimulus
-    :param avg_response_matrix: average response matrix (average across repetitions per condition), time x directions
-    :return:
     """
     normed_kernel = time_kernel - np.min(time_kernel)
     normed_kernel = normed_kernel / np.max(normed_kernel)
@@ -215,7 +215,7 @@ def compute_osdsindexes(snippets, dir_order):
 
 
 class OsDsIndexesTemplate(dj.Computed):
-    database = ""  # hack to suppress DJ error
+    database = ""
 
     @property
     def definition(self):
@@ -242,12 +242,23 @@ class OsDsIndexesTemplate(dj.Computed):
         """
         return definition
 
-    stimulus_table = PlaceholderTable
-    snippets_table = PlaceholderTable
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
 
     @property
     def key_source(self):
-        return self.snippets_table() & (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
+        try:
+            return self.snippets_table() & \
+                   (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
+        except TypeError:
+            pass
 
     def make(self, key):
         dir_order = (self.stimulus_table() & key).fetch1('trial_info')
@@ -267,8 +278,9 @@ class OsDsIndexesTemplate(dj.Computed):
                           surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
                           avg_sorted_resp=avg_sorted_responses))
 
-    def plot1(self, key):
-        key = {k: v for k, v in key.items() if k in self.primary_key}
+    def plot1(self, key=None):
+        key = get_primary_key(table=self, key=key)
+
         dir_order = (self.stimulus_table() & key).fetch1('trial_info')
         sorted_directions_rad = np.deg2rad(np.sort(dir_order))
 

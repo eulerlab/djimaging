@@ -1,11 +1,12 @@
+from configparser import ConfigParser
+
 import h5py
-import os
 
 
-def load_h5_data(filename):
+def load_h5_data(filename, lower_keys=False):
     """Helper function to load h5 file."""
     with h5py.File(filename, 'r') as f:
-        return {key: f[key][:] for key in list(f.keys())}
+        return {key.lower() if lower_keys else key: f[key][:] for key in list(f.keys())}
 
 
 def load_h5_table(*tablename, filename, lower_keys=False):
@@ -36,20 +37,11 @@ def extract_h5_table(*tablename, open_file, lower_keys=False):
     return data_dict
 
 
-def list_data_files(folder, hidden=False, field=None, field_loc=None, ftype='h5'):
-    data_files = []
-    for file in os.listdir(folder):
-        if not file.endswith(f'.{ftype}'):
-            continue
-        if file.startswith('.') and not hidden:
-            continue
-        if field is not None:
-            assert field_loc is not None
-            fileinfo = file.replace(f'.{ftype}', '').split("_")
-
-            if len(fileinfo) < field_loc or field != fileinfo[field_loc]:
-                continue
-
-        data_files.append(file)
-    return data_files
-
+def read_config_dict(filename):
+    config_dict = dict()
+    parser = ConfigParser()
+    parser.read(filename)
+    for key1 in parser.keys():
+        for key2 in parser[key1].keys():
+            config_dict[key2[key2.find("_") + 1:]] = str(parser[key1][key2])
+    return config_dict
