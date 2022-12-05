@@ -14,3 +14,6 @@ scikit-learn~=1.1.2
 opencv-python~=4.6.0.66
 scikit-image~=0.19.3
 astropy~=5.1
+
+ipython
+numba

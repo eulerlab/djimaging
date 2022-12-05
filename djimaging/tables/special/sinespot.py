@@ -11,6 +11,16 @@ from djimaging.utils.math_utils import normalize_soft_zero_one
 
 class SineSpotQITemplate(ChirpQITemplate):
     @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
+
+    @property
     def key_source(self):
         try:
             return self.snippets_table() & \
