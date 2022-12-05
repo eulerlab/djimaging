@@ -124,7 +124,8 @@ class STATemplate(dj.Computed):
 
         data = (self * self.DataSet() & key).fetch()
 
-        fig, axs = plt.subplots(len(data), 1, figsize=(10, 3 * len(data)))
+        fig, axs = plt.subplots(len(data), 1, figsize=(10, 3 * len(data)), squeeze=False)
+        axs = axs.flat
 
         for ax, row in zip(axs, data):
             ax.set(title=f"{row['kind']}   cc={row['cc']:.2f}   mse={row['mse']:.2f}", ylabel='y')

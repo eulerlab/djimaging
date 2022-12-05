@@ -43,6 +43,7 @@ class CellFilterParamsTemplate(dj.Lookup):
         definition = """
         cell_filter_params_hash         :  varchar(32)         # hash of the classifier params config
         ---
+        condition = 'control'           :  varchar(255)        # Condition to classify
         qi_thres_chirp                  :  float               # QI threshold for full-field chirp response
         qi_thres_bar                    :  float               # QI threshold for moving bar response
         cell_selection_constraint       :  enum("and", "or")   # constraint flag (and, or) for QI 
@@ -50,10 +51,9 @@ class CellFilterParamsTemplate(dj.Lookup):
         return definition
 
     def add_parameters(self, qi_thres_chirp: float, qi_thres_bar: float, cell_selection_constraint: str,
-                       skip_duplicates: bool = False) -> None:
-        insert_dict = dict(qi_thres_chirp=qi_thres_chirp,
-                           qi_thres_bar=qi_thres_bar,
-                           cell_selection_constraint=cell_selection_constraint)
+                       skip_duplicates: bool = False, condition: str = 'control') -> None:
+        insert_dict = dict(qi_thres_chirp=qi_thres_chirp, qi_thres_bar=qi_thres_bar,
+                           cell_selection_constraint=cell_selection_constraint, condition=condition)
         cell_filter_params_hash = make_hash(insert_dict)
         insert_dict.update(dict(cell_filter_params_hash=cell_filter_params_hash))
         self.insert1(insert_dict, skip_duplicates=skip_duplicates)
@@ -231,6 +231,10 @@ class CelltypeAssignmentTemplate(dj.Computed):
         """
         return definition
 
+    _stim_name_chirp = 'gChirp'
+    _stim_name_bar = 'movingbar'
+    _chirp_qi_key = 'qidx'
+
     @property
     @abstractmethod
     def cell_filter_parameter_table(self):
@@ -253,7 +257,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def presentation_table(self):
+    def field_table(self):
         pass
 
     @property
@@ -273,35 +277,16 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def user_info_table(self):
-        pass
-
-    @property
-    @abstractmethod
     def detrend_params_table(self):
         pass
 
     @property
-    @abstractmethod
-    def field_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def exp_info_table(self):
-        pass
-
-    _stim_name_chirp = 'gChirp'
-    _stim_name_bar = 'movingbar'
-    _chirp_qi_key = 'qidx'
-
-    @property
     def key_source(self):
         try:
-            return (self.classifier_training_data_table() * self.classifier_table() *
-                    self.field_table() * self.detrend_params_table() * self.cell_filter_parameter_table()) & \
-                   (self.snippets_table() & f"stim_name = '{self._stim_name_chirp}'") & \
-                   (self.snippets_table() & f"stim_name = '{self._stim_name_bar}'")
+            return (self.field_table() * self.detrend_params_table() * self.classifier_training_data_table() *
+                    self.classifier_table() * self.cell_filter_parameter_table()) & \
+                   ((self.snippets_table() & f"stim_name = '{self._stim_name_chirp}'").proj(chirp='stim_name') *
+                    (self.snippets_table() & f"stim_name = '{self._stim_name_bar}'").proj(bar='stim_name'))
         except TypeError:
             pass
 
@@ -354,7 +339,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         self.current_model_key = model_key
 
-        if key.get("roi_id", False):
+        if "roi_id" in key:
             self.run_cell_type_assignment(key, mode="roi")
         else:
             self.run_cell_type_assignment(key, mode="field")
@@ -367,30 +352,42 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
     def run_cell_type_assignment(self, key, mode):
         if mode == "roi":
-            raise NotImplementedError
+            raise NotImplementedError('mode == "roi"')
 
+        # Fetch selection parameters
+        qi_thres_chirp, qi_thres_bar, cell_selection_constraint, condition = (
+            self.cell_filter_parameter_table() & key).fetch1(
+                'qi_thres_chirp', 'qi_thres_bar', 'cell_selection_constraint', 'condition')
+
+        # Define subkeys
         chirp_key = deepcopy(key)
         chirp_key['stim_name'] = self._stim_name_chirp
+        chirp_key['condition'] = condition
 
-        chirp_traces, roi_ids = (self.snippets_table() & chirp_key).fetch('snippets', "roi_id")
+        bar_key = deepcopy(key)
+        bar_key['stim_name'] = self._stim_name_bar
+        bar_key['condition'] = condition
+
+        roi_ids = ((self.roi_table() & (self.snippets_table() & chirp_key)) & (self.snippets_table() & bar_key)).fetch(
+            'roi_id')
+
+        restr = [f'roi_id={roi_id}' for roi_id in roi_ids]
+
+        # Fetch chirp data
+        chirp_traces = (self.snippets_table() & chirp_key & restr).fetch('snippets')
         chirp_traces = np.asarray([chirp_trace for chirp_trace in chirp_traces])
         chirp_traces = preprocess_chirp(chirp_traces)
 
-        # Bar Response
-        bar_key = deepcopy(key)
-        bar_key['stim_name'] = self._stim_name_bar
-        bar_traces = (self.or_dir_index_table() & bar_key).fetch('time_component')
+        chirp_qis = (self.chirp_qi_table() & chirp_key & restr).fetch(self._chirp_qi_key)
 
-        # shift by 5 frames backwards
+        # Fetch bar data, shift by 5 frames backwards
+        bar_traces, ds_pvalues, bar_qis = (self.or_dir_index_table() & bar_key & restr).fetch(
+            'time_component', 'ds_pvalue', 'd_qi')
         bar_traces = np.asarray([bar for bar in bar_traces])
         bar_traces = np.roll(bar_traces, -5)
 
-        # fetch more parameters
-        ds_pvalues, bar_qis = (self.or_dir_index_table() & bar_key).fetch('ds_pvalue', 'd_qi')
-        chirp_qis = (self.chirp_qi_table() & chirp_key).fetch(self._chirp_qi_key)
-
         # Get ROI size
-        roi_sizes_um = (self.roi_table() & key).fetch('roi_size_um2')
+        roi_sizes_um = (self.roi_table() & key & restr).fetch('roi_size_um2')
 
         # feature activation matrix
         feature_activation_bar = np.dot(bar_traces, self.bar_features)
@@ -399,10 +396,6 @@ class CelltypeAssignmentTemplate(dj.Computed):
         feature_activation_matrix = np.concatenate(
             [feature_activation_chirp, feature_activation_bar, ds_pvalues[:, np.newaxis],
              roi_sizes_um[:, np.newaxis]], axis=-1)
-
-        # choose the model that applies to the attribute of the cell
-        qi_thres_chirp, qi_thres_bar, cell_selection_constraint = (self.cell_filter_parameter_table() & key).fetch1(
-            'qi_thres_chirp', 'qi_thres_bar', 'cell_selection_constraint')
 
         if cell_selection_constraint == 'and':
             quality_mask = (bar_qis > qi_thres_bar) & (chirp_qis > qi_thres_chirp)
@@ -422,7 +415,6 @@ class CelltypeAssignmentTemplate(dj.Computed):
                                   preproc_chirp=chirp_traces[quality_mask, :][i],
                                   preproc_bar=bar_traces[quality_mask][i],
                                   ))
-
         if np.any(~quality_mask):
             dummy_confidence = np.full((1, 46), -1)
 

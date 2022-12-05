@@ -95,20 +95,15 @@ def predict_linear_rf_response(rf, stim_design_matrix, threshold=False, dtype=np
 
 def prepare_data(stim, stimtime, trace, tracetime, fupsample=None, fit_kind='trace',
                  lowpass_cutoff=0, ref_time='trace', pre_blur_sigma_s=0, post_blur_sigma_s=0):
-
     assert stimtime.ndim == 1, stimtime.shape
     assert trace.ndim == 1, trace.shape
     assert tracetime.ndim == 1, tracetime.shape
     assert stim.shape[0] == stimtime.size, f"stim-len {stim.shape[0]} != stimtime-len {stimtime.size}"
     assert trace.size == tracetime.size
 
-    dts = np.diff(tracetime)
-    dt = np.mean(dts)
-    dt_max_diff = np.max(dts) - np.max(dts)
+    dt, is_consistent = get_mean_dt(tracetime, rtol=0.1)
 
-    trace_dt_inconsistent = (dt_max_diff / dt) > 0.1
-
-    if trace_dt_inconsistent:
+    if not is_consistent:
         warnings.warn('Inconsistent step-sizes in trace, resample trace.')
         tracetime, trace = resample_trace(tracetime=tracetime, trace=trace, dt=dt)
 
@@ -131,6 +126,8 @@ def prepare_data(stim, stimtime, trace, tracetime, fupsample=None, fit_kind='tra
     if post_blur_sigma_s > 0:
         trace = gaussian_filter(trace, sigma=post_blur_sigma_s / dt, mode='nearest')
 
+    trace = trace / (np.median(np.abs(trace)) / 0.6745)
+
     if 'int' in str(stim.dtype) or 'bool' in str(stim.dtype):
         stim = stim - np.mean(stim, dtype='int16')
     else:
@@ -144,8 +141,6 @@ def prepare_trace(tracetime, trace, kind='trace', fupsample=None, dt=None):
         fupsample = 1
     else:
         assert dt is not None
-
-    trace = trace / np.std(trace)
 
     if kind == 'trace':
         if fupsample > 1:
@@ -200,18 +195,27 @@ def align_stim_to_trace(stim, stimtime, trace, tracetime):
     return aligned_stim, aligned_trace, dt, t0
 
 
+def get_mean_dt(tracetime, rtol=0.1, raise_error=False) -> (float, bool):
+    dts = np.diff(tracetime)
+    dt = np.mean(dts)
+    dt_max_diff = np.max(dts) - np.min(dts)
+    is_consistent = (dt_max_diff / dt) <= rtol
+
+    if raise_error and not is_consistent:
+        raise ValueError(f"Inconsistent dts. dt_mean={dt:.3g}, dt_max={np.max(dts):.3g}, dt_min={np.min(dts):.3g}")
+
+    return dt, is_consistent
+
+
 def align_trace_to_stim(stim, stimtime, trace, tracetime):
     """Align stimulus and trace."""
-    dts = np.diff(stimtime)
-    dt = np.mean(dts)
-    assert ((np.max(dts) - np.max(dts)) / dt) < 0.1, 'not implemented for varying frame times'
-
-    aligned_trace = np.zeros(stimtime.size)
+    dt, is_consistent = get_mean_dt(stimtime, rtol=0.1, raise_error=True)
 
     t0 = stimtime[0]
     aligned_stim = stim
 
-    for i, (t_a, t_b) in enumerate(zip(stimtime,  np.append(stimtime[1:], stimtime[-1] + dt))):
+    aligned_trace = np.zeros(stimtime.size)
+    for i, (t_a, t_b) in enumerate(zip(stimtime, np.append(stimtime[1:], stimtime[-1] + dt))):
         aligned_trace[i] = np.sum(trace[(tracetime >= t_a) & (tracetime < t_b)])
 
     return aligned_stim, aligned_trace, dt, t0

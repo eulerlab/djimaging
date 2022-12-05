@@ -24,13 +24,11 @@ class Classifier(ClassifierTemplate):
 
 @schema
 class CelltypeAssignment(CelltypeAssignmentTemplate):
+    field_table = Field
     classifier_training_data_table = ClassifierTrainingData
     cell_filter_parameter_table = CellFilterParams
     classifier_table = Classifier
-    user_info_table = UserInfo
-    field_table = Field
     roi_table = Roi
-    presentation_table = Presentation
     snippets_table = Snippets
     chirp_qi_table = ChirpQI
     or_dir_index_table = OsDsIndexes
