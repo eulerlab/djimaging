@@ -9,6 +9,7 @@ from sklearn.model_selection import KFold
 
 from djimaging.utils import math_utils
 from djimaging.utils.filter_utils import resample_trace, LowPassFilter
+from djimaging.utils.image_utils import resize_image
 
 
 def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
@@ -291,12 +292,11 @@ def smooth_rf(rf, blur_std, blur_npix):
 
 def resize_srf(srf, scale=None, output_shape=None):
     """Change size of sRF, used for up or down sampling"""
-    from skimage.transform import resize
     if scale is not None:
         output_shape = np.array(srf.shape) * scale
     else:
         assert output_shape is not None
-    return resize(srf, output_shape=output_shape, mode='constant', order=1)
+    return resize_image(srf, output_shape=output_shape, order=1)
 
 
 def compute_polarity_and_peak_idxs(trf, nstd=1.):
