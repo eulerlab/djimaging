@@ -19,7 +19,7 @@ def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
     assert trace.size == stim.shape[0]
     assert kind in ['sta', 'mle'], f"kind={kind}"
 
-    x, y = split_data(x=stim, y=trace, frac_train=frac_train, frac_dev=frac_dev, as_dict=True)
+    x, y = split_data(x=stim, y=trace, frac_train=frac_train, frac_dev=frac_dev, as_dict=False)
 
     n_t_past = int(np.ceil(filter_dur_s_past / dt))
     n_t_future = int(np.ceil(filter_dur_s_future / dt))

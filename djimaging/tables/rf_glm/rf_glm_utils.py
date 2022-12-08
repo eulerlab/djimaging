@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 from scipy.stats import ttest_1samp
 from sklearn.model_selection import KFold
 
-from djimaging.tables.receptivefield.rf_utils import split_strf, split_data
+from djimaging.tables.receptivefield.rf_utils import split_strf, split_data, build_design_matrix
 
 try:
     import rfest
@@ -21,357 +21,346 @@ except ImportError:
     jax = None
 
 
-def compute_glm_receptive_field(
-        dt, trace, stim, dur_tfilter, df_ts, df_ws, shift, betas, metric, output_nonlinearity='none',
-        alpha=1., kfold=1, tolerance=5, atol=1e-5, step_size=0.01, max_iters=2000, min_iters=200, p_keep=1.,
-        init_method=None, n_perm=20, min_cc=0.2, seed=42, verbose=0, fit_R=False, fit_intercept=True, distr='gaussian'):
-    """Estimate RF for given data. Return RF and quality."""
-    np.random.seed(seed)
-    starttime = time.time()
+class ReceptiveFieldGLM:
+    def __init__(self, dt, stim, trace, dur_tfilter, df_ts, df_ws, shift, betas, metric, output_nonlinearity='none',
+                 alphas=(1.,), kfold=1, tolerance=5, atol=1e-5, step_size=0.01, max_iters=2000, min_iters=200,
+                 init_method=None, n_perm=20, min_cc=0.2, seed=42, verbose=0, fit_R=False, fit_intercept=True,
+                 num_subunits=1, distr='gaussian', frac_test=0.2, t_burn=5):
+        # Data
+        self.dt = dt
+        self.stim = stim
+        self.trace = trace
 
-    if kfold == 0:
-        assert len(betas) == 1
-        frac_train, frac_dev = 0.8, 0.0
-    elif kfold == 1:
-        frac_train, frac_dev = 0.6, 0.2
-    else:
-        frac_train, frac_dev = 0.8, 0.0
+        # Filter settings
+        self.dur_tfilter = dur_tfilter
+        self.shift = shift
+        self.output_nonlinearity = output_nonlinearity
+        assert num_subunits == 1
+        self.num_subunits = num_subunits
 
-    x, y = split_data(x=stim, y=trace, frac_train=frac_train, frac_dev=frac_dev, as_dict=True)
+        # Loss and CV
+        self.metric = metric
+        self.betas = np.sort(np.asarray(betas))
+        self.alphas = np.sort(np.asarray(alphas))
+        self.kfold = kfold
+        self.distr = distr
+        self.fit_intercept = fit_intercept
+        self.fit_R = fit_R
 
-    model, metric_dev_opt_hp_sets = compute_best_rf_model(
-        x['train'], y['train'], X_dev=x.get('dev', None), y_dev=y.get('dev', None),
-        kfold=kfold, step_size=step_size, max_iters=max_iters, min_iters=min_iters, atol=atol,
-        dt=dt, dur_tfilter=dur_tfilter, df_ts=df_ts, df_ws=df_ws, shift=shift,
-        output_nonlinearity=output_nonlinearity, distr=distr,
-        betas=betas, init_method=init_method, verbose=verbose,
-        fit_R=fit_R, fit_intercept=fit_intercept, alpha=alpha, metric=metric, tolerance=tolerance,
-    )
+        # Optimizer settings
+        self.init_method = init_method if init_method is not None else 'mle'
+        self.tolerance = tolerance
+        self.atol = atol
+        self.step_size = step_size
+        self.max_iters = max_iters
+        self.min_iters = min_iters
+        self.verbose = verbose
+        self.seed = seed
 
-    quality_dict = dict(metric=metric)
+        # Evaluation parameters
+        self.frac_test = frac_test
+        self.n_perm = n_perm
+        self.min_cc = min_cc
 
-    if verbose > 0:
-        print("############ Evaluate model performance ############")
+        # Filter dims
+        self.tfilterdims = int(np.round(dur_tfilter / dt)) + 1
+        self.n_burn = np.maximum(int(t_burn / dt), int(np.ceil(dur_tfilter / dt)))
 
-    if (n_perm is not None) and (n_perm > 0):
-        assert y['test'].size > 1, y['test']
-        score_trueX, score_permX = rfest.check.compute_permutation_test(
-            model, x['test'], y['test'], n_perm=n_perm, metric=metric, history=False)
-        p_value = quality_test(score_trueX=score_trueX, score_permX=score_permX, metric=metric)
-        quality_dict = dict(score_test=float(score_trueX), score_permX=score_permX, perm_test_success=p_value < 0.001)
+        assert (((self.tfilterdims - 1) * dt) - dur_tfilter) < (dt / 10.), \
+            f'Choose multiple of dt={dt} as dur_tfilter={dur_tfilter}'
 
-    y_pred_train = model.predict({'stimulus': x['train']})
+        assert self.tfilterdims > 0
 
-    for metric_ in ['corrcoef', 'mse']:
-        quality_dict[f'{metric_}_train'] = model.compute_score(
-            y=y['train'][model.burn_in:], y_pred=y_pred_train, metric=metric_)
-
-        if kfold == 1:
-            y_pred_dev = model.predict({'stimulus': x['dev']})
-            quality_dict[f'{metric_}_dev'] = model.compute_score(
-                y=y['dev'][model.burn_in:], y_pred=y_pred_dev, metric=metric_)
-
-        y_test_pred = model.predict({'stimulus': x['test']})
-        quality_dict[f'{metric_}_test'] = model.compute_score(
-            y=y['test'][model.burn_in:], y_pred=y_test_pred, metric=metric_)
-
-    w = rfest.utils.uvec(model.w['opt']['stimulus'])
-    if w.shape[1] != 1:
-        raise NotImplementedError('Not implemented for more than one subunit')
-
-    w = np.array(w.reshape(model.dims['stimulus']))
-
-    model_dict = dict(
-        df=model.df, dims=model.dims, shift=model.shift,
-        alpha=model.alpha, beta=model.beta, metric=model.metric,
-        output_nonlinearity=model.output_nonlinearity,
-        intercept={k: float(v) for k, v in model.get_intercept(model.p['opt']).items()},
-        R={k: float(v) for k, v in model.get_R(model.p['opt']).items()},
-        return_model=model.return_model,
-        metric_train=np.array(model.metric_train).astype(np.float32),
-        cost_train=np.array(model.cost_train).astype(np.float32),
-        metric_dev_opt=float(model.metric_dev_opt),
-        best_iteration=int(model.best_iteration),
-        train_stop=model.train_stop,
-        p_keep=p_keep, dt=dt,
-        y_test=np.array(y['test'][model.burn_in:]).astype(np.float32),
-        y_pred=np.array(y_test_pred).astype(np.float32),
-        y_train=np.array(y['train'][model.burn_in:]).astype(np.float32),
-        y_pred_train=np.array(y_pred_train).astype(np.float32),
-    )
-
-    if np.any(np.isfinite(model.metric_dev)):
-        model_dict['metric_dev'] = np.array(model.metric_dev).astype(np.float32)
-
-    if np.any(np.isfinite(model.cost_dev)):
-        model_dict['cost_dev'] = np.array(model.cost_dev).astype(np.float32)
-
-    if kfold == 1:
-        model_dict['y_dev'] = np.array(y['dev'][model.burn_in:]).astype(np.float32)
-        model_dict['y_pred_dev'] = np.array(y_pred_dev).astype(np.float32)
-
-    model_dict['df_ts'] = df_ts
-    model_dict['df_ws'] = df_ws
-    model_dict['betas'] = betas
-    model_dict['metrics_dev_opt'] = metric_dev_opt_hp_sets
-
-    quality_dict['quality'] = \
-        quality_dict.get('corrcoef_train', np.inf) > min_cc and \
-        quality_dict.get('corrcoef_dev', np.inf) > min_cc and \
-        quality_dict.get('corrcoef_test', np.inf) > min_cc and \
-        quality_dict.get('perm_test_success', True)
-
-    if verbose > 0:
-        print(f'Total Time Elapsed: {time.time() - starttime:.0f} sec\n')
-
-    return w, quality_dict, model_dict
-
-
-def compute_best_rf_model(
-        X_train, y_train, dt, dur_tfilter, betas, df_ts, df_ws, shift, alpha, metric, tolerance,
-        step_size, max_iters, min_iters, kfold, atol, distr,
-        X_dev=None, y_dev=None, verbose=0, t_burn=5, init_method=None,
-        output_nonlinearity='none', fit_R=False, fit_intercept=True):
-    """Compute the best RF model using K-Fold cross-validation."""
-
-    df_ts = np.sort(np.asarray(df_ts))
-    df_ws = np.sort(np.asarray(df_ws))
-    betas = np.sort(np.asarray(betas))
-
-    tfilterdims = int(np.round(dur_tfilter / dt)) + 1
-
-    assert (((tfilterdims - 1) * dt) - dur_tfilter) < (dt / 10.), \
-        f'Choose multiple of dt={dt} as dur_tfilter={dur_tfilter}'
-
-    hdims = X_train.shape[1]
-    wdims = X_train.shape[2]
-
-    df_ts = clip_dfs(df_ts, tfilterdims)
-    df_ws = clip_dfs(df_ws, wdims)
-
-    if verbose > 0 and (betas.size > 1):
-        print(f"################## Optimizing dfs ##################\n" + \
-              f"\tTrying {df_ts.size * df_ws.size} combination: df_ts={df_ts} and df_ws={df_ws}")
-
-    n_burn = np.maximum(int(t_burn / dt), int(np.ceil(dur_tfilter / dt)))
-
-    def dfh_from_dfw(_df_w):
-        return np.minimum(int(np.round(_df_w * hdims / wdims)), hdims)
-
-    # Folds
-    if kfold == 0:
-        splits = [(X_train, y_train, None, None)]
-    elif kfold == 1:
-        splits = [(X_train, y_train, X_dev, y_dev)]
-    else:
-        assert X_dev is None
-        assert y_dev is None
-
-        # TODO: Improve this by splitting the design matrix instead. Also burn the design matrix instead.
-        splits = []
-        for train_idx, dev_idx in KFold(n_splits=kfold, shuffle=False).split(X_train, y_train):
-            train_idx = train_idx[(train_idx < np.min(dev_idx)) | (train_idx > np.max(dev_idx) + n_burn)]
-            splits += [(X_train[train_idx], y_train[train_idx], X_train[dev_idx], y_train[dev_idx])]
-
-    # HP space
-    dfs = [(df_t, dfh_from_dfw(df_w), df_w) for df_t, df_w in list(itertools.product(df_ts, df_ws))]
-    metrics_dev_opt = np.zeros((np.maximum(kfold, 1), len(dfs), len(betas)))
-
-    best_model = None
-
-    for idx_dfs, df in enumerate(dfs):
-        if verbose > 0:
-            print(f'############ Optimize for df={df} ############')
-
-        for idx_kf, (X_train_k, y_train_k, X_dev_k, y_dev_k) in enumerate(splits):
-            if verbose > 0 and kfold > 1:
-                print(f"###### Fold: {idx_kf + 1}/{kfold} ######")
-
-            best_model, metrics_dev_opt_i = create_and_fit_glm(
-                X_train=X_train_k, y_train=y_train_k, X_dev=X_dev_k, y_dev=y_dev_k, init_method=init_method,
-                dt=dt, alphas=[alpha], betas=betas, df=df, tfilterdims=tfilterdims, shift=shift,
-                verbose=verbose, step_size=step_size, max_iters=max_iters, min_iters=min_iters,
-                fit_R=fit_R, fit_intercept=fit_intercept,
-                early_stopping=False, num_subunits=1, output_nonlinearity=output_nonlinearity,
-                metric=metric, tolerance=tolerance, atol=atol, distr=distr)
-
-            metrics_dev_opt[idx_kf, idx_dfs, :] = metrics_dev_opt_i
-
-    if kfold > 0:
-        assert np.all(np.isfinite(metrics_dev_opt)), metrics_dev_opt
-
-        # Get best model
-        mean_metrics_dev_opt = np.mean(metrics_dev_opt, axis=0)
-
-        if metric == 'corrcoef':
-            best_df_idx, best_beta_idx = \
-                np.unravel_index(mean_metrics_dev_opt.argmax(), mean_metrics_dev_opt.shape)
+        if stim.ndim == 3:
+            self.hdims = stim.shape[1]
+            self.wdims = stim.shape[2]
+            self.dims = (self.tfilterdims, self.hdims, self.wdims)
+        elif stim.ndim == 1:
+            self.dims = (self.tfilterdims,)
         else:
-            best_df_idx, best_beta_idx = \
-                np.unravel_index(mean_metrics_dev_opt.argmin(), mean_metrics_dev_opt.shape)
-    else:
-        assert metrics_dev_opt.size == 1
-        best_df_idx = 0
-        best_beta_idx = 0
+            raise NotImplementedError()
 
-    best_df = dfs[best_df_idx]
-    best_beta = betas[best_beta_idx]
-
-    if kfold >= 1:
-        if verbose > 0:
-            print(f'###### Optimize on all data with best HPs ######\n' +
-                  f'\tdf={best_df} and beta={best_beta:.4g}')
-
-        best_model, _ = create_and_fit_glm(
-            X_train=X_train, y_train=y_train, X_dev=None, y_dev=None, init_method=init_method,
-            dt=dt, alphas=[alpha], betas=[best_beta], df=best_df, tfilterdims=tfilterdims, shift=shift,
-            verbose=verbose, step_size=step_size, max_iters=max_iters, min_iters=min_iters,
-            fit_R=fit_R, fit_intercept=fit_intercept,
-            early_stopping=False, num_subunits=1, output_nonlinearity=output_nonlinearity,
-            metric=metric, tolerance=tolerance, atol=atol, distr=distr)
-        best_model.metric_dev_opt = np.mean(metrics_dev_opt[:, best_df_idx, best_beta_idx])
-
-        if verbose > 0:
-            print(
-                f'###### Finished HP optimization ######\n' +
-                f'\t{metric}={np.mean(metrics_dev_opt[:, best_df_idx, best_beta_idx]):.3f}'
-                f'\t+-{np.std(metrics_dev_opt[:, best_df_idx, best_beta_idx]) / np.sqrt(kfold):.3f}\n')
-
-    return best_model, metrics_dev_opt
-
-
-def clip_dfs(dfs, dims):
-    if np.all(dfs <= dims):
-        return dfs
-    elif np.any(dfs <= dims):
-        warnings.warn(' No using df_ts larger than dims')
-        return dfs[dfs <= dims]
-    else:
-        warnings.warn(' All df_ts larger than dims, use only dims as df')
-        return np.array([dims])
-
-
-def _df_w2df_h(df_w, X_train, hdims):
-    df_h = np.minimum(int(np.round(df_w * X_train.shape[1] / X_train.shape[2])), hdims)
-    return df_h
-
-
-def create_and_fit_glm(
-        X_train, y_train, X_dev, y_dev, dt, tfilterdims, df, shift, alphas, betas,
-        num_subunits, output_nonlinearity, init_method, fit_R, fit_intercept, early_stopping, metric, distr,
-        tolerance, atol, step_size=None, max_iters=None, min_iters=None, verbose=0):
-    """Fit GLM model"""
-
-    model = create_glm(
-        tfilterdims=tfilterdims, df=df, X_train=X_train, y_train=y_train, X_dev=X_dev, dt=dt, shift=shift,
-        num_subunits=num_subunits, output_nonlinearity=output_nonlinearity, init_method=init_method,
-        fit_R=fit_R, fit_intercept=fit_intercept, distr=distr)
-
-    model, metric_dev_opt_hp_sets = fit_glm(
-        model=model, y_train=y_train, X_dev=X_dev, y_dev=y_dev, alphas=alphas, betas=betas,
-        step_size=step_size, max_iters=max_iters, min_iters=min_iters, early_stopping=early_stopping,
-        verbose=verbose, metric=metric, tolerance=tolerance, atol=atol)
-
-    assert model.fit_R == fit_R
-    assert model.fit_intercept == fit_intercept
-
-    return model, metric_dev_opt_hp_sets
-
-
-def create_glm(
-        tfilterdims, df, X_train, y_train, X_dev, dt, shift, distr, fit_R, fit_intercept,
-        num_subunits=1, output_nonlinearity='none', init_method=None):
-    assert tfilterdims > 0
-
-    if X_train.ndim == 3:
-        dims = (tfilterdims, X_train.shape[1], X_train.shape[2])
-    elif X_train.ndim == 1:
-        dims = (tfilterdims,)
-    else:
-        raise NotImplementedError()
-
-    if len(dims) != len(df):
-        raise ValueError(f"size mismatch {len(dims)} != {len(df)}")
-
-    # Never use more dfs than necessary:
-    df = np.asarray(df)
-    for i, (dim, dfi) in enumerate(zip(dims, df)):
-        if dfi > dim:
-            warnings.warn(f' More degrees of freedom than necessary, dims={dims}, df={df}. Set to max.')
-            df[i] = dim
-    df = tuple(df)
-
-    # Create model
-    model = initialize_model(
-        dims=dims, df=df, shift=shift, output_nonlinearity=output_nonlinearity,
-        num_subunits=num_subunits, dt=dt, X_train=X_train, y_train=y_train, X_dev=X_dev, init_method=init_method,
-        fit_R=fit_R, fit_intercept=fit_intercept, distr=distr
-    )
-
-    return model
-
-
-def fit_glm(
-        model, y_train, X_dev, y_dev, alphas, betas,
-        step_size, max_iters, min_iters, tolerance, metric, atol,
-        early_stopping=False, verbose=0):
-    """Fit GLM model"""
-    min_iters_other = min_iters // 5
-
-    if len(alphas) == 1 and len(betas) == 1:
-        y = {'train': y_train, 'dev': y_dev} if early_stopping else {'train': y_train}
-        if 'dev' in y:
-            return_model = 'best_dev_metric' if early_stopping else 'best_train_cost'
+        self.df_ts = self.clip_dfs(np.sort(np.asarray(df_ts)), self.tfilterdims)
+        if stim.ndim == 3:
+            self.df_ws = self.clip_dfs(np.sort(np.asarray(df_ws)), self.wdims)
         else:
-            return_model = 'best_dev_metric' if early_stopping else 'best_train_cost'
+            assert not df_ws
 
-        model.fit(
-            y=y, num_iters=max_iters, verbose=verbose, tolerance=tolerance, metric=metric,
-            step_size=step_size, alpha=alphas[0], beta=betas[0], min_iters=min_iters,
-            return_model=return_model, atol=atol)
+    def compute_glm_receptive_field(self):
+        """Estimate RF for given data. Return RF and quality."""
+        np.random.seed(self.seed)
+        starttime = time.time()
 
-        if not early_stopping and y_dev is not None:
-            model.metric_dev_opt = model.score({'stimulus': X_dev}, y_test=y_dev, metric=metric)
-        metric_dev_opt_hp_sets = [model.metric_dev_opt]
-    else:
-        metric_dev_opt_hp_sets = model.fit_hps(
-            y={'train': y_train, 'dev': y_dev},
-            num_iters=max_iters, verbose=verbose, tolerance=tolerance, metric=metric,
-            step_size=step_size, alphas=alphas, betas=betas, min_iters=min_iters,
-            min_iters_other=min_iters_other, atol=atol)
+        stim_dict, trace_dict = split_data(
+            x=self.stim, y=self.trace, frac_train=1. - self.frac_test, frac_dev=0, as_dict=True)
 
-    return model, metric_dev_opt_hp_sets
+        model, metric_dev_opt_hp_sets = self.compute_best_rf_model(stim=stim_dict['train'], trace=trace_dict['train'])
 
+        quality_dict = dict(metric=self.metric)
 
-def initialize_model(
-        dims, df, shift, output_nonlinearity, num_subunits, dt, X_train, y_train, fit_R, fit_intercept,
-        X_dev=None, init_method=None, distr='gaussian'):
-    """Initialize model parameters for faster optimization"""
+        if self.verbose > 0:
+            print("############ Evaluate model performance ############")
 
-    model = rfest.GLM(distr=distr, output_nonlinearity=output_nonlinearity)
-    model.add_design_matrix(
-        X_train, dims=dims, df=df, shift=shift, smooth='cr', filter_nonlinearity='none', name='stimulus')
+        if (self.n_perm is not None) and (self.n_perm > 0):
+            assert trace_dict['test'].size > 1, trace_dict['test']
+            score_trueX, score_permX = rfest.check.compute_permutation_test(
+                model, stim_dict['test'], trace_dict['test'], n_perm=self.n_perm, metric=self.metric, history=False)
+            p_value = quality_test(
+                score_trueX=score_trueX, score_permX=score_permX, metric=self.metric)
+            quality_dict = dict(
+                score_test=float(score_trueX), score_permX=score_permX, perm_test_success=p_value < 0.001)
 
-    if X_dev is not None:
-        model.add_design_matrix(X_dev, dims=dims, shift=shift, name='stimulus', kind='dev')
+        y_pred_train = model.predict({'stimulus': stim_dict['train']})
 
-    model.initialize(num_subunits=num_subunits, dt=dt,
-                     method=init_method if init_method is not None else 'mle',
-                     compute_ci=False, random_seed=42, y=y_train,
-                     fit_R=fit_R, fit_intercept=fit_intercept)
+        for metric_ in ['corrcoef', 'mse']:
+            quality_dict[f'{metric_}_train'] = model.compute_score(
+                y=trace_dict['train'][model.burn_in:], y_pred=y_pred_train, metric=metric_)
 
-    return model
+            if self.kfold == 1:
+                y_pred_dev = model.predict({'stimulus': stim_dict['dev']})
+                quality_dict[f'{metric_}_dev'] = model.compute_score(
+                    y=trace_dict['dev'][model.burn_in:], y_pred=y_pred_dev, metric=metric_)
 
+            y_test_pred = model.predict({'stimulus': stim_dict['test']})
+            quality_dict[f'{metric_}_test'] = model.compute_score(
+                y=trace_dict['test'][model.burn_in:], y_pred=y_test_pred, metric=metric_)
 
-def get_b_from_w(S, w):
-    b, *_ = np.linalg.lstsq(S, w, rcond=None)
-    return b
+        w = rfest.utils.uvec(model.w['opt']['stimulus'])
+        if w.shape[1] != 1:
+            raise NotImplementedError('Not implemented for more than one subunit')
 
+        w = np.array(w.reshape(model.dims['stimulus']))
 
-def _get_model_info(model):
-    info = f"{model.metric}={model.metric_dev_opt:.4f} "
-    info += f"for HP-set: alpha={model.alpha:.5g}, beta={model.beta:.5g}, df={model.df}, dims={model.dims}"
-    return info
+        model_dict = dict(
+            df=model.df, dims=model.dims, shift=model.shift,
+            alpha=model.alpha, beta=model.beta, metric=model.metric,
+            output_nonlinearity=model.output_nonlinearity,
+            intercept={k: float(v) for k, v in model.get_intercept(model.p['opt']).items()},
+            R={k: float(v) for k, v in model.get_R(model.p['opt']).items()},
+            return_model=model.return_model,
+            metric_train=np.array(model.metric_train).astype(np.float32),
+            cost_train=np.array(model.cost_train).astype(np.float32),
+            metric_dev_opt=float(model.metric_dev_opt),
+            best_iteration=int(model.best_iteration),
+            train_stop=model.train_stop,
+            dt=self.dt,
+            y_test=np.array(trace_dict['test'][model.burn_in:]).astype(np.float32),
+            y_pred=np.array(y_test_pred).astype(np.float32),
+            y_train=np.array(trace_dict['train'][model.burn_in:]).astype(np.float32),
+            y_pred_train=np.array(y_pred_train).astype(np.float32),
+        )
+
+        if np.any(np.isfinite(model.metric_dev)):
+            model_dict['metric_dev'] = np.array(model.metric_dev).astype(np.float32)
+
+        if np.any(np.isfinite(model.cost_dev)):
+            model_dict['cost_dev'] = np.array(model.cost_dev).astype(np.float32)
+
+        if self.kfold == 1:
+            model_dict['y_dev'] = np.array(trace_dict['dev'][model.burn_in:]).astype(np.float32)
+            model_dict['y_pred_dev'] = np.array(y_pred_dev).astype(np.float32)
+
+        model_dict['df_ts'] = self.df_ts
+        model_dict['df_ws'] = self.df_ws
+        model_dict['betas'] = self.betas
+        model_dict['metrics_dev_opt'] = metric_dev_opt_hp_sets
+
+        quality_dict['quality'] = \
+            quality_dict.get('corrcoef_train', np.inf) > self.min_cc and \
+            quality_dict.get('corrcoef_dev', np.inf) > self.min_cc and \
+            quality_dict.get('corrcoef_test', np.inf) > self.min_cc and \
+            quality_dict.get('perm_test_success', True)
+
+        if self.verbose > 0:
+            print(f'Total Time Elapsed: {time.time() - starttime:.0f} sec\n')
+
+        return w, quality_dict, model_dict
+
+    def dfh_from_dfw(self, df_w):
+        return np.minimum(int(np.round(df_w * self.hdims / self.wdims)), self.hdims)
+
+    def compute_best_rf_model(self, trace, stim):
+        """Compute the best RF model using K-Fold cross-validation."""
+
+        if self.verbose > 0 and (self.betas.size > 1):
+            print(f"################## Optimizing dfs ##################\n" + \
+                  f"\tTrying {self.df_ts.size * self.df_ws.size} combination:" + \
+                  " df_ts={self.df_ts} and df_ws={self.df_ws}")
+
+        # Define HP grid
+        dfs = [(df_t, self.dfh_from_dfw(df_w), df_w) for df_t, df_w in list(itertools.product(self.df_ts, self.df_ws))]
+        metrics_dev_opt = np.zeros((np.maximum(self.kfold, 1), len(dfs), len(self.betas)))
+
+        # Prepare data
+        X = build_design_matrix(X=stim, n_lag=self.dims[0], shift=self.shift, dtype=np.float32)[self.n_burn:]
+        y = trace[self.n_burn:].copy().astype(np.float32)
+
+        # Folds
+        if self.kfold == 0:
+            splits = [(X, y, None, None)]
+        elif self.kfold == 1:
+            split_idx = int(y.size * 0.8)
+            splits = [(X[:split_idx], y[:split_idx], X[split_idx:], y[split_idx:])]
+        else:
+            splits = []
+            for train_idx, dev_idx in KFold(n_splits=self.kfold, shuffle=False).split(X, y):
+                train_idx = train_idx[(train_idx < np.min(dev_idx)) | (train_idx > np.max(dev_idx) + self.n_burn)]
+                splits += [(X[train_idx], y[train_idx], X[dev_idx], y[dev_idx])]
+
+        best_model = None
+        for idx_dfs, df in enumerate(dfs):
+            if self.verbose > 0:
+                print(f'############ Optimize for df={df} ############')
+
+            for idx_kf, (X_train_k, y_train_k, X_dev_k, y_dev_k) in enumerate(splits):
+                if self.verbose > 0 and self.kfold > 1:
+                    print(f"###### Fold: {idx_kf + 1}/{self.kfold} ######")
+
+                best_model, metrics_dev_opt_i = self.create_and_fit_glm(
+                    df=df, X_train=X_train_k, y_train=y_train_k, X_dev=X_dev_k, y_dev=y_dev_k,
+                    alphas=self.alphas, betas=self.betas)
+
+                metrics_dev_opt[idx_kf, idx_dfs, :] = metrics_dev_opt_i
+
+        if self.kfold > 0:
+            assert np.all(np.isfinite(metrics_dev_opt)), metrics_dev_opt
+
+            # Get best model
+            mean_metrics_dev_opt = np.mean(metrics_dev_opt, axis=0)
+
+            if self.metric == 'corrcoef':
+                best_df_idx, best_beta_idx = \
+                    np.unravel_index(mean_metrics_dev_opt.argmax(), mean_metrics_dev_opt.shape)
+            else:
+                best_df_idx, best_beta_idx = \
+                    np.unravel_index(mean_metrics_dev_opt.argmin(), mean_metrics_dev_opt.shape)
+        else:
+            assert metrics_dev_opt.size == 1
+            best_df_idx = 0
+            best_beta_idx = 0
+
+        best_df = dfs[best_df_idx]
+        best_beta = self.betas[best_beta_idx]
+
+        if self.kfold >= 1:
+            if self.verbose > 0:
+                print(f'###### Optimize on all data with best HPs ######\n' +
+                      f'\tdf={best_df} and beta={best_beta:.4g}')
+
+            best_model, _ = self.create_and_fit_glm(
+                df=best_df, X_train=X, y_train=y, X_dev=None, y_dev=None,
+                alphas=self.alphas, betas=[best_beta])
+            best_model.metric_dev_opt = np.mean(metrics_dev_opt[:, best_df_idx, best_beta_idx])
+
+            if self.verbose > 0:
+                print(
+                    f'###### Finished HP optimization ######\n' +
+                    f'\t{self.metric}={np.mean(metrics_dev_opt[:, best_df_idx, best_beta_idx]):.3f}'
+                    f'\t+-{np.std(metrics_dev_opt[:, best_df_idx, best_beta_idx]) / np.sqrt(self.kfold):.3f}\n')
+
+        return best_model, metrics_dev_opt
+
+    @staticmethod
+    def clip_dfs(dfs, dims):
+        if np.all(dfs <= dims):
+            return dfs
+        elif np.any(dfs <= dims):
+            warnings.warn(' No using df_ts larger than dims')
+            return dfs[dfs <= dims]
+        else:
+            warnings.warn(' All df_ts larger than dims, use only dims as df')
+            return np.array([dims])
+
+    @staticmethod
+    def _df_w2df_h(df_w, X_train, hdims):
+        df_h = np.minimum(int(np.round(df_w * X_train.shape[1] / X_train.shape[2])), hdims)
+        return df_h
+
+    def create_and_fit_glm(self, df, X_train, y_train, X_dev, y_dev, alphas, betas):
+        """Fit GLM model"""
+        model = self.create_glm(
+            df=df, X_train=X_train, y_train=y_train, X_dev=X_dev)
+
+        model, metric_dev_opt_hp_sets = self.fit_glm(
+            model=model, y_train=y_train, y_dev=y_dev, alphas=alphas, betas=betas)
+
+        return model, metric_dev_opt_hp_sets
+
+    def create_glm(self, df, X_train, y_train, X_dev):
+
+        if len(self.dims) != len(df):
+            raise ValueError(f"size mismatch {len(self.dims)} != {len(df)}")
+
+        # Never use more dfs than necessary:
+        df = np.asarray(df)
+        for i, (dim, dfi) in enumerate(zip(self.dims, df)):
+            if dfi > dim:
+                warnings.warn(f' More degrees of freedom than necessary, dims={self.dims}, df={df}. Set to max.')
+                df[i] = dim
+
+        df = tuple(df)
+        model = self.initialize_model(df=df, X_train=X_train, y_train=y_train, X_dev=X_dev)
+        return model
+
+    def fit_glm(self, model, alphas, betas, y_train, y_dev=None):
+        """Fit GLM model"""
+        min_iters_other = self.min_iters // 5
+
+        if len(alphas) == 1 and len(betas) == 1:
+
+            if y_dev is not None:
+                assert 'dev' in model.X
+                y = {'train': y_train, 'dev': y_dev}
+                return_model = 'best_dev_metric'
+                early_stopping = True
+            else:
+                y = {'train': y_train}
+                return_model = 'best_train_cost'
+                early_stopping = False
+
+            model.fit(
+                y=y, metric=self.metric, num_iters=self.max_iters, min_iters=self.min_iters, step_size=self.step_size,
+                atol=self.atol, tolerance=self.tolerance, alpha=alphas[0], beta=betas[0],
+                verbose=self.verbose, return_model=return_model, early_stopping=early_stopping)
+
+            metric_dev_opt_hp_sets = [model.metric_dev_opt]
+        else:
+            metric_dev_opt_hp_sets = model.fit_hps(
+                y={'train': y_train, 'dev': y_dev},
+                num_iters=self.max_iters, verbose=self.verbose, tolerance=self.tolerance, metric=self.metric,
+                step_size=self.step_size, alphas=alphas, betas=betas, min_iters=self.min_iters,
+                min_iters_other=min_iters_other, atol=self.atol)
+
+        return model, metric_dev_opt_hp_sets
+
+    def initialize_model(self, df, X_train, y_train, X_dev=None):
+        """Initialize model parameters for faster optimization"""
+
+        model = rfest.GLM(distr=self.distr, output_nonlinearity=self.output_nonlinearity)
+        model.add_design_matrix(X_train, is_design_matrix=True, df=df, dims=self.dims, shift=self.shift,
+                                smooth='cr', filter_nonlinearity='none', name='stimulus')
+
+        if X_dev is not None:
+            model.add_design_matrix(X_dev, is_design_matrix=True, dims=self.dims, shift=self.shift,
+                                    name='stimulus', kind='dev')
+
+        model.initialize(num_subunits=self.num_subunits, dt=self.dt,
+                         method=self.init_method,
+                         compute_ci=False, random_seed=42, y=y_train,
+                         fit_R=self.fit_R, fit_intercept=self.fit_intercept)
+
+        return model
+
+    @staticmethod
+    def get_b_from_w(S, w):
+        b, *_ = np.linalg.lstsq(S, w, rcond=None)
+        return b
+
+    @staticmethod
+    def _get_model_info(model):
+        info = f"{model.metric}={model.metric_dev_opt:.4f} "
+        info += f"for HP-set: alpha={model.alpha:.5g}, beta={model.beta:.5g}, df={model.df}, dims={model.dims}"
+        return info
 
 
 def quality_test(score_trueX, score_permX, metric):

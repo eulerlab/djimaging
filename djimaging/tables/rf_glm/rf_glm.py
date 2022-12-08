@@ -5,7 +5,7 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.rf_glm.rf_glm_utils import compute_glm_receptive_field, plot_rf_summary, quality_test
+from djimaging.tables.rf_glm.rf_glm_utils import ReceptiveFieldGLM, plot_rf_summary, quality_test
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -89,12 +89,13 @@ class RFGLMTemplate(dj.Computed):
         other_params_dict = params.pop('other_params_dict')
         dt, time, trace, stim = (self.noise_traces_table() & key).fetch1('dt', 'time', 'trace', 'stim')
 
-        rf, quality_dict, model_dict = compute_glm_receptive_field(
+        model = ReceptiveFieldGLM(
             dt=dt, trace=trace, stim=stim,
             dur_tfilter=params['dur_filter_s'], df_ts=params['df_ts'], df_ws=params['df_ws'],
             betas=params['betas'], kfold=params['kfold'], metric=params['metric'],
-            output_nonlinearity=params['output_nonlinearity'], **other_params_dict
-        )
+            output_nonlinearity=params['output_nonlinearity'], **other_params_dict)
+
+        rf, quality_dict, model_dict = model.compute_glm_receptive_field()
 
         from IPython.display import clear_output
         clear_output(wait=True)
@@ -161,11 +162,13 @@ class RFGLMQualityTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def glm_table(self): pass
+    def glm_table(self):
+        pass
 
     @property
     @abstractmethod
-    def params_table(self): pass
+    def params_table(self):
+        pass
 
     def make(self, key):
         quality_dict, model_dict = (self.glm_table() & key).fetch1('quality_dict', 'model_dict')
