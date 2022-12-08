@@ -5,15 +5,15 @@ from numba import jit
 from scipy.ndimage import gaussian_filter
 from scipy.signal import find_peaks
 from sklearn.decomposition import randomized_svd
-from sklearn.model_selection import KFold
 
 from djimaging.utils import math_utils
-from djimaging.utils.filter_utils import resample_trace, LowPassFilter
+from djimaging.utils.filter_utils import resample_trace, LowPassFilter, upsample_stim
 from djimaging.utils.image_utils import resize_image
 
 
 def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
-                      filter_dur_s_past, filter_dur_s_future=0., kind='sta', threshold_pred=False, dtype=np.float32):
+                      filter_dur_s_past, filter_dur_s_future=0.,
+                      kind='sta', threshold_pred=False, dtype=np.float32):
     kind = kind.lower()
 
     assert trace.size == stim.shape[0]
@@ -94,13 +94,18 @@ def predict_linear_rf_response(rf, stim_design_matrix, threshold=False, dtype=np
     return y_pred.astype(dtype)
 
 
-def prepare_data(stim, stimtime, trace, tracetime, fupsample=None, fit_kind='trace',
+def prepare_data(stim, stimtime, trace, tracetime, fupsample_trace=None, fupsample_stim=None, fit_kind='trace',
                  lowpass_cutoff=0, ref_time='trace', pre_blur_sigma_s=0, post_blur_sigma_s=0):
     assert stimtime.ndim == 1, stimtime.shape
     assert trace.ndim == 1, trace.shape
     assert tracetime.ndim == 1, tracetime.shape
-    assert stim.shape[0] == stimtime.size, f"stim-len {stim.shape[0]} != stimtime-len {stimtime.size}"
     assert trace.size == tracetime.size
+
+    if stim.shape[0] < stimtime.size:
+        raise ValueError(f"More triggertimes than expected: stim-len {stim.shape[0]} != stimtime-len {stimtime.size}")
+    elif stim.shape[0] > stimtime.size:
+        warnings.warn(f"Less triggertimes than expected: stim-len {stim.shape[0]} != stimtime-len {stimtime.size}")
+        stim = stim[:stimtime.size].copy()
 
     dt, is_consistent = get_mean_dt(tracetime, rtol=0.1)
 
@@ -115,7 +120,10 @@ def prepare_data(stim, stimtime, trace, tracetime, fupsample=None, fit_kind='tra
     if pre_blur_sigma_s > 0:
         trace = gaussian_filter(trace, sigma=pre_blur_sigma_s / dt, mode='nearest')
 
-    tracetime, trace = prepare_trace(tracetime, trace, kind=fit_kind, fupsample=fupsample, dt=dt)
+    tracetime, trace = prepare_trace(tracetime, trace, kind=fit_kind, fupsample=fupsample_trace, dt=dt)
+
+    if (fupsample_stim is not None) and (fupsample_stim > 1):
+        stimtime, stim = upsample_stim(stimtime, stim, fupsample=fupsample_stim)
 
     if ref_time == 'trace':
         stim, trace, dt, t0 = align_stim_to_trace(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime)
@@ -127,10 +135,12 @@ def prepare_data(stim, stimtime, trace, tracetime, fupsample=None, fit_kind='tra
     if post_blur_sigma_s > 0:
         trace = gaussian_filter(trace, sigma=post_blur_sigma_s / dt, mode='nearest')
 
-    trace = trace / (np.median(np.abs(trace)) / 0.6745)
+    trace = trace / np.std(trace)
 
-    if 'int' in str(stim.dtype) or 'bool' in str(stim.dtype):
-        stim = stim - np.mean(stim, dtype='int16')
+    if 'bool' in str(stim.dtype) or set(np.unique(stim).astype(float)) == {0., 1.}:
+        stim = 2 * stim.astype(np.int8) - 1
+    elif 'int' in str(stim.dtype):
+        stim = stim - np.mean(stim, dtype='int')
     else:
         stim = math_utils.normalize_zscore(stim)
 
@@ -251,34 +261,6 @@ def split_data(x, y, frac_train=0.8, frac_dev=0.1, as_dict=False):
             y_dict['test'] = y_tst
 
         return x_dict, y_dict
-
-
-def get_split_kfold_indices(n_frames, frac_test, kfolds=None, n_burn=0):
-    """Get indices to split data into train, dev and test splits. Train indexes will be the same for all splits."""
-    assert frac_test < 1
-
-    if kfolds == 0:
-        kfolds = 1
-
-    idxs = np.arange(n_frames)
-
-    idx0_test = int(n_frames * (1 - frac_test))
-
-    idxs_train_dev = idxs[:idx0_test].copy()
-    idxs_test = idxs[idx0_test:].copy()
-
-    idxs_train_splits = []
-    idxs_dev_splits = []
-
-    pseudo_x = np.empty((idxs_train_dev.size,))
-    for idxs_train, idxs_dev in KFold(n_splits=kfolds, shuffle=False).split(pseudo_x, pseudo_x):
-        if n_burn > 0:
-            idxs_train = idxs_train[(idxs_train < np.min(idxs_dev)) | (idxs_train > np.max(idxs_dev) + n_burn)]
-
-        idxs_train_splits.append(idxs_train)
-        idxs_dev_splits.append(idxs_dev)
-
-    return idxs_train_splits, idxs_dev_splits, idxs_test
 
 
 def compute_explained_rf(rf, rf_fit):

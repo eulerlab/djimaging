@@ -13,6 +13,7 @@ from djimaging.tables.receptivefield.rf_utils import split_strf, split_data
 try:
     import rfest
     import jax
+
     jax.config.update('jax_platform_name', 'cpu')
 except ImportError:
     warnings.warn('Failed to import RFEst: Cannot compute receptive fields.')
@@ -21,9 +22,9 @@ except ImportError:
 
 
 def compute_glm_receptive_field(
-        dt, trace, stim, dur_tfilter, df_ts, df_ws, betas, alpha, metric, tolerance, atol,
-        step_size, max_iters, min_iters, kfold, p_keep=1., output_nonlinearity='none', init_method=None,
-        n_perm=20, min_cc=0.2, seed=42, verbose=0, fit_R=False, fit_intercept=True, distr='gaussian'):
+        dt, trace, stim, dur_tfilter, df_ts, df_ws, shift, betas, metric, output_nonlinearity='none',
+        alpha=1., kfold=1, tolerance=5, atol=1e-5, step_size=0.01, max_iters=2000, min_iters=200, p_keep=1.,
+        init_method=None, n_perm=20, min_cc=0.2, seed=42, verbose=0, fit_R=False, fit_intercept=True, distr='gaussian'):
     """Estimate RF for given data. Return RF and quality."""
     np.random.seed(seed)
     starttime = time.time()
@@ -41,8 +42,9 @@ def compute_glm_receptive_field(
     model, metric_dev_opt_hp_sets = compute_best_rf_model(
         x['train'], y['train'], X_dev=x.get('dev', None), y_dev=y.get('dev', None),
         kfold=kfold, step_size=step_size, max_iters=max_iters, min_iters=min_iters, atol=atol,
-        dt=dt, dur_tfilter=dur_tfilter, df_ts=df_ts, df_ws=df_ws, init_method=init_method,
-        betas=betas, verbose=verbose, output_nonlinearity=output_nonlinearity, distr=distr,
+        dt=dt, dur_tfilter=dur_tfilter, df_ts=df_ts, df_ws=df_ws, shift=shift,
+        output_nonlinearity=output_nonlinearity, distr=distr,
+        betas=betas, init_method=init_method, verbose=verbose,
         fit_R=fit_R, fit_intercept=fit_intercept, alpha=alpha, metric=metric, tolerance=tolerance,
     )
 
@@ -126,7 +128,7 @@ def compute_glm_receptive_field(
 
 
 def compute_best_rf_model(
-        X_train, y_train, dt, dur_tfilter, betas, df_ts, df_ws, alpha, metric, tolerance,
+        X_train, y_train, dt, dur_tfilter, betas, df_ts, df_ws, shift, alpha, metric, tolerance,
         step_size, max_iters, min_iters, kfold, atol, distr,
         X_dev=None, y_dev=None, verbose=0, t_burn=5, init_method=None,
         output_nonlinearity='none', fit_R=False, fit_intercept=True):
@@ -138,16 +140,16 @@ def compute_best_rf_model(
 
     tfilterdims = int(np.round(dur_tfilter / dt)) + 1
 
-    assert (((tfilterdims - 1) * dt) - dur_tfilter) < (dt / 10.),\
+    assert (((tfilterdims - 1) * dt) - dur_tfilter) < (dt / 10.), \
         f'Choose multiple of dt={dt} as dur_tfilter={dur_tfilter}'
 
-    wdims = X_train.shape[2]
     hdims = X_train.shape[1]
+    wdims = X_train.shape[2]
 
     df_ts = clip_dfs(df_ts, tfilterdims)
     df_ws = clip_dfs(df_ws, wdims)
 
-    if verbose > 0  and (betas.size > 1):
+    if verbose > 0 and (betas.size > 1):
         print(f"################## Optimizing dfs ##################\n" + \
               f"\tTrying {df_ts.size * df_ws.size} combination: df_ts={df_ts} and df_ws={df_ws}")
 
@@ -164,10 +166,10 @@ def compute_best_rf_model(
     else:
         assert X_dev is None
         assert y_dev is None
-        kf = KFold(n_splits=kfold)
 
+        # TODO: Improve this by splitting the design matrix instead. Also burn the design matrix instead.
         splits = []
-        for train_idx, dev_idx in kf.split(X_train, y_train):
+        for train_idx, dev_idx in KFold(n_splits=kfold, shuffle=False).split(X_train, y_train):
             train_idx = train_idx[(train_idx < np.min(dev_idx)) | (train_idx > np.max(dev_idx) + n_burn)]
             splits += [(X_train[train_idx], y_train[train_idx], X_train[dev_idx], y_train[dev_idx])]
 
@@ -187,8 +189,8 @@ def compute_best_rf_model(
 
             best_model, metrics_dev_opt_i = create_and_fit_glm(
                 X_train=X_train_k, y_train=y_train_k, X_dev=X_dev_k, y_dev=y_dev_k, init_method=init_method,
-                dt=dt, alphas=[alpha], betas=betas, df=df, tfilterdims=tfilterdims, verbose=verbose,
-                step_size=step_size, max_iters=max_iters, min_iters=min_iters,
+                dt=dt, alphas=[alpha], betas=betas, df=df, tfilterdims=tfilterdims, shift=shift,
+                verbose=verbose, step_size=step_size, max_iters=max_iters, min_iters=min_iters,
                 fit_R=fit_R, fit_intercept=fit_intercept,
                 early_stopping=False, num_subunits=1, output_nonlinearity=output_nonlinearity,
                 metric=metric, tolerance=tolerance, atol=atol, distr=distr)
@@ -222,8 +224,8 @@ def compute_best_rf_model(
 
         best_model, _ = create_and_fit_glm(
             X_train=X_train, y_train=y_train, X_dev=None, y_dev=None, init_method=init_method,
-            dt=dt, alphas=[alpha], betas=[best_beta], df=best_df, tfilterdims=tfilterdims, verbose=verbose,
-            step_size=step_size, max_iters=max_iters, min_iters=min_iters,
+            dt=dt, alphas=[alpha], betas=[best_beta], df=best_df, tfilterdims=tfilterdims, shift=shift,
+            verbose=verbose, step_size=step_size, max_iters=max_iters, min_iters=min_iters,
             fit_R=fit_R, fit_intercept=fit_intercept,
             early_stopping=False, num_subunits=1, output_nonlinearity=output_nonlinearity,
             metric=metric, tolerance=tolerance, atol=atol, distr=distr)
@@ -255,13 +257,13 @@ def _df_w2df_h(df_w, X_train, hdims):
 
 
 def create_and_fit_glm(
-        X_train, y_train, X_dev, y_dev, dt, tfilterdims, df, alphas, betas,
+        X_train, y_train, X_dev, y_dev, dt, tfilterdims, df, shift, alphas, betas,
         num_subunits, output_nonlinearity, init_method, fit_R, fit_intercept, early_stopping, metric, distr,
         tolerance, atol, step_size=None, max_iters=None, min_iters=None, verbose=0):
     """Fit GLM model"""
 
     model = create_glm(
-        tfilterdims=tfilterdims, df=df, X_train=X_train, y_train=y_train, X_dev=X_dev, dt=dt,
+        tfilterdims=tfilterdims, df=df, X_train=X_train, y_train=y_train, X_dev=X_dev, dt=dt, shift=shift,
         num_subunits=num_subunits, output_nonlinearity=output_nonlinearity, init_method=init_method,
         fit_R=fit_R, fit_intercept=fit_intercept, distr=distr)
 
@@ -277,7 +279,7 @@ def create_and_fit_glm(
 
 
 def create_glm(
-        tfilterdims, df, X_train, y_train, X_dev, dt, distr, fit_R, fit_intercept,
+        tfilterdims, df, X_train, y_train, X_dev, dt, shift, distr, fit_R, fit_intercept,
         num_subunits=1, output_nonlinearity='none', init_method=None):
     assert tfilterdims > 0
 
@@ -301,7 +303,7 @@ def create_glm(
 
     # Create model
     model = initialize_model(
-        dims=dims, df=df, output_nonlinearity=output_nonlinearity,
+        dims=dims, df=df, shift=shift, output_nonlinearity=output_nonlinearity,
         num_subunits=num_subunits, dt=dt, X_train=X_train, y_train=y_train, X_dev=X_dev, init_method=init_method,
         fit_R=fit_R, fit_intercept=fit_intercept, distr=distr
     )
@@ -318,7 +320,10 @@ def fit_glm(
 
     if len(alphas) == 1 and len(betas) == 1:
         y = {'train': y_train, 'dev': y_dev} if early_stopping else {'train': y_train}
-        return_model = 'best_dev_metric' if early_stopping else 'best_train_cost'
+        if 'dev' in y:
+            return_model = 'best_dev_metric' if early_stopping else 'best_train_cost'
+        else:
+            return_model = 'best_dev_metric' if early_stopping else 'best_train_cost'
 
         model.fit(
             y=y, num_iters=max_iters, verbose=verbose, tolerance=tolerance, metric=metric,
@@ -339,15 +344,16 @@ def fit_glm(
 
 
 def initialize_model(
-        dims, df, output_nonlinearity, num_subunits, dt, X_train, y_train, fit_R, fit_intercept,
+        dims, df, shift, output_nonlinearity, num_subunits, dt, X_train, y_train, fit_R, fit_intercept,
         X_dev=None, init_method=None, distr='gaussian'):
     """Initialize model parameters for faster optimization"""
 
     model = rfest.GLM(distr=distr, output_nonlinearity=output_nonlinearity)
-    model.add_design_matrix(X_train, dims=dims, df=df, smooth='cr', filter_nonlinearity='none', name='stimulus')
+    model.add_design_matrix(
+        X_train, dims=dims, df=df, shift=shift, smooth='cr', filter_nonlinearity='none', name='stimulus')
 
     if X_dev is not None:
-        model.add_design_matrix(X_dev, dims=dims, name='stimulus', kind='dev')
+        model.add_design_matrix(X_dev, dims=dims, shift=shift, name='stimulus', kind='dev')
 
     model.initialize(num_subunits=num_subunits, dt=dt,
                      method=init_method if init_method is not None else 'mle',
@@ -411,11 +417,13 @@ def plot_rf_summary(rf, quality_dict, model_dict, title=""):
     # Plot
     ax = axs[0]
     ax.set(title='tRF')
-    t_tRF = np.arange(-trf.size + 1, 0 + 1)
-    if 'dt' in model_dict:
-        t_tRF = t_tRF.astype(float) * model_dict['dt']
+    try:
+        dt = model_dict['dt']
+        shift = model_dict['shift']['stimulus']
+        t_tRF = (np.arange(-trf.size + 1, 0.1, 1) - shift).astype(float) * dt
         ax.set_xlabel('Time')
-    else:
+    except KeyError:
+        t_tRF = np.arange(-trf.size + 1, 0.1, 1)
         ax.set_xlabel('Frames')
     ax.fill_between(t_tRF, np.zeros_like(trf), trf)
     ax.set_ylim(-np.max(np.abs(trf)) * 1.1, np.max(np.abs(trf)) * 1.1)
@@ -530,3 +538,31 @@ def plot_test_rf_quality(score_permX, score_test, cc_test=None, cc_dev=None, ax=
                 np.max([mu + 0.03, mu + 4 * std, score_test + 0.01]))
 
     return ax
+
+
+def get_split_kfold_indices(n_frames, frac_test, kfolds=None, n_burn=0):
+    """Get indices to split data into train, dev and test splits. Train indexes will be the same for all splits."""
+    assert frac_test < 1
+
+    if kfolds == 0:
+        kfolds = 1
+
+    idxs = np.arange(n_frames)
+
+    idx0_test = int(n_frames * (1 - frac_test))
+
+    idxs_train_dev = idxs[:idx0_test].copy()
+    idxs_test = idxs[idx0_test:].copy()
+
+    idxs_train_splits = []
+    idxs_dev_splits = []
+
+    pseudo_x = np.empty((idxs_train_dev.size,))
+    for idxs_train, idxs_dev in KFold(n_splits=kfolds, shuffle=False).split(pseudo_x, pseudo_x):
+        if n_burn > 0:
+            idxs_train = idxs_train[(idxs_train < np.min(idxs_dev)) | (idxs_train > np.max(idxs_dev) + n_burn)]
+
+        idxs_train_splits.append(idxs_train)
+        idxs_dev_splits.append(idxs_dev)
+
+    return idxs_train_splits, idxs_dev_splits, idxs_test

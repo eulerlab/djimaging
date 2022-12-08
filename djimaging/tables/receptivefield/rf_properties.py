@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.receptivefield.rf_properties_utils import compute_gauss_srf_area, compute_surround_index, \
-    fit_rf_model
+    fit_rf_model, compute_trf_transience_index, compute_half_amp_width, compute_main_peak_lag
 from djimaging.tables.receptivefield.rf_utils import compute_explained_rf, resize_srf, split_strf, \
     compute_polarity_and_peak_idxs, merge_strf
 from djimaging.utils.dj_utils import get_primary_key
@@ -147,11 +147,6 @@ class RFContoursParamsTemplate(dj.Lookup):
         )
         key.update(**params)
         self.insert1(key, skip_duplicates=skip_duplicates)
-
-
-class RFContoursTemplate(dj.Computed):
-    database = ""
-    # TODO: Implement
 
 
 class FitGauss2DRFTemplate(dj.Computed):
@@ -335,3 +330,42 @@ class FitDoG2DRFTemplate(dj.Computed):
 
         plt.tight_layout()
         plt.show()
+
+
+class TempRFPropertiesTemplate(dj.Computed):
+    database = ""
+
+    @property
+    def definition(self):
+        definition = """
+        -> self.split_rf_table
+        ---
+        transience_idx : float
+        half_amp_width : float
+        main_peak_lag : float
+        """
+        return definition
+
+    @property
+    @abstractmethod
+    def rf_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def split_rf_table(self):
+        pass
+
+    def make(self, key):
+        rf_time = (self.rf_table & key).fetch('rf_time')
+        trf, trf_peak_idxs = (self & key).fetch('trf', 'trf_peak_idxs')
+        transience_idx = compute_trf_transience_index(rf_time, trf, trf_peak_idxs)
+        half_amp_width = compute_half_amp_width(rf_time, trf, trf_peak_idxs, plot=False)
+        main_peak_lag = compute_main_peak_lag(rf_time, trf, trf_peak_idxs, plot=False)
+
+        key = key.copy()
+        key['transience_idx'] = transience_idx
+        key['half_amp_width'] = half_amp_width
+        key['main_peak_lag'] = main_peak_lag
+
+        self.insert1(key)

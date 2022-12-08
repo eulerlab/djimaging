@@ -203,9 +203,11 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
         definition = """
         -> self.retinalfieldlocation_table
         ---
-        nt_side  : enum('nasal', 'center', 'temporal')
-        vd_side  : enum('ventral', 'center', 'dorsal')
+        nt_side  : enum('n', 'c', 't')
+        vd_side  : enum('v', 'c', 'd')
         ntvd_side : enum('nv', 'nc', 'nd', 'cv', 'cc', 'cd', 'tv', 'tc', 'td')
+        n_tvd_side  : enum('n', 'cv', 'cc', 'cd', 'tv', 'tc', 'td')
+        nvd_t_side  : enum('nv', 'nc', 'nd', 'cv', 'cc', 'cd', 't')
         """
         return definition
 
@@ -215,30 +217,32 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
 
     _ventral_dorsal_key = 'ventral_dorsal_pos_um'
     _temporal_nasal_key = 'temporal_nasal_pos_um'
-    _center_dist = 100.
+    _center_dist = 0.
 
     def make(self, key):
         ventral_dorsal, temporal_nasal = (self.retinalfieldlocation_table() & key).fetch1(
             self._ventral_dorsal_key, self._temporal_nasal_key)
 
         if temporal_nasal < -self._center_dist:
-            nt_side = 'temporal'
+            nt_side = 't'
         elif temporal_nasal > self._center_dist:
-            nt_side = 'nasal'
+            nt_side = 'n'
         else:
-            nt_side = 'center'
+            nt_side = 'c'
 
         if ventral_dorsal < -self._center_dist:
-            vd_side = 'ventral'
+            vd_side = 'v'
         elif ventral_dorsal > self._center_dist:
-            vd_side = 'dorsal'
+            vd_side = 'd'
         else:
-            vd_side = 'center'
+            vd_side = 'c'
 
         rfl_key = key.copy()
         rfl_key['nt_side'] = nt_side
         rfl_key['vd_side'] = vd_side
-        rfl_key['ntvd_side'] = nt_side[0] + vd_side[0]
+        rfl_key['ntvd_side'] = nt_side + vd_side
+        rfl_key['n_tvd_side'] = nt_side + vd_side if nt_side == 't' else nt_side
+        rfl_key['nvd_t_side'] = nt_side + vd_side if nt_side == 'n' else nt_side
         self.insert1(rfl_key)
 
     def plot(self, restriction=None):
