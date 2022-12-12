@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 from scipy.stats import ttest_1samp
 from sklearn.model_selection import KFold
 
-from djimaging.tables.receptivefield.rf_utils import split_strf, split_data, build_design_matrix
+from djimaging.tables.receptivefield.rf_utils import split_strf, split_data, build_design_matrix, get_rf_timing_params
 
 try:
     import rfest
@@ -22,17 +22,19 @@ except ImportError:
 
 
 class ReceptiveFieldGLM:
-    def __init__(self, dt, stim, trace, dur_tfilter, df_ts, df_ws, shift, betas, metric, output_nonlinearity='none',
-                 alphas=(1.,), kfold=1, tolerance=5, atol=1e-5, step_size=0.01, max_iters=2000, min_iters=200,
+    def __init__(self, dt, stim, trace, filter_dur_s_past, filter_dur_s_future, df_ts, df_ws, shift, betas, metric,
+                 output_nonlinearity='none', alphas=(1.,), kfold=1,
+                 tolerance=5, atol=1e-5, step_size=0.01, max_iters=2000, min_iters=200,
                  init_method=None, n_perm=20, min_cc=0.2, seed=42, verbose=0, fit_R=False, fit_intercept=True,
-                 num_subunits=1, distr='gaussian', frac_test=0.2, t_burn=5):
+                 num_subunits=1, distr='gaussian', frac_test=0.2, t_burn_min=0.):
         # Data
         self.dt = dt
         self.stim = stim
         self.trace = trace
 
         # Filter settings
-        self.dur_tfilter = dur_tfilter
+        self.filter_dur_s_past = filter_dur_s_past
+        self.filter_dur_s_future = filter_dur_s_future
         self.shift = shift
         self.output_nonlinearity = output_nonlinearity
         assert num_subunits == 1
@@ -63,24 +65,21 @@ class ReceptiveFieldGLM:
         self.min_cc = min_cc
 
         # Filter dims
-        self.tfilterdims = int(np.round(dur_tfilter / dt)) + 1
-        self.n_burn = np.maximum(int(t_burn / dt), int(np.ceil(dur_tfilter / dt)))
+        self.rf_time, self.dim_t, self.shift, burn_in = get_rf_timing_params(
+            filter_dur_s_past, filter_dur_s_future, dt)
 
-        assert (((self.tfilterdims - 1) * dt) - dur_tfilter) < (dt / 10.), \
-            f'Choose multiple of dt={dt} as dur_tfilter={dur_tfilter}'
-
-        assert self.tfilterdims > 0
+        self.burn_in = np.maximum(int(np.ceil(t_burn_min / dt)), burn_in)
 
         if stim.ndim == 3:
             self.hdims = stim.shape[1]
             self.wdims = stim.shape[2]
-            self.dims = (self.tfilterdims, self.hdims, self.wdims)
+            self.dims = (self.dim_t, self.hdims, self.wdims)
         elif stim.ndim == 1:
-            self.dims = (self.tfilterdims,)
+            self.dims = (self.dim_t,)
         else:
             raise NotImplementedError()
 
-        self.df_ts = self.clip_dfs(np.sort(np.asarray(df_ts)), self.tfilterdims)
+        self.df_ts = self.clip_dfs(np.sort(np.asarray(df_ts)), self.dim_t)
         if stim.ndim == 3:
             self.df_ws = self.clip_dfs(np.sort(np.asarray(df_ws)), self.wdims)
         else:
@@ -110,16 +109,11 @@ class ReceptiveFieldGLM:
             quality_dict = dict(
                 score_test=float(score_trueX), score_permX=score_permX, perm_test_success=p_value < 0.001)
 
-        y_pred_train = model.predict({'stimulus': stim_dict['train']})
+        y_pred_train = model.forwardpass(kind='train', p=model.p['opt'])
 
         for metric_ in ['corrcoef', 'mse']:
             quality_dict[f'{metric_}_train'] = model.compute_score(
                 y=trace_dict['train'][model.burn_in:], y_pred=y_pred_train, metric=metric_)
-
-            if self.kfold == 1:
-                y_pred_dev = model.predict({'stimulus': stim_dict['dev']})
-                quality_dict[f'{metric_}_dev'] = model.compute_score(
-                    y=trace_dict['dev'][model.burn_in:], y_pred=y_pred_dev, metric=metric_)
 
             y_test_pred = model.predict({'stimulus': stim_dict['test']})
             quality_dict[f'{metric_}_test'] = model.compute_score(
@@ -132,6 +126,7 @@ class ReceptiveFieldGLM:
         w = np.array(w.reshape(model.dims['stimulus']))
 
         model_dict = dict(
+            rf_time=self.rf_time, dt=self.dt,
             df=model.df, dims=model.dims, shift=model.shift,
             alpha=model.alpha, beta=model.beta, metric=model.metric,
             output_nonlinearity=model.output_nonlinearity,
@@ -143,9 +138,8 @@ class ReceptiveFieldGLM:
             metric_dev_opt=float(model.metric_dev_opt),
             best_iteration=int(model.best_iteration),
             train_stop=model.train_stop,
-            dt=self.dt,
             y_test=np.array(trace_dict['test'][model.burn_in:]).astype(np.float32),
-            y_pred=np.array(y_test_pred).astype(np.float32),
+            y_pred_test=np.array(y_test_pred).astype(np.float32),
             y_train=np.array(trace_dict['train'][model.burn_in:]).astype(np.float32),
             y_pred_train=np.array(y_pred_train).astype(np.float32),
         )
@@ -155,10 +149,6 @@ class ReceptiveFieldGLM:
 
         if np.any(np.isfinite(model.cost_dev)):
             model_dict['cost_dev'] = np.array(model.cost_dev).astype(np.float32)
-
-        if self.kfold == 1:
-            model_dict['y_dev'] = np.array(trace_dict['dev'][model.burn_in:]).astype(np.float32)
-            model_dict['y_pred_dev'] = np.array(y_pred_dev).astype(np.float32)
 
         model_dict['df_ts'] = self.df_ts
         model_dict['df_ws'] = self.df_ws
@@ -185,15 +175,15 @@ class ReceptiveFieldGLM:
         if self.verbose > 0 and (self.betas.size > 1):
             print(f"################## Optimizing dfs ##################\n" + \
                   f"\tTrying {self.df_ts.size * self.df_ws.size} combination:" + \
-                  " df_ts={self.df_ts} and df_ws={self.df_ws}")
+                  f" df_ts={self.df_ts} and df_ws={self.df_ws}")
 
         # Define HP grid
         dfs = [(df_t, self.dfh_from_dfw(df_w), df_w) for df_t, df_w in list(itertools.product(self.df_ts, self.df_ws))]
         metrics_dev_opt = np.zeros((np.maximum(self.kfold, 1), len(dfs), len(self.betas)))
 
         # Prepare data
-        X = build_design_matrix(X=stim, n_lag=self.dims[0], shift=self.shift, dtype=np.float32)[self.n_burn:]
-        y = trace[self.n_burn:].copy().astype(np.float32)
+        X = build_design_matrix(X=stim, n_lag=self.dims[0], shift=self.shift, dtype=np.float32)
+        y = trace.copy().astype(np.float32)
 
         # Folds
         if self.kfold == 0:
@@ -204,7 +194,7 @@ class ReceptiveFieldGLM:
         else:
             splits = []
             for train_idx, dev_idx in KFold(n_splits=self.kfold, shuffle=False).split(X, y):
-                train_idx = train_idx[(train_idx < np.min(dev_idx)) | (train_idx > np.max(dev_idx) + self.n_burn)]
+                train_idx = train_idx[(train_idx < np.min(dev_idx)) | (train_idx > np.max(dev_idx) + self.burn_in)]
                 splits += [(X[train_idx], y[train_idx], X[dev_idx], y[dev_idx])]
 
         best_model = None
@@ -276,8 +266,14 @@ class ReceptiveFieldGLM:
         df_h = np.minimum(int(np.round(df_w * X_train.shape[1] / X_train.shape[2])), hdims)
         return df_h
 
-    def create_and_fit_glm(self, df, X_train, y_train, X_dev, y_dev, alphas, betas):
+    def create_and_fit_glm(self, df, X_train, y_train, alphas, betas, X_dev=None, y_dev=None):
         """Fit GLM model"""
+        assert X_train.shape[0] == y_train.shape[0]
+        if X_dev is not None:
+            assert y_dev is not None
+            assert X_dev.shape[0] == y_dev.shape[0]
+            assert X_train.shape[1:] == X_dev.shape[1:]
+
         model = self.create_glm(
             df=df, X_train=X_train, y_train=y_train, X_dev=X_dev)
 
@@ -311,12 +307,15 @@ class ReceptiveFieldGLM:
             if y_dev is not None:
                 assert 'dev' in model.X
                 y = {'train': y_train, 'dev': y_dev}
-                return_model = 'best_dev_metric'
+                return_model = 'best_dev_cost'
                 early_stopping = True
             else:
                 y = {'train': y_train}
                 return_model = 'best_train_cost'
                 early_stopping = False
+
+            if self.verbose > 0:
+                print(return_model)
 
             model.fit(
                 y=y, metric=self.metric, num_iters=self.max_iters, min_iters=self.min_iters, step_size=self.step_size,
@@ -329,7 +328,8 @@ class ReceptiveFieldGLM:
                 y={'train': y_train, 'dev': y_dev},
                 num_iters=self.max_iters, verbose=self.verbose, tolerance=self.tolerance, metric=self.metric,
                 step_size=self.step_size, alphas=alphas, betas=betas, min_iters=self.min_iters,
-                min_iters_other=min_iters_other, atol=self.atol)
+                min_iters_other=min_iters_other, atol=self.atol, return_model='best_train_cost',
+                early_stopping=False)
 
         return model, metric_dev_opt_hp_sets
 
@@ -337,6 +337,7 @@ class ReceptiveFieldGLM:
         """Initialize model parameters for faster optimization"""
 
         model = rfest.GLM(distr=self.distr, output_nonlinearity=self.output_nonlinearity)
+        model.burn_in = self.burn_in
         model.add_design_matrix(X_train, is_design_matrix=True, df=df, dims=self.dims, shift=self.shift,
                                 smooth='cr', filter_nonlinearity='none', name='stimulus')
 
@@ -527,31 +528,3 @@ def plot_test_rf_quality(score_permX, score_test, cc_test=None, cc_dev=None, ax=
                 np.max([mu + 0.03, mu + 4 * std, score_test + 0.01]))
 
     return ax
-
-
-def get_split_kfold_indices(n_frames, frac_test, kfolds=None, n_burn=0):
-    """Get indices to split data into train, dev and test splits. Train indexes will be the same for all splits."""
-    assert frac_test < 1
-
-    if kfolds == 0:
-        kfolds = 1
-
-    idxs = np.arange(n_frames)
-
-    idx0_test = int(n_frames * (1 - frac_test))
-
-    idxs_train_dev = idxs[:idx0_test].copy()
-    idxs_test = idxs[idx0_test:].copy()
-
-    idxs_train_splits = []
-    idxs_dev_splits = []
-
-    pseudo_x = np.empty((idxs_train_dev.size,))
-    for idxs_train, idxs_dev in KFold(n_splits=kfolds, shuffle=False).split(pseudo_x, pseudo_x):
-        if n_burn > 0:
-            idxs_train = idxs_train[(idxs_train < np.min(idxs_dev)) | (idxs_train > np.max(idxs_dev) + n_burn)]
-
-        idxs_train_splits.append(idxs_train)
-        idxs_dev_splits.append(idxs_dev)
-
-    return idxs_train_splits, idxs_dev_splits, idxs_test

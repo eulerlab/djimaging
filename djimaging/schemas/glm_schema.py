@@ -32,12 +32,18 @@ class RFGLM(RFGLMTemplate):
 
 
 @schema
+class RFGLMSingleModel(RFGLMSingleModelTemplate):
+    glm_table = RFGLM
+
+
+@schema
 class RFGLMQualityParams(RFGLMQualityParamsTemplate):
     pass
 
 
 @schema
 class RFGLMQuality(RFGLMQualityTemplate):
+    glm_single_model_table = RFGLMSingleModel
     glm_table = RFGLM
     params_table = RFGLMQualityParams
 

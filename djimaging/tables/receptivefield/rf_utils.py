@@ -19,18 +19,10 @@ def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
     assert trace.size == stim.shape[0]
     assert kind in ['sta', 'mle'], f"kind={kind}"
 
-    x, y = split_data(x=stim, y=trace, frac_train=frac_train, frac_dev=frac_dev, as_dict=False)
+    rf_time, dim_t, shift, burn_in = get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt)
+    dims = (dim_t,) + stim.shape[1:]
 
-    n_t_past = int(np.ceil(filter_dur_s_past / dt))
-    n_t_future = int(np.ceil(filter_dur_s_future / dt))
-
-    shift = -n_t_future
-    dim_t = n_t_past + n_t_future
-    dims = (dim_t,) + x['train'].shape[1:]
-
-    rf_time = np.arange(-n_t_past + 1, n_t_future + 1) * dt
-
-    burn_in = n_t_past
+    x, y = split_data(x=stim, y=trace, frac_train=frac_train, frac_dev=frac_dev, as_dict=True)
 
     x_train_dm = build_design_matrix(x['train'], n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
     y_train_dm = y['train'][burn_in:].astype(dtype)
@@ -62,6 +54,16 @@ def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
 
     rf = rf.reshape(dims)
     return rf, rf_time, model_eval, x, y, shift
+
+
+def get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt):
+    n_t_past = int(np.ceil(filter_dur_s_past / dt))
+    n_t_future = int(np.ceil(filter_dur_s_future / dt))
+    shift = -n_t_future
+    dim_t = n_t_past + n_t_future
+    rf_time = np.arange(-n_t_past + 1, n_t_future + 1) * dt
+    burn_in = n_t_past
+    return rf_time, dim_t, shift, burn_in
 
 
 @jit(nopython=True)
@@ -107,7 +109,7 @@ def prepare_data(stim, stimtime, trace, tracetime, fupsample_trace=None, fupsamp
         warnings.warn(f"Less triggertimes than expected: stim-len {stim.shape[0]} != stimtime-len {stimtime.size}")
         stim = stim[:stimtime.size].copy()
 
-    dt, is_consistent = get_mean_dt(tracetime, rtol=0.1)
+    dt, is_consistent = get_mean_dt(tracetime, rtol_std=0.01, rtol_max=0.1)
 
     if not is_consistent:
         warnings.warn('Inconsistent step-sizes in trace, resample trace.')
@@ -206,21 +208,24 @@ def align_stim_to_trace(stim, stimtime, trace, tracetime):
     return aligned_stim, aligned_trace, dt, t0
 
 
-def get_mean_dt(tracetime, rtol=0.1, raise_error=False) -> (float, bool):
+def get_mean_dt(tracetime, rtol_std=0.01, rtol_max=0.1, raise_error=False) -> (float, bool):
     dts = np.diff(tracetime)
     dt = np.mean(dts)
-    dt_max_diff = np.max(dts) - np.min(dts)
-    is_consistent = (dt_max_diff / dt) <= rtol
+    is_consistent_max = ((np.max(dts) - np.min(dts)) / dt) <= rtol_max
+    is_consistent_std = np.std(dts) / dt <= rtol_std
+
+    is_consistent = is_consistent_max and is_consistent_std
 
     if raise_error and not is_consistent:
-        raise ValueError(f"Inconsistent dts. dt_mean={dt:.3g}, dt_max={np.max(dts):.3g}, dt_min={np.min(dts):.3g}")
+        raise ValueError(f"Inconsistent dts. dt_mean={dt:.3g}, but " +
+                         f"dt_max={np.max(dts):.3g}, dt_min={np.min(dts):.3g}, dt_std={np.std(dts):.3g}")
 
     return dt, is_consistent
 
 
 def align_trace_to_stim(stim, stimtime, trace, tracetime):
     """Align stimulus and trace."""
-    dt, is_consistent = get_mean_dt(stimtime, rtol=0.1, raise_error=True)
+    dt, is_consistent = get_mean_dt(stimtime, rtol_std=0.05, rtol_max=0.4, raise_error=True)
 
     t0 = stimtime[0]
     aligned_stim = stim

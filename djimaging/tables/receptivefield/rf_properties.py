@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.receptivefield.rf_properties_utils import compute_gauss_srf_area, compute_surround_index, \
-    fit_rf_model, compute_trf_transience_index, compute_half_amp_width, compute_main_peak_lag
+    fit_rf_model, compute_trf_transience_index, compute_half_amp_width, compute_main_peak_lag, compute_center_index
 from djimaging.tables.receptivefield.rf_utils import compute_explained_rf, resize_srf, split_strf, \
     compute_polarity_and_peak_idxs, merge_strf
 from djimaging.utils.dj_utils import get_primary_key
@@ -99,8 +99,11 @@ class SplitRFTemplate(dj.Computed):
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
+        try:
+            rf_time = (self.rf_table & key).fetch1('rf_time')
+        except dj.DataJointError:
+            rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
 
-        t_trf = (self.rf_table() & key).fetch1("rf_time")
         srf, trf, peak_idxs = (self & key).fetch1("srf", "trf", "trf_peak_idxs")
 
         fig, axs = plt.subplots(1, 2, figsize=(8, 3))
@@ -108,7 +111,7 @@ class SplitRFTemplate(dj.Computed):
         plot_srf(srf, ax=ax)
 
         ax = axs[1]
-        plot_trf(trf, t_trf=t_trf, peak_idxs=peak_idxs, ax=ax)
+        plot_trf(trf, t_trf=rf_time, peak_idxs=peak_idxs, ax=ax)
 
         plt.tight_layout()
         plt.show()
@@ -161,7 +164,8 @@ class FitGauss2DRFTemplate(dj.Computed):
         srf_params: longblob
         rf_area_um2: float # Area covered by 2 standard deviations
         rf_cdia_um: float # Circle equivalent diameter
-        surround_index: float # Strength of surround in sRF
+        center_index: float # Weight and sign of center in sRF
+        surround_index: float # Weight and sign of surround in sRF
         rf_qidx: float # Quality index as explained variance of the sRF estimation between 0 and 1
         """
         return definition
@@ -181,12 +185,12 @@ class FitGauss2DRFTemplate(dj.Computed):
         stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
 
         # Fit RF model
-        srf_fit, srf_params = fit_rf_model(srf, kind='gauss', polarity=self._polarity)
+        srf_fit, srf_params, qi = fit_rf_model(srf, kind='gauss', polarity=self._polarity)
 
         # Compute properties
         area, diameter = compute_gauss_srf_area(srf_params, stim_dict["pix_scale_x_um"], stim_dict["pix_scale_y_um"])
-        qi = compute_explained_rf(srf, srf_fit)
-        surround_index = compute_surround_index(srf, srf_fit)
+        center_index = compute_center_index(srf=srf, srf_center=srf_fit)
+        surround_index = compute_surround_index(srf=srf, srf_center=srf_fit)
 
         # Save
         fit_key = deepcopy(key)
@@ -194,6 +198,7 @@ class FitGauss2DRFTemplate(dj.Computed):
         fit_key['srf_params'] = srf_params
         fit_key['rf_cdia_um'] = diameter
         fit_key['rf_area_um2'] = area
+        fit_key['center_index'] = center_index
         fit_key['surround_index'] = surround_index
         fit_key['rf_qidx'] = qi
 
@@ -240,7 +245,8 @@ class FitDoG2DRFTemplate(dj.Computed):
         rf_qidx: float
         rf_area_um2: float # Area covered by 2 standard deviations
         rf_cdia_um: float # Circle equivalent diameter
-        surround_index: float # Strength of surround in sRF
+        center_index: float # Weight and sign of center in sRF
+        surround_index: float # Weight and sign of surround in sRF
         """
         return definition
 
@@ -260,10 +266,8 @@ class FitDoG2DRFTemplate(dj.Computed):
         srf = (self.split_rf_table() & key).fetch1("srf")
         stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
 
-        srf_fit, srf_center_fit, srf_surround_fit, srf_params, eff_polarity = fit_rf_model(
+        srf_fit, srf_center_fit, srf_surround_fit, srf_params, eff_polarity, qi = fit_rf_model(
             srf, kind='dog', polarity=self._polarity)
-
-        qi = compute_explained_rf(srf, srf_fit)
 
         if (self._polarity is None) or (eff_polarity == self._polarity):
             srf_eff_center = eff_polarity * np.clip(eff_polarity * srf_fit, 0, None)
@@ -274,9 +278,11 @@ class FitDoG2DRFTemplate(dj.Computed):
             warnings.warn(f'Failed to fit DoG to key={key}')
             return
 
+        center_index = compute_center_index(srf=srf, srf_center=srf_eff_center)
         surround_index = compute_surround_index(srf=srf, srf_center=srf_eff_center)
-        # Compute area from gaussian fit to effective center?
-        _, srf_gauss_params = fit_rf_model(srf_eff_center, kind='gauss', polarity=self._polarity)
+
+        # Compute area from gaussian fit to effective center
+        srf_gauss_params = fit_rf_model(srf_eff_center, kind='gauss', polarity=eff_polarity)[1]
         area, diameter = compute_gauss_srf_area(
             srf_gauss_params, stim_dict["pix_scale_x_um"], stim_dict["pix_scale_y_um"])
 
@@ -289,6 +295,7 @@ class FitDoG2DRFTemplate(dj.Computed):
         fit_key['srf_eff_center'] = srf_eff_center
         fit_key['rf_cdia_um'] = diameter
         fit_key['rf_area_um2'] = area
+        fit_key['center_index'] = center_index
         fit_key['surround_index'] = surround_index
         fit_key['rf_qidx'] = qi
 
@@ -357,15 +364,27 @@ class TempRFPropertiesTemplate(dj.Computed):
         pass
 
     def make(self, key):
-        rf_time = (self.rf_table & key).fetch('rf_time')
-        trf, trf_peak_idxs = (self & key).fetch('trf', 'trf_peak_idxs')
+        try:
+            rf_time = (self.rf_table & key).fetch1('rf_time')
+        except dj.DataJointError:
+            rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
+
+        trf, trf_peak_idxs = (self.split_rf_table & key).fetch1('trf', 'trf_peak_idxs')
         transience_idx = compute_trf_transience_index(rf_time, trf, trf_peak_idxs)
         half_amp_width = compute_half_amp_width(rf_time, trf, trf_peak_idxs, plot=False)
         main_peak_lag = compute_main_peak_lag(rf_time, trf, trf_peak_idxs, plot=False)
 
         key = key.copy()
-        key['transience_idx'] = transience_idx
-        key['half_amp_width'] = half_amp_width
-        key['main_peak_lag'] = main_peak_lag
+        key['transience_idx'] = transience_idx if transience_idx is not None else -1.
+        key['half_amp_width'] = half_amp_width if half_amp_width is not None else -1.
+        key['main_peak_lag'] = main_peak_lag if main_peak_lag is not None else -1.
 
         self.insert1(key)
+
+    def plot(self):
+        fig, axs = plt.subplots(1, 3, figsize=(12, 3))
+        for ax, name in zip(axs, ['transience_idx', 'half_amp_width', 'main_peak_lag']):
+            ax.hist(self.fetch(name))
+            ax.set_title(name)
+        plt.tight_layout()
+        plt.show()

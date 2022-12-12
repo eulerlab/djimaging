@@ -1,3 +1,4 @@
+import warnings
 from abc import abstractmethod
 from copy import deepcopy
 
@@ -17,7 +18,8 @@ class RFGLMParamsTemplate(dj.Lookup):
         definition = """
         rf_glm_params_id: int # unique param set id
         ---
-        dur_filter_s: float # minimum duration of filter in seconds
+        filter_dur_s_past : float # filter duration in seconds into the past
+        filter_dur_s_future : float # filter duration in seconds into the future
         df_ts : blob
         df_ws : blob
         betas : blob
@@ -36,7 +38,7 @@ class RFGLMParamsTemplate(dj.Lookup):
 
         other_params_dict_default = dict(
             min_iters=50, max_iters=1000, step_size=0.1, tolerance=5,
-            alpha=1, verbose=0, p_keep=1., n_perm=20, min_cc=0.2, seed=42,
+            alphas=(1.,), verbose=0, n_perm=20, min_cc=0.2, seed=42,
             fit_R=False, fit_intercept=True, init_method=None, atol=1e-3,
             distr='gaussian'
         )
@@ -45,11 +47,10 @@ class RFGLMParamsTemplate(dj.Lookup):
 
         key = dict(
             rf_glm_params_id=1,
-            dur_filter_s=1.0,
-            df_ts=[8],
-            df_ws=[9],
-            betas=[0.001, 0.01, 0.1],
-            kfold=1,
+            filter_dur_s_past=1.,
+            filter_dur_s_future=0.,
+            df_ts=(8,), df_ws=(9,),
+            betas=(0.001, 0.01, 0.1), kfold=1,
             other_params_dict=other_params_dict_default,
         )
 
@@ -91,7 +92,8 @@ class RFGLMTemplate(dj.Computed):
 
         model = ReceptiveFieldGLM(
             dt=dt, trace=trace, stim=stim,
-            dur_tfilter=params['dur_filter_s'], df_ts=params['df_ts'], df_ws=params['df_ws'],
+            filter_dur_s_past=params['filter_dur_s_past'], filter_dur_s_future=params['filter_dur_s_future'],
+            df_ts=params['df_ts'], df_ws=params['df_ws'],
             betas=params['betas'], kfold=params['kfold'], metric=params['metric'],
             output_nonlinearity=params['output_nonlinearity'], **other_params_dict)
 
@@ -146,6 +148,80 @@ class RFGLMQualityParamsTemplate(dj.Lookup):
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
+class RFGLMSingleModelTemplate(dj.Computed):
+    database = ""
+    _default_metric = 'mse'
+
+    @property
+    def definition(self):
+        definition = '''
+            # Pick best model for all parameterizations
+            -> self.glm_table
+            ---
+            score_test : float
+            '''
+        return definition
+
+    @property
+    @abstractmethod
+    def glm_table(self):
+        pass
+
+    def make(self, key):
+        roi_key = key.copy()
+        roi_key.pop('rf_glm_params_id')
+        quality_dicts, model_dicts, param_ids = (self.glm_table & roi_key).fetch(
+            'quality_dict', 'model_dict', 'rf_glm_params_id')
+
+        metrics = [model_dict['metric'] for model_dict in model_dicts]
+        if np.unique(metrics).size == 1:
+            metric = metrics[0]
+        else:
+            warnings.warn(f'Different metric were used. Fallback to {self._default_metric}')
+            metric = self._default_metric
+
+        scores_test = [quality_dict[f'{metric}_test'] for quality_dict in quality_dicts]
+
+        # Do some sanity check
+        if np.unique(metrics).size == 1:
+            for i, score_test in enumerate(scores_test):
+                assert np.isclose(quality_dicts[i]['score_test'], score_test)
+
+        # Get best model parameterization
+        if metric in ['mse', 'gcv']:
+            best_i = np.argmin(scores_test)
+        else:
+            best_i = np.argmax(scores_test)
+
+        score_test = scores_test[best_i]
+        param_id = param_ids[best_i]
+
+        if len(self & roi_key) > 1:
+            raise ValueError(f'Already more than one entry present for key={roi_key}. This should not happen.')
+        elif len(self & roi_key) == 1:
+            (self & roi_key).delete_quick()  # Delete for update, e.g. if new param_ids were added
+
+        key = key.copy()
+        key['rf_glm_params_id'] = param_id
+        key['score_test'] = score_test
+        self.insert1(key)
+
+    def plot(self):
+        rf_glm_params_ids = self.fetch('rf_glm_params_id')
+        plt.figure()
+        plt.hist(rf_glm_params_ids,
+                 bins=np.arange(np.min(rf_glm_params_ids) - 0.25, np.max(rf_glm_params_ids) + 0.5, 0.5))
+        plt.title('rf_glm_params_id')
+        plt.show()
+
+    def plot1(self, key=None):
+        key = get_primary_key(table=self, key=key)
+        rf, quality_dict, model_dict = (self.glm_table & key).fetch1('rf', 'quality_dict', 'model_dict')
+        plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
+                        title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
+        plt.show()
+
+
 class RFGLMQualityTemplate(dj.Computed):
     database = ""
 
@@ -153,12 +229,17 @@ class RFGLMQualityTemplate(dj.Computed):
     def definition(self):
         definition = '''
             # Compute basic receptive fields
-            -> self.glm_table
+            -> self.glm_single_model_table
             -> self.params_table
             ---
             rf_glm_qidx : float  
             '''
         return definition
+
+    @property
+    @abstractmethod
+    def glm_single_model_table(self):
+        pass
 
     @property
     @abstractmethod
