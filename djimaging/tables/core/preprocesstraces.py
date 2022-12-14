@@ -132,7 +132,7 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds, fs,
 
     if (fs_resample is not None) and (fs_resample > 0):
         trace_times_resampled = np.arange(
-            trace_times[0], np.nextafter(trace_times[-1], trace_times[-1] + fs_resample), 1./fs_resample)
+            trace_times[0], np.nextafter(trace_times[-1], trace_times[-1] + fs_resample), 1. / fs_resample)
 
         trace = np.interp(trace_times_resampled, trace_times, trace)
         trace_times = trace_times_resampled
@@ -233,7 +233,8 @@ class PreprocessTracesTemplate(dj.Computed):
         try:
             trace_times, preprocess_trace, smoothed_trace = process_trace(
                 trace_times=trace_times, trace=trace, stim_start=stim_start,
-                poly_order=poly_order, window_len_seconds=window_len_seconds, fs=fs, f_cutoff=f_cutoff,
+                poly_order=poly_order, window_len_seconds=window_len_seconds,
+                fs=fs, f_cutoff=f_cutoff, fs_resample=fs_resample,
                 subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative)
 
             self.insert1(dict(key, preprocess_trace_times=trace_times,
