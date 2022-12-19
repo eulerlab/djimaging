@@ -61,6 +61,12 @@ class LowPassFilter:
         plt.show()
 
 
+def lowpass_filter_trace(trace, fs, f_cutoff):
+    """Apply low pass filter to trace"""
+    trace_filtered = LowPassFilter(fs=fs, cutoff=f_cutoff, order=6, direction='ff').filter_data(trace)
+    return trace_filtered
+
+
 def resample_trace(tracetime, trace, dt):
     """Resample trace through linear interpolation"""
     tracetime_resampled = np.arange(tracetime[0], np.nextafter(tracetime[-1], tracetime[-1] + dt), dt)
@@ -70,7 +76,7 @@ def resample_trace(tracetime, trace, dt):
 
 def upsample_stim(stimtime, stim, fupsample):
     dt = np.mean(np.diff(stimtime))
-    stimtime = np.sort(np.concatenate([stimtime, stimtime + dt/2]))
+    stimtime = np.sort(np.concatenate([stimtime, stimtime + dt / 2]))
     stim = np.repeat(stim, fupsample, axis=0)
     return stimtime, stim
 

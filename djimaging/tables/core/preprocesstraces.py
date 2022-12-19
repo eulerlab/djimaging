@@ -7,11 +7,11 @@ from matplotlib import pyplot as plt
 from scipy import signal
 
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.filter_utils import LowPassFilter
+from djimaging.utils.filter_utils import lowpass_filter_trace
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 
 
-def drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace=False):
+def drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace: bool = False):
     """Drop left and right most values if they are out of limits of the rest of the trace.
     This is necessary because the first few and last few points may be affected by artifacts.
     This is relatively conservative.
@@ -60,46 +60,61 @@ def detrend_trace(trace, window_len_seconds, fs, poly_order):
         window_len_frames -= 1
 
     window_len_frames = int(window_len_frames)
-
-    if len(trace) >= window_len_frames:
-        smoothed_trace = signal.savgol_filter(
-            trace, window_length=window_len_frames, polyorder=poly_order, mode='interp')
-    else:
-        smoothed_trace = signal.savgol_filter(
-            trace, window_length=window_len_frames, polyorder=poly_order, mode='nearest')
+    smoothed_trace = signal.savgol_filter(
+        trace, window_length=window_len_frames, polyorder=poly_order,
+        mode='interp' if len(trace) >= window_len_frames else 'nearest')
 
     detrended_trace = trace - smoothed_trace
 
     return detrended_trace, smoothed_trace
 
 
-def non_negative_trace(trace, trace_times, standardize, stim_start):
-    """Make trace positive, remove lowest 2.5 percentile (and standardize by STD of baseline)"""
+def extract_baseline(trace, trace_times, stim_start: float):
+    """Compute baseline for trace"""
 
-    clip_value = np.percentile(trace, q=2.5)
-    trace[trace < clip_value] = clip_value
-    trace = trace - clip_value
+    # heuristic to find out whether triggers are in time base or in frame base
+    if stim_start > 1000:
+        print("Converting triggers from frame base to time base")
+        stim_start /= 500
 
-    if standardize:
-        # find last frame recorded before stimulus started
-        baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
-        baseline = trace[:baseline_end]
-        trace = trace / np.std(baseline)
-
-    return trace
-
-
-def subtract_baseline_trace(trace, trace_times, standardize, stim_start):
-    """Subtract baseline of trace (and standardize by STD of baseline)"""
+    if not np.any(trace_times < stim_start):
+        raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
 
     baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
     baseline = trace[:baseline_end]
-    trace = trace - np.median(baseline)
+    return baseline
 
-    if standardize:
-        trace = trace / np.std(baseline)
+
+def non_negative_trace(trace, inplace: bool = False):
+    """Make trace positive, remove lowest 2.5 percentile (and standardize by STD of baseline)"""
+    if not inplace:
+        trace = trace.copy()
+
+    clip_value = np.percentile(trace, q=2.5)
+    trace[trace < clip_value] = clip_value
+    trace -= clip_value
 
     return trace
+
+
+def subtract_baseline_trace(trace, trace_times, stim_start: float, inplace: bool = False):
+    """Subtract baseline of trace (and standardize by STD of baseline)"""
+    if not inplace:
+        trace = trace.copy()
+
+    baseline = extract_baseline(trace, trace_times, stim_start)
+    trace -= np.median(baseline)
+
+    return trace
+
+
+def resample_trace(trace, trace_times, fs_resample: float):
+    trace_times_resampled = np.arange(
+        trace_times[0], np.nextafter(trace_times[-1], trace_times[-1] + fs_resample), 1. / fs_resample)
+
+    trace_resampled = np.interp(trace_times_resampled, trace_times, trace)
+
+    return trace_resampled, trace_times_resampled
 
 
 def process_trace(trace_times, trace, poly_order, window_len_seconds, fs,
@@ -108,34 +123,24 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds, fs,
     """Detrend and preprocess trace"""
     trace = np.asarray(trace).copy()
 
-    trace = drop_left_and_right(trace, drop_nmin_lr=drop_nmin_lr, drop_nmax_lr=drop_nmax_lr, inplace=False)
+    trace = drop_left_and_right(trace, drop_nmin_lr=drop_nmin_lr, drop_nmax_lr=drop_nmax_lr, inplace=True)
 
     if (f_cutoff is not None) and (f_cutoff > 0):
-        trace = LowPassFilter(fs=fs, cutoff=f_cutoff, order=6, direction='ff').filter_data(trace)
+        trace = lowpass_filter_trace(trace=trace, fs=fs, f_cutoff=f_cutoff)
 
     trace, smoothed_trace = detrend_trace(trace, window_len_seconds, fs, poly_order)
 
-    if stim_start is not None:
-
-        # heuristic to find out whether triggers are in time base or in frame base
-        if stim_start > 1000:
-            print("Converting triggers from frame base to time base")
-            stim_start /= 500
-
-        if not np.any(trace_times < stim_start):
-            raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
-
     if non_negative:
-        trace = non_negative_trace(trace, trace_times, standardize, stim_start)
+        trace = non_negative_trace(trace, inplace=True)
     elif subtract_baseline:
-        trace = subtract_baseline_trace(trace, trace_times, standardize, stim_start)
+        trace = subtract_baseline_trace(trace, trace_times, stim_start, inplace=True)
+
+    if standardize:
+        baseline = extract_baseline(trace, trace_times, stim_start)
+        trace /= np.std(baseline)
 
     if (fs_resample is not None) and (fs_resample > 0):
-        trace_times_resampled = np.arange(
-            trace_times[0], np.nextafter(trace_times[-1], trace_times[-1] + fs_resample), 1. / fs_resample)
-
-        trace = np.interp(trace_times_resampled, trace_times, trace)
-        trace_times = trace_times_resampled
+        trace, trace_times = resample_trace(trace, trace_times, fs_resample=fs_resample)
 
     return trace_times, trace, smoothed_trace
 
@@ -152,7 +157,7 @@ class PreprocessParamsTemplate(dj.Lookup):
         poly_order:          int       # order of polynomial for savgol filter
         non_negative:        tinyint unsigned
         subtract_baseline:   tinyint unsigned
-        standardize:         tinyint unsigned  # whether to standardize (divide by sd)
+        standardize:         tinyint unsigned  # whether to standardize (divide by sd of baseline)
         f_cutoff = 0 : float  # Cutoff frequency for low pass filter, only applied when > 0.
         fs_resample = 0 : float  # Resampling frequency, only applied when > 0.
         """
@@ -230,17 +235,14 @@ class PreprocessTracesTemplate(dj.Computed):
         trace = (self.traces_table() & key).fetch1('trace')
         stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
 
-        try:
-            trace_times, preprocess_trace, smoothed_trace = process_trace(
-                trace_times=trace_times, trace=trace, stim_start=stim_start,
-                poly_order=poly_order, window_len_seconds=window_len_seconds,
-                fs=fs, f_cutoff=f_cutoff, fs_resample=fs_resample,
-                subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative)
+        trace_times, preprocess_trace, smoothed_trace = process_trace(
+            trace_times=trace_times, trace=trace, stim_start=stim_start,
+            poly_order=poly_order, window_len_seconds=window_len_seconds,
+            fs=fs, f_cutoff=f_cutoff, fs_resample=fs_resample,
+            subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative)
 
-            self.insert1(dict(key, preprocess_trace_times=trace_times,
-                              preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
-        except ValueError as e:
-            warnings.warn(f"{e}\nfor key\n{key}")
+        self.insert1(dict(key, preprocess_trace_times=trace_times,
+                          preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
 
     def plot1(self, key=None):
         key = get_primary_key(self, key)

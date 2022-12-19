@@ -7,7 +7,7 @@ from scipy.signal import find_peaks
 from sklearn.decomposition import randomized_svd
 
 from djimaging.utils import math_utils
-from djimaging.utils.filter_utils import resample_trace, LowPassFilter, upsample_stim
+from djimaging.utils.filter_utils import resample_trace, upsample_stim, lowpass_filter_trace
 from djimaging.utils.image_utils import resize_image
 
 
@@ -116,8 +116,7 @@ def prepare_data(stim, stimtime, trace, tracetime, fupsample_trace=None, fupsamp
         tracetime, trace = resample_trace(tracetime=tracetime, trace=trace, dt=dt)
 
     if lowpass_cutoff > 0:
-        trace = LowPassFilter(
-            fs=1. / dt, cutoff=lowpass_cutoff, order=6, direction='ff').filter_data(trace)
+        trace = lowpass_filter_trace(trace=trace, fs=1. / dt, f_cutoff=lowpass_cutoff)
 
     if pre_blur_sigma_s > 0:
         trace = gaussian_filter(trace, sigma=pre_blur_sigma_s / dt, mode='nearest')
@@ -225,7 +224,7 @@ def get_mean_dt(tracetime, rtol_std=0.01, rtol_max=0.1, raise_error=False) -> (f
 
 def align_trace_to_stim(stim, stimtime, trace, tracetime):
     """Align stimulus and trace."""
-    dt, is_consistent = get_mean_dt(stimtime, rtol_std=0.05, rtol_max=0.4, raise_error=True)
+    dt, is_consistent = get_mean_dt(stimtime, rtol_std=0.05, rtol_max=0.9, raise_error=True)
 
     t0 = stimtime[0]
     aligned_stim = stim
