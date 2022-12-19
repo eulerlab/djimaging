@@ -139,8 +139,7 @@ class SnippetsTemplate(dj.Computed):
     def make(self, key):
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
-        trace_times = (self.traces_table() & key).fetch1('trace_times')
-        traces = (self.preprocesstraces_table() & key).fetch1('preprocess_trace')
+        trace_times, traces = (self.preprocesstraces_table() & key).fetch1('preprocess_trace_times', 'preprocess_trace')
 
         if triggertimes[-1] > 2 * trace_times[-1]:
             triggertimes = triggertimes / 500.
