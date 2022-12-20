@@ -5,6 +5,7 @@ import numpy as np
 
 from djimaging.utils.data_utils import extract_h5_table
 from djimaging.utils.misc_utils import CapturePrints
+from djimaging.utils.trace_utils import find_closest
 
 
 def get_npixartifact(setupid):
@@ -117,7 +118,7 @@ def load_traces_from_h5_file(filepath, roi_ids):
 def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.1, allow_drop_last=True):
     """Split trace in snippets, using triggertimes"""
 
-    t_idxs = [np.argwhere(np.isclose(times, tt + delay, atol=atol))[0][0] for tt in triggertimes[::ntrigger_rep]]
+    t_idxs = [find_closest(target=tt + delay, data=times, atol=atol) for tt in triggertimes[::ntrigger_rep]]
 
     assert len(t_idxs) > 1, 'Cannot split a single repetition'
 
