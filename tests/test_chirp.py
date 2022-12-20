@@ -25,7 +25,7 @@ def test_compute_on_off_index_on_response():
 
     trigger_times = np.concatenate([[t_start + i * stim_dur, t_start + i * stim_dur] for i in range(n_reps)])
 
-    obs = compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1)
+    obs = compute_on_off_index(snippets, snippets_times, trigger_times, light_step_duration=1)
     exp_lb = 0.95
     assert obs > exp_lb
 
@@ -52,7 +52,7 @@ def test_compute_on_off_index_off_response():
 
     trigger_times = np.concatenate([[t_start + i * stim_dur, t_start + i * stim_dur] for i in range(n_reps)])
 
-    obs = compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1)
+    obs = compute_on_off_index(snippets, snippets_times, trigger_times, light_step_duration=1)
     exp_ub = -0.95
     assert obs < exp_ub
 
@@ -72,6 +72,6 @@ def test_compute_on_off_index_no_response():
 
     trigger_times = np.concatenate([[t_start + i * stim_dur, t_start + i * stim_dur] for i in range(n_reps)])
 
-    obs = compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1)
+    obs = compute_on_off_index(snippets, snippets_times, trigger_times, light_step_duration=1)
     exp = 0.0
     assert obs == exp

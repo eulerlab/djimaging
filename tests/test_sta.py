@@ -46,7 +46,7 @@ def test_split_train():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=42)
     stim, trace, dt, t0 = prepare_data(
         trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
-        fupsample=2, fit_kind='trace', lowpass_cutoff=0)
+        fupsample_trace=2, fit_kind='trace', lowpass_cutoff=0)
 
     x_dict, y_dict = split_data(x=stim, y=trace, frac_train=1., frac_dev=0., as_dict=True)
     assert set(x_dict.keys()) == {'train'}
@@ -57,7 +57,7 @@ def test_split_train_dev():
 
     stim, trace, dt, t0 = prepare_data(
         trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
-        fupsample=2, fit_kind='trace', lowpass_cutoff=0)
+        fupsample_trace=2, fit_kind='trace', lowpass_cutoff=0)
 
     x_dict, y_dict = split_data(x=stim, y=trace, frac_train=0.8, frac_dev=0.2, as_dict=True)
 
@@ -70,7 +70,7 @@ def test_split_train_test():
 
     stim, trace, dt, t0 = prepare_data(
         trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
-        fupsample=2, fit_kind='trace', lowpass_cutoff=0)
+        fupsample_trace=2, fit_kind='trace', lowpass_cutoff=0)
 
     x_dict, y_dict = split_data(x=stim, y=trace, frac_train=0.8, frac_dev=0.0, as_dict=True)
 
@@ -83,7 +83,7 @@ def test_split_train_dev_test():
 
     stim, trace, dt, t0 = prepare_data(
         trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
-        fupsample=1, fit_kind='trace', lowpass_cutoff=0)
+        fupsample_trace=1, fit_kind='trace', lowpass_cutoff=0)
 
     x_dict, y_dict = split_data(x=stim, y=trace, frac_train=0.6, frac_dev=0.2, as_dict=True)
 
