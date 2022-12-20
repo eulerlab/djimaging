@@ -49,10 +49,14 @@ def align_trace_to_stim(stim, stimtime, trace, tracetime):
     return aligned_stim, aligned_trace, dt, t0
 
 
-def find_closest(target: float, data: np.ndarray, atol=np.inf) -> float:
-    """Find closest point in data"""
-    closest = data[np.argmin(np.abs(target - data))]
+def find_closest(target: float, data: np.ndarray, atol=np.inf, as_index=False):
+    """Find the closest point in data"""
+    closest_index = np.argmin(np.abs(target - data))
+    closest = data[closest_index]
     eps = np.abs(target - closest)
     if eps > atol:
         raise ValueError(f'Did not find any point being close enough {eps} vs. atol={atol}')
-    return closest
+    if as_index:
+        return closest_index
+    else:
+        return closest
