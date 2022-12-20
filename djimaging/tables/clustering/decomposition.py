@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
@@ -32,21 +33,21 @@ class FeaturesParamsTemplate(dj.Lookup):
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
-def compute_features(traces: list, ncomps: list, kind: str, params_dict: dict) -> (list, list):
+def compute_features(traces: list, ncomps: list, kind: str, params_dict: dict) -> (list, list, list):
     """Reduce dimension of traces to features and stack them to feature matrix"""
     kind = kind.lower()
 
     if kind == 'sparse_pca':
-        features, infos = compute_features_sparse_pca(traces=traces, ncomps=ncomps, **params_dict)
+        features, traces_reconstructed, infos = compute_features_sparse_pca(traces=traces, ncomps=ncomps, **params_dict)
     elif kind == 'pca':
         assert len(params_dict) == 0
-        features, infos = compute_features_pca(traces=traces, ncomps=ncomps)
+        features, traces_reconstructed, infos = compute_features_pca(traces=traces, ncomps=ncomps)
     elif kind == 'none':
-        features, infos = traces, [dict()] * len(traces)
+        features, traces_reconstructed, infos = deepcopy(traces), deepcopy(traces), [dict()] * len(traces)
     else:
         raise NotImplementedError(kind)
 
-    return features, infos
+    return features, traces_reconstructed, infos
 
 
 def compute_variance_explained_sparse_pca(X: np.ndarray, P: np.ndarray) -> (float, float):
@@ -60,14 +61,25 @@ def compute_variance_explained_sparse_pca(X: np.ndarray, P: np.ndarray) -> (floa
     return explained_variance, total_variance
 
 
-def compute_features_sparse_pca(traces: list, ncomps: list, alpha=1) -> (list, list):
+def compute_features_sparse_pca(traces: list, ncomps: list, alpha=1) -> (list, list, list):
     from sklearn.decomposition import SparsePCA
+    from sklearn.preprocessing import StandardScaler
 
-    features, infos = [], []
+    features, traces_reconstructed, infos = [], [], []
     for traces_i, ncomps_i in zip(traces, ncomps):
+        sc = StandardScaler()
+        norm_traces_i = sc.fit_transform(X=traces_i)
+
         decomp = SparsePCA(n_components=ncomps_i, random_state=0, alpha=alpha, verbose=1)
-        features_i = decomp.fit_transform(traces_i)
-        explained_variance, total_variance = compute_variance_explained_sparse_pca(X=traces_i, P=decomp.components_.T)
+        features_i = decomp.fit_transform(X=norm_traces_i)
+
+        try:
+            traces_reconstructed_i = sc.inverse_transform(X=decomp.inverse_transform(X=features_i))
+        except AttributeError:  # SparsePCA.inverse_transform was only added in scikit-learn 1.2
+            traces_reconstructed_i = None
+
+        explained_variance, total_variance = compute_variance_explained_sparse_pca(
+            X=norm_traces_i, P=decomp.components_.T)
 
         info_i = dict()
         info_i["components"] = decomp.components_
@@ -75,28 +87,36 @@ def compute_features_sparse_pca(traces: list, ncomps: list, alpha=1) -> (list, l
         info_i["explained_variance_ratio"] = explained_variance / total_variance
 
         features.append(features_i)
+        traces_reconstructed.append(traces_reconstructed_i)
         infos.append(info_i)
 
-    return features, infos
+    return features, traces_reconstructed, infos
 
 
-def compute_features_pca(traces: list, ncomps: list) -> (list, list):
+def compute_features_pca(traces: list, ncomps: list) -> (list, list, list):
     from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
 
-    features, infos = [], []
+    features, traces_reconstructed, infos = [], [], []
     for traces_i, ncomps_i in zip(traces, ncomps):
+        sc = StandardScaler()
+        norm_traces_i = sc.fit_transform(X=traces_i)
+
         decomp = PCA(n_components=ncomps_i, random_state=0)
-        features_i = decomp.fit_transform(traces_i)
+        features_i = decomp.fit_transform(X=norm_traces_i)
+
+        traces_reconstructed_i = sc.inverse_transform(X=decomp.inverse_transform(X=features_i))
 
         info_i = dict()
         info_i["components"] = decomp.components_
         info_i["explained_variance"] = decomp.explained_variance_
-        info_i["explained_variance_ratio_"] = decomp.explained_variance_ratio_
+        info_i["explained_variance_ratio"] = decomp.explained_variance_ratio_
 
         features.append(features_i)
+        traces_reconstructed.append(traces_reconstructed_i)
         infos.append(info_i)
 
-    return features, infos
+    return features, traces_reconstructed, infos
 
 
 class FeaturesTemplate(dj.Computed):
@@ -107,7 +127,9 @@ class FeaturesTemplate(dj.Computed):
         definition = """
         -> self.params_table
         ---
-        features: longblob  # feature matrix
+        features: longblob  # Feature matrix.
+        traces: longblob  # Input traces.
+        traces_reconstructed: longblob  # Reconstructed traces.
         decomp_infos: longblob  # information about decomposition of different stimuli
         """
         return definition
@@ -154,10 +176,13 @@ class FeaturesTemplate(dj.Computed):
         ncomps = [int(ncomps_i) for ncomps_i in ncomps.split('_')] if len(ncomps) > 0 else []
         traces, times, roi_keys, stim_names = self.fetch_traces(key=key)
 
-        features, infos = compute_features(traces=traces, ncomps=ncomps, kind=kind, params_dict=params_dict)
+        features, traces_reconstructed, infos = compute_features(
+            traces=traces, ncomps=ncomps, kind=kind, params_dict=params_dict)
 
         main_key = key.copy()
         main_key['features'] = features
+        main_key['traces'] = traces
+        main_key['traces_reconstructed'] = traces_reconstructed
         main_key['decomp_infos'] = infos
         self.insert1(main_key)
 
@@ -179,14 +204,40 @@ class FeaturesTemplate(dj.Computed):
         key = get_primary_key(table=self, key=key)
         decomp_infos = (self & key).fetch1('decomp_infos')
 
-        n_rows = np.max([d['components'].shape[0] for d in decomp_infos])
-        fig, axs = plt.subplots(n_rows, len(decomp_infos), sharex='all', sharey='all',
-                                figsize=(4 * len(decomp_infos), (1 + n_rows) * 0.6), squeeze=False)
+        hsize = np.max([decomp_info['components'].shape[0] for decomp_info in decomp_infos])
 
-        fig.suptitle(f"{key!r}")
+        fig, axs = plt.subplots(1, len(decomp_infos), sharex='all', sharey='all',
+                                figsize=(4 * len(decomp_infos), hsize * 0.2))
 
-        for ax_col, decomp_info in zip(axs.T, decomp_infos):
-            for i, (ax, component) in enumerate(zip(ax_col, decomp_info['components']), start=1):
-                ax.fill_between(np.arange(component.size), component)
-                ax.set(ylabel=f'C{i}')
+        axs[0].set_ylabel('Components')
+
+        fig.suptitle(f"{key!r}", y=1, va='bottom')
+        for ax, decomp_info in zip(axs, decomp_infos):
+            components = decomp_info['components']
+            explained_variance_ratio = decomp_info['explained_variance_ratio']
+            vabsmax = np.max(np.abs(components))
+            ax.set_title(np.around(np.asarray(explained_variance_ratio), 2))
+            ax.imshow(components, aspect='auto', cmap='coolwarm', interpolation='none', vmin=-vabsmax, vmax=vabsmax)
+        plt.show()
+
+    def plot1_traces(self, key=None):
+        """Plot traces, reconstructed traces, and reconstruction errors as heatmaps"""
+        key = get_primary_key(table=self, key=key)
+
+        stim_names = (self.params_table & key).fetch1('stim_names')
+        traces, traces_reconstructed = (self & key).fetch1('traces', 'traces_reconstructed')
+
+        fig, axs = plt.subplots(len(traces), 3, sharex='all', sharey='all', figsize=(12, 6))
+
+        for ax_row, traces_i, reconstructed_i, stim_i in zip(axs, traces, traces_reconstructed, stim_names.split('_')):
+            vabsmax = np.maximum(np.max(np.abs(traces_i)), np.max(np.abs(reconstructed_i)))
+            ax_row[0].set_ylabel(stim_i)
+            for ax, data_i, title_i in zip(ax_row,
+                                           [traces_i, reconstructed_i, reconstructed_i - traces_i],
+                                           ["Traces", "Reconstruction", "Error(R-T)"]):
+                ax.set_title(title_i)
+                im = ax.imshow(data_i, aspect='auto', cmap='coolwarm', interpolation='none', vmin=-vabsmax,
+                               vmax=vabsmax)
+                plt.colorbar(im, ax=ax)
+
         plt.show()
