@@ -6,6 +6,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy import signal
 
+from djimaging.utils.trace_utils import get_mean_dt
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.filter_utils import LowPassFilter
 from djimaging.utils.plot_utils import plot_trace_and_trigger
@@ -102,11 +103,27 @@ def subtract_baseline_trace(trace, trace_times, standardize, stim_start):
     return trace
 
 
-def process_trace(trace_times, trace, poly_order, window_len_seconds, fs,
+def check_stim_start(stim_start, trace_times):
+    # heuristic to find out whether triggers are in time base or in frame base
+    if stim_start > 1000:
+        print("Converting triggers from frame base to time base")
+        stim_start /= 500
+
+    if not np.any(trace_times < stim_start):
+        raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
+
+    return stim_start
+
+
+def process_trace(trace_times, trace, poly_order, window_len_seconds,
                   subtract_baseline: bool, standardize: bool, non_negative: bool, stim_start: float = None,
                   f_cutoff: float = None, fs_resample: float = None, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3)):
     """Detrend and preprocess trace"""
     trace = np.asarray(trace).copy()
+    dt, is_consistent = get_mean_dt(tracetime=trace_times, rtol=0.01, raise_error=False)
+    if not is_consistent:
+        warnings.warn('Sampling rate varies')
+    fs = 1. / dt
 
     trace = drop_left_and_right(trace, drop_nmin_lr=drop_nmin_lr, drop_nmax_lr=drop_nmax_lr, inplace=False)
 
@@ -116,14 +133,7 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds, fs,
     trace, smoothed_trace = detrend_trace(trace, window_len_seconds, fs, poly_order)
 
     if stim_start is not None:
-
-        # heuristic to find out whether triggers are in time base or in frame base
-        if stim_start > 1000:
-            print("Converting triggers from frame base to time base")
-            stim_start /= 500
-
-        if not np.any(trace_times < stim_start):
-            raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
+        stim_start = check_stim_start(stim_start=stim_start, trace_times=trace_times)
 
     if non_negative:
         trace = non_negative_trace(trace, trace_times, standardize, stim_start)
@@ -219,28 +229,22 @@ class PreprocessTracesTemplate(dj.Computed):
                 'window_length', 'poly_order', 'subtract_baseline', 'non_negative', 'standardize',
                 'f_cutoff', 'fs_resample')
 
-        fs = (self.presentation_table().ScanInfo() & key).fetch1('scan_frequency')
-
         assert not (non_negative and subtract_baseline), \
             "You are trying to populate with an invalid parameter set"
         assert (standardize == non_negative) or (standardize == subtract_baseline), \
             "You are trying to populate with an invalid parameter set"
 
-        trace_times = (self.traces_table() & key).fetch1('trace_times')
-        trace = (self.traces_table() & key).fetch1('trace')
+        trace_times, trace = (self.traces_table() & key).fetch1('trace_times', 'trace')
         stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
 
-        try:
-            trace_times, preprocess_trace, smoothed_trace = process_trace(
-                trace_times=trace_times, trace=trace, stim_start=stim_start,
-                poly_order=poly_order, window_len_seconds=window_len_seconds,
-                fs=fs, f_cutoff=f_cutoff, fs_resample=fs_resample,
-                subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative)
+        preprocess_trace_times, preprocess_trace, smoothed_trace = process_trace(
+            trace_times=trace_times, trace=trace, stim_start=stim_start,
+            poly_order=poly_order, window_len_seconds=window_len_seconds,
+            f_cutoff=f_cutoff, fs_resample=fs_resample,
+            subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative)
 
-            self.insert1(dict(key, preprocess_trace_times=trace_times,
-                              preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
-        except ValueError as e:
-            warnings.warn(f"{e}\nfor key\n{key}")
+        self.insert1(dict(key, preprocess_trace_times=preprocess_trace_times,
+                          preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
 
     def plot1(self, key=None):
         key = get_primary_key(self, key)

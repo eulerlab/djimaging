@@ -5,6 +5,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy import signal
 
+from djimaging.utils.trace_utils import get_mean_dt
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 
@@ -104,13 +105,11 @@ class ChirpFeaturesTemplate(dj.Computed):
             pass
 
     def make(self, key):
-        # TODO: Should this depend on pres? Triggertimes are also in snippets and sf can be derived from times
         snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
         trigger_times = (self.presentation_table() & key).fetch1('triggertimes')
-        sf = (self.presentation_table().ScanInfo() & key).fetch1('scan_frequency')
 
-        on_off_index = compute_on_off_index(snippets, snippets_times, trigger_times, sf)
-        transience_index = compute_transience_index(snippets, snippets_times, trigger_times, sf)
+        on_off_index = compute_on_off_index(snippets, snippets_times, trigger_times)
+        transience_index = compute_transience_index(snippets, snippets_times, trigger_times)
 
         self.insert1(dict(key, on_off_index=on_off_index, transience_index=transience_index))
 
@@ -149,9 +148,13 @@ class ChirpFeaturesTemplate(dj.Computed):
         plt.show()
 
 
-def compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step_duration=1):
+def compute_on_off_index(snippets, snippets_times, trigger_times, light_step_duration=1):
+    dts = [get_mean_dt(tracetime=snippets_times_i, raise_error=True)[0]
+           for snippets_times_i in snippets_times.T]
+    fs = 1. / np.mean(dts)
+
     start_trigs = trigger_times[::2]
-    light_step_frames = int(light_step_duration * sf)
+    light_step_frames = int(light_step_duration * fs)
 
     on_responses = np.zeros((light_step_frames, snippets.shape[1]))
     off_responses = np.zeros((light_step_frames, snippets.shape[1]))
@@ -189,8 +192,12 @@ def compute_on_off_index(snippets, snippets_times, trigger_times, sf, light_step
     return on_off_index
 
 
-def compute_transience_index(snippets, snippets_times, trigger_times, sf, upsam_fre=500):
-    upsampling_factor = int(snippets.shape[0] / sf * upsam_fre)
+def compute_transience_index(snippets, snippets_times, trigger_times, upsam_fre=500):
+    dts = [get_mean_dt(tracetime=snippets_times_i, raise_error=True)[0]
+           for snippets_times_i in snippets_times.T]
+    fs = 1. / np.mean(dts)
+
+    upsampling_factor = int(snippets.shape[0] / fs * upsam_fre)
 
     resampled_snippets = np.zeros((upsampling_factor, snippets.shape[1]))
     resampled_snippets_times = np.zeros((upsampling_factor, snippets.shape[1]))
@@ -201,7 +208,6 @@ def compute_transience_index(snippets, snippets_times, trigger_times, sf, upsam_
         start_time = snippets_times[0, i]
         end_time = snippets_times[-1, i]
         resampled_snippets_times[:, i] = np.linspace(start_time, end_time, upsampling_factor)
-        # used this as interpolartion, signal.resample had edge effects when interpolaring the linear array
 
     start_trigs_local = trigger_times[::2]
 
