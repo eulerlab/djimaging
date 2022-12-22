@@ -89,8 +89,8 @@ class ClusteringParametersTemplate(dj.Lookup):
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
-def remove_clusters(cluster_idxs, min_count):
-    new_cluster_idxs = np.full(cluster_idxs.size, -1)
+def remove_clusters(cluster_idxs, min_count, invalid_value=-1):
+    new_cluster_idxs = np.full(cluster_idxs.size, invalid_value)
 
     new_cluster = 1
     for cluster, count in zip(*np.unique(cluster_idxs, return_counts=True)):
@@ -101,9 +101,13 @@ def remove_clusters(cluster_idxs, min_count):
     return new_cluster_idxs
 
 
-def sort_clusters(traces, cluster_idxs):
+def sort_clusters(traces, cluster_idxs, invalid_value=-1):
     """Sort clusters by correlation to the largest cluster"""
-    u_cidxs, counts = np.unique(cluster_idxs[cluster_idxs >= 0], return_counts=True)
+    u_cidxs, counts = np.unique(cluster_idxs[cluster_idxs != invalid_value], return_counts=True)
+
+    if u_cidxs.size <= 1:
+        return u_cidxs
+
     X_means = [np.mean(traces[cluster_idxs == cidx, :], axis=0) for cidx in u_cidxs]
     ccs = np.corrcoef(X_means)[np.argmax(counts)]
     sorted_u_cidxs = u_cidxs[np.argsort(ccs)[::-1]]
@@ -150,10 +154,10 @@ class ClusteringTemplate(dj.Computed):
             return
 
         cluster_idxs = cluster_features(X=np.hstack(features), kind=kind, params_dict=params_dict)
-        cluster_idxs = remove_clusters(cluster_idxs=cluster_idxs, min_count=min_count)
+        cluster_idxs = remove_clusters(cluster_idxs=cluster_idxs, min_count=min_count, invalid_value=-1)
 
         traces = self.features_table().fetch_traces(key=key)[0]
-        cluster_idxs = sort_clusters(traces=np.hstack(traces), cluster_idxs=cluster_idxs)
+        cluster_idxs = sort_clusters(traces=np.hstack(traces), cluster_idxs=cluster_idxs, invalid_value=-1)
 
         main_key = key.copy()
         main_key['clusters'] = cluster_idxs
@@ -204,7 +208,7 @@ class ClusteringTemplate(dj.Computed):
         fig.suptitle(key)
 
         for ax_col, stim_i, traces_i, times_i in zip(axs.T, stim_names, traces, times):
-            ax_col[0].set(title='Local chirp')
+            ax_col[0].set(title=stim_i)
             for row_i, (ax, cluster) in enumerate(zip(ax_col, unique_clusters)):
                 c = f'C{row_i}'
                 plot_mean_trace_and_std(

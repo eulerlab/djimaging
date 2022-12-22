@@ -76,20 +76,15 @@ class FieldTemplate(dj.Computed):
         self.__add_experiment_fields(key, only_new=False, verboselvl=0, suppress_errors=False)
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False):
-        """
-        Scan filesystem for new fields and add them to the database.
-        :param restrictions: Restrictions for new fields.
-        :param verboselvl: Defines level of output.
-        :param suppress_errors:
-        """
+        """Scan filesystem for new fields and add them to the database."""
         if restrictions is None:
             restrictions = dict()
 
         for row in (self.experiment_table() & restrictions):
-            key = dict(experimenter=row['experimenter'], date=row['date'], exp_num=row['exp_num'])
+            key = {k: v for k, v in row.items() if k in self.experiment_table.primary_key}
             self.__add_experiment_fields(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def __add_experiment_fields(self, key, only_new, verboselvl, suppress_errors):
+    def __add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
 
         header_path = (self.experiment_table() & key).fetch1('header_path')
         pre_data_dir = (self.userinfo_table() & key).fetch1("pre_data_dir")

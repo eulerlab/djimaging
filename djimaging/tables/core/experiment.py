@@ -48,8 +48,7 @@ class ExperimentTemplate(dj.Computed):
             restrictions = dict()
 
         for row in (self.userinfo_table() & restrictions):
-            key = dict()
-            key['experimenter'] = row['experimenter']
+            key = {k: v for k, v in row.items() if k in self.userinfo_table.primary_key}
 
             if verboselvl > 0:
                 print(f"Scanning for experimenter: {key['experimenter']}")
