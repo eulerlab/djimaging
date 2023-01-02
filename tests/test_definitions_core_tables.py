@@ -1,4 +1,5 @@
 from djimaging.tables.core import *
+from djimaging.tables.core import SnippetsTemplate
 
 from .utils import _test_definition
 

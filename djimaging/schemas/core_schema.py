@@ -1,6 +1,7 @@
 import datajoint as dj
 
 from djimaging.tables.core import *
+from djimaging.tables.core import SnippetsTemplate, AveragesTemplate
 
 schema = dj.Schema()
 

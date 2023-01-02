@@ -216,7 +216,7 @@ class FeaturesTemplate(dj.Computed):
             components = decomp_info['components']
             explained_variance_ratio = decomp_info['explained_variance_ratio']
             vabsmax = np.max(np.abs(components))
-            ax.set_title(np.around(np.asarray(explained_variance_ratio), 2))
+            ax.set_title(f"var_exp_tot={np.sum(explained_variance_ratio):.1%}")
             ax.imshow(components, aspect='auto', cmap='coolwarm', interpolation='none', vmin=-vabsmax, vmax=vabsmax)
         plt.show()
 
@@ -230,10 +230,13 @@ class FeaturesTemplate(dj.Computed):
         fig, axs = plt.subplots(len(traces), 3, sharex='all', sharey='all', figsize=(12, 6))
 
         for ax_row, traces_i, reconstructed_i, stim_i in zip(axs, traces, traces_reconstructed, stim_names.split('_')):
-            vabsmax = np.maximum(np.max(np.abs(traces_i)), np.max(np.abs(reconstructed_i)))
+            errors_i = reconstructed_i - traces_i
+            vabsmax = np.max([np.max(np.abs(traces_i)),
+                              np.max(np.abs(reconstructed_i)),
+                              np.max(np.abs(errors_i))])
             ax_row[0].set_ylabel(stim_i)
             for ax, data_i, title_i in zip(ax_row,
-                                           [traces_i, reconstructed_i, reconstructed_i - traces_i],
+                                           [traces_i, reconstructed_i, errors_i],
                                            ["Traces", "Reconstruction", "Error(R-T)"]):
                 ax.set_title(title_i)
                 im = ax.imshow(data_i, aspect='auto', cmap='coolwarm', interpolation='none', vmin=-vabsmax,

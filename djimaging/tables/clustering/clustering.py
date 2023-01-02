@@ -106,7 +106,7 @@ def sort_clusters(traces, cluster_idxs, invalid_value=-1):
     u_cidxs, counts = np.unique(cluster_idxs[cluster_idxs != invalid_value], return_counts=True)
 
     if u_cidxs.size <= 1:
-        return u_cidxs
+        return cluster_idxs
 
     X_means = [np.mean(traces[cluster_idxs == cidx, :], axis=0) for cidx in u_cidxs]
     ccs = np.corrcoef(X_means)[np.argmax(counts)]
@@ -115,6 +115,7 @@ def sort_clusters(traces, cluster_idxs, invalid_value=-1):
     sorted_cluster_idxs = np.full(cluster_idxs.size, -1)
     for new_cidx, cidx in zip(sorted_u_cidxs, u_cidxs):
         sorted_cluster_idxs[cluster_idxs == new_cidx] = cidx
+
     return sorted_cluster_idxs
 
 
@@ -145,6 +146,7 @@ class ClusteringTemplate(dj.Computed):
 
         kind, params_dict, min_count = (self.params_table & key).fetch1('kind', 'params_dict', 'min_count')
         features = (self.features_table & key).fetch1('features')
+        traces = self.features_table().fetch_traces(key=key)
 
         decomp_kind = (self.features_table.params_table & key).fetch1('kind')
 
@@ -155,9 +157,7 @@ class ClusteringTemplate(dj.Computed):
 
         cluster_idxs = cluster_features(X=np.hstack(features), kind=kind, params_dict=params_dict)
         cluster_idxs = remove_clusters(cluster_idxs=cluster_idxs, min_count=min_count, invalid_value=-1)
-
-        traces = self.features_table().fetch_traces(key=key)[0]
-        cluster_idxs = sort_clusters(traces=np.hstack(traces), cluster_idxs=cluster_idxs, invalid_value=-1)
+        cluster_idxs = sort_clusters(traces=np.hstack(traces[0]), cluster_idxs=cluster_idxs, invalid_value=-1)
 
         main_key = key.copy()
         main_key['clusters'] = cluster_idxs
