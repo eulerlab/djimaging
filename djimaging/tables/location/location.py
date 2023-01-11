@@ -213,7 +213,8 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def retinalfieldlocation_table(self): pass
+    def retinalfieldlocation_table(self):
+        pass
 
     _ventral_dorsal_key = 'ventral_dorsal_pos_um'
     _temporal_nasal_key = 'temporal_nasal_pos_um'

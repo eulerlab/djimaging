@@ -7,9 +7,9 @@ from scipy.signal import find_peaks
 from sklearn.decomposition import randomized_svd
 
 from djimaging.utils import math_utils
-from djimaging.utils.trace_utils import align_stim_to_trace, get_mean_dt, align_trace_to_stim
 from djimaging.utils.filter_utils import resample_trace, upsample_stim, lowpass_filter_trace
 from djimaging.utils.image_utils import resize_image
+from djimaging.utils.trace_utils import align_stim_to_trace, get_mean_dt, align_trace_to_stim
 
 
 def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,

@@ -356,8 +356,8 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         # Fetch selection parameters
         qi_thres_chirp, qi_thres_bar, cell_selection_constraint, condition = (
-            self.cell_filter_parameter_table() & key).fetch1(
-                'qi_thres_chirp', 'qi_thres_bar', 'cell_selection_constraint', 'condition')
+                self.cell_filter_parameter_table() & key).fetch1(
+            'qi_thres_chirp', 'qi_thres_bar', 'cell_selection_constraint', 'condition')
 
         # Define subkeys
         chirp_key = deepcopy(key)

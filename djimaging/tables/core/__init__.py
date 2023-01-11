@@ -1,10 +1,10 @@
-from .userinfo import UserInfoTemplate
+from .averages import AveragesTemplate
 from .experiment import ExperimentTemplate
 from .field import FieldTemplate
-from .roi import RoiTemplate
-from .stimulus import StimulusTemplate
-from .presentation import PresentationTemplate
-from .traces import TracesTemplate
 from .preprocesstraces import PreprocessTracesTemplate, PreprocessParamsTemplate
+from .presentation import PresentationTemplate
+from .roi import RoiTemplate
 from .snippets import SnippetsTemplate
-from .averages import AveragesTemplate
+from .stimulus import StimulusTemplate
+from .traces import TracesTemplate
+from .userinfo import UserInfoTemplate

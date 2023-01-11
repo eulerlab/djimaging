@@ -206,9 +206,9 @@ class FeaturesTemplate(dj.Computed):
 
         hsize = np.max([decomp_info['components'].shape[0] for decomp_info in decomp_infos])
 
-        fig, axs = plt.subplots(1, len(decomp_infos), sharex='all', sharey='all',
-                                figsize=(4 * len(decomp_infos), hsize * 0.2))
-
+        fig, axs = plt.subplots(1, len(decomp_infos), sharex='all',
+                                figsize=(4 * len(decomp_infos), hsize * 0.2), squeeze=False)
+        axs = axs.flat
         axs[0].set_ylabel('Components')
 
         fig.suptitle(f"{key!r}", y=1, va='bottom')
@@ -227,7 +227,7 @@ class FeaturesTemplate(dj.Computed):
         stim_names = (self.params_table & key).fetch1('stim_names')
         traces, traces_reconstructed = (self & key).fetch1('traces', 'traces_reconstructed')
 
-        fig, axs = plt.subplots(len(traces), 3, sharex='all', sharey='all', figsize=(12, 6))
+        fig, axs = plt.subplots(len(traces), 3, sharex='all', sharey='all', figsize=(12, 6), squeeze=False)
 
         for ax_row, traces_i, reconstructed_i, stim_i in zip(axs, traces, traces_reconstructed, stim_names.split('_')):
             errors_i = reconstructed_i - traces_i

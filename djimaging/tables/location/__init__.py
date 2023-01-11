@@ -1,0 +1,3 @@
+from .location import RetinalFieldLocationTemplate, RelativeFieldLocationTemplate, \
+    RetinalFieldLocationCatTemplate, OpticDiskTemplate
+from .location_from_table import RetinalFieldLocationFromTableTemplate, RetinalFieldLocationTableParamsTemplate

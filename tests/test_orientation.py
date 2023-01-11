@@ -2,7 +2,7 @@ import pickle as pkl
 
 import numpy as np
 
-from djimaging.tables.optional.orientation import compute_osdsindexes
+from djimaging.tables.response.orientation import compute_osdsindexes
 
 
 def load_test_data(cell_type):

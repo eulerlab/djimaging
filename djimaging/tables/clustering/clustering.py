@@ -1,10 +1,11 @@
 from abc import abstractmethod
-import numpy as np
+
 import datajoint as dj
+import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.user.alpha.plot.plot_traces import plot_mean_trace_and_std
 from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.plot_utils import plot_mean_trace_and_std
 
 
 def cluster_features(X, kind: str, params_dict: dict) -> np.ndarray:
@@ -43,7 +44,23 @@ def cluster_hierarchical_cc(X, n_clusters=None, distance_threshold=0.9, linkage=
     return cluster_idxs
 
 
-def cluster_gmm(X, ncomp_max=6, cv=10, cv_metric='bic'):
+def plot_grid_search_results(grid_search):
+    import pandas as pd
+    import seaborn as sns
+
+    rows = []
+    for param, score in zip(grid_search.cv_results_['params'], grid_search.cv_results_['mean_test_score']):
+        rows.append(dict(**param, score=score))
+    df = pd.DataFrame(rows)
+
+    if df.n_components.nunique() > 1:
+        sns.lineplot(data=df, x='n_components', y='score', hue='covariance_type', markers=True)
+    else:
+        sns.scatterplot(data=df, x='n_components', y='score', hue='covariance_type')
+    plt.show()
+
+
+def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic', return_model=False, plot_results=True):
     from sklearn.mixture import GaussianMixture
     from sklearn.model_selection import GridSearchCV
 
@@ -57,16 +74,26 @@ def cluster_gmm(X, ncomp_max=6, cv=10, cv_metric='bic'):
         return -estimator.bic(X_)
 
     param_grid = {
-        "n_components": range(1, ncomp_max + 1),
+        "n_components": range(ncomp_min, ncomp_max + 1),
         "covariance_type": ["spherical", "tied", "diag", "full"],
     }
 
-    grid_search = GridSearchCV(GaussianMixture(), cv=cv, param_grid=param_grid,
-                               scoring=gmm_bic_score if cv_metric == 'bic' else gmm_aic_score, verbose=1)
-    grid_search.fit(X)
-    cluster_idxs = grid_search.best_estimator_.fit_predict(X)
+    if cv == 1:
+        cv = [(np.arange(X.shape[0]), np.arange(X.shape[0]))]  # Use train set as test set
 
-    return cluster_idxs
+    grid_search = GridSearchCV(GaussianMixture(), cv=cv, param_grid=param_grid, n_jobs=10,
+                               scoring=gmm_bic_score if cv_metric == 'bic' else gmm_aic_score, verbose=2)
+    grid_search.fit(X)
+
+    if plot_results:
+        plot_grid_search_results(grid_search)
+
+    if return_model:
+        return grid_search
+    else:
+        cluster_idxs = grid_search.best_estimator_.fit_predict(X)
+
+        return cluster_idxs
 
 
 class ClusteringParametersTemplate(dj.Lookup):
@@ -146,7 +173,6 @@ class ClusteringTemplate(dj.Computed):
 
         kind, params_dict, min_count = (self.params_table & key).fetch1('kind', 'params_dict', 'min_count')
         features = (self.features_table & key).fetch1('features')
-        traces = self.features_table().fetch_traces(key=key)
 
         decomp_kind = (self.features_table.params_table & key).fetch1('kind')
 
@@ -157,7 +183,9 @@ class ClusteringTemplate(dj.Computed):
 
         cluster_idxs = cluster_features(X=np.hstack(features), kind=kind, params_dict=params_dict)
         cluster_idxs = remove_clusters(cluster_idxs=cluster_idxs, min_count=min_count, invalid_value=-1)
-        cluster_idxs = sort_clusters(traces=np.hstack(traces[0]), cluster_idxs=cluster_idxs, invalid_value=-1)
+
+        traces = (self.features_table() & key).fetch1('traces')
+        cluster_idxs = sort_clusters(traces=np.hstack(traces), cluster_idxs=cluster_idxs, invalid_value=-1)
 
         main_key = key.copy()
         main_key['clusters'] = cluster_idxs
@@ -193,27 +221,59 @@ class ClusteringTemplate(dj.Computed):
         plt.show()
 
     def plot1_averages(self, key=None):
+        self.plot1_traces(key=key, kind='averages')
+
+    def plot1_heatmaps(self, key=None):
+        self.plot1_traces(key=key, kind='traces')
+
+    def plot1_traces(self, key=None, kind='traces'):
         key = get_primary_key(table=self, key=key)
 
-        traces, times, roi_keys, stim_names = self.features_table().fetch_traces(key=key)
+        stim_names = (self.features_table.params_table & key).fetch1('stim_names').split('_')
+        traces = (self.features_table & key).fetch1('traces')
         clusters = (self & key).fetch1('clusters')
 
-        unique_clusters = np.unique(clusters)
+        unique_clusters, cluster_counts = np.unique(clusters, return_counts=True)
 
         n_rows = np.minimum(unique_clusters.size, 15)
         n_cols = len(traces)
 
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 2, 0.8 * (1 + n_rows)),
-                                sharex='all', sharey='all', squeeze=False)
-        fig.suptitle(key)
+        if kind == 'averages':
+            fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 2, 0.8 * (1 + n_rows)), squeeze=False,
+                                    sharex='col', sharey='row')
+        else:
+            fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, 2 * (1 + n_rows)), squeeze=False,
+                                    sharex='col', sharey='row', gridspec_kw=dict(height_ratios=cluster_counts))
 
-        for ax_col, stim_i, traces_i, times_i in zip(axs.T, stim_names, traces, times):
-            ax_col[0].set(title=stim_i)
+        fig.suptitle(key, y=1, va='bottom')
+
+        for ax_col, stim_i, traces_i in zip(axs.T, stim_names, traces):
+            ax_col[0].set(title=f"stim={stim_i}")
             for row_i, (ax, cluster) in enumerate(zip(ax_col, unique_clusters)):
-                c = f'C{row_i}'
-                plot_mean_trace_and_std(
-                    ax=ax, time=np.mean(times_i, axis=0), traces=traces_i[clusters == cluster], color=c)
-                ax.set(ylabel=f"{int(cluster)}\n{np.sum(clusters == cluster)}")
+                c_traces_i = traces_i[clusters == cluster, :]
+
+                if kind == 'averages':
+                    self._plot_cluster_averages(ax, traces=c_traces_i, c=f'C{row_i}')
+                else:
+                    self._plot_cluster_trace_heatmaps(ax, traces=c_traces_i, vabsmax=np.max(np.abs(traces_i)))
+
+                ax.set(ylabel=f"cluster={int(cluster)}\nn={c_traces_i.shape[0]}")
 
         plt.tight_layout()
         plt.show()
+
+    @staticmethod
+    def _plot_cluster_averages(ax, traces, c=None):
+        plot_mean_trace_and_std(
+            ax=ax, time=np.arange(traces.shape[1]), traces=traces, color=c)
+
+    @staticmethod
+    def _plot_cluster_trace_heatmaps(ax, traces, vabsmax=None):
+        mean_trace = np.mean(traces, axis=0)
+        corr_mean = np.array([np.corrcoef(trace, mean_trace)[0, 1] for trace in traces])
+        sort_idx = np.argsort(corr_mean)
+
+        im = ax.imshow(traces[sort_idx, :], aspect='auto', cmap='coolwarm', interpolation='none',
+                       vmin=-vabsmax, vmax=vabsmax, origin='lower')
+
+        plt.colorbar(im, ax=ax)

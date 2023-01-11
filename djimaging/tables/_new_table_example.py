@@ -26,7 +26,8 @@ class ExampleTableTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def field_table(self): pass  # A place-holder table, must be replaced in schema with real table
+    def field_table(self):
+        pass  # A place-holder table, must be replaced in schema with real table
 
     def make(self, key):
         # Fetch something. Use fetch1

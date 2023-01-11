@@ -6,10 +6,10 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy import signal
 
-from djimaging.utils.trace_utils import get_mean_dt
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.filter_utils import lowpass_filter_trace
 from djimaging.utils.plot_utils import plot_trace_and_trigger
+from djimaging.utils.trace_utils import get_mean_dt
 
 
 def drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace: bool = False):

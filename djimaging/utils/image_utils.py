@@ -1,5 +1,5 @@
-from skimage.transform import rotate, resize
 import numpy as np
+from skimage.transform import rotate, resize
 
 
 def resize_image(image, output_shape, order=0):

@@ -4,10 +4,9 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.optional import ChirpQITemplate
 from djimaging.tables.receptivefield.rf_utils import get_mean_dt
+from djimaging.tables.response import ChirpQITemplate
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.math_utils import normalize_soft_zero_one
 
 
 class SineSpotQITemplate(ChirpQITemplate):

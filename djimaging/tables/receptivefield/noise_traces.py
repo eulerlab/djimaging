@@ -88,9 +88,9 @@ class DNoiseTraceTemplate(dj.Computed):
         stimtime = (self.presentation_table() & key).fetch1('triggertimes')
         trace, tracetime = (self.traces_table() & key).fetch1('preprocess_trace', 'preprocess_trace_times')
         fupsample_trace, fupsample_stim, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s, ref_time = (
-            self.params_table() & key).fetch1(
-                "fupsample_trace", "fupsample_stim", "fit_kind", "lowpass_cutoff",
-                "pre_blur_sigma_s", "post_blur_sigma_s", "ref_time")
+                self.params_table() & key).fetch1(
+            "fupsample_trace", "fupsample_stim", "fit_kind", "lowpass_cutoff",
+            "pre_blur_sigma_s", "post_blur_sigma_s", "ref_time")
 
         stim, trace, dt, t0 = prepare_data(
             trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,

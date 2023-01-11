@@ -5,9 +5,9 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy import signal
 
-from djimaging.utils.trace_utils import get_mean_dt
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
+from djimaging.utils.trace_utils import get_mean_dt
 
 
 class ChirpQITemplate(dj.Computed):
