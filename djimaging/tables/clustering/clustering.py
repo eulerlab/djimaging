@@ -8,31 +8,31 @@ from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_mean_trace_and_std
 
 
-def cluster_features(X, kind: str, params_dict: dict) -> np.ndarray:
+def cluster_features(X, kind: str, params_dict: dict):
     assert X.ndim == 2, f"{X.shape}"
 
     if kind == 'hierarchical_ward':
-        cluster_idxs = cluster_hierarchical_ward(X, **params_dict)
+        model, cluster_idxs = cluster_hierarchical_ward(X, **params_dict)
     elif kind == 'hierarchical_correlation':
-        cluster_idxs = cluster_hierarchical_cc(X, **params_dict)
+        model, cluster_idxs = cluster_hierarchical_cc(X, **params_dict)
     elif kind == 'gmm':
-        cluster_idxs = cluster_gmm(X, **params_dict)
+        model, cluster_idxs = cluster_gmm(X, **params_dict)
     else:
         raise NotImplementedError
 
-    return cluster_idxs
+    return model, cluster_idxs
 
 
-def cluster_hierarchical_ward(X, n_clusters=None, distance_threshold=75) -> np.ndarray:
+def cluster_hierarchical_ward(X, n_clusters=None, distance_threshold=75):
     from sklearn.cluster import AgglomerativeClustering
     model = AgglomerativeClustering(n_clusters=n_clusters, metric="euclidean", linkage='ward',
                                     distance_threshold=distance_threshold)
     model = model.fit(X)
     cluster_idxs = np.array(model.labels_).astype(float)
-    return cluster_idxs
+    return model, cluster_idxs
 
 
-def cluster_hierarchical_cc(X, n_clusters=None, distance_threshold=0.9, linkage='complete') -> np.ndarray:
+def cluster_hierarchical_cc(X, n_clusters=None, distance_threshold=0.9, linkage='complete'):
     from sklearn.cluster import AgglomerativeClustering
     from sklearn.metrics import pairwise_distances
 
@@ -41,7 +41,7 @@ def cluster_hierarchical_cc(X, n_clusters=None, distance_threshold=0.9, linkage=
                                     distance_threshold=distance_threshold)
     model = model.fit(cc_dists)
     cluster_idxs = np.array(model.labels_).astype(float)
-    return cluster_idxs
+    return model, cluster_idxs
 
 
 def plot_grid_search_results(grid_search):
@@ -60,18 +60,29 @@ def plot_grid_search_results(grid_search):
     plt.show()
 
 
-def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic', return_model=False, plot_results=True):
+def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic', plot_results=True):
     from sklearn.mixture import GaussianMixture
     from sklearn.model_selection import GridSearchCV
 
     cv_metric = cv_metric.lower()
-    assert cv_metric in ['bic', 'aic']
 
     def gmm_bic_score(estimator, X_):
         return -estimator.bic(X_)
 
     def gmm_aic_score(estimator, X_):
         return -estimator.bic(X_)
+
+    def gmm_loglikelihood_score(estimator, X_):
+        return estimator.score(X_)
+
+    if cv_metric == 'bic':
+        scoring = gmm_bic_score
+    elif cv_metric == 'aic':
+        scoring = gmm_aic_score
+    elif cv_metric in ['loglikelihood', 'likelihood']:
+        scoring = gmm_loglikelihood_score
+    else:
+        raise NotImplementedError(cv_metric)
 
     param_grid = {
         "n_components": range(ncomp_min, ncomp_max + 1),
@@ -81,19 +92,14 @@ def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic', return_mode
     if cv == 1:
         cv = [(np.arange(X.shape[0]), np.arange(X.shape[0]))]  # Use train set as test set
 
-    grid_search = GridSearchCV(GaussianMixture(), cv=cv, param_grid=param_grid, n_jobs=10,
-                               scoring=gmm_bic_score if cv_metric == 'bic' else gmm_aic_score, verbose=2)
-    grid_search.fit(X)
+    model = GridSearchCV(GaussianMixture(), cv=cv, param_grid=param_grid, n_jobs=10, scoring=scoring, verbose=2)
+    model.fit(X)
 
     if plot_results:
-        plot_grid_search_results(grid_search)
+        plot_grid_search_results(model)
 
-    if return_model:
-        return grid_search
-    else:
-        cluster_idxs = grid_search.best_estimator_.fit_predict(X)
-
-        return cluster_idxs
+    cluster_idxs = model.best_estimator_.fit_predict(X)
+    return model, cluster_idxs
 
 
 class ClusteringParametersTemplate(dj.Lookup):
@@ -181,7 +187,7 @@ class ClusteringTemplate(dj.Computed):
         elif kind == 'hierarchical_correlation' and not decomp_kind == 'none':
             return
 
-        cluster_idxs = cluster_features(X=np.hstack(features), kind=kind, params_dict=params_dict)
+        _, cluster_idxs = cluster_features(X=np.hstack(features), kind=kind, params_dict=params_dict)
         cluster_idxs = remove_clusters(cluster_idxs=cluster_idxs, min_count=min_count, invalid_value=-1)
 
         traces = (self.features_table() & key).fetch1('traces')
