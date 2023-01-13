@@ -20,14 +20,17 @@ def align_stim_to_trace(stim, stimtime, trace, tracetime):
     return aligned_stim, aligned_trace, dt, t0
 
 
-def get_mean_dt(tracetime, rtol=0.1, raise_error=False) -> (float, bool):
+def get_mean_dt(tracetime, rtol=0.01, rtol_max=0.1, raise_error=False) -> (float, bool):
     dts = np.diff(tracetime)
     dt = np.mean(dts)
-    dt_max_diff = np.max(dts) - np.min(dts)
-    is_consistent = (dt_max_diff / dt) <= rtol
+    is_consistent_max = ((np.max(dts) - np.min(dts)) / dt) <= rtol_max
+    is_consistent_std = np.std(dts) / dt <= rtol
+
+    is_consistent = is_consistent_max and is_consistent_std
 
     if raise_error and not is_consistent:
-        raise ValueError(f"Inconsistent dts. dt_mean={dt:.3g}, dt_max={np.max(dts):.3g}, dt_min={np.min(dts):.3g}")
+        raise ValueError(f"Inconsistent dts. dt_mean={dt:.3g}, but " +
+                         f"dt_max={np.max(dts):.3g}, dt_min={np.min(dts):.3g}, dt_std={np.std(dts):.3g}")
 
     return dt, is_consistent
 

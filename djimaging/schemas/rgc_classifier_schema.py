@@ -1,29 +1,30 @@
 from djimaging.schemas.advanced_schema import *
+from djimaging.tables import optional
 
 
 @schema
-class CellFilterParams(CellFilterParamsTemplate):
+class CellFilterParams(optional.CellFilterParamsTemplate):
     pass
 
 
 @schema
-class ClassifierTrainingData(ClassifierTrainingDataTemplate):
+class ClassifierTrainingData(optional.ClassifierTrainingDataTemplate):
     pass
 
 
 @schema
-class ClassifierMethod(ClassifierMethodTemplate):
+class ClassifierMethod(optional.ClassifierMethodTemplate):
     classifier_training_data_table = ClassifierTrainingData
 
 
 @schema
-class Classifier(ClassifierTemplate):
+class Classifier(optional.ClassifierTemplate):
     classifier_training_data_table = ClassifierTrainingData
     classifier_method_table = ClassifierMethod
 
 
 @schema
-class CelltypeAssignment(CelltypeAssignmentTemplate):
+class CelltypeAssignment(optional.CelltypeAssignmentTemplate):
     field_table = Field
     classifier_training_data_table = ClassifierTrainingData
     cell_filter_parameter_table = CellFilterParams

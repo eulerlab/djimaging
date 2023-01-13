@@ -152,7 +152,20 @@ class PresentationTemplate(dj.Computed):
             """
             return definition
 
+    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False):
+        """Scan filesystem for new fields and add them to the database."""
+        if restrictions is None:
+            restrictions = dict()
+
+        for row in ((self.field_table * self.stimulus_table) & restrictions):
+            key = {k: v for k, v in row.items()
+                   if k in self.field_table.primary_key or k in self.stimulus_table.primary_key}
+            self.__add_field_presentations(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
+
     def make(self, key):
+        self.__add_field_presentations(key, only_new=False, verboselvl=0, suppress_errors=False)
+
+    def __add_field_presentations(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
         field = (self.field_table() & key).fetch1("field")
         stim_loc, field_loc, condition_loc = (self.userinfo_table() & key).fetch1(
             "stimulus_loc", "field_loc", "condition_loc")
@@ -168,19 +181,38 @@ class PresentationTemplate(dj.Computed):
         for h5_file in h5_files:
             split_string = h5_file[:h5_file.find(".h5")].split("_")
             stim = split_string[stim_loc] if stim_loc < len(split_string) else 'nostim'
+
+            if (stim == 'nostim') or (len(stim) == 0) or (stim.lower() not in stim_alias):
+                continue
+
             condition = split_string[condition_loc] if condition_loc < len(split_string) else 'control'
 
-            primary_key = deepcopy(key)
-            primary_key["condition"] = condition
+            new_key = deepcopy(key)
+            new_key["condition"] = condition
 
-            if stim.lower() in stim_alias:
-                self.__add_presentation(
-                    key=primary_key, filepath=os.path.join(pre_data_path, h5_file))
+            for k in self.primary_key:
+                assert k in new_key, f'Did not find k={k} in new_key.'
 
-    def __add_presentation(self, key, filepath):
+            exists = len((self & new_key).fetch()) > 0
+            if only_new and exists:
+                if verboselvl > 1:
+                    print(f"\tSkipping presentation for `{h5_file}`, which is already present")
+                continue
 
+            if verboselvl > 0:
+                print(f"\tAdding presentation for `{h5_file}`.")
+
+            try:
+                self.__add_presentation(key=new_key, filepath=os.path.join(pre_data_path, h5_file))
+            except Exception as e:
+                if suppress_errors:
+                    print("Suppressed Error:", e, '\n\tfor key:', key)
+                else:
+                    print(f"Error for key: {key}")
+                    raise e
+
+    def __add_presentation(self, key, filepath: str):
         triggertimes, triggervalues, ch0_stack, ch1_stack, wparams = get_triggers_and_data(filepath)
-
         isrepeated, ntrigger_rep = (self.stimulus_table() & key).fetch1("isrepeated", "ntrigger_rep")
 
         if isrepeated == 0:
@@ -213,8 +245,8 @@ class PresentationTemplate(dj.Computed):
         for k in remove_list:
             scaninfo_key.pop(k, None)
 
-        self.insert1(pres_key)
-        (self.ScanInfo() & key).insert1(scaninfo_key)
+        self.insert1(pres_key, allow_direct_insert=True)
+        (self.ScanInfo() & key).insert1(scaninfo_key, allow_direct_insert=True)
 
     def plot1(self, key=None, figsize=(16, 4)):
         key = get_primary_key(table=self, key=key)

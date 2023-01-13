@@ -77,6 +77,14 @@ def plot_field_and_traces(ch0_average, ch1_average, roi_mask, title='', figsize=
     plt.tight_layout()
 
 
+def plot_traces(time, traces, ax=None):
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 2))
+
+    for trace in traces:
+        ax.plot(time, trace, alpha=np.maximum(1. / len(traces), 0.3))
+
+
 def plot_trace_and_trigger(time, trace, triggertimes, trace_norm=None, title='', ax=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(10, 2))
@@ -89,16 +97,13 @@ def plot_trace_and_trigger(time, trace, triggertimes, trace_norm=None, title='',
     ax.set(title=title)
     ax.plot(time, trace)
     ax.set(xlabel='time', ylabel='trace')
-    ax.vlines(triggertimes, np.min(trace) - 0.1 * (np.max(trace) - np.min(trace)), np.min(trace),
-              color='r', label='trigger')
+    ax.vlines(triggertimes, np.min(trace), np.max(trace), color='r', label='trigger', zorder=-2)
     ax.legend(loc='upper right')
 
     if trace_norm is not None:
         tax = ax.twinx()
         tax.plot(time, trace_norm, ':')
-        tax.vlines(triggertimes,
-                   np.min(trace_norm) - 0.1 * (np.max(trace_norm) - np.min(trace_norm)), np.min(trace_norm),
-                   color='r', label='trigger', ls=':')
+        tax.vlines(triggertimes, np.min(trace_norm), np.max(trace_norm), color='r', label='trigger', ls=':', zorder=-1)
         tax.set(ylabel='normalized')
 
     return ax
@@ -158,3 +163,16 @@ def plot_df_cols_as_histograms(df):
     for ax, col in zip(axs, df.columns):
         df.hist(column=col, ax=ax)
     return axs
+
+
+def plot_mean_trace_and_std(ax, time, traces, label=None, color='k', color2='gray', lw=0.8, downsample_factor=1):
+    """Plot mean and std of trace"""
+
+    trace_mean = np.mean(traces, axis=0)
+    trace_std = np.std(traces, axis=0)
+
+    idxs = np.arange(0, time.size, downsample_factor)
+
+    ax.plot(time[idxs], trace_mean[idxs], c=color, label=label, zorder=2, lw=lw, clip_on=False)
+    ax.fill_between(time[idxs], trace_mean[idxs] + trace_std[idxs], trace_mean[idxs] - trace_std[idxs], alpha=0.7,
+                    color=color2, lw=0, clip_on=False)

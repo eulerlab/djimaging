@@ -6,13 +6,13 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy import signal
 
-from djimaging.utils.trace_utils import get_mean_dt
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.filter_utils import LowPassFilter
+from djimaging.utils.filter_utils import lowpass_filter_trace
 from djimaging.utils.plot_utils import plot_trace_and_trigger
+from djimaging.utils.trace_utils import get_mean_dt
 
 
-def drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace=False):
+def drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace: bool = False):
     """Drop left and right most values if they are out of limits of the rest of the trace.
     This is necessary because the first few and last few points may be affected by artifacts.
     This is relatively conservative.
@@ -61,46 +61,61 @@ def detrend_trace(trace, window_len_seconds, fs, poly_order):
         window_len_frames -= 1
 
     window_len_frames = int(window_len_frames)
-
-    if len(trace) >= window_len_frames:
-        smoothed_trace = signal.savgol_filter(
-            trace, window_length=window_len_frames, polyorder=poly_order, mode='interp')
-    else:
-        smoothed_trace = signal.savgol_filter(
-            trace, window_length=window_len_frames, polyorder=poly_order, mode='nearest')
+    smoothed_trace = signal.savgol_filter(
+        trace, window_length=window_len_frames, polyorder=poly_order,
+        mode='interp' if len(trace) >= window_len_frames else 'nearest')
 
     detrended_trace = trace - smoothed_trace
 
     return detrended_trace, smoothed_trace
 
 
-def non_negative_trace(trace, trace_times, standardize, stim_start):
-    """Make trace positive, remove lowest 2.5 percentile (and standardize by STD of baseline)"""
+def extract_baseline(trace, trace_times, stim_start: float):
+    """Compute baseline for trace"""
 
-    clip_value = np.percentile(trace, q=2.5)
-    trace[trace < clip_value] = clip_value
-    trace = trace - clip_value
+    # heuristic to find out whether triggers are in time base or in frame base
+    if stim_start > 1000:
+        print("Converting triggers from frame base to time base")
+        stim_start /= 500
 
-    if standardize:
-        # find last frame recorded before stimulus started
-        baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
-        baseline = trace[:baseline_end]
-        trace = trace / np.std(baseline)
-
-    return trace
-
-
-def subtract_baseline_trace(trace, trace_times, standardize, stim_start):
-    """Subtract baseline of trace (and standardize by STD of baseline)"""
+    if not np.any(trace_times < stim_start):
+        raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
 
     baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
     baseline = trace[:baseline_end]
-    trace = trace - np.median(baseline)
+    return baseline
 
-    if standardize:
-        trace = trace / np.std(baseline)
+
+def non_negative_trace(trace, inplace: bool = False):
+    """Make trace positive, remove lowest 2.5 percentile (and standardize by STD of baseline)"""
+    if not inplace:
+        trace = trace.copy()
+
+    clip_value = np.percentile(trace, q=2.5)
+    trace[trace < clip_value] = clip_value
+    trace -= clip_value
 
     return trace
+
+
+def subtract_baseline_trace(trace, trace_times, stim_start: float, inplace: bool = False):
+    """Subtract baseline of trace (and standardize by STD of baseline)"""
+    if not inplace:
+        trace = trace.copy()
+
+    baseline = extract_baseline(trace, trace_times, stim_start)
+    trace -= np.median(baseline)
+
+    return trace
+
+
+def resample_trace(trace, trace_times, fs_resample: float):
+    trace_times_resampled = np.arange(
+        trace_times[0], np.nextafter(trace_times[-1], trace_times[-1] + fs_resample), 1. / fs_resample)
+
+    trace_resampled = np.interp(trace_times_resampled, trace_times, trace)
+
+    return trace_resampled, trace_times_resampled
 
 
 def check_stim_start(stim_start, trace_times):
@@ -120,15 +135,15 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds,
                   f_cutoff: float = None, fs_resample: float = None, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3)):
     """Detrend and preprocess trace"""
     trace = np.asarray(trace).copy()
-    dt, is_consistent = get_mean_dt(tracetime=trace_times, rtol=0.01, raise_error=False)
+    dt, is_consistent = get_mean_dt(tracetime=trace_times, raise_error=False)
     if not is_consistent:
         warnings.warn('Sampling rate varies')
     fs = 1. / dt
 
-    trace = drop_left_and_right(trace, drop_nmin_lr=drop_nmin_lr, drop_nmax_lr=drop_nmax_lr, inplace=False)
+    trace = drop_left_and_right(trace, drop_nmin_lr=drop_nmin_lr, drop_nmax_lr=drop_nmax_lr, inplace=True)
 
     if (f_cutoff is not None) and (f_cutoff > 0):
-        trace = LowPassFilter(fs=fs, cutoff=f_cutoff, order=6, direction='ff').filter_data(trace)
+        trace = lowpass_filter_trace(trace=trace, fs=fs, f_cutoff=f_cutoff)
 
     trace, smoothed_trace = detrend_trace(trace, window_len_seconds, fs, poly_order)
 
@@ -136,16 +151,16 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds,
         stim_start = check_stim_start(stim_start=stim_start, trace_times=trace_times)
 
     if non_negative:
-        trace = non_negative_trace(trace, trace_times, standardize, stim_start)
+        trace = non_negative_trace(trace, inplace=True)
     elif subtract_baseline:
-        trace = subtract_baseline_trace(trace, trace_times, standardize, stim_start)
+        trace = subtract_baseline_trace(trace, trace_times, stim_start, inplace=True)
+
+    if standardize:
+        baseline = extract_baseline(trace, trace_times, stim_start)
+        trace /= np.std(baseline)
 
     if (fs_resample is not None) and (fs_resample > 0):
-        trace_times_resampled = np.arange(
-            trace_times[0], np.nextafter(trace_times[-1], trace_times[-1] + fs_resample), 1. / fs_resample)
-
-        trace = np.interp(trace_times_resampled, trace_times, trace)
-        trace_times = trace_times_resampled
+        trace, trace_times = resample_trace(trace, trace_times, fs_resample=fs_resample)
 
     return trace_times, trace, smoothed_trace
 
@@ -162,7 +177,7 @@ class PreprocessParamsTemplate(dj.Lookup):
         poly_order:          int       # order of polynomial for savgol filter
         non_negative:        tinyint unsigned
         subtract_baseline:   tinyint unsigned
-        standardize:         tinyint unsigned  # whether to standardize (divide by sd)
+        standardize:         tinyint unsigned  # whether to standardize (divide by sd of baseline)
         f_cutoff = 0 : float  # Cutoff frequency for low pass filter, only applied when > 0.
         fs_resample = 0 : float  # Resampling frequency, only applied when > 0.
         """

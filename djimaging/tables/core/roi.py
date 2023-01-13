@@ -43,12 +43,7 @@ class RoiTemplate(dj.Computed):
         if not np.any(roi_mask):
             return
 
-        field_key = dict(
-            experimenter=key["experimenter"],
-            date=key["date"],
-            exp_num=key["exp_num"],
-            field=key["field"],
-        )
+        field_key = {k: v for k, v in key.items() if k in self.field_table.primary_key}
 
         roi_idxs = extract_roi_idxs(roi_mask)
 

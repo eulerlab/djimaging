@@ -1,5 +1,5 @@
 from djimaging.schemas.advanced_schema import *
-from djimaging.tables import receptivefield
+from djimaging.tables import receptivefield, rf_glm
 
 
 @schema
@@ -16,17 +16,35 @@ class DNoiseTrace(receptivefield.DNoiseTraceTemplate):
 
 
 @schema
-class STAParams(receptivefield.STAParamsTemplate):
+class RFGLMParams(rf_glm.RFGLMParamsTemplate):
     pass
 
 
 @schema
-class STA(receptivefield.STATemplate):
+class RFGLM(rf_glm.RFGLMTemplate):
     noise_traces_table = DNoiseTrace
-    params_table = STAParams
+    params_table = RFGLMParams
+    preprocesstraces_table = PreprocessTraces
+    stimulus_table = Stimulus
+    presentation_table = Presentation
+    traces_table = Traces
 
-    class DataSet(receptivefield.STATemplate.DataSet):
-        pass
+
+@schema
+class RFGLMSingleModel(rf_glm.RFGLMSingleModelTemplate):
+    glm_table = RFGLM
+
+
+@schema
+class RFGLMQualityParams(rf_glm.RFGLMQualityParamsTemplate):
+    pass
+
+
+@schema
+class RFGLMQuality(rf_glm.RFGLMQualityTemplate):
+    glm_single_model_table = RFGLMSingleModel
+    glm_table = RFGLM
+    params_table = RFGLMQualityParams
 
 
 @schema
@@ -36,7 +54,7 @@ class SplitRFParams(receptivefield.SplitRFParamsTemplate):
 
 @schema
 class SplitRF(receptivefield.SplitRFTemplate):
-    rf_table = STA
+    rf_table = RFGLM
     split_rf_params_table = SplitRFParams
 
 

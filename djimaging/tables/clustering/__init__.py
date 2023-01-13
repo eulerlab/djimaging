@@ -1,0 +1,2 @@
+from .clustering import ClusteringParametersTemplate, ClusteringTemplate
+from .decomposition import FeaturesParamsTemplate, FeaturesTemplate

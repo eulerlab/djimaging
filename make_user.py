@@ -73,7 +73,7 @@ def copy_schema(djimaging_dir, user_dir, username):
 
             new_import = \
                 f"# Remove comments to import templates that listed in user/{username}/tables/__init__.py \n" + \
-                f"# from djimaging.user.{username}.tables import *"
+                f"# from djimaging.user.{username} import tables as user_tables"
 
             new_table = \
                 "\n" + \

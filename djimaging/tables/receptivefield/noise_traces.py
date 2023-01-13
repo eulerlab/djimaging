@@ -16,7 +16,8 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
         dnoise_params_id: int # unique param set id
         ---
         fit_kind : varchar(255)
-        fupsample : tinyint unsigned  # Multiplier of sampling frequency, using linear interpolation.
+        fupsample_trace : tinyint unsigned  # Multiplier of sampling frequency, using linear interpolation.
+        fupsample_stim = 0 : tinyint unsigned  # Multiplier of sampling stimulus, using repeat.
         lowpass_cutoff = 0: float  # Cutoff frequency low pass filter, applied if larger 0.
         pre_blur_sigma_s = 0: float  # Gaussian blur applied after low pass filter.
         post_blur_sigma_s = 0: float  # Gaussian blur applied after all other steps.
@@ -26,10 +27,12 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
 
     def add_default(
             self, dnoise_params_id=1, fit_kind="events", ref_time='trace',
-            fupsample=1, lowpass_cutoff=0, pre_blur_sigma_s=0, post_blur_sigma_s=0, skip_duplicates=False):
+            fupsample_trace=1, fupsample_stim=1, lowpass_cutoff=0,
+            pre_blur_sigma_s=0, post_blur_sigma_s=0, skip_duplicates=False):
         """Add default preprocess parameter to table"""
 
-        key = dict(dnoise_params_id=dnoise_params_id, fit_kind=fit_kind, fupsample=fupsample,
+        key = dict(dnoise_params_id=dnoise_params_id, fit_kind=fit_kind,
+                   fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
                    ref_time=ref_time, lowpass_cutoff=lowpass_cutoff,
                    pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s)
 
@@ -84,13 +87,14 @@ class DNoiseTraceTemplate(dj.Computed):
         stim = (self.stimulus_table() & key).fetch1("stim_trace")
         stimtime = (self.presentation_table() & key).fetch1('triggertimes')
         trace, tracetime = (self.traces_table() & key).fetch1('preprocess_trace', 'preprocess_trace_times')
-        fupsample, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s, ref_time = (
-            self.params_table() & key).fetch1(
-                "fupsample", "fit_kind", "lowpass_cutoff", "pre_blur_sigma_s", "post_blur_sigma_s", "ref_time")
+        fupsample_trace, fupsample_stim, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s, ref_time = (
+                self.params_table() & key).fetch1(
+            "fupsample_trace", "fupsample_stim", "fit_kind", "lowpass_cutoff",
+            "pre_blur_sigma_s", "post_blur_sigma_s", "ref_time")
 
         stim, trace, dt, t0 = prepare_data(
             trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
-            fupsample=fupsample, ref_time=ref_time,
+            fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim, ref_time=ref_time,
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
             pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s)
 

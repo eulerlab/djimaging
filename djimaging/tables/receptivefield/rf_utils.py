@@ -5,32 +5,25 @@ from numba import jit
 from scipy.ndimage import gaussian_filter
 from scipy.signal import find_peaks
 from sklearn.decomposition import randomized_svd
-from sklearn.model_selection import KFold
 
 from djimaging.utils import math_utils
-from djimaging.utils.filter_utils import resample_trace, LowPassFilter
+from djimaging.utils.filter_utils import resample_trace, upsample_stim, lowpass_filter_trace
+from djimaging.utils.image_utils import resize_image
 from djimaging.utils.trace_utils import align_stim_to_trace, get_mean_dt, align_trace_to_stim
 
 
 def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
-                      filter_dur_s_past, filter_dur_s_future=0., kind='sta', threshold_pred=False, dtype=np.float32):
+                      filter_dur_s_past, filter_dur_s_future=0.,
+                      kind='sta', threshold_pred=False, dtype=np.float32):
     kind = kind.lower()
 
     assert trace.size == stim.shape[0]
     assert kind in ['sta', 'mle'], f"kind={kind}"
 
+    rf_time, dim_t, shift, burn_in = get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt)
+    dims = (dim_t,) + stim.shape[1:]
+
     x, y = split_data(x=stim, y=trace, frac_train=frac_train, frac_dev=frac_dev, as_dict=True)
-
-    n_t_past = int(np.ceil(filter_dur_s_past / dt))
-    n_t_future = int(np.ceil(filter_dur_s_future / dt))
-
-    shift = -n_t_future
-    dim_t = n_t_past + n_t_future
-    dims = (dim_t,) + x['train'].shape[1:]
-
-    rf_time = np.arange(-n_t_past + 1, n_t_future + 1) * dt
-
-    burn_in = n_t_past
 
     x_train_dm = build_design_matrix(x['train'], n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
     y_train_dm = y['train'][burn_in:].astype(dtype)
@@ -64,6 +57,16 @@ def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
     return rf, rf_time, model_eval, x, y, shift
 
 
+def get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt):
+    n_t_past = int(np.ceil(filter_dur_s_past / dt))
+    n_t_future = int(np.ceil(filter_dur_s_future / dt))
+    shift = -n_t_future
+    dim_t = n_t_past + n_t_future
+    rf_time = np.arange(-n_t_past + 1, n_t_future + 1) * dt
+    burn_in = n_t_past
+    return rf_time, dim_t, shift, burn_in
+
+
 @jit(nopython=True)
 def compute_rf_sta(X, y, is_spikes=False):
     """From RFEst"""
@@ -94,28 +97,35 @@ def predict_linear_rf_response(rf, stim_design_matrix, threshold=False, dtype=np
     return y_pred.astype(dtype)
 
 
-def prepare_data(stim, stimtime, trace, tracetime, fupsample=None, fit_kind='trace',
+def prepare_data(stim, stimtime, trace, tracetime, fupsample_trace=None, fupsample_stim=None, fit_kind='trace',
                  lowpass_cutoff=0, ref_time='trace', pre_blur_sigma_s=0, post_blur_sigma_s=0):
     assert stimtime.ndim == 1, stimtime.shape
     assert trace.ndim == 1, trace.shape
     assert tracetime.ndim == 1, tracetime.shape
-    assert stim.shape[0] == stimtime.size, f"stim-len {stim.shape[0]} != stimtime-len {stimtime.size}"
     assert trace.size == tracetime.size
 
-    dt, is_consistent = get_mean_dt(tracetime, rtol=0.1)
+    if stim.shape[0] < stimtime.size:
+        raise ValueError(f"More triggertimes than expected: stim-len {stim.shape[0]} != stimtime-len {stimtime.size}")
+    elif stim.shape[0] > stimtime.size:
+        warnings.warn(f"Less triggertimes than expected: stim-len {stim.shape[0]} != stimtime-len {stimtime.size}")
+        stim = stim[:stimtime.size].copy()
+
+    dt, is_consistent = get_mean_dt(tracetime)
 
     if not is_consistent:
         warnings.warn('Inconsistent step-sizes in trace, resample trace.')
         tracetime, trace = resample_trace(tracetime=tracetime, trace=trace, dt=dt)
 
     if lowpass_cutoff > 0:
-        trace = LowPassFilter(
-            fs=1. / dt, cutoff=lowpass_cutoff, order=6, direction='ff').filter_data(trace)
+        trace = lowpass_filter_trace(trace=trace, fs=1. / dt, f_cutoff=lowpass_cutoff)
 
     if pre_blur_sigma_s > 0:
         trace = gaussian_filter(trace, sigma=pre_blur_sigma_s / dt, mode='nearest')
 
-    tracetime, trace = prepare_trace(tracetime, trace, kind=fit_kind, fupsample=fupsample, dt=dt)
+    tracetime, trace = prepare_trace(tracetime, trace, kind=fit_kind, fupsample=fupsample_trace, dt=dt)
+
+    if (fupsample_stim is not None) and (fupsample_stim > 1):
+        stimtime, stim = upsample_stim(stimtime, stim, fupsample=fupsample_stim)
 
     if ref_time == 'trace':
         stim, trace, dt, t0 = align_stim_to_trace(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime)
@@ -127,10 +137,12 @@ def prepare_data(stim, stimtime, trace, tracetime, fupsample=None, fit_kind='tra
     if post_blur_sigma_s > 0:
         trace = gaussian_filter(trace, sigma=post_blur_sigma_s / dt, mode='nearest')
 
-    trace = trace / (np.median(np.abs(trace)) / 0.6745)
+    trace = trace / np.std(trace)
 
-    if 'int' in str(stim.dtype) or 'bool' in str(stim.dtype):
-        stim = stim - np.mean(stim, dtype='int16')
+    if 'bool' in str(stim.dtype) or set(np.unique(stim).astype(float)) == {0., 1.}:
+        stim = 2 * stim.astype(np.int8) - 1
+    elif 'int' in str(stim.dtype):
+        stim = stim - np.mean(stim, dtype='int')
     else:
         stim = math_utils.normalize_zscore(stim)
 
@@ -210,34 +222,6 @@ def split_data(x, y, frac_train=0.8, frac_dev=0.1, as_dict=False):
         return x_dict, y_dict
 
 
-def get_split_kfold_indices(n_frames, frac_test, kfolds=None, n_burn=0):
-    """Get indices to split data into train, dev and test splits. Train indexes will be the same for all splits."""
-    assert frac_test < 1
-
-    if kfolds == 0:
-        kfolds = 1
-
-    idxs = np.arange(n_frames)
-
-    idx0_test = int(n_frames * (1 - frac_test))
-
-    idxs_train_dev = idxs[:idx0_test].copy()
-    idxs_test = idxs[idx0_test:].copy()
-
-    idxs_train_splits = []
-    idxs_dev_splits = []
-
-    pseudo_x = np.empty((idxs_train_dev.size,))
-    for idxs_train, idxs_dev in KFold(n_splits=kfolds, shuffle=False).split(pseudo_x, pseudo_x):
-        if n_burn > 0:
-            idxs_train = idxs_train[(idxs_train < np.min(idxs_dev)) | (idxs_train > np.max(idxs_dev) + n_burn)]
-
-        idxs_train_splits.append(idxs_train)
-        idxs_dev_splits.append(idxs_dev)
-
-    return idxs_train_splits, idxs_dev_splits, idxs_test
-
-
 def compute_explained_rf(rf, rf_fit):
     return np.maximum(1. - np.var(rf - rf_fit) / np.var(rf), 0.)
 
@@ -249,12 +233,11 @@ def smooth_rf(rf, blur_std, blur_npix):
 
 def resize_srf(srf, scale=None, output_shape=None):
     """Change size of sRF, used for up or down sampling"""
-    from skimage.transform import resize
     if scale is not None:
         output_shape = np.array(srf.shape) * scale
     else:
         assert output_shape is not None
-    return resize(srf, output_shape=output_shape, mode='constant', order=1)
+    return resize_image(srf, output_shape=output_shape, order=1)
 
 
 def compute_polarity_and_peak_idxs(trf, nstd=1.):

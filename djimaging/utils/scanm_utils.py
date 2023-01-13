@@ -240,3 +240,30 @@ def get_triggers_and_data(filepath):
             extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name='wDataCh0', ch1_name='wDataCh1')
 
     return triggertimes, triggervalues, ch0_stack, ch1_stack, wparams
+
+
+def compute_triggertimes(w_params, data, threshold=30_000, os_params=None):
+    npix_x_offset_left = int(w_params['User_nXPixLineOffs'])
+    npix_x_offset_right = int(w_params['User_nPixRetrace'])
+    npix_x = int(w_params['User_dxPix'])
+    npix_y = int(w_params['User_dyPix'])
+    pix_dt = w_params['RealPixDur'] * 1e-6
+    line_dt = pix_dt * npix_x
+    frame_dt = pix_dt * npix_x * npix_y
+
+    if os_params is not None:
+        assert np.isclose(line_dt, os_params['LineDuration'])
+        assert np.isclose(1. / os_params['samp_rate_Hz'], frame_dt)
+
+    frame_dt_offset = (np.arange(npix_x * npix_y) * pix_dt).reshape(npix_y, npix_x).T
+    frame_dt_offset = frame_dt_offset[npix_x_offset_left:-npix_x_offset_right]
+
+    frame_times = np.arange(data['wDataCh2'].shape[2]) * frame_dt
+
+    trigger_pixels = data['wDataCh2'] > threshold
+    trigger_frame_idxs = np.where(np.diff(np.any(trigger_pixels, axis=(0, 1)).astype(int)) > 0)[0] + 1
+
+    triggertimes = frame_times[trigger_frame_idxs] + np.array(
+        [np.min(frame_dt_offset[trigger_pixels[:, :, idx]]) for idx in trigger_frame_idxs])
+
+    return triggertimes
