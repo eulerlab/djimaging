@@ -225,7 +225,8 @@ class CelltypeAssignmentTemplate(dj.Computed):
         -> self.cell_filter_parameter_table
         ---
         celltype:        int               # predicted group (-1, 1-46)
-        confidence:      mediumblob        # confidence score (probability) per group
+        max_confidence:  float             # confidence score for assigned cluster for easy restriction
+        confidence:      mediumblob        # confidence score (probability) for all groups
         preproc_chirp:   mediumblob        # preprocessed chirp trace (averaged, downsampled and normalized)
         preproc_bar:     mediumblob        # preprocessed bar (shifted by -5 frames)
         """
@@ -412,6 +413,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                 self.insert1(dict(key,
                                   celltype=type_predictions[i],
                                   confidence=confidence[i],
+                                  max_confidence=np.max(confidence[i]),
                                   preproc_chirp=chirp_traces[quality_mask, :][i],
                                   preproc_bar=bar_traces[quality_mask][i],
                                   ))
@@ -423,6 +425,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                 self.insert1(dict(key,
                                   celltype=-1,
                                   confidence=dummy_confidence,
+                                  max_confidence=0.,
                                   preproc_chirp=chirp_traces[~quality_mask, :][i],
                                   preproc_bar=bar_traces[~quality_mask][i],
                                   ))
