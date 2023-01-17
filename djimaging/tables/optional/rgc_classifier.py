@@ -78,7 +78,8 @@ class ClassifierMethodTemplate(dj.Lookup):
 
     @property
     @abstractmethod
-    def classifier_training_data_table(self): pass
+    def classifier_training_data_table(self):
+        pass
 
     def add_classifier(self, classifier_fn: str, classifier_config: Mapping,
                        comment: str = "", skip_duplicates: bool = False, classifier_seed: int = 42) -> None:
@@ -100,7 +101,8 @@ class ClassifierMethodTemplate(dj.Lookup):
         training_data = self.classifier_training_data_table().get_training_data(key)
         classifier = classifier_fn(**classifier_config)
         classifier.fit(X=training_data["X"], y=training_data["y"])
-        return classifier
+        score = classifier.score(X=training_data["X"], y=training_data["y"])
+        return classifier, score
 
 
 class ClassifierTrainingDataTemplate(dj.Manual):
@@ -156,6 +158,7 @@ class ClassifierTemplate(dj.Computed):
         -> self.classifier_method_table
         ---
         classifier_file         :   attach@{store}
+        score_train : float
         """.format(store=self.store)
         return definition
 
@@ -170,13 +173,13 @@ class ClassifierTemplate(dj.Computed):
     def make(self, key):
         output_path = (self.classifier_training_data_table() & key).fetch1("output_path")
         classifier_file = os.path.join(output_path, 'rgc_classifier.pkl')
-        classifier = self.classifier_method_table().train_classifier(key)
+        classifier, score_train = self.classifier_method_table().train_classifier(key)
 
         print(f'Saving classifier to {classifier_file}')
         with open(classifier_file, "wb") as f:
             pkl.dump(classifier, f)
 
-        self.insert1(dict(key, classifier_file=classifier_file))
+        self.insert1(dict(key, classifier_file=classifier_file, score_train=score_train))
 
 
 def preprocess_chirp(chirp_traces, samples=249):
@@ -235,6 +238,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
     _stim_name_chirp = 'gChirp'
     _stim_name_bar = 'movingbar'
     _chirp_qi_key = 'qidx'
+    _bar_qi_key = 'd_qi'
 
     @property
     @abstractmethod
@@ -346,7 +350,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
             self.run_cell_type_assignment(key, mode="field")
 
     def run_classifier(self, X):
-        confidence = self.classifier.predict_proba(X).reshape(-1, order="C")
+        confidence = self.classifier.predict_proba(X)
         type_predictions = self.classifier.predict(X)
 
         return type_predictions, confidence
@@ -383,7 +387,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         # Fetch bar data, shift by 5 frames backwards
         bar_traces, ds_pvalues, bar_qis = (self.or_dir_index_table() & bar_key & restr).fetch(
-            'time_component', 'ds_pvalue', 'd_qi')
+            'time_component', 'ds_pvalue', self._bar_qi_key)
         bar_traces = np.asarray([bar for bar in bar_traces])
         bar_traces = np.roll(bar_traces, -5)
 
@@ -406,14 +410,14 @@ class CelltypeAssignmentTemplate(dj.Computed):
             raise NotImplementedError(f"cell_selection_constraint={cell_selection_constraint}")
 
         if np.any(quality_mask):
-            type_predictions, confidence = self.run_classifier(feature_activation_matrix[quality_mask])
+            type_predictions, confidence = self.run_classifier(feature_activation_matrix[quality_mask, :])
 
             for i, roi_id in enumerate(roi_ids[quality_mask]):
                 key["roi_id"] = roi_id
                 self.insert1(dict(key,
                                   celltype=type_predictions[i],
-                                  confidence=confidence[i],
-                                  max_confidence=np.max(confidence[i]),
+                                  confidence=confidence[i, :],
+                                  max_confidence=np.max(confidence[i, :]),
                                   preproc_chirp=chirp_traces[quality_mask, :][i],
                                   preproc_bar=bar_traces[quality_mask][i],
                                   ))
