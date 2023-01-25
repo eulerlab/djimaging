@@ -22,11 +22,11 @@ except ImportError:
 
 
 class ReceptiveFieldGLM:
-    def __init__(self, dt, stim, trace, filter_dur_s_past, filter_dur_s_future, df_ts, df_ws, shift, betas, metric,
+    def __init__(self, dt, stim, trace, filter_dur_s_past, filter_dur_s_future, df_ts, df_ws, betas, metric,
                  output_nonlinearity='none', alphas=(1.,), kfold=1,
                  tolerance=5, atol=1e-5, step_size=0.01, max_iters=2000, min_iters=200,
                  init_method=None, n_perm=20, min_cc=0.2, seed=42, verbose=0, fit_R=False, fit_intercept=True,
-                 num_subunits=1, distr='gaussian', frac_test=0.2, t_burn_min=0.):
+                 num_subunits=1, distr='gaussian', frac_test=0.2, t_burn_min=0., shift=None):
         # Data
         self.dt = dt
         self.stim = stim
@@ -35,7 +35,6 @@ class ReceptiveFieldGLM:
         # Filter settings
         self.filter_dur_s_past = filter_dur_s_past
         self.filter_dur_s_future = filter_dur_s_future
-        self.shift = shift
         self.output_nonlinearity = output_nonlinearity
         assert num_subunits == 1
         self.num_subunits = num_subunits
@@ -67,6 +66,9 @@ class ReceptiveFieldGLM:
         # Filter dims
         self.rf_time, self.dim_t, self.shift, burn_in = get_rf_timing_params(
             filter_dur_s_past, filter_dur_s_future, dt)
+
+        if shift is not None:
+            assert shift == self.shift
 
         self.burn_in = np.maximum(int(np.ceil(t_burn_min / dt)), burn_in)
 
@@ -303,11 +305,10 @@ class ReceptiveFieldGLM:
         min_iters_other = self.min_iters // 5
 
         if len(alphas) == 1 and len(betas) == 1:
-
             if y_dev is not None:
                 assert 'dev' in model.X
                 y = {'train': y_train, 'dev': y_dev}
-                return_model = 'best_dev_cost'
+                return_model = 'best_dev_metric'
                 early_stopping = True
             else:
                 y = {'train': y_train}
