@@ -72,6 +72,11 @@ class SplitRFTemplate(dj.Computed):
     def make(self, key):
         # Get data
         strf = (self.rf_table() & key).fetch1("rf")
+        
+        try:
+            shift = (self.rf_table() & key).fetch1("shift")
+        except dj.DataJointError:
+            shift = (self.rf_table & key).fetch1('model_dict')['shift']
 
         # Get preprocess params
         blur_std, blur_npix, upsample_srf_scale, peak_nstd = \
@@ -81,7 +86,7 @@ class SplitRFTemplate(dj.Computed):
         srf, trf = split_strf(strf, blur_std=blur_std, blur_npix=blur_npix, upsample_srf_scale=upsample_srf_scale)
 
         # Make tRF always positive, so that sRF reflects the polarity of the RF
-        polarity, peak_idxs = compute_polarity_and_peak_idxs(trf, nstd=peak_nstd)
+        polarity, peak_idxs = compute_polarity_and_peak_idxs(trf, nstd=peak_nstd, shift=shift)
         if polarity == -1:
             srf *= -1
             trf *= -1

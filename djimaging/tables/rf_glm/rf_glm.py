@@ -61,6 +61,8 @@ class RFGLMParamsTemplate(dj.Lookup):
 class RFGLMTemplate(dj.Computed):
     database = ""
 
+    # TODO: Make definition as in STA, i.e. add shift and rf_time
+
     @property
     def definition(self):
         definition = '''

@@ -223,7 +223,7 @@ def split_data(x, y, frac_train=0.8, frac_dev=0.1, as_dict=False):
 
 
 def compute_explained_rf(rf, rf_fit):
-    return np.maximum(1. - np.var(rf - rf_fit) / np.var(rf), 0.)
+    return 1. - (np.var(rf - rf_fit) / np.var(rf))
 
 
 def smooth_rf(rf, blur_std, blur_npix):
@@ -240,10 +240,10 @@ def resize_srf(srf, scale=None, output_shape=None):
     return resize_image(srf, output_shape=output_shape, order=1)
 
 
-def compute_polarity_and_peak_idxs(trf, nstd=1.):
+def compute_polarity_and_peak_idxs(trf, nstd=1., shift=0):
     """Estimate polarity. 1 for ON-cells, -1 for OFF-cells, 0 for uncertain cells"""
 
-    trf = trf.copy()
+    trf = trf.copy() if shift >= 0 else trf[:shift].copy()  # Only consider peaks before t=0
     std_trf = np.std(trf)
 
     pos_peak_idxs, _ = find_peaks(trf, prominence=nstd * std_trf / 2., height=nstd * std_trf)
@@ -318,7 +318,7 @@ def svd_rf(w):
     if len(dims) == 3:
         dims_tRF = dims[0]
         dims_sRF = dims[1:]
-        U, S, Vt = randomized_svd(w.reshape(dims_tRF, np.prod(dims_sRF)), 3, random_state=0)
+        U, S, Vt = randomized_svd(w.reshape(dims_tRF, -1), 3, random_state=0)
         srf = Vt[0].reshape(*dims_sRF)
         trf = U[:, 0]
 
