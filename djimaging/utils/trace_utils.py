@@ -3,7 +3,7 @@ import numpy as np
 from djimaging.utils.filter_utils import resample_trace
 
 
-def get_mean_dt(tracetime, rtol_error=0.8) -> (float, float):
+def get_mean_dt(tracetime, rtol_error=1.0) -> (float, float):
     dts = np.diff(tracetime)
     dt = np.mean(dts)
     dt_rel_error = np.maximum(np.max(dts) - dt, dt - np.min(dts)) / dt
