@@ -222,6 +222,15 @@ def get_triggers_and_data(filepath):
         else:
             raise ValueError('Multiple triggertimes found')
 
+        if "Tracetimes0" in h5_file.keys():  # Correct if triggertimes are in frames and not in time (old version)
+            traces_times = np.asarray(h5_file["Tracetimes0"][()])
+            correct_triggertimes = triggertimes[-1] > 2 * np.max(traces_times)
+        else:
+            correct_triggertimes = triggertimes[0] > 250 and triggertimes[-1] > 1000
+
+        if correct_triggertimes:
+            triggertimes = triggertimes / 500.
+
         key_triggervalues = [k for k in h5_file.keys() if k.lower() == 'triggervalues']
 
         if len(key_triggervalues) == 1:

@@ -213,6 +213,7 @@ class PresentationTemplate(dj.Computed):
 
     def __add_presentation(self, key, filepath: str):
         triggertimes, triggervalues, ch0_stack, ch1_stack, wparams = get_triggers_and_data(filepath)
+
         isrepeated, ntrigger_rep = (self.stimulus_table() & key).fetch1("isrepeated", "ntrigger_rep")
 
         if isrepeated == 0:

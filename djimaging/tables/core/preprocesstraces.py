@@ -72,12 +72,6 @@ def detrend_trace(trace, window_len_seconds, fs, poly_order):
 
 def extract_baseline(trace, trace_times, stim_start: float):
     """Compute baseline for trace"""
-
-    # heuristic to find out whether triggers are in time base or in frame base
-    if stim_start > 1000:
-        print("Converting triggers from frame base to time base")
-        stim_start /= 500
-
     if not np.any(trace_times < stim_start):
         raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
 
@@ -118,18 +112,6 @@ def resample_trace(trace, trace_times, fs_resample: float):
     return trace_resampled, trace_times_resampled
 
 
-def check_stim_start(stim_start, trace_times):
-    # heuristic to find out whether triggers are in time base or in frame base
-    if stim_start > 1000:
-        print("Converting triggers from frame base to time base")
-        stim_start /= 500
-
-    if not np.any(trace_times < stim_start):
-        raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
-
-    return stim_start
-
-
 def process_trace(trace_times, trace, poly_order, window_len_seconds,
                   subtract_baseline: bool, standardize: bool, non_negative: bool, stim_start: float = None,
                   f_cutoff: float = None, fs_resample: float = None, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3)):
@@ -148,7 +130,8 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds,
     trace, smoothed_trace = detrend_trace(trace, window_len_seconds, fs, poly_order)
 
     if stim_start is not None:
-        stim_start = check_stim_start(stim_start=stim_start, trace_times=trace_times)
+        if not np.any(trace_times < stim_start):
+            raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
 
     if non_negative:
         trace = non_negative_trace(trace, inplace=True)
