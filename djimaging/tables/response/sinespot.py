@@ -24,7 +24,7 @@ class SineSpotQITemplate(ChirpQITemplate):
     def key_source(self):
         try:
             return self.snippets_table() & \
-                   (self.stimulus_table() & "stim_name = 'sinespot' or stim_family = 'sinespot'")
+                (self.stimulus_table() & "stim_name = 'sinespot' or stim_family = 'sinespot'")
         except TypeError:
             pass
 
@@ -69,7 +69,7 @@ class SineSpotFeaturesTemplate(dj.Computed):
     def key_source(self):
         try:
             return self.preprocesstraces_table() & \
-                   (self.stimulus_table() & "stim_name = 'sinespot' or stim_family = 'sinespot'")
+                (self.stimulus_table() & "stim_name = 'sinespot' or stim_family = 'sinespot'")
         except TypeError:
             pass
 
@@ -147,7 +147,7 @@ def compute_sinespot_response_matrix(trace, times, triggertimes, ntrigger_rep, d
     """Split data into responses to different reps and summarize as mean response"""
     from djimaging.utils.scanm_utils import split_trace_by_reps
 
-    dt = get_mean_dt(times, raise_error=True)[0]
+    dt = get_mean_dt(times)[0]
     n_frames = int(np.ceil(rep_dt / dt))
 
     tt_reps = triggertimes.reshape(-1, ntrigger_rep)

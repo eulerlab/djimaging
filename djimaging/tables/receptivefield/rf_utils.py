@@ -98,7 +98,7 @@ def predict_linear_rf_response(rf, stim_design_matrix, threshold=False, dtype=np
 
 
 def prepare_data(stim, stimtime, trace, tracetime, fupsample_trace=None, fupsample_stim=None, fit_kind='trace',
-                 lowpass_cutoff=0, ref_time='trace', pre_blur_sigma_s=0, post_blur_sigma_s=0):
+                 lowpass_cutoff=0, ref_time='trace', pre_blur_sigma_s=0, post_blur_sigma_s=0, dt_rtol=0.1):
     assert stimtime.ndim == 1, stimtime.shape
     assert trace.ndim == 1, trace.shape
     assert tracetime.ndim == 1, tracetime.shape
@@ -110,9 +110,9 @@ def prepare_data(stim, stimtime, trace, tracetime, fupsample_trace=None, fupsamp
         warnings.warn(f"Less triggertimes than expected: stim-len {stim.shape[0]} != stimtime-len {stimtime.size}")
         stim = stim[:stimtime.size].copy()
 
-    dt, is_consistent = get_mean_dt(tracetime)
+    dt, dt_rel_error = get_mean_dt(tracetime)
 
-    if not is_consistent:
+    if dt_rel_error > dt_rtol:
         warnings.warn('Inconsistent step-sizes in trace, resample trace.')
         tracetime, trace = resample_trace(tracetime=tracetime, trace=trace, dt=dt)
 
@@ -128,9 +128,11 @@ def prepare_data(stim, stimtime, trace, tracetime, fupsample_trace=None, fupsamp
         stimtime, stim = upsample_stim(stimtime, stim, fupsample=fupsample_stim)
 
     if ref_time == 'trace':
-        stim, trace, dt, t0 = align_stim_to_trace(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime)
+        stim, trace, dt, t0, dt_rel_error = align_stim_to_trace(
+            stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime)
     elif ref_time == 'stim':
-        stim, trace, dt, t0 = align_trace_to_stim(stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime)
+        stim, trace, dt, t0, dt_rel_error = align_trace_to_stim(
+            stim=stim, stimtime=stimtime, trace=trace, tracetime=tracetime)
     else:
         raise NotImplementedError
 
@@ -146,7 +148,7 @@ def prepare_data(stim, stimtime, trace, tracetime, fupsample_trace=None, fupsamp
     else:
         stim = math_utils.normalize_zscore(stim)
 
-    return stim, trace, dt, t0
+    return stim, trace, dt, t0, dt_rel_error
 
 
 def prepare_trace(tracetime, trace, kind='trace', fupsample=None, dt=None):

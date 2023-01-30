@@ -53,6 +53,7 @@ class DNoiseTraceTemplate(dj.Computed):
         time : longblob  # Time lof aligned traces and stimulus
         trace : longblob   # Trace to fit
         stim : longblob  # Stimulus frames
+        dt_rel_error : float  # Maximum relative error of dts, if too large, can have unwanted effects
         '''
         return definition
 
@@ -92,7 +93,7 @@ class DNoiseTraceTemplate(dj.Computed):
             "fupsample_trace", "fupsample_stim", "fit_kind", "lowpass_cutoff",
             "pre_blur_sigma_s", "post_blur_sigma_s", "ref_time")
 
-        stim, trace, dt, t0 = prepare_data(
+        stim, trace, dt, t0, dt_rel_error = prepare_data(
             trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
             fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim, ref_time=ref_time,
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
@@ -105,6 +106,7 @@ class DNoiseTraceTemplate(dj.Computed):
         data_key['time'] = time
         data_key['trace'] = trace
         data_key['stim'] = stim
+        data_key['dt_rel_error'] = dt_rel_error
         self.insert1(data_key)
 
     def plot1(self, key=None, xlim=None):

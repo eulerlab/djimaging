@@ -44,7 +44,7 @@ def generate_data_3d(seed, trace_dt=0.1, trace_trng=(0.3, 64), dims_xy=(6, 8), s
 
 def test_split_train():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=42)
-    stim, trace, dt, t0 = prepare_data(
+    stim, trace, dt, t0, dt_rel_error = prepare_data(
         trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
         fupsample_trace=2, fit_kind='trace', lowpass_cutoff=0)
 
@@ -55,7 +55,7 @@ def test_split_train():
 def test_split_train_dev():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=42)
 
-    stim, trace, dt, t0 = prepare_data(
+    stim, trace, dt, t0, dt_rel_error = prepare_data(
         trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
         fupsample_trace=2, fit_kind='trace', lowpass_cutoff=0)
 
@@ -68,7 +68,7 @@ def test_split_train_dev():
 def test_split_train_test():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=461)
 
-    stim, trace, dt, t0 = prepare_data(
+    stim, trace, dt, t0, dt_rel_error = prepare_data(
         trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
         fupsample_trace=2, fit_kind='trace', lowpass_cutoff=0)
 
@@ -81,7 +81,7 @@ def test_split_train_test():
 def test_split_train_dev_test():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=50)
 
-    stim, trace, dt, t0 = prepare_data(
+    stim, trace, dt, t0, dt_rel_error = prepare_data(
         trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
         fupsample_trace=1, fit_kind='trace', lowpass_cutoff=0)
 

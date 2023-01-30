@@ -3,10 +3,21 @@ import numpy as np
 from djimaging.utils.filter_utils import resample_trace
 
 
+def get_mean_dt(tracetime, rtol_error=0.8) -> (float, float):
+    dts = np.diff(tracetime)
+    dt = np.mean(dts)
+    dt_rel_error = np.maximum(np.max(dts) - dt, dt - np.min(dts)) / dt
+
+    if dt_rel_error >= rtol_error:
+        raise ValueError(f"Inconsistent dts. dt_mean={dt:.3g}, but " +
+                         f"dt_max={np.max(dts):.3g}, dt_min={np.min(dts):.3g}, dt_std={np.std(dts):.3g}")
+    return dt, dt_rel_error
+
+
 def align_stim_to_trace(stim, stimtime, trace, tracetime):
     """Align stimulus and trace.
      Modified from RFEst"""
-    dt = np.mean(np.diff(tracetime))
+    dt, dt_rel_error = get_mean_dt(tracetime)
 
     valid_idxs = (tracetime >= stimtime[0]) & (tracetime <= (stimtime[-1] + np.max(np.diff(stimtime))))
     r_tracetime, aligned_trace = resample_trace(tracetime=tracetime[valid_idxs], trace=trace[valid_idxs], dt=dt)
@@ -17,27 +28,12 @@ def align_stim_to_trace(stim, stimtime, trace, tracetime):
                             zip(stimtime, np.append(stimtime[1:], stimtime[-1] + np.max(np.diff(stimtime))))])
     aligned_stim = np.repeat(stim, num_repeats, axis=0)
 
-    return aligned_stim, aligned_trace, dt, t0
-
-
-def get_mean_dt(tracetime, rtol=0.01, rtol_max=0.1, raise_error=False) -> (float, bool):
-    dts = np.diff(tracetime)
-    dt = np.mean(dts)
-    is_consistent_max = ((np.max(dts) - np.min(dts)) / dt) <= rtol_max
-    is_consistent_std = np.std(dts) / dt <= rtol
-
-    is_consistent = is_consistent_max and is_consistent_std
-
-    if raise_error and not is_consistent:
-        raise ValueError(f"Inconsistent dts. dt_mean={dt:.3g}, but " +
-                         f"dt_max={np.max(dts):.3g}, dt_min={np.min(dts):.3g}, dt_std={np.std(dts):.3g}")
-
-    return dt, is_consistent
+    return aligned_stim, aligned_trace, dt, t0, dt_rel_error
 
 
 def align_trace_to_stim(stim, stimtime, trace, tracetime):
     """Align stimulus and trace."""
-    dt, is_consistent = get_mean_dt(stimtime, rtol=0.1, raise_error=True)
+    dt, dt_rel_error = get_mean_dt(stimtime)
 
     t0 = stimtime[0]
     aligned_stim = stim
@@ -46,7 +42,7 @@ def align_trace_to_stim(stim, stimtime, trace, tracetime):
     for i, (t_a, t_b) in enumerate(zip(stimtime, np.append(stimtime[1:], stimtime[-1] + dt))):
         aligned_trace[i] = np.sum(trace[(tracetime >= t_a) & (tracetime < t_b)])
 
-    return aligned_stim, aligned_trace, dt, t0
+    return aligned_stim, aligned_trace, dt, t0, dt_rel_error
 
 
 def find_closest(target: float, data: np.ndarray, atol=np.inf, as_index=False):

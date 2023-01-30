@@ -131,14 +131,19 @@ def check_stim_start(stim_start, trace_times):
 
 
 def process_trace(trace_times, trace, poly_order, window_len_seconds,
-                  subtract_baseline: bool, standardize: bool, non_negative: bool, stim_start: float = None,
-                  f_cutoff: float = None, fs_resample: float = None, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3)):
+                  subtract_baseline: bool, standardize: int, non_negative: bool, stim_start: float = None,
+                  f_cutoff: float = None, fs_resample: float = None, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3),
+                  dt_rtol=0.1):
     """Detrend and preprocess trace"""
+    assert standardize in [0, 1, 2], standardize
+
     trace = np.asarray(trace).copy()
-    dt, is_consistent = get_mean_dt(tracetime=trace_times, raise_error=False)
-    if not is_consistent:
-        warnings.warn('Sampling rate varies')
+    dt, dt_rel_error = get_mean_dt(tracetime=trace_times)
     fs = 1. / dt
+
+    if dt_rel_error > dt_rtol:
+        warnings.warn('Inconsistent step-sizes in trace, resample trace.')
+        tracetime, trace = resample_trace(trace=trace, trace_times=trace_times, fs_resample=fs)
 
     trace = drop_left_and_right(trace, drop_nmin_lr=drop_nmin_lr, drop_nmax_lr=drop_nmax_lr, inplace=True)
 
@@ -150,14 +155,17 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds,
     if stim_start is not None:
         stim_start = check_stim_start(stim_start=stim_start, trace_times=trace_times)
 
-    if non_negative:
-        trace = non_negative_trace(trace, inplace=True)
-    elif subtract_baseline:
+    if subtract_baseline:
         trace = subtract_baseline_trace(trace, trace_times, stim_start, inplace=True)
 
-    if standardize:
+    if non_negative:
+        trace = non_negative_trace(trace, inplace=True)
+
+    if standardize == 1:
         baseline = extract_baseline(trace, trace_times, stim_start)
         trace /= np.std(baseline)
+    elif standardize == 2:
+        trace /= np.std(trace)
 
     if (fs_resample is not None) and (fs_resample > 0):
         trace, trace_times = resample_trace(trace, trace_times, fs_resample=fs_resample)
@@ -175,16 +183,16 @@ class PreprocessParamsTemplate(dj.Lookup):
         ---
         window_length:       int       # window length for SavGol filter in seconds
         poly_order:          int       # order of polynomial for savgol filter
-        non_negative:        tinyint unsigned
-        subtract_baseline:   tinyint unsigned
-        standardize:         tinyint unsigned  # whether to standardize (divide by sd of baseline)
+        non_negative:        tinyint unsigned  # Clip negative values of trace
+        subtract_baseline:   tinyint unsigned  # Subtract baseline
+        standardize:         tinyint unsigned  # standardize (1: with sd of baseline, 2: sd of trace, 0: nothing)
         f_cutoff = 0 : float  # Cutoff frequency for low pass filter, only applied when > 0.
         fs_resample = 0 : float  # Resampling frequency, only applied when > 0.
         """
         return definition
 
     def add_default(self, preprocess_id=1, window_length=60, poly_order=3, non_negative=False,
-                    subtract_baseline=True, standardize=True, f_cutoff=None, fs_resample=None,
+                    subtract_baseline=True, standardize=1, f_cutoff=None, fs_resample=None,
                     skip_duplicates=False):
         key = dict(
             preprocess_id=preprocess_id,
@@ -244,19 +252,14 @@ class PreprocessTracesTemplate(dj.Computed):
                 'window_length', 'poly_order', 'subtract_baseline', 'non_negative', 'standardize',
                 'f_cutoff', 'fs_resample')
 
-        assert not (non_negative and subtract_baseline), \
-            "You are trying to populate with an invalid parameter set"
-        assert (standardize == non_negative) or (standardize == subtract_baseline), \
-            "You are trying to populate with an invalid parameter set"
-
         trace_times, trace = (self.traces_table() & key).fetch1('trace_times', 'trace')
         stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
 
         preprocess_trace_times, preprocess_trace, smoothed_trace = process_trace(
             trace_times=trace_times, trace=trace, stim_start=stim_start,
             poly_order=poly_order, window_len_seconds=window_len_seconds,
-            f_cutoff=f_cutoff, fs_resample=fs_resample,
-            subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative)
+            subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative,
+            f_cutoff=f_cutoff, fs_resample=fs_resample)
 
         self.insert1(dict(key, preprocess_trace_times=preprocess_trace_times,
                           preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))

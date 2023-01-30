@@ -149,8 +149,7 @@ class ChirpFeaturesTemplate(dj.Computed):
 
 
 def compute_on_off_index(snippets, snippets_times, trigger_times, light_step_duration=1):
-    dts = [get_mean_dt(tracetime=snippets_times_i, raise_error=True)[0]
-           for snippets_times_i in snippets_times.T]
+    dts = [get_mean_dt(tracetime=snippets_times_i)[0] for snippets_times_i in snippets_times.T]
     fs = 1. / np.mean(dts)
 
     start_trigs = trigger_times[::2]
@@ -193,8 +192,7 @@ def compute_on_off_index(snippets, snippets_times, trigger_times, light_step_dur
 
 
 def compute_transience_index(snippets, snippets_times, trigger_times, upsam_fre=500):
-    dts = [get_mean_dt(tracetime=snippets_times_i, raise_error=True)[0]
-           for snippets_times_i in snippets_times.T]
+    dts = [get_mean_dt(tracetime=snippets_times_i)[0] for snippets_times_i in snippets_times.T]
     fs = 1. / np.mean(dts)
 
     upsampling_factor = int(snippets.shape[0] / fs * upsam_fre)
