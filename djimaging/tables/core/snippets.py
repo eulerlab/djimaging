@@ -72,9 +72,6 @@ class SnippetsTemplate(dj.Computed):
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
         trace_times, traces = (self.preprocesstraces_table() & key).fetch1('preprocess_trace_times', 'preprocess_trace')
 
-        if triggertimes[-1] > 2 * trace_times[-1]:
-            triggertimes = triggertimes / 500.
-
         snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_reps(
             traces, trace_times, triggertimes, ntrigger_rep, allow_drop_last=True)
 

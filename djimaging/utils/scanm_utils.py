@@ -253,6 +253,19 @@ def load_roi_mask(filepath, ignore_not_found=False):
     return roi_mask
 
 
+def extract_traces(h5_file_open):
+    """Read all traces and their times from file"""
+    if "Traces0_raw" in h5_file_open.keys() and "Tracetimes0" in h5_file_open.keys():
+        traces = np.asarray(h5_file_open["Traces0_raw"][()])
+        traces_times = np.asarray(h5_file_open["Tracetimes0"][()])
+    else:
+        raise ValueError('Traces not found in h5 file.')
+
+    assert traces.shape == traces_times.shape, 'Inconsistent traces and tracetimes shapes'
+
+    return traces, traces_times
+
+
 def extract_roi_mask(h5_file_open, ignore_not_found=False):
     roi_keys = [k for k in h5_file_open.keys() if 'rois' in k.lower()]
 
@@ -268,19 +281,6 @@ def extract_roi_mask(h5_file_open, ignore_not_found=False):
         raise KeyError('No ROI mask found in single file')
 
     return roi_mask
-
-
-def extract_traces(h5_file_open):
-    """Read all traces and their times from file"""
-    if "Traces0_raw" in h5_file_open.keys() and "Tracetimes0" in h5_file_open.keys():
-        traces = np.asarray(h5_file_open["Traces0_raw"][()])
-        traces_times = np.asarray(h5_file_open["Tracetimes0"][()])
-    else:
-        raise ValueError('Traces not found in h5 file.')
-
-    assert traces.shape == traces_times.shape, 'Inconsistent traces and tracetimes shapes'
-
-    return traces, traces_times
 
 
 def extract_w_params_from_h5(h5_file_open):
