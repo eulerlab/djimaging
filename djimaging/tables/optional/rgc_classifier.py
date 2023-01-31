@@ -290,8 +290,8 @@ class CelltypeAssignmentTemplate(dj.Computed):
         try:
             return (self.field_table() * self.detrend_params_table() * self.classifier_training_data_table() *
                     self.classifier_table() * self.cell_filter_parameter_table()) & \
-                   ((self.snippets_table() & f"stim_name = '{self._stim_name_chirp}'").proj(chirp='stim_name') *
-                    (self.snippets_table() & f"stim_name = '{self._stim_name_bar}'").proj(bar='stim_name'))
+                ((self.snippets_table() & f"stim_name = '{self._stim_name_chirp}'").proj(chirp='stim_name') *
+                 (self.snippets_table() & f"stim_name = '{self._stim_name_bar}'").proj(bar='stim_name'))
         except TypeError:
             pass
 
@@ -410,14 +410,25 @@ class CelltypeAssignmentTemplate(dj.Computed):
             raise NotImplementedError(f"cell_selection_constraint={cell_selection_constraint}")
 
         if np.any(quality_mask):
+            n_rois = np.sum(quality_mask)
             type_predictions, confidence = self.run_classifier(feature_activation_matrix[quality_mask, :])
+
+            assert confidence.shape == (n_rois, 46), f"{confidence.shape} != {(n_rois, 46)} (expected)"
+            assert type_predictions.size == n_rois, f"{type_predictions.size} != {n_rois} (expected)"
 
             for i, roi_id in enumerate(roi_ids[quality_mask]):
                 key["roi_id"] = roi_id
+
+                confidence_i = confidence[i, :]
+                assert confidence_i.size == 46, \
+                    f"Expected 46 confidence scores, got {confidence_i.size}"
+                assert np.isclose(np.sum(confidence_i), 1., rtol=0.01, atol=0.01), \
+                    f"Confidences should sum up to 1, but are {np.sum(confidence_i)}."
+
                 self.insert1(dict(key,
                                   celltype=type_predictions[i],
-                                  confidence=confidence[i, :],
-                                  max_confidence=np.max(confidence[i, :]),
+                                  confidence=confidence_i,
+                                  max_confidence=np.max(confidence_i),
                                   preproc_chirp=chirp_traces[quality_mask, :][i],
                                   preproc_bar=bar_traces[quality_mask][i],
                                   ))
@@ -429,7 +440,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                 self.insert1(dict(key,
                                   celltype=-1,
                                   confidence=dummy_confidence,
-                                  max_confidence=0.,
+                                  max_confidence=-1,
                                   preproc_chirp=chirp_traces[~quality_mask, :][i],
                                   preproc_bar=bar_traces[~quality_mask][i],
                                   ))
