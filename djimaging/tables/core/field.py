@@ -3,14 +3,14 @@ from abc import abstractmethod
 from copy import deepcopy
 
 import datajoint as dj
-import h5py
 import numpy as np
 
 from djimaging.utils.alias_utils import check_shared_alias_str
 from djimaging.utils.datafile_utils import get_filename_info
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm_utils import get_pixel_size_xy_um, load_ch0_ch1_stacks_from_h5, get_npixartifact
+from djimaging.utils.scanm_utils import get_pixel_size_xy_um, load_ch0_ch1_stacks_from_h5, get_npixartifact, \
+    load_roi_mask
 
 
 class FieldTemplate(dj.Computed):
@@ -211,22 +211,9 @@ def load_field_roi_mask(pre_data_path, files, mask_alias='', highres_alias=''):
     sorted_files = files[np.argsort(penalties)]
 
     for file in sorted_files:
-        filepath = os.path.join(pre_data_path, file)
-
-        try:
-            with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-                roi_keys = [k for k in h5_file.keys() if 'rois' in k.lower()]
-                if len(roi_keys) == 0:
-                    continue
-                elif len(roi_keys) == 1:
-                    roi_mask = np.copy(h5_file[roi_keys[0]])
-                    if roi_mask.size == 0:
-                        continue
-                    return roi_mask, file
-                else:
-                    raise KeyError(f'Multiple ROI masks found in {filepath}')
-        except:
-            pass
+        roi_mask = load_roi_mask(filepath=os.path.join(pre_data_path, file), ignore_not_found=True)
+        if roi_mask is not None:
+            return roi_mask, file
     else:
         raise ValueError(f'No ROI mask found in any file in {pre_data_path}: {files}')
 
