@@ -74,47 +74,6 @@ def get_retinal_position(rel_xcoord_um: float, rel_ycoord_um: float, rotation: f
     return ventral_dorsal_pos_um, temporal_nasal_pos_um
 
 
-def load_traces_from_h5_file(filepath, roi_ids):
-    """Extract traces from ScanM h5 file"""
-
-    with h5py.File(filepath, "r", driver="stdio") as h5_file:
-        # read all traces and their times from file
-        if "Traces0_raw" in h5_file.keys() and "Tracetimes0" in h5_file.keys():
-            traces = np.asarray(h5_file["Traces0_raw"][()])
-            traces_times = np.asarray(h5_file["Tracetimes0"][()])
-        else:
-            raise ValueError(f'Traces not found in {filepath}')
-
-    assert np.all(roi_ids >= 1)
-    assert traces.shape == traces_times.shape, f'Inconsistent traces and tracetimes in {filepath}'
-
-    roi2trace = dict()
-
-    for roi_id in roi_ids:
-        idx = roi_id - 1
-
-        if traces.ndim == 3 and idx < traces.shape[-1]:
-            trace = traces[:, :, idx]
-            trace_times = traces_times[:, :, idx]
-            valid_flag = 1
-        elif traces.ndim == 2 and idx < traces.shape[-1]:
-            trace = traces[:, idx]
-            trace_times = traces_times[:, idx]
-            valid_flag = 1
-        else:
-            valid_flag = 0
-            trace = np.zeros(0)
-            trace_times = np.zeros(0)
-
-        if np.any(~np.isfinite(trace)) or np.any(~np.isfinite(trace_times)):
-            warnings.warn(f'NaN trace or tracetime in {filepath} for ROI{roi_id}.')
-            valid_flag = 0
-
-        roi2trace[roi_id] = dict(trace=trace, trace_times=trace_times, valid_flag=valid_flag)
-
-    return roi2trace
-
-
 def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.1, allow_drop_last=True):
     """Split trace in snippets, using triggertimes"""
 
@@ -149,36 +108,61 @@ def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol
     return snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag
 
 
+def load_traces_from_h5_file(filepath, roi_ids):
+    """Extract traces from ScanM h5 file"""
+
+    with h5py.File(filepath, "r", driver="stdio") as h5_file:
+        traces, traces_times = extract_traces(h5_file)
+
+    assert np.all(roi_ids >= 1)
+
+    roi2trace = dict()
+
+    for roi_id in roi_ids:
+        idx = roi_id - 1
+
+        if traces.ndim == 3 and idx < traces.shape[-1]:
+            trace = traces[:, :, idx]
+            trace_times = traces_times[:, :, idx]
+            valid_flag = 1
+        elif traces.ndim == 2 and idx < traces.shape[-1]:
+            trace = traces[:, idx]
+            trace_times = traces_times[:, idx]
+            valid_flag = 1
+        else:
+            valid_flag = 0
+            trace = np.zeros(0)
+            trace_times = np.zeros(0)
+
+        if np.any(~np.isfinite(trace)) or np.any(~np.isfinite(trace_times)):
+            warnings.warn(f'NaN trace or tracetime in {filepath} for ROI{roi_id}.')
+            valid_flag = 0
+
+        roi2trace[roi_id] = dict(trace=trace, trace_times=trace_times, valid_flag=valid_flag)
+
+    return roi2trace
+
+
 def load_ch0_ch1_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh1'):
     """Load high resolution stack channel 0 and 1 from h5 file"""
 
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        ch0_stack, ch1_stack, wparams = \
-            extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name=ch0_name, ch1_name=ch1_name)
+        ch0_stack, ch1_stack = extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name=ch0_name, ch1_name=ch1_name)
+        wparams = extract_w_params_from_h5(h5_file)
+
+    check_dims_ch_stack_wparams(ch_stack=ch0_stack, wparams=wparams)
+    check_dims_ch_stack_wparams(ch_stack=ch1_stack, wparams=wparams)
 
     return ch0_stack, ch1_stack, wparams
 
 
-def extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name='wDataCh0', ch1_name='wDataCh1'):
-    ch0_stack = np.copy(h5_file[ch0_name])
-    ch1_stack = np.copy(h5_file[ch1_name])
-
-    wparams = dict()
-    if 'wParamsStr' in h5_file.keys():
-        wparams.update(extract_h5_table('wParamsStr', open_file=h5_file, lower_keys=True))
-        wparams.update(extract_h5_table('wParamsNum', open_file=h5_file, lower_keys=True))
-
-    # Check stack average
+def check_dims_ch_stack_wparams(ch_stack, wparams):
     nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
     nypix = wparams["user_dypix"]
     nzpix = wparams.get("user_dzpix", 0)
 
-    assert ch0_stack.shape == ch1_stack.shape, 'Stacks must be of equal size'
-    assert ch0_stack.ndim == 3, 'Stack does not match expected shape'
-    assert ch0_stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)], \
-        f'Stack shape error: {ch0_stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]'
-
-    return ch0_stack, ch1_stack, wparams
+    assert ch_stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)], \
+        f'Stack shape error: {ch_stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]'
 
 
 def load_ch0_ch1_stacks_from_smp(filepath):
@@ -213,42 +197,86 @@ def load_ch0_ch1_stacks_from_smp(filepath):
 
 def get_triggers_and_data(filepath):
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        key_triggertimes = [k for k in h5_file.keys() if k.lower() == 'triggertimes']
+        triggertimes, triggervalues = extract_triggers(h5_file)
+        ch0_stack, ch1_stack = extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name='wDataCh0', ch1_name='wDataCh1')
+        wparams = extract_w_params_from_h5(h5_file)
 
-        if len(key_triggertimes) == 1:
-            triggertimes = h5_file[key_triggertimes[0]][()]
-        elif len(key_triggertimes) == 0:
-            triggertimes = np.zeros(0)
-        else:
-            raise ValueError('Multiple triggertimes found')
-
-        if "Tracetimes0" in h5_file.keys():  # Correct if triggertimes are in frames and not in time (old version)
-            traces_times = np.asarray(h5_file["Tracetimes0"][()])
-            correct_triggertimes = triggertimes[-1] > 2 * np.max(traces_times)
-        else:
-            correct_triggertimes = triggertimes[0] > 250 and triggertimes[-1] > 1000
-
-        if correct_triggertimes:
-            triggertimes = triggertimes / 500.
-
-        key_triggervalues = [k for k in h5_file.keys() if k.lower() == 'triggervalues']
-
-        if len(key_triggervalues) == 1:
-            triggervalues = h5_file[key_triggervalues[0]][()]
-            assert len(triggertimes) == len(triggervalues), 'Trigger mismatch'
-        elif len(key_triggervalues) == 0:
-            triggervalues = np.zeros(0)
-        else:
-            raise ValueError('Multiple triggervalues found')
-
-        os_params = dict()
-        if 'OS_Parameters' in h5_file.keys():
-            os_params.update(extract_h5_table('OS_Parameters', open_file=h5_file, lower_keys=True))
-
-        ch0_stack, ch1_stack, wparams = \
-            extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name='wDataCh0', ch1_name='wDataCh1')
+    check_dims_ch_stack_wparams(ch_stack=ch0_stack, wparams=wparams)
+    check_dims_ch_stack_wparams(ch_stack=ch1_stack, wparams=wparams)
 
     return triggertimes, triggervalues, ch0_stack, ch1_stack, wparams
+
+
+def extract_os_params(h5_file_open) -> dict:
+    os_params = dict()
+    os_params_key = [k for k in h5_file_open.keys() if k.lower() == 'os_parameters']
+    if len(os_params_key) > 0:
+        os_params.update(extract_h5_table(os_params_key[0], open_file=h5_file_open, lower_keys=True))
+    return os_params
+
+
+def extract_triggers(h5_file_open):
+    key_triggertimes = [k for k in h5_file_open.keys() if k.lower() == 'triggertimes']
+
+    if len(key_triggertimes) == 1:
+        triggertimes = h5_file_open[key_triggertimes[0]][()]
+    elif len(key_triggertimes) == 0:
+        triggertimes = np.zeros(0)
+    else:
+        raise ValueError('Multiple triggertimes found')
+
+    if "Tracetimes0" in h5_file_open.keys():  # Correct if triggertimes are in frames and not in time (old version)
+        traces_times = np.asarray(h5_file_open["Tracetimes0"][()])
+        correct_triggertimes = triggertimes[-1] > 2 * np.max(traces_times)
+    else:
+        correct_triggertimes = triggertimes[0] > 250 and triggertimes[-1] > 1000
+
+    if correct_triggertimes:
+        triggertimes = triggertimes / 500.
+
+    key_triggervalues = [k for k in h5_file_open.keys() if k.lower() == 'triggervalues']
+
+    if len(key_triggervalues) == 1:
+        triggervalues = h5_file_open[key_triggervalues[0]][()]
+        assert len(triggertimes) == len(triggervalues), 'Trigger mismatch'
+    elif len(key_triggervalues) == 0:
+        triggervalues = np.zeros(0)
+    else:
+        raise ValueError('Multiple triggervalues found')
+
+    return triggertimes, triggervalues
+
+
+def extract_traces(h5_file_open):
+    """Read all traces and their times from file"""
+    if "Traces0_raw" in h5_file_open.keys() and "Tracetimes0" in h5_file_open.keys():
+        traces = np.asarray(h5_file_open["Traces0_raw"][()])
+        traces_times = np.asarray(h5_file_open["Tracetimes0"][()])
+    else:
+        raise ValueError('Traces not found in h5 file.')
+
+    assert traces.shape == traces_times.shape, 'Inconsistent traces and tracetimes shapes'
+
+    return traces, traces_times
+
+
+def extract_w_params_from_h5(h5_file_open):
+    wparams = dict()
+    wparamsstr_key = [k for k in h5_file_open.keys() if k.lower() == 'wparamsstr']
+    if len(wparamsstr_key) > 0:
+        wparams.update(extract_h5_table(wparamsstr_key[0], open_file=h5_file_open, lower_keys=True))
+    wparamsnum_key = [k for k in h5_file_open.keys() if k.lower() == 'wparamsnum']
+    if len(wparamsnum_key) > 0:
+        wparams.update(extract_h5_table(wparamsnum_key[0], open_file=h5_file_open, lower_keys=True))
+    return wparams
+
+
+def extract_ch0_ch1_stacks_from_h5(h5_file_open, ch0_name='wDataCh0', ch1_name='wDataCh1'):
+    ch0_stack = np.copy(h5_file_open[ch0_name])
+    ch1_stack = np.copy(h5_file_open[ch1_name])
+    assert ch0_stack.shape == ch1_stack.shape, 'Stacks must be of equal size'
+    assert ch0_stack.ndim == 3, 'Stack does not match expected shape'
+    return ch0_stack, ch1_stack
 
 
 def compute_triggertimes(w_params, data, threshold=30_000, os_params=None):
