@@ -1,11 +1,12 @@
 import cmath
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy import stats
 
+from djimaging.tables.response.response_quality import RepeatQITemplate
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -183,6 +184,16 @@ def get_dir_idx(snippets, dir_order):
     return dir_idx, dir_rad
 
 
+def compute_mb_qi(snippets, dir_order):
+    assert snippets.ndim == 2
+    assert np.asarray(dir_order).ndim == 1
+
+    dir_idx, dir_rad = get_dir_idx(snippets, dir_order)
+    sorted_responses, sorted_directions = sort_response_matrix(snippets, dir_idx, dir_rad)
+    d_qi = quality_index_ds(sorted_responses)
+    return d_qi
+
+
 def compute_osdsindexes(snippets, dir_order):
     assert snippets.ndim == 2
     assert np.asarray(dir_order).ndim == 1
@@ -211,7 +222,7 @@ def compute_osdsindexes(snippets, dir_order):
     d_qi = quality_index_ds(sorted_responses)
     on_off = get_on_off_index(u)
     return dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
-           on_off, d_qi, u, v, surrogate_v, dsi_s, avg_sorted_responses
+        on_off, d_qi, u, v, surrogate_v, dsi_s, avg_sorted_responses
 
 
 class OsDsIndexesTemplate(dj.Computed):
@@ -256,7 +267,7 @@ class OsDsIndexesTemplate(dj.Computed):
     def key_source(self):
         try:
             return self.snippets_table() & \
-                   (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
+                (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
         except TypeError:
             pass
 
@@ -265,7 +276,7 @@ class OsDsIndexesTemplate(dj.Computed):
         snippets = (self.snippets_table() & key).fetch1('snippets')  # get the response snippets
 
         dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
-        on_off, d_qi, u, v, surrogate_v, dsi_s, avg_sorted_responses = \
+            on_off, d_qi, u, v, surrogate_v, dsi_s, avg_sorted_responses = \
             compute_osdsindexes(snippets=snippets, dir_order=dir_order)
 
         self.insert1(dict(key,
@@ -312,3 +323,26 @@ class OsDsIndexesTemplate(dj.Computed):
             ax.set_ylim([vmin - vmax * 0.2, vmax * 1.2])
             ax.set_xlim([-len(avg_sorted_resp) * 0.2, len(avg_sorted_resp) * 1.2])
         return None
+
+
+class MovingBarQITemplate(RepeatQITemplate):
+    _stim_family = "movingbar"
+    _stim_name = "movingbar"
+
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
+
+    def make(self, key):
+        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
+        snippets = (self.snippets_table() & key).fetch1('snippets')
+
+        qidx = compute_mb_qi(snippets, dir_order)
+        min_qidx = 1 / np.unique(dir_order).size
+        self.insert1(dict(key, qidx=qidx, min_qidx=min_qidx))

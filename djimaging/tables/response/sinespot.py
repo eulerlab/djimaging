@@ -5,11 +5,14 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.receptivefield.rf_utils import get_mean_dt
-from djimaging.tables.response import ChirpQITemplate
+from djimaging.tables.response.response_quality import RepeatQITemplate
 from djimaging.utils.dj_utils import get_primary_key
 
 
-class SineSpotQITemplate(ChirpQITemplate):
+class SineSpotQITemplate(RepeatQITemplate):
+    _stim_family = "sinespot"
+    _stim_name = "sinespot"
+
     @property
     @abstractmethod
     def stimulus_table(self):
@@ -19,14 +22,6 @@ class SineSpotQITemplate(ChirpQITemplate):
     @abstractmethod
     def snippets_table(self):
         pass
-
-    @property
-    def key_source(self):
-        try:
-            return self.snippets_table() & \
-                (self.stimulus_table() & "stim_name = 'sinespot' or stim_family = 'sinespot'")
-        except TypeError:
-            pass
 
 
 class SineSpotFeaturesTemplate(dj.Computed):

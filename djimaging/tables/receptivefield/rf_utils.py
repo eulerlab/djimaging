@@ -269,11 +269,13 @@ def merge_strf(srf, trf):
     return rf
 
 
-def build_design_matrix(X, n_lag, shift=0, n_c=1, dtype=np.float32):
+def build_design_matrix(X, n_lag, shift=0, n_c=1, dtype=None):
     """
     Build design matrix.
     Modified from RFEst.
     """
+    if dtype is None:
+        dtype = X.dtype
 
     n_sample = X.shape[0]
     n_feature = np.product(X.shape[1:])

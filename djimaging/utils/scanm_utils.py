@@ -215,7 +215,7 @@ def extract_os_params(h5_file_open) -> dict:
     return os_params
 
 
-def extract_triggers(h5_file_open):
+def extract_triggers(h5_file_open, check_triggervalues=False):
     key_triggertimes = [k for k in h5_file_open.keys() if k.lower() == 'triggertimes']
 
     if len(key_triggertimes) == 1:
@@ -238,11 +238,13 @@ def extract_triggers(h5_file_open):
 
     if len(key_triggervalues) == 1:
         triggervalues = h5_file_open[key_triggervalues[0]][()]
-        assert len(triggertimes) == len(triggervalues), 'Trigger mismatch'
     elif len(key_triggervalues) == 0:
         triggervalues = np.zeros(0)
     else:
         raise ValueError('Multiple triggervalues found')
+
+    if check_triggervalues:
+        assert len(triggertimes) == len(triggervalues), f'Mismatch: {len(triggertimes)} != {len(triggervalues)}'
 
     return triggertimes, triggervalues
 
