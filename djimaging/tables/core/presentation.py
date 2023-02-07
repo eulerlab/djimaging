@@ -55,7 +55,7 @@ class PresentationTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.field_table().RoiMask() * self.stimulus_table()
+            return (self.field_table().RoiMask() * self.stimulus_table()).proj()
         except TypeError:
             pass
 

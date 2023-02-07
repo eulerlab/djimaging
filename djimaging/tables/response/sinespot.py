@@ -63,7 +63,7 @@ class SineSpotFeaturesTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.preprocesstraces_table() & \
+            return self.preprocesstraces_table().proj() & \
                 (self.stimulus_table() & "stim_name = 'sinespot' or stim_family = 'sinespot'")
         except TypeError:
             pass

@@ -45,11 +45,10 @@ class TracesTemplate(dj.Computed):
 
     @property
     def key_source(self):
+        roi_restriction = dict() if self._include_artifacts else 'artifact_flag=0'
+
         try:
-            if self._include_artifacts:
-                return self.roi_table() * self.presentation_table()
-            else:
-                return (self.roi_table() & 'artifact_flag=0') * self.presentation_table()
+            return ((self.roi_table() & roi_restriction) * self.presentation_table()).proj()
         except TypeError:
             pass
 

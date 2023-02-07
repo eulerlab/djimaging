@@ -1,5 +1,5 @@
 import cmath
-from abc import abstractmethod, ABC
+from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
@@ -173,7 +173,7 @@ def get_dir_idx(snippets, dir_order):
     assert dir_order.ndim == 1, dir_order.shape
     assert snippets.ndim == 2, snippets.shape
     n_snippets = snippets.shape[-1]
-    assert (n_snippets % dir_order.size) == 0, f"{n_snippets} vs. {dir_order.size}"
+    assert (n_snippets % dir_order.size) == 0, f"Snippet length {n_snippets} is not a multiple of {dir_order.size}"
     dir_order = np.tile(dir_order, n_snippets // dir_order.size)
     assert n_snippets == dir_order.size
 
@@ -266,7 +266,7 @@ class OsDsIndexesTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.snippets_table() & \
+            return self.snippets_table().proj() & \
                 (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
         except TypeError:
             pass

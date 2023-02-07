@@ -19,8 +19,15 @@ class RepeatQITemplate(dj.Computed):
         '''
         return definition
 
-    _stim_family = None
-    _stim_name = None
+    @property
+    @abstractmethod
+    def _stim_family(self):
+        return None
+
+    @property
+    @abstractmethod
+    def _stim_name(self):
+        return None
 
     @property
     @abstractmethod
@@ -32,17 +39,21 @@ class RepeatQITemplate(dj.Computed):
     def snippets_table(self):
         pass
 
+    def get_stim_restriction(self):
+        if (self._stim_family is not None) and (self._stim_name is not None):
+            return f"stim_family='{self._stim_family}' or stim_name='{self._stim_name}'"
+        elif self._stim_family is not None:
+            return f"stim_family='{self._stim_family}'"
+        elif self._stim_name is not None:
+            return f"stim_name='{self._stim_name}'"
+        else:
+            return dict()
+
     @property
     def key_source(self):
-        stim_restriction = "isrepeated=1"
-        if self._stim_family is not None:
-            stim_restriction += f"and (stim_family='{self._stim_family}'"
-        if self._stim_name is not None:
-            stim_restriction += f"or stim_name='{self._stim_name}'"
-        stim_restriction += ")"
-
         try:
-            return self.snippets_table() & (self.stimulus_table() & stim_restriction)
+            return self.snippets_table().proj() & \
+                (self.stimulus_table() & "isrepeated=1" & self.get_stim_restriction())
         except TypeError:
             pass
 

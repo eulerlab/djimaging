@@ -1,4 +1,4 @@
-from abc import abstractmethod, ABC
+from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
@@ -60,7 +60,8 @@ class ChirpFeaturesTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.snippets_table() & (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
+            return self.snippets_table().proj() & \
+                (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
         except TypeError:
             pass
 

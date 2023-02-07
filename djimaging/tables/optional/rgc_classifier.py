@@ -289,7 +289,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
     def key_source(self):
         try:
             return (self.field_table() * self.detrend_params_table() * self.classifier_training_data_table() *
-                    self.classifier_table() * self.cell_filter_parameter_table()) & \
+                    self.classifier_table() * self.cell_filter_parameter_table()).proj() & \
                 ((self.snippets_table() & f"stim_name = '{self._stim_name_chirp}'").proj(chirp='stim_name') *
                  (self.snippets_table() & f"stim_name = '{self._stim_name_bar}'").proj(bar='stim_name'))
         except TypeError:

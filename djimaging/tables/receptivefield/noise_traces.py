@@ -80,7 +80,8 @@ class DNoiseTraceTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.params_table() * self.traces_table() & (self.stimulus_table() & "stim_family = 'noise'")
+            return self.params_table() * self.traces_table().proj() & \
+                (self.stimulus_table() & "stim_family = 'noise'")
         except TypeError:
             pass
 

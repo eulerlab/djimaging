@@ -1,4 +1,4 @@
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 
 import datajoint as dj
 import numpy as np
@@ -32,7 +32,10 @@ class RoiTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.field_table().RoiMask()
+        try:
+            return self.field_table().RoiMask().proj()
+        except TypeError:
+            pass
 
     def make(self, key):
         # load roi_mask for insert roi for a specific experiment and field

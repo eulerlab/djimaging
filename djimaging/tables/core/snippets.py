@@ -63,7 +63,7 @@ class SnippetsTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.preprocesstraces_table() * (self.stimulus_table() & "isrepeated=1")
+            return (self.preprocesstraces_table() * (self.stimulus_table() & "isrepeated=1")).proj()
         except TypeError:
             pass
 
