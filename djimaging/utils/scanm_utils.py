@@ -304,28 +304,72 @@ def extract_ch0_ch1_stacks_from_h5(h5_file_open, ch0_name='wDataCh0', ch1_name='
     return ch0_stack, ch1_stack
 
 
-def compute_triggertimes(w_params, data, threshold=30_000, os_params=None):
-    npix_x_offset_left = int(w_params['User_nXPixLineOffs'])
-    npix_x_offset_right = int(w_params['User_nPixRetrace'])
-    npix_x = int(w_params['User_dxPix'])
-    npix_y = int(w_params['User_dyPix'])
-    pix_dt = w_params['RealPixDur'] * 1e-6
+def compute_frame_times(w_params: dict, n_frames: int, os_params: dict = None):
+    """Compute timepoints of frames and relative delay of individual pixels"""
+    w_params = {k.lower(): v for k, v in w_params.items()}
+    os_params = {k.lower(): v for k, v in os_params.items()}
+
+    npix_x_offset_left = int(w_params['user_nxpixlineoffs'])
+    npix_x_offset_right = int(w_params['user_npixretrace'])
+    npix_x = int(w_params['user_dxpix'])
+    npix_y = int(w_params['user_dypix'])
+    pix_dt = w_params['realpixdur'] * 1e-6
     line_dt = pix_dt * npix_x
     frame_dt = pix_dt * npix_x * npix_y
 
     if os_params is not None:
-        assert np.isclose(line_dt, os_params['LineDuration'])
-        assert np.isclose(1. / os_params['samp_rate_Hz'], frame_dt)
+        assert np.isclose(line_dt, os_params['lineduration'])
+        assert np.isclose(1. / os_params['samp_rate_hz'], frame_dt)
 
     frame_dt_offset = (np.arange(npix_x * npix_y) * pix_dt).reshape(npix_y, npix_x).T
     frame_dt_offset = frame_dt_offset[npix_x_offset_left:-npix_x_offset_right]
 
-    frame_times = np.arange(data['wDataCh2'].shape[2]) * frame_dt
+    frame_times = np.arange(n_frames) * frame_dt
 
-    trigger_pixels = data['wDataCh2'] > threshold
+    return frame_times, frame_dt_offset
+
+
+def compute_triggertimes(stack: np.ndarray, w_params: dict, threshold: int = 30_000, os_params: dict = None):
+    """Extract triggertimes from stack"""
+    # TODO: Test and compare with Igor
+    assert stack.ndim == 3
+    frame_times, frame_dt_offset = compute_frame_times(
+        w_params=w_params, n_frames=stack.shape[2], os_params=os_params)
+
+    trigger_pixels = stack > threshold
     trigger_frame_idxs = np.where(np.diff(np.any(trigger_pixels, axis=(0, 1)).astype(int)) > 0)[0] + 1
 
     triggertimes = frame_times[trigger_frame_idxs] + np.array(
         [np.min(frame_dt_offset[trigger_pixels[:, :, idx]]) for idx in trigger_frame_idxs])
 
     return triggertimes
+
+
+def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, w_params: dict, os_params: dict):
+    """Extract traces and tracetimes of stack"""
+    # TODO: Test and compare with Igor
+    assert stack.ndim == 3
+    assert roi_mask.ndim == 2
+    assert stack.shape[:2] == roi_mask.shape
+    assert np.max(roi_mask) == 1 and not np.any(np.sum(roi_mask == 0)), 'ROI mask has unknown format'
+
+    frame_times, frame_dt_offset = compute_frame_times(
+        w_params=w_params, n_frames=stack.shape[2], os_params=os_params)
+
+    n_frames = stack.shape[2]
+    roi_idxs = extract_roi_idxs(roi_mask, npixartifact=0)
+
+    traces_times = np.full((n_frames, roi_idxs.size), np.nan)
+    traces = np.full((n_frames, roi_idxs.size), np.nan)
+
+    os_params = {k.lower(): v for k, v in os_params.items()}
+    delay_ms = os_params['stimulatordelay']
+
+    for ii, roi_idx in enumerate(roi_idxs):
+        roi_mask_i = roi_mask == roi_idx
+        assert np.any(roi_mask_i)
+
+        traces_times[:, ii] = frame_times + np.mean(frame_dt_offset[roi_mask_i]) + delay_ms / 1000.
+        traces[:, ii] = np.mean(stack[roi_mask_i], axis=0)
+
+    return traces, traces_times
