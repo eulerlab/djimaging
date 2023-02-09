@@ -74,12 +74,15 @@ def get_retinal_position(rel_xcoord_um: float, rel_ycoord_um: float, rotation: f
     return ventral_dorsal_pos_um, temporal_nasal_pos_um
 
 
-def load_traces_from_h5_file(filepath, roi_ids):
+def load_traces_from_h5_file(filepath):
     """Extract traces from ScanM h5 file"""
-
     with h5py.File(filepath, "r", driver="stdio") as h5_file:
         traces, traces_times = extract_traces(h5_file)
+    return traces, traces_times
 
+
+def get_roi2trace(traces, traces_times, roi_ids):
+    """Get dict that holds traces and times accessible by roi_id"""
     assert np.all(roi_ids >= 1)
 
     roi2trace = dict()
@@ -101,7 +104,7 @@ def load_traces_from_h5_file(filepath, roi_ids):
             trace_times = np.zeros(0)
 
         if np.any(~np.isfinite(trace)) or np.any(~np.isfinite(trace_times)):
-            warnings.warn(f'NaN trace or tracetime in {filepath} for ROI{roi_id}.')
+            warnings.warn(f'NaN trace or tracetime in for ROI{roi_id}.')
             valid_flag = 0
 
         roi2trace[roi_id] = dict(trace=trace, trace_times=trace_times, valid_flag=valid_flag)
@@ -276,6 +279,9 @@ def extract_roi_mask(h5_file_open, ignore_not_found=False):
         raise KeyError('Multiple ROI masks found in single file')
     elif len(roi_keys) == 1:
         roi_mask = np.copy(h5_file_open[roi_keys[0]])
+        if np.all(roi_mask.astype(int) == roi_mask):
+            roi_mask = roi_mask.astype(int)
+
         if roi_mask.size == 0:
             roi_mask = None
 
@@ -331,7 +337,6 @@ def compute_frame_times(w_params: dict, n_frames: int, os_params: dict = None):
 
 def compute_triggertimes(stack: np.ndarray, w_params: dict, threshold: int = 30_000, os_params: dict = None):
     """Extract triggertimes from stack"""
-    # TODO: Test and compare with Igor
     assert stack.ndim == 3
     frame_times, frame_dt_offset = compute_frame_times(
         w_params=w_params, n_frames=stack.shape[2], os_params=os_params)
@@ -345,9 +350,8 @@ def compute_triggertimes(stack: np.ndarray, w_params: dict, threshold: int = 30_
     return triggertimes
 
 
-def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, w_params: dict, os_params: dict):
+def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, w_params: dict, os_params: dict = None):
     """Extract traces and tracetimes of stack"""
-    # TODO: Test and compare with Igor
     assert stack.ndim == 3
     assert roi_mask.ndim == 2
     assert stack.shape[:2] == roi_mask.shape
@@ -369,7 +373,7 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, w_params: dict, os_p
         roi_mask_i = roi_mask == roi_idx
         assert np.any(roi_mask_i)
 
-        traces_times[:, ii] = frame_times + np.mean(frame_dt_offset[roi_mask_i]) + delay_ms / 1000.
+        traces_times[:, ii] = frame_times + np.median(frame_dt_offset[roi_mask_i]) + delay_ms / 1000.
         traces[:, ii] = np.mean(stack[roi_mask_i], axis=0)
 
     return traces, traces_times
