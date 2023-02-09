@@ -344,5 +344,5 @@ class MovingBarQITemplate(RepeatQITemplate):
         snippets = (self.snippets_table() & key).fetch1('snippets')
 
         qidx = compute_mb_qi(snippets, dir_order)
-        min_qidx = 1 / np.unique(dir_order).size
+        min_qidx = 1 / (snippets.shape[1] / np.unique(dir_order).size)
         self.insert1(dict(key, qidx=qidx, min_qidx=min_qidx))
