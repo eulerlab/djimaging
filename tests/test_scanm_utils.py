@@ -98,7 +98,7 @@ def test_compute_tracetimes(
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
         w_params = scanm_utils.extract_w_params_from_h5(h5_file)
         os_params = scanm_utils.extract_os_params(h5_file)
-        igor_traces, igor_traces_times = scanm_utils.extract_traces(h5_file)
+        _, igor_traces_times = scanm_utils.extract_traces(h5_file)
         stack = np.copy(h5_file[stack_name])
         roi_mask = scanm_utils.extract_roi_mask(h5_file)
 
@@ -106,7 +106,7 @@ def test_compute_tracetimes(
         stack=stack, roi_mask=roi_mask, w_params=w_params, os_params=os_params)
 
     assert igor_traces_times.shape == traces_times.shape
-    assert np.allclose(igor_traces_times, traces_times, atol=2e-3)
+    assert np.allclose(igor_traces_times, traces_times, atol=4e-3)
 
 
 def test_compute_traces(
@@ -118,7 +118,7 @@ def test_compute_traces(
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
         w_params = scanm_utils.extract_w_params_from_h5(h5_file)
         os_params = scanm_utils.extract_os_params(h5_file)
-        igor_traces, igor_traces_times = scanm_utils.extract_traces(h5_file)
+        igor_traces, _ = scanm_utils.extract_traces(h5_file)
         stack = np.copy(h5_file[stack_name])
         roi_mask = scanm_utils.extract_roi_mask(h5_file)
 
@@ -144,3 +144,8 @@ def test_compute_triggertimes(filepath="/gpfs01/euler/data/Data/DataJointTestDat
 
     assert igor_triggertimes.shape == triggertimes.shape
     assert np.allclose(igor_triggertimes, triggertimes, atol=2e-3)
+
+
+if __name__ == "__main__":
+    test_compute_tracetimes()
+    test_compute_triggertimes()

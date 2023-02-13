@@ -352,6 +352,10 @@ def compute_triggertimes(stack: np.ndarray, w_params: dict, threshold: int = 30_
 
 def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, w_params: dict, os_params: dict = None):
     """Extract traces and tracetimes of stack"""
+    # TODO: Decide if tracetimes should be numerically equal:
+    # Igor uses different method of defining the central pixel, leading to slightly different results.
+    # Igor uses GeoC, i.e. it defines a pixel for each ROI.
+
     assert stack.ndim == 3
     assert roi_mask.ndim == 2
     assert stack.shape[:2] == roi_mask.shape
