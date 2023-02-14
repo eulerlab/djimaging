@@ -3,8 +3,8 @@ from skimage.transform import rotate, resize
 
 
 def resize_image(image, output_shape, order=0):
+    image = image.copy().astype(float)
     finite_mask = np.isfinite(image)
-    image = image.copy()
     image[~finite_mask] = np.nanmin(image)
     image_resized = resize(
         image, output_shape=output_shape, order=order, mode='constant', anti_aliasing=False)
