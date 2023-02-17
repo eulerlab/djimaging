@@ -6,8 +6,8 @@ from scipy.ndimage import gaussian_filter
 from scipy.signal import find_peaks
 from sklearn.decomposition import randomized_svd
 
-from djimaging.utils import math_utils
-from djimaging.utils.filter_utils import resample_trace, upsample_stim, lowpass_filter_trace
+from djimaging.utils import math_utils, filter_utils
+from djimaging.utils.filter_utils import upsample_stim, lowpass_filter_trace
 from djimaging.utils.image_utils import resize_image
 from djimaging.utils.trace_utils import align_stim_to_trace, get_mean_dt, align_trace_to_stim
 
@@ -114,7 +114,7 @@ def prepare_data(stim, stimtime, trace, tracetime, fupsample_trace=None, fupsamp
 
     if dt_rel_error > dt_rtol:
         warnings.warn('Inconsistent step-sizes in trace, resample trace.')
-        tracetime, trace = resample_trace(tracetime=tracetime, trace=trace, dt=dt)
+        tracetime, trace = filter_utils.resample_trace(tracetime=tracetime, trace=trace, dt=dt)
 
     if lowpass_cutoff > 0:
         trace = lowpass_filter_trace(trace=trace, fs=1. / dt, f_cutoff=lowpass_cutoff)
@@ -159,14 +159,16 @@ def prepare_trace(tracetime, trace, kind='trace', fupsample=None, dt=None):
 
     if kind == 'trace':
         if fupsample > 1:
-            fit_tracetime, fit_trace = resample_trace(tracetime=tracetime, trace=trace, dt=dt / fupsample)
+            fit_tracetime, fit_trace = filter_utils.upsample_trace(
+                tracetime=tracetime, trace=trace, fupsample=fupsample)
         else:
             fit_tracetime, fit_trace = tracetime, trace
 
     elif kind == 'gradient':
         diff_trace = np.append(0, np.diff(trace))
         if fupsample > 1:
-            fit_tracetime, fit_trace = resample_trace(tracetime=tracetime, trace=diff_trace, dt=dt / fupsample)
+            fit_tracetime, fit_trace = filter_utils.upsample_trace(
+                tracetime=tracetime, trace=diff_trace, fupsample=fupsample)
         else:
             fit_tracetime, fit_trace = tracetime, diff_trace
 
@@ -176,7 +178,8 @@ def prepare_trace(tracetime, trace, kind='trace', fupsample=None, dt=None):
         # Baden et al 2016
         diff_trace = np.append(0, np.diff(trace))
         if fupsample > 1:
-            fit_tracetime, diff_trace = resample_trace(tracetime=tracetime, trace=diff_trace, dt=dt / fupsample)
+            fit_tracetime, diff_trace = filter_utils.upsample_trace(
+                tracetime=tracetime, trace=diff_trace, fupsample=fupsample)
         else:
             fit_tracetime = tracetime
 

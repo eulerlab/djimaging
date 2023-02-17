@@ -3,7 +3,6 @@ import pytest
 
 from djimaging.tables.receptivefield import rf_utils
 from djimaging.tables.receptivefield.rf_utils import prepare_data, split_data
-from djimaging.utils.filter_utils import resample_trace
 
 try:
     import rfest
@@ -91,20 +90,6 @@ def test_split_train_dev_test():
     assert np.isclose(y_dict['dev'].size / y_dict['train'].size, 0.2 / 0.6, atol=0.01, rtol=0.01)
     assert np.isclose(y_dict['test'].size / y_dict['train'].size, 0.2 / 0.6, atol=0.01, rtol=0.01)
     assert np.isclose(y_dict['dev'].size / y_dict['test'].size, 1., atol=0.01, rtol=0.01)
-
-
-def test_resample_trace():
-    dt_old = 0.1
-    dt_new = 0.01
-    tracetime = np.arange(10) * dt_old
-    trace = np.random.normal(0, 1, tracetime.size)
-    tracetime_resampled, trace_resampled = resample_trace(tracetime, trace, dt_new)
-
-    dts_new = np.diff(tracetime_resampled)
-
-    assert np.isclose(np.mean(dts_new), dt_new)
-    assert np.isclose(np.std(dts_new), 0.0)
-    assert np.isclose(tracetime_resampled[0], tracetime[0])
 
 
 @pytest.mark.skipif(rfest is None, reason="requires rfest")

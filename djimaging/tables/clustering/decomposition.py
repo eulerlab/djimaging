@@ -7,6 +7,7 @@ from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.math_utils import truncated_vstack
+from djimaging.utils.trace_utils import argsort_traces
 
 
 class FeaturesParamsTemplate(dj.Lookup):
@@ -99,7 +100,7 @@ def compute_features_pca(traces: list, ncomps: list) -> (list, list, list):
 
     features, traces_reconstructed, infos = [], [], []
     for traces_i, ncomps_i in zip(traces, ncomps):
-        sc = StandardScaler()
+        sc = StandardScaler(with_mean=True, with_std=True)
         norm_traces_i = sc.fit_transform(X=traces_i)
 
         decomp = PCA(n_components=ncomps_i, random_state=0)
@@ -200,7 +201,7 @@ class FeaturesTemplate(dj.Computed):
             """
             return definition
 
-    def plot1_components(self, key=None):
+    def plot1_components(self, key=None, sort=False):
         key = get_primary_key(table=self, key=key)
         decomp_infos = (self & key).fetch1('decomp_infos')
 
@@ -209,15 +210,21 @@ class FeaturesTemplate(dj.Computed):
         fig, axs = plt.subplots(1, len(decomp_infos), sharex='all',
                                 figsize=(4 * len(decomp_infos), hsize * 0.2), squeeze=False)
         axs = axs.flat
-        axs[0].set_ylabel('Components')
+        axs[0].set_ylabel('Sorted components' if sort else 'Components')
 
         fig.suptitle(f"{key!r}", y=1, va='bottom')
         for ax, decomp_info in zip(axs, decomp_infos):
             components = decomp_info['components']
-            explained_variance_ratio = decomp_info['explained_variance_ratio']
+
+            if sort:
+                sort_idxs = np.argsort(np.argmax(np.cumsum(np.abs(components), axis=1) > 0.5, axis=1))
+            else:
+                sort_idxs = np.arange(components.shape[0])
+
             vabsmax = np.max(np.abs(components))
-            ax.set_title(f"var_exp_tot={np.sum(explained_variance_ratio):.1%}")
-            ax.imshow(components, aspect='auto', cmap='coolwarm', interpolation='none', vmin=-vabsmax, vmax=vabsmax)
+            ax.set_title(f"var_exp_tot={np.sum(decomp_info['explained_variance_ratio']):.1%}")
+            ax.imshow(components[sort_idxs, :],
+                      aspect='auto', cmap='bwr', interpolation='none', vmin=-vabsmax, vmax=vabsmax)
         plt.show()
 
     def plot1_traces(self, key=None):
@@ -227,6 +234,8 @@ class FeaturesTemplate(dj.Computed):
         stim_names = (self.params_table & key).fetch1('stim_names')
         traces, traces_reconstructed = (self & key).fetch1('traces', 'traces_reconstructed')
 
+        sort_idxs = argsort_traces(traces[0])
+
         fig, axs = plt.subplots(len(traces), 3, sharex='all', sharey='all', figsize=(12, 6), squeeze=False)
 
         for ax_row, traces_i, reconstructed_i, stim_i in zip(axs, traces, traces_reconstructed, stim_names.split('_')):
@@ -235,12 +244,13 @@ class FeaturesTemplate(dj.Computed):
                               np.max(np.abs(reconstructed_i)),
                               np.max(np.abs(errors_i))])
             ax_row[0].set_ylabel(stim_i)
+
             for ax, data_i, title_i in zip(ax_row,
                                            [traces_i, reconstructed_i, errors_i],
                                            ["Traces", "Reconstruction", "Error(R-T)"]):
                 ax.set_title(title_i)
-                im = ax.imshow(data_i, aspect='auto', cmap='coolwarm', interpolation='none', vmin=-vabsmax,
-                               vmax=vabsmax)
+                im = ax.imshow(data_i[sort_idxs, :], origin='lower',
+                               aspect='auto', cmap='bwr', interpolation='none', vmin=-vabsmax, vmax=vabsmax)
                 plt.colorbar(im, ax=ax)
 
         plt.show()

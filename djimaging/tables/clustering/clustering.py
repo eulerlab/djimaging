@@ -60,7 +60,7 @@ def plot_grid_search_results(grid_search):
     plt.show()
 
 
-def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic', plot_results=True):
+def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic', seed=45312, plot_results=True):
     from sklearn.mixture import GaussianMixture
     from sklearn.model_selection import GridSearchCV
 
@@ -92,7 +92,8 @@ def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic', plot_result
     if cv == 1:
         cv = [(np.arange(X.shape[0]), np.arange(X.shape[0]))]  # Use train set as test set
 
-    model = GridSearchCV(GaussianMixture(), cv=cv, param_grid=param_grid, n_jobs=10, scoring=scoring, verbose=2)
+    np.random.seed(seed)
+    model = GridSearchCV(GaussianMixture(), cv=cv, param_grid=param_grid, n_jobs=10, scoring=scoring, verbose=1)
     model.fit(X)
 
     if plot_results:

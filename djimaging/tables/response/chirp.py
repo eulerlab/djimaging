@@ -8,7 +8,7 @@ from scipy import signal
 from djimaging.tables.response.response_quality import RepeatQITemplate
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
-from djimaging.utils.trace_utils import get_mean_dt
+from djimaging.utils.trace_utils import get_mean_dt, find_closest
 
 
 class ChirpQITemplate(RepeatQITemplate):
@@ -127,8 +127,8 @@ def compute_on_off_index(snippets, snippets_times, trigger_times, light_step_dur
         snip = snippets[:, i]
         snip = snip - snip.min()
 
-        step_up_idx = np.argmax(np.isclose(snip_times, step_up, atol=1e-01))
-        step_down_idx = np.argmax(np.isclose(snip_times, step_down, atol=1e-01))
+        step_up_idx = find_closest(step_up, data=snip_times, as_index=True)
+        step_down_idx = find_closest(step_down, data=snip_times, as_index=True)
 
         baseline_on = np.median(snip[:step_up_idx])
         on_response = snip[step_up_idx:step_up_idx + light_step_frames] - baseline_on

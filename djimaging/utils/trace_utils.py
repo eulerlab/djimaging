@@ -1,6 +1,6 @@
 import numpy as np
 
-from djimaging.utils.filter_utils import resample_trace
+from djimaging.utils import filter_utils
 
 
 def get_mean_dt(tracetime, rtol_error=1.0) -> (float, float):
@@ -20,7 +20,8 @@ def align_stim_to_trace(stim, stimtime, trace, tracetime):
     dt, dt_rel_error = get_mean_dt(tracetime)
 
     valid_idxs = (tracetime >= stimtime[0]) & (tracetime <= (stimtime[-1] + np.max(np.diff(stimtime))))
-    r_tracetime, aligned_trace = resample_trace(tracetime=tracetime[valid_idxs], trace=trace[valid_idxs], dt=dt)
+    r_tracetime, aligned_trace = filter_utils.resample_trace(
+        tracetime=tracetime[valid_idxs], trace=trace[valid_idxs], dt=dt)
     t0 = r_tracetime[0]
 
     num_repeats = np.array([np.sum((r_tracetime > t_a) & (r_tracetime <= t_b))
@@ -56,3 +57,19 @@ def find_closest(target: float, data: np.ndarray, atol=np.inf, as_index=False):
         return closest_index
     else:
         return closest
+
+
+def argsort_traces(traces):
+    """Traces (n_samples x n_time)"""
+    assert traces.ndim == 2
+    ccs = np.corrcoef(traces)
+    ref_idx = np.argmax(np.sum(ccs, axis=0))
+    sort_idxs = np.argsort(ccs[ref_idx])
+    return sort_idxs
+
+
+def sort_traces(traces):
+    """Traces (n_samples x n_time)"""
+    assert traces.ndim == 2
+    sort_idxs = argsort_traces(traces)
+    return traces[sort_idxs, :]

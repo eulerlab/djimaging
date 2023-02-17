@@ -3,6 +3,7 @@ from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
+from djimaging.utils import filter_utils
 from matplotlib import pyplot as plt
 from scipy import signal
 
@@ -103,15 +104,6 @@ def subtract_baseline_trace(trace, trace_times, stim_start: float, inplace: bool
     return trace
 
 
-def resample_trace(trace, trace_times, fs_resample: float):
-    trace_times_resampled = np.arange(
-        trace_times[0], np.nextafter(trace_times[-1], trace_times[-1] + fs_resample), 1. / fs_resample)
-
-    trace_resampled = np.interp(trace_times_resampled, trace_times, trace)
-
-    return trace_resampled, trace_times_resampled
-
-
 def process_trace(trace_times, trace, poly_order, window_len_seconds,
                   subtract_baseline: bool, standardize: int, non_negative: bool, stim_start: float = None,
                   f_cutoff: float = None, fs_resample: float = None, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3),
@@ -125,7 +117,7 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds,
 
     if dt_rel_error > dt_rtol:
         warnings.warn('Inconsistent step-sizes in trace, resample trace.')
-        tracetime, trace = resample_trace(trace=trace, trace_times=trace_times, fs_resample=fs)
+        tracetime, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=dt)
 
     trace = drop_left_and_right(trace, drop_nmin_lr=drop_nmin_lr, drop_nmax_lr=drop_nmax_lr, inplace=True)
 
@@ -150,8 +142,12 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds,
     elif standardize == 2:
         trace /= np.std(trace)
 
-    if (fs_resample is not None) and (fs_resample > 0):
-        trace, trace_times = resample_trace(trace, trace_times, fs_resample=fs_resample)
+    if (fs_resample is not None) and (fs_resample != 0) and (fs != fs_resample):
+        if fs_resample < fs and np.isclose((fs / fs_resample), np.round(fs / fs_resample)):
+            trace_times, trace = filter_utils.downsample_trace(
+                tracetime=trace_times, trace=trace, fdownsample=int(np.round(fs / fs_resample)))
+        else:
+            trace_times, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=dt)
 
     return trace_times, trace, smoothed_trace
 

@@ -99,3 +99,25 @@ def upsample_trace(tracetime, trace, fupsample):
     trace_upsampled = np.interp(tracetime_upsampled, tracetime, trace)
 
     return tracetime_upsampled, trace_upsampled
+
+
+def downsample_trace(tracetime, trace, fdownsample):
+    assert isinstance(fdownsample, int)
+    assert fdownsample > 1
+
+    tracetime = np.atleast_2d(tracetime.copy())
+    trace = np.atleast_2d(trace.copy())
+
+    n_new = trace.shape[1] // fdownsample
+    n_max = n_new * fdownsample
+
+    trace = trace[:, :n_max]
+    trace_downsampled = np.mean(trace.reshape(trace.shape[0], n_new, fdownsample), axis=2)
+    tracetime_downsampled = tracetime[:, ::fdownsample][:, :n_new]
+
+    tracetime_downsampled, trace_downsampled = tracetime_downsampled.squeeze(), trace_downsampled.squeeze()
+
+    assert tracetime_downsampled.shape[-1] == trace_downsampled.shape[-1], \
+        f"{tracetime_downsampled.shape} != {trace_downsampled.shape} != {n_new}"
+
+    return tracetime_downsampled, trace_downsampled
