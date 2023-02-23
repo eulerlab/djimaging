@@ -1,4 +1,3 @@
-import warnings
 from abc import abstractmethod
 
 import datajoint as dj
@@ -33,13 +32,7 @@ class AveragesTemplate(dj.Computed):
     def snippets_table(self):
         pass
 
-    def make(self, key):
-        snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
-        triggertimes_snippets = (self.snippets_table() & key).fetch1('triggertimes_snippets').copy()
-
-        average_times = get_aligned_snippets_times(snippets_times=snippets_times)
-        average = np.mean(snippets, axis=1)
-
+    def normalize_average(self, average):
         if self._norm_kind == 'zscore':
             average_norm = math_utils.normalize_zscore(average)
         elif self._norm_kind == 'zero_one':
@@ -50,6 +43,17 @@ class AveragesTemplate(dj.Computed):
             average_norm = math_utils.normalize_amp_std(average)
         else:
             raise NotImplementedError(self._norm_kind)
+
+        return average_norm
+
+    def make(self, key):
+        snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
+        triggertimes_snippets = (self.snippets_table() & key).fetch1('triggertimes_snippets').copy()
+
+        average_times = get_aligned_snippets_times(snippets_times=snippets_times)
+        average = np.mean(snippets, axis=1)
+
+        average_norm = self.normalize_average(average)
 
         triggertimes_rel = np.mean(triggertimes_snippets - triggertimes_snippets[0, :], axis=1)
 
@@ -93,10 +97,12 @@ class AveragesTemplate(dj.Computed):
         averages_norm = math_utils.padded_vstack(averages_norm, cval=np.nan)
 
         fig, axs = plt.subplots(2, 1, figsize=(10, 8))
-        plot_utils.set_long_title(fig=fig, title=restriction)
-
+        if len(restriction) > 0:
+            plot_utils.set_long_title(fig=fig, title=restriction)
         sort_idxs = trace_utils.argsort_traces(averages, ignore_nan=True)
 
+        axs[0].set_title('average')
         plot_utils.plot_signals_heatmap(ax=axs[0], signals=averages[sort_idxs, :])
+        axs[1].set_title('average_norm')
         plot_utils.plot_signals_heatmap(ax=axs[1], signals=averages_norm[sort_idxs, :])
         plt.show()

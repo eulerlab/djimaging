@@ -1,6 +1,8 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.utils import trace_utils
+
 
 def plot_field(ch0_average, ch1_average, roi_mask=None, roi_ch_average=None, npixartifact=0,
                title='', figsize=(16, 4), highlight_roi=None, fig=None, axs=None):
@@ -158,12 +160,15 @@ def plot_trf(trf, t_trf=None, peak_idxs=None, ax=None):
     return ax
 
 
-def plot_signals_heatmap(signals, ax=None, cb=True):
+def plot_signals_heatmap(signals, ax=None, cb=True, vabsmax=None, sort=False):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(8, 3))
 
-    vabsmax = np.nanmax(np.abs(signals))
-    im = ax.imshow(signals, aspect='auto', vmin=-vabsmax, vmax=vabsmax, cmap='coolwarm')
+    if vabsmax is None:
+        vabsmax = np.nanmax(np.abs(signals))
+
+    im = ax.imshow(signals, aspect='auto', vmin=-vabsmax, vmax=vabsmax, cmap='bwr',
+                   interpolation='none', origin='lower')
     if cb:
         plt.colorbar(im, ax=ax)
 
@@ -188,3 +193,36 @@ def plot_mean_trace_and_std(ax, time, traces, label=None, color='k', color2='gra
     ax.plot(time[idxs], trace_mean[idxs], c=color, label=label, zorder=2, lw=lw, clip_on=False)
     ax.fill_between(time[idxs], trace_mean[idxs] + trace_std[idxs], trace_mean[idxs] - trace_std[idxs], alpha=0.7,
                     color=color2, lw=0, clip_on=False)
+
+
+def plot_clusters(traces_list, stim_names, clusters, kind='averages', title=None):
+    """Plot traces sorted by clusters"""
+    unique_clusters, cluster_counts = np.unique(clusters, return_counts=True)
+
+    n_rows = np.minimum(unique_clusters.size, 15)
+    n_cols = len(traces_list)
+
+    if kind == 'averages':
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 2, 0.8 * (1 + n_rows)), squeeze=False,
+                                sharex='col', sharey='row')
+    else:
+        fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, 2 * (1 + n_rows)), squeeze=False,
+                                sharex='col', sharey='row', gridspec_kw=dict(height_ratios=cluster_counts))
+
+    set_long_title(fig=fig, title=title)
+
+    for ax_col, stim_i, traces_i in zip(axs.T, stim_names, traces_list):
+        ax_col[0].set(title=f"stim={stim_i}")
+        for row_i, (ax, cluster) in enumerate(zip(ax_col, unique_clusters)):
+            c_traces_i = traces_i[clusters == cluster, :]
+
+            if kind == 'averages':
+                plot_mean_trace_and_std(ax=ax, time=np.arange(c_traces_i.shape[1]), traces=c_traces_i,
+                                        color=f'C{row_i}')
+            else:
+                plot_signals_heatmap(signals=c_traces_i, ax=ax, cb=True, vabsmax=np.max(np.abs(traces_i)))
+
+            ax.set(ylabel=f"cluster={int(cluster)}\nn={c_traces_i.shape[0]}")
+
+    plt.tight_layout()
+    plt.show()

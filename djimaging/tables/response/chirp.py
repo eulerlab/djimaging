@@ -34,7 +34,7 @@ class ChirpFeaturesTemplate(dj.Computed):
     @property
     def definition(self):
         definition = '''
-        #Computes an OnOff and a transience index based on the chirp step response
+        # Computes an OnOff and a transience index based on the chirp step response
         -> self.snippets_table
         ---
         on_off_index:       float   # index indicating light preference (-1 Off, 1 On)
@@ -110,6 +110,7 @@ class ChirpFeaturesTemplate(dj.Computed):
 
 
 def compute_on_off_index(snippets, snippets_times, trigger_times, light_step_duration=1):
+    # TODO: Reimplement cleaner
     dts = [get_mean_dt(tracetime=snippets_times_i)[0] for snippets_times_i in snippets_times.T]
     fs = 1. / np.mean(dts)
 
@@ -153,6 +154,7 @@ def compute_on_off_index(snippets, snippets_times, trigger_times, light_step_dur
 
 
 def compute_transience_index(snippets, snippets_times, trigger_times, upsam_fre=500):
+    # TODO: Reimplement cleaner
     dts = [get_mean_dt(tracetime=snippets_times_i)[0] for snippets_times_i in snippets_times.T]
     fs = 1. / np.mean(dts)
 

@@ -2,10 +2,10 @@ from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
+from djimaging.utils import plot_utils
 from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.plot_utils import plot_mean_trace_and_std
 
 
 def cluster_features(X, kind: str, params_dict: dict):
@@ -237,50 +237,6 @@ class ClusteringTemplate(dj.Computed):
         key = get_primary_key(table=self, key=key)
 
         stim_names = (self.features_table.params_table & key).fetch1('stim_names').split('_')
-        traces = (self.features_table & key).fetch1('traces')
+        traces_list = (self.features_table & key).fetch1('traces')
         clusters = (self & key).fetch1('clusters')
-
-        unique_clusters, cluster_counts = np.unique(clusters, return_counts=True)
-
-        n_rows = np.minimum(unique_clusters.size, 15)
-        n_cols = len(traces)
-
-        if kind == 'averages':
-            fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 2, 0.8 * (1 + n_rows)), squeeze=False,
-                                    sharex='col', sharey='row')
-        else:
-            fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, 2 * (1 + n_rows)), squeeze=False,
-                                    sharex='col', sharey='row', gridspec_kw=dict(height_ratios=cluster_counts))
-
-        fig.suptitle(key, y=1, va='bottom')
-
-        for ax_col, stim_i, traces_i in zip(axs.T, stim_names, traces):
-            ax_col[0].set(title=f"stim={stim_i}")
-            for row_i, (ax, cluster) in enumerate(zip(ax_col, unique_clusters)):
-                c_traces_i = traces_i[clusters == cluster, :]
-
-                if kind == 'averages':
-                    self._plot_cluster_averages(ax, traces=c_traces_i, c=f'C{row_i}')
-                else:
-                    self._plot_cluster_trace_heatmaps(ax, traces=c_traces_i, vabsmax=np.max(np.abs(traces_i)))
-
-                ax.set(ylabel=f"cluster={int(cluster)}\nn={c_traces_i.shape[0]}")
-
-        plt.tight_layout()
-        plt.show()
-
-    @staticmethod
-    def _plot_cluster_averages(ax, traces, c=None):
-        plot_mean_trace_and_std(
-            ax=ax, time=np.arange(traces.shape[1]), traces=traces, color=c)
-
-    @staticmethod
-    def _plot_cluster_trace_heatmaps(ax, traces, vabsmax=None):
-        mean_trace = np.mean(traces, axis=0)
-        corr_mean = np.array([np.corrcoef(trace, mean_trace)[0, 1] for trace in traces])
-        sort_idx = np.argsort(corr_mean)
-
-        im = ax.imshow(traces[sort_idx, :], aspect='auto', cmap='coolwarm', interpolation='none',
-                       vmin=-vabsmax, vmax=vabsmax, origin='lower')
-
-        plt.colorbar(im, ax=ax)
+        plot_utils.plot_clusters(traces_list, stim_names, clusters, kind=kind, title=key)

@@ -66,6 +66,9 @@ def argsort_traces(traces, ignore_nan=False):
     if ignore_nan:
         traces = traces[:, np.all(np.isfinite(traces), axis=0)]
 
+    if traces.shape[0] <= 2:
+        return np.arange(traces.shape[0])
+
     ccs = np.corrcoef(traces)
     ref_idx = np.argmax(np.sum(ccs, axis=0))
     sort_idxs = np.argsort(ccs[ref_idx])
