@@ -77,13 +77,20 @@ def plot_field_and_traces(ch0_average, ch1_average, roi_mask, title='', figsize=
     plt.tight_layout()
 
 
-def set_long_title(ax, title=None):
+def prep_long_title(title=None):
     if title is None:
         return
     title = str(title)
     if '\n' not in title and len(title) > 50:
         title = title[:len(title) // 2] + '\n' + title[len(title) // 2:]
-    ax.set(title=title)
+    return title
+
+
+def set_long_title(ax=None, fig=None, title=None):
+    if ax is not None:
+        ax.set_title(prep_long_title(title=title))
+    elif fig is not None:
+        fig.suptitle(prep_long_title(title=title))
 
 
 def plot_traces(time, traces, ax=None, title=None):
@@ -118,7 +125,7 @@ def plot_srf(srf, ax=None, vabsmax=None, pixelsize=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(6, 6))
     if vabsmax is None:
-        vabsmax = np.max(np.abs(srf))
+        vabsmax = np.nanmax(np.abs(srf))
 
     if pixelsize is not None:
         extent = np.array([-srf.shape[1] / 2., srf.shape[1] / 2., -srf.shape[0] / 2., srf.shape[0] / 2.]) * pixelsize
@@ -139,7 +146,7 @@ def plot_trf(trf, t_trf=None, peak_idxs=None, ax=None):
     if t_trf is None:
         t_trf = np.arange(-trf.size + 1, 1)
 
-    vabsmax = np.max(np.abs(trf))
+    vabsmax = np.nanmax(np.abs(trf))
 
     ax.set(title='tRF')
     ax.fill_between(t_trf, trf)
@@ -151,15 +158,15 @@ def plot_trf(trf, t_trf=None, peak_idxs=None, ax=None):
     return ax
 
 
-def plot_signals_heatmap(signals, ax=None):
+def plot_signals_heatmap(signals, ax=None, cb=True):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(8, 3))
 
-    from sklearn.decomposition import PCA
+    vabsmax = np.nanmax(np.abs(signals))
+    im = ax.imshow(signals, aspect='auto', vmin=-vabsmax, vmax=vabsmax, cmap='coolwarm')
+    if cb:
+        plt.colorbar(im, ax=ax)
 
-    vabsmax = np.max(np.abs(signals))
-    ax.imshow(signals[np.argsort(PCA(n_components=1).fit_transform(signals).flat)], aspect='auto',
-              vmin=-vabsmax, vmax=vabsmax, cmap='coolwarm')
     return ax
 
 

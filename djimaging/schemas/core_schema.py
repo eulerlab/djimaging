@@ -89,4 +89,6 @@ class Snippets(core.SnippetsTemplate):
 
 @schema
 class Averages(core.AveragesTemplate):
+    _norm_kind = 'amp_one'
     snippets_table = Snippets
+

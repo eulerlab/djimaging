@@ -59,17 +59,21 @@ def find_closest(target: float, data: np.ndarray, atol=np.inf, as_index=False):
         return closest
 
 
-def argsort_traces(traces):
+def argsort_traces(traces, ignore_nan=False):
     """Traces (n_samples x n_time)"""
-    assert traces.ndim == 2
+    assert traces.ndim == 2, traces.ndim
+
+    if ignore_nan:
+        traces = traces[:, np.all(np.isfinite(traces), axis=0)]
+
     ccs = np.corrcoef(traces)
     ref_idx = np.argmax(np.sum(ccs, axis=0))
     sort_idxs = np.argsort(ccs[ref_idx])
     return sort_idxs
 
 
-def sort_traces(traces):
+def sort_traces(traces, ignore_nan=False):
     """Traces (n_samples x n_time)"""
     assert traces.ndim == 2
-    sort_idxs = argsort_traces(traces)
+    sort_idxs = argsort_traces(traces, ignore_nan=ignore_nan)
     return traces[sort_idxs, :]
