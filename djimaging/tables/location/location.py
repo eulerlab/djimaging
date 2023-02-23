@@ -23,7 +23,7 @@ class OpticDiskTemplate(dj.Computed):
         # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
         -> self.experiment_table
         ---
-        fromfile :varchar(255)  # File from which data was extraced
+        od_fromfile :varchar(255)  # File from which optic disc data was extracted
         odx      :float         # XCoord_um relative to the optic disk
         ody      :float         # YCoord_um relative to the optic disk
         odz      :float         # ZCoord_um relative to the optic disk
@@ -85,7 +85,7 @@ class OpticDiskTemplate(dj.Computed):
         loc_key["odx"] = odx
         loc_key["ody"] = ody
         loc_key["odz"] = odz
-        loc_key["fromfile"] = fromfile
+        loc_key["od_fromfile"] = fromfile
 
         self.insert1(loc_key)
 
