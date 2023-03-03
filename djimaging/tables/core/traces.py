@@ -9,6 +9,7 @@ from djimaging.utils.scanm_utils import load_traces_from_h5_file
 
 class TracesTemplate(dj.Computed):
     database = ""
+    _include_artifacts = False
 
     @property
     def definition(self):
@@ -41,21 +42,14 @@ class TracesTemplate(dj.Computed):
     def roi_table(self):
         pass
 
-    _include_artifacts = False
-
     @property
     def key_source(self):
         try:
-            if self._include_artifacts:
-                return self.roi_table() * self.presentation_table()
-            else:
-                return (self.roi_table() & 'artifact_flag=0') * self.presentation_table()
+            return self.presentation_table().proj()
         except TypeError:
             pass
 
     def make(self, key):
-
-        # get all params we need for creating trace
         filepath = (self.presentation_table() & key).fetch1("h5_header")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
         roi_ids = (self.roi_table() & key).fetch("roi_id")
@@ -63,23 +57,31 @@ class TracesTemplate(dj.Computed):
         roi2trace = load_traces_from_h5_file(filepath, roi_ids)
 
         for roi_id, roi_data in roi2trace.items():
+            if not self._include_artifacts:
+                if (self.roi_table() & key & dict(roi_id=roi_id)).fetch1("artifact_flag") == 1:
+                    continue
+
             trace_key = key.copy()
             trace_key['roi_id'] = roi_id
             trace_key['trace'] = roi_data['trace']
             trace_key['trace_times'] = roi_data['trace_times']
             trace_key['trace_flag'] = roi_data['valid_flag']
-
-            if trace_key['trace_flag']:
-                if triggertimes[0] < trace_key['trace_times'][0]:
-                    trace_key["trigger_flag"] = 0
-                elif trace_key['trace_flag'] and triggertimes[-1] > trace_key['trace_times'][-1]:
-                    trace_key["trigger_flag"] = 0
-                else:
-                    trace_key["trigger_flag"] = 1
-            else:
-                trace_key["trigger_flag"] = 0
+            trace_key['trigger_flag'] = self.get_trigger_flag(
+                trace_flag=trace_key['trace_flag'], trace_times=trace_key['trace_times'], triggertimes=triggertimes)
 
             self.insert1(trace_key)
+
+    @staticmethod
+    def get_trigger_flag(trace_flag, trace_times, triggertimes):
+        if trace_flag:
+            if triggertimes[0] < trace_times[0]:
+                return 0
+            elif triggertimes[-1] > trace_times[-1]:
+                return 0
+            else:
+                return 1
+        else:
+            return 0
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
