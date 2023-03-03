@@ -86,3 +86,11 @@ def get_primary_key(table, key=None):
     else:
         key = random.choice(table.proj().fetch(as_dict=True))
     return key
+
+
+def get_secondary_keys(table):
+    """Get all secondary keys of table"""
+    key = get_primary_key(table)
+    row = (table & key).fetch1()
+    secondary_keys = list(set(row.keys()) - set(key.keys()))
+    return secondary_keys

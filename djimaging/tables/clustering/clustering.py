@@ -221,7 +221,7 @@ class ClusteringTemplate(dj.Computed):
         clusters = (self & key).fetch1('clusters')
 
         fig, ax = plt.subplots(1, 1, figsize=(6, 2))
-        fig.suptitle(key)
+        plot_utils.set_long_title(fig=fig, title=key)
         ax.hist(clusters, bins=np.arange(clusters.min() - 0.25, clusters.max() + 0.5, 0.5))
         ax.set(title='Counts')
         plt.tight_layout()

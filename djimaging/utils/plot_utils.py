@@ -195,9 +195,13 @@ def plot_mean_trace_and_std(ax, time, traces, label=None, color='k', color2='gra
                     color=color2, lw=0, clip_on=False)
 
 
-def plot_clusters(traces_list, stim_names, clusters, kind='averages', title=None):
+def plot_clusters(traces_list, stim_names, clusters, kind='averages', title=None, min_count=1):
     """Plot traces sorted by clusters"""
     unique_clusters, cluster_counts = np.unique(clusters, return_counts=True)
+
+    if min_count > 1:
+        unique_clusters = unique_clusters[cluster_counts >= min_count]
+        cluster_counts = cluster_counts[cluster_counts >= min_count]
 
     n_rows = np.minimum(unique_clusters.size, 15)
     n_cols = len(traces_list)
@@ -207,7 +211,7 @@ def plot_clusters(traces_list, stim_names, clusters, kind='averages', title=None
                                 sharex='col', sharey='row')
     else:
         fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, 2 * (1 + n_rows)), squeeze=False,
-                                sharex='col', sharey='row', gridspec_kw=dict(height_ratios=cluster_counts))
+                                sharex='col', sharey='row', gridspec_kw=dict(height_ratios=cluster_counts[:n_rows] + 1))
 
     set_long_title(fig=fig, title=title)
 

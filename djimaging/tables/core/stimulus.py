@@ -36,7 +36,7 @@ class StimulusTemplate(dj.Manual):
 
     def add_stimulus(self, stim_name: str, alias: str, stim_family: str = "", framerate: float = 0,
                      isrepeated: bool = 0, ntrigger_rep: int = 0, stim_path: str = "", commit_id: str = "",
-                     trial_info: object = None, stim_trace: object = None, stim_dict: dict = None,
+                     trial_info: object = None, stim_trace: np.ndarray = None, stim_dict: dict = None,
                      skip_duplicates: bool = False, unique_alias: bool = True) -> None:
         """
         Add stimulus to database
@@ -123,7 +123,7 @@ class StimulusTemplate(dj.Manual):
 
     def add_chirp(self, stim_name: str = "chirp", stim_family: str = 'chirp',
                   spatialextent: float = None, framerate: float = 1 / 60.,
-                  ntrigger_rep: int = 2, isrepeated: bool = True,
+                  ntrigger_rep: int = 2, isrepeated: bool = True, stim_trace: np.ndarray = None,
                   alias: str = None, skip_duplicates: bool = False):
 
         if alias is None:
@@ -142,6 +142,7 @@ class StimulusTemplate(dj.Manual):
             framerate=framerate,
             skip_duplicates=skip_duplicates,
             unique_alias=True,
+            stim_trace=stim_trace,
             stim_dict=stim_dict,
         )
 
