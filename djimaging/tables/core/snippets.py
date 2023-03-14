@@ -10,10 +10,10 @@ from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.scanm_utils import split_trace_by_reps
 
 
-def get_aligned_snippets_times(snippets_times, raise_error=True):
+def get_aligned_snippets_times(snippets_times, raise_error=True, tol=1e-4):
     snippets_times = snippets_times - snippets_times[0, :]
 
-    is_inconsistent = np.any(np.std(snippets_times, axis=1) > 1e-4)
+    is_inconsistent = np.any(np.std(snippets_times, axis=1) > tol)
     if is_inconsistent:
         if raise_error:
             raise ValueError(f'Failed to snippet times: max_std={np.max(np.std(snippets_times, axis=1))}')
