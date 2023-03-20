@@ -312,3 +312,20 @@ def compute_triggertimes(w_params, data, threshold=30_000, os_params=None, stimu
         [np.min(frame_dt_offset[trigger_pixels[:, :, idx]]) for idx in trigger_frame_idxs])
 
     return triggertimes
+
+
+def get_roi_center(roi_mask: np.ndarray, roi_id: int) -> (float, float):
+    binary_arr = -roi_mask == roi_id
+    if not np.any(binary_arr):
+        raise ValueError(f'roi_id={roi_id} not found in roi_mask with values {np.unique(roi_mask)}')
+    x, y = np.mean(np.stack(np.where(binary_arr), axis=1), axis=0)
+    return x, y
+
+
+def get_roi_centers(roi_mask: np.ndarray, roi_ids: np.ndarray) -> np.ndarray:
+    # TODO test if x, y should be swapped
+    roi_centers = np.zeros((len(roi_ids), 2))
+    for i, roi_id in enumerate(roi_ids):
+        x, y = get_roi_center(roi_mask, roi_id)
+        roi_centers[i, :] = (x, y)
+    return roi_centers
