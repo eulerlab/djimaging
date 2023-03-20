@@ -11,14 +11,13 @@ from djimaging.utils.plot_utils import plot_trace_and_trigger
 
 class TracesTemplate(dj.Computed):
     database = ""
-    _include_artifacts = False
-    _compute_from_stack = False
 
     @property
     def definition(self):
         definition = """
         # Raw Traces for each roi under a specific presentation
     
+        -> self.params_table
         -> self.presentation_table
         -> self.roi_table
     
@@ -29,6 +28,11 @@ class TracesTemplate(dj.Computed):
         trigger_flag   :tinyint unsigned      # Are triggertimes inside trace_times (1) or not (0)?
         """
         return definition
+
+    @property
+    @abstractmethod
+    def params_table(self):
+        pass
 
     @property
     @abstractmethod
@@ -53,22 +57,25 @@ class TracesTemplate(dj.Computed):
             pass
 
     def make(self, key):
+        include_artifacts, compute_from_stack, trace_precision = (self.params_table() & key).fetch1(
+            "include_artifacts", "compute_from_stack", "trace_precision")
         filepath = (self.presentation_table() & key).fetch1("h5_header")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
         roi_ids = (self.roi_table() & key).fetch("roi_id")
 
-        if self._compute_from_stack:
+        if compute_from_stack:
             data_stack_name = (self.field_table.experiment_table.userinfo_table & key).fetch1("data_stack_name")
             roi_mask = (self.field_table.RoiMask & key).fetch1("roi_mask")
             assert np.all(roi_ids == np.abs(scanm_utils.extract_roi_idxs(roi_mask))), f'ROIs do not match for {key}'
 
             roi2trace = self._roi2trace_from_stack(
-                filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask, data_stack_name=data_stack_name)
+                filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
+                data_stack_name=data_stack_name, precision=trace_precision)
         else:
             roi2trace = self._roi2trace_from_h5_file(filepath, roi_ids)
 
         for roi_id, roi_data in roi2trace.items():
-            if not self._include_artifacts:
+            if not include_artifacts:
                 if (self.roi_table() & key & dict(roi_id=roi_id)).fetch1("artifact_flag") == 1:
                     continue
 
@@ -90,13 +97,15 @@ class TracesTemplate(dj.Computed):
         return roi2trace
 
     @staticmethod
-    def _roi2trace_from_stack(filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray, data_stack_name: str):
+    def _roi2trace_from_stack(filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray,
+                              data_stack_name: str, precision: str):
+
         with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-            w_params = scanm_utils.extract_w_params_from_h5(h5_file)
-            os_params = scanm_utils.extract_os_params(h5_file)
+            wparams = scanm_utils.extract_wparams_from_h5(h5_file)
             stack = np.copy(h5_file[data_stack_name])
 
-        traces, traces_times = scanm_utils.compute_traces(stack, roi_mask, w_params, os_params)
+        traces, traces_times = scanm_utils.compute_traces(
+            stack=stack, roi_mask=roi_mask, wparams=wparams, precision=precision)
         roi2trace = scanm_utils.get_roi2trace(traces=traces, traces_times=traces_times, roi_ids=roi_ids)
         return roi2trace
 

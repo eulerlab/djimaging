@@ -89,24 +89,38 @@ def test_get_retinal_position_left_vn():
     assert exp_temporal_nasal_pos == obs_temporal_nasal_pos
 
 
-def test_compute_tracetimes(
-        filepath="/gpfs01/euler/data/Data/DataJointTestData/20220304/1/Pre/SMP_M1_LR_GCL0_chirp.h5",
-        stack_name='wDataCh0'):
+def _test_compute_tracetimes(filepath, stack_name, precision, atol):
     if not os.path.isfile(filepath):
         pytest.skip(f"File not found {filepath}")
 
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        w_params = scanm_utils.extract_w_params_from_h5(h5_file)
+        wparams = scanm_utils.extract_wparams_from_h5(h5_file)
         os_params = scanm_utils.extract_os_params(h5_file)
         _, igor_traces_times = scanm_utils.extract_traces(h5_file)
         stack = np.copy(h5_file[stack_name])
         roi_mask = scanm_utils.extract_roi_mask(h5_file)
 
+        # In Igor this was wrongly added, so let's remove it again
+        igor_traces_times -= os_params['stimulatordelay'] / 1000
+
     _, traces_times = scanm_utils.compute_traces(
-        stack=stack, roi_mask=roi_mask, w_params=w_params, os_params=os_params)
+        stack=stack, roi_mask=roi_mask, wparams=wparams, precision=precision)
 
     assert igor_traces_times.shape == traces_times.shape
-    assert np.allclose(igor_traces_times, traces_times, atol=4e-3)
+    assert np.allclose(igor_traces_times, traces_times,
+                       atol=atol), f"{np.max(np.abs(igor_traces_times - traces_times))} > {atol}"
+
+
+def test_compute_tracetimes_line_precision(
+        filepath="/gpfs01/euler/data/Data/DataJointTestData/20220304/1/Pre/SMP_M1_LR_GCL0_chirp.h5",
+        stack_name='wDataCh0'):
+    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='line', atol=1e-3)
+
+
+def test_compute_tracetimes_pixel_precision(
+        filepath="/gpfs01/euler/data/Data/DataJointTestData/20220304/1/Pre/SMP_M1_LR_GCL0_chirp.h5",
+        stack_name='wDataCh0'):
+    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='pixel', atol=3e-3)
 
 
 def test_compute_traces(
@@ -116,36 +130,51 @@ def test_compute_traces(
         pytest.skip(f"File not found {filepath}")
 
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        w_params = scanm_utils.extract_w_params_from_h5(h5_file)
-        os_params = scanm_utils.extract_os_params(h5_file)
+        wparams = scanm_utils.extract_wparams_from_h5(h5_file)
         igor_traces, _ = scanm_utils.extract_traces(h5_file)
         stack = np.copy(h5_file[stack_name])
         roi_mask = scanm_utils.extract_roi_mask(h5_file)
 
     traces, _ = scanm_utils.compute_traces(
-        stack=stack, roi_mask=roi_mask, w_params=w_params, os_params=os_params)
+        stack=stack, roi_mask=roi_mask, wparams=wparams)
 
     assert igor_traces.shape == traces.shape
+    assert np.allclose(igor_traces[0, 0], traces[0, 0])
+    assert np.allclose(igor_traces[0, -1], traces[0, -1])
+    assert np.allclose(igor_traces[-1, 0], traces[-1, 0])
     assert np.allclose(igor_traces, traces)
 
 
-def test_compute_triggertimes(filepath="/gpfs01/euler/data/Data/DataJointTestData/20201127/1/Pre/SMP_C1_d1_Chirp.h5"):
+def _test_compute_triggertimes(filepath, precision):
+    """Don't add stimulator delay for comparison, because in Igor it was added to tracetimes instead"""
     if not os.path.isfile(filepath):
         pytest.skip(f"File not found {filepath}")
 
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        w_params = scanm_utils.extract_w_params_from_h5(h5_file)
-        os_params = scanm_utils.extract_os_params(h5_file)
+        wparams = scanm_utils.extract_wparams_from_h5(h5_file)
         igor_triggertimes, _ = scanm_utils.extract_triggers(h5_file, check_triggervalues=False)
         ch2_stack = np.copy(h5_file['wDataCh2'])
 
-    triggertimes = scanm_utils.compute_triggertimes(
-        stack=ch2_stack, w_params=w_params, os_params=os_params)
+    triggertimes = scanm_utils.compute_triggertimes_from_wparams(
+        stack=ch2_stack, wparams=wparams, precision=precision, stimulator_delay=0)
 
     assert igor_triggertimes.shape == triggertimes.shape
     assert np.allclose(igor_triggertimes, triggertimes, atol=2e-3)
 
 
+def test_compute_triggertimes_line_precision(
+        filepath="/gpfs01/euler/data/Data/DataJointTestData2/20201127/1/Pre/SMP_C1_d1_Chirp.h5"):
+    _test_compute_triggertimes(filepath=filepath, precision='line')
+
+
+def test_compute_triggertimes_pixel_precision(
+        filepath="/gpfs01/euler/data/Data/DataJointTestData2/20201127/1/Pre/SMP_C1_d1_Chirp.h5"):
+    _test_compute_triggertimes(filepath=filepath, precision='pixel')
+
+
 if __name__ == "__main__":
-    test_compute_tracetimes()
-    test_compute_triggertimes()
+    test_compute_tracetimes_line_precision()
+    test_compute_tracetimes_pixel_precision()
+
+    test_compute_triggertimes_line_precision()
+    test_compute_triggertimes_pixel_precision()

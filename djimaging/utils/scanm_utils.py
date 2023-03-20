@@ -8,6 +8,10 @@ from djimaging.utils.misc_utils import CapturePrints
 from djimaging.utils.trace_utils import find_closest
 
 
+def get_stimulator_delay(date, setupid) -> float:
+    raise NotImplementedError
+
+
 def get_npixartifact(setupid):
     """Get number of lines that affected by the light artifact."""
     setupid = int(setupid)
@@ -76,7 +80,7 @@ def get_retinal_position(rel_xcoord_um: float, rel_ycoord_um: float, rotation: f
     return ventral_dorsal_pos_um, temporal_nasal_pos_um
 
 
-def load_traces_from_h5_file(filepath):
+def load_traces_from_h5(filepath):
     """Extract traces from ScanM h5 file"""
     with h5py.File(filepath, "r", driver="stdio") as h5_file:
         traces, traces_times = extract_traces(h5_file)
@@ -148,17 +152,16 @@ def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol
     return snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag
 
 
-def load_ch0_ch1_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh1'):
+def load_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh1') -> (dict, dict):
     """Load high resolution stack channel 0 and 1 from h5 file"""
-
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        ch0_stack, ch1_stack = extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name=ch0_name, ch1_name=ch1_name)
-        wparams = extract_w_params_from_h5(h5_file)
+        ch_stacks = extract_stacks_from_h5(h5_file, ch_names=(ch0_name, ch1_name))
+        wparams = extract_wparams_from_h5(h5_file)
 
-    check_dims_ch_stack_wparams(ch_stack=ch0_stack, wparams=wparams)
-    check_dims_ch_stack_wparams(ch_stack=ch1_stack, wparams=wparams)
+    for name, stack in ch_stacks.items():
+        check_dims_ch_stack_wparams(ch_stack=stack, wparams=wparams)
 
-    return ch0_stack, ch1_stack, wparams
+    return ch_stacks, wparams
 
 
 def check_dims_ch_stack_wparams(ch_stack, wparams):
@@ -201,16 +204,10 @@ def load_ch0_ch1_stacks_from_smp(filepath):
     return ch0_stack, ch1_stack, wparams
 
 
-def get_triggers_and_data(filepath):
+def load_triggers_from_h5(filepath):
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
         triggertimes, triggervalues = extract_triggers(h5_file)
-        ch0_stack, ch1_stack = extract_ch0_ch1_stacks_from_h5(h5_file, ch0_name='wDataCh0', ch1_name='wDataCh1')
-        wparams = extract_w_params_from_h5(h5_file)
-
-    check_dims_ch_stack_wparams(ch_stack=ch0_stack, wparams=wparams)
-    check_dims_ch_stack_wparams(ch_stack=ch1_stack, wparams=wparams)
-
-    return triggertimes, triggervalues, ch0_stack, ch1_stack, wparams
+    return triggertimes, triggervalues
 
 
 def extract_os_params(h5_file_open) -> dict:
@@ -255,7 +252,7 @@ def extract_triggers(h5_file_open, check_triggervalues=False):
     return triggertimes, triggervalues
 
 
-def load_roi_mask(filepath, ignore_not_found=False):
+def load_roi_mask_from_h5(filepath, ignore_not_found=False):
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
         roi_mask = extract_roi_mask(h5_file, ignore_not_found=ignore_not_found)
     return roi_mask
@@ -294,7 +291,7 @@ def extract_roi_mask(h5_file_open, ignore_not_found=False):
     return roi_mask
 
 
-def extract_w_params_from_h5(h5_file_open):
+def extract_wparams_from_h5(h5_file_open):
     wparams = dict()
     wparamsstr_key = [k for k in h5_file_open.keys() if k.lower() == 'wparamsstr']
     if len(wparamsstr_key) > 0:
@@ -305,32 +302,48 @@ def extract_w_params_from_h5(h5_file_open):
     return wparams
 
 
-def extract_ch0_ch1_stacks_from_h5(h5_file_open, ch0_name='wDataCh0', ch1_name='wDataCh1'):
-    ch0_stack = np.copy(h5_file_open[ch0_name])
-    ch1_stack = np.copy(h5_file_open[ch1_name])
-    assert ch0_stack.shape == ch1_stack.shape, 'Stacks must be of equal size'
-    assert ch0_stack.ndim == 3, 'Stack does not match expected shape'
-    return ch0_stack, ch1_stack
+def extract_stacks_from_h5(h5_file_open, ch_names=('wDataCh0', 'wDataCh1')) -> dict:
+    ch_stacks = {ch_name: np.copy(h5_file_open[ch_name]) for ch_name in ch_names}
+    for name, stack in ch_stacks.items():
+        if stack.ndim != 3:
+            raise ValueError(f"stack must be 3d but ndim={stack.ndim}")
+        if stack.shape != ch_stacks[ch_names[0]].shape:
+            raise ValueError('Stacks must be of equal size')
+    return ch_stacks
 
 
-def compute_frame_times(w_params: dict, n_frames: int, os_params: dict = None):
+def compute_frame_times_from_wparams(wparams: dict, n_frames: int, precision: str = 'line') \
+        -> (np.ndarray, np.ndarray):
+    """Compute timepoints of frames and relative delay of individual pixels. Extract relevant parameters from wparams"""
+    if precision not in ['line', 'pixel']:
+        raise ValueError(f"precision must be either 'line' or 'pixel' but was {precision}")
+
+    wparams = {k.lower(): v for k, v in wparams.items()}
+
+    npix_x_offset_left = int(wparams['user_nxpixlineoffs'])
+    npix_x_offset_right = int(wparams['user_npixretrace'])
+    npix_x = int(wparams['user_dxpix'])
+    npix_y = int(wparams['user_dypix'])
+    pix_dt = wparams['realpixdur'] * 1e-6
+
+    frame_times, frame_dt_offset = compute_frame_times(
+        n_frames=n_frames, pix_dt=pix_dt, npix_x=npix_x, npix_y=npix_y,
+        npix_x_offset_left=npix_x_offset_left, npix_x_offset_right=npix_x_offset_right, precision=precision)
+
+    return frame_times, frame_dt_offset
+
+
+def compute_frame_times(n_frames: int, pix_dt: int, npix_x: int, npix_y: int,
+                        npix_x_offset_left: int, npix_x_offset_right: int,
+                        precision: str = 'line') -> (np.ndarray, np.ndarray):
     """Compute timepoints of frames and relative delay of individual pixels"""
-    w_params = {k.lower(): v for k, v in w_params.items()}
-    os_params = {k.lower(): v for k, v in os_params.items()}
-
-    npix_x_offset_left = int(w_params['user_nxpixlineoffs'])
-    npix_x_offset_right = int(w_params['user_npixretrace'])
-    npix_x = int(w_params['user_dxpix'])
-    npix_y = int(w_params['user_dypix'])
-    pix_dt = w_params['realpixdur'] * 1e-6
-    line_dt = pix_dt * npix_x
     frame_dt = pix_dt * npix_x * npix_y
 
-    if os_params is not None:
-        assert np.isclose(line_dt, os_params['lineduration'])
-        assert np.isclose(1. / os_params['samp_rate_hz'], frame_dt)
-
     frame_dt_offset = (np.arange(npix_x * npix_y) * pix_dt).reshape(npix_y, npix_x).T
+
+    if precision == 'line':
+        frame_dt_offset = np.tile(frame_dt_offset[0, :], (npix_x, 1))
+
     frame_dt_offset = frame_dt_offset[npix_x_offset_left:-npix_x_offset_right]
 
     frame_times = np.arange(n_frames) * frame_dt
@@ -338,34 +351,51 @@ def compute_frame_times(w_params: dict, n_frames: int, os_params: dict = None):
     return frame_times, frame_dt_offset
 
 
-def compute_triggertimes(stack: np.ndarray, w_params: dict, threshold: int = 30_000, os_params: dict = None):
+def compute_triggertimes_from_wparams(
+        stack: np.ndarray, wparams: dict, stimulator_delay: float,
+        threshold: int = 30_000, precision: str = 'line') -> np.ndarray:
+    """Extract triggertimes from stack, get parameters from wparams"""
+    frame_times, frame_dt_offset = compute_frame_times_from_wparams(
+        wparams=wparams, n_frames=stack.shape[2], precision=precision)
+    triggertimes = compute_triggertimes(
+        stack=stack, frame_times=frame_times, frame_dt_offset=frame_dt_offset, threshold=threshold)
+    return triggertimes
+
+
+def compute_triggertimes(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset: np.ndarray,
+                         threshold: int = 30_000, stimulator_delay: float = 0.) -> np.ndarray:
     """Extract triggertimes from stack"""
-    assert stack.ndim == 3
-    frame_times, frame_dt_offset = compute_frame_times(
-        w_params=w_params, n_frames=stack.shape[2], os_params=os_params)
+    if stack.ndim != 3:
+        raise ValueError(f"stack must be 3d but ndim={stack.ndim}")
+    if stack.shape[2] != frame_times.size:
+        raise ValueError(f"stack shape not not match frame_times {stack.shape} {frame_times.shape}")
+    if stack.shape[:2] != frame_dt_offset.shape:
+        raise ValueError(f"stack shape not not match frame_dt_offset {stack.shape} {frame_dt_offset.shape}")
 
     trigger_pixels = stack > threshold
     trigger_frame_idxs = np.where(np.diff(np.any(trigger_pixels, axis=(0, 1)).astype(int)) > 0)[0] + 1
 
     triggertimes = frame_times[trigger_frame_idxs] + np.array(
-        [np.min(frame_dt_offset[trigger_pixels[:, :, idx]]) for idx in trigger_frame_idxs])
+        [np.min(frame_dt_offset[trigger_pixels[:, :, idx]]) for idx in trigger_frame_idxs]) + stimulator_delay
 
     return triggertimes
 
 
-def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, w_params: dict, os_params: dict = None):
+def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, precision: str = 'line') \
+        -> (np.ndarray, np.ndarray):
     """Extract traces and tracetimes of stack"""
     # TODO: Decide if tracetimes should be numerically equal:
     # Igor uses different method of defining the central pixel, leading to slightly different results.
     # Igor uses GeoC, i.e. it defines a pixel for each ROI.
 
-    assert stack.ndim == 3
-    assert roi_mask.ndim == 2
-    assert stack.shape[:2] == roi_mask.shape
-    assert np.max(roi_mask) == 1 and not np.any(np.sum(roi_mask == 0)), 'ROI mask has unknown format'
+    if stack.ndim != 3:
+        raise ValueError(f"stack must be 3d but ndim={stack.ndim}")
+    check_if_scanm_roi_mask(roi_mask=roi_mask)
+    if stack.shape[:2] != roi_mask.shape:
+        raise ValueError(f"xy-dim of stack roi_mask must match but shapes are {stack.shape} and {roi_mask.shape}")
 
-    frame_times, frame_dt_offset = compute_frame_times(
-        w_params=w_params, n_frames=stack.shape[2], os_params=os_params)
+    frame_times, frame_dt_offset = compute_frame_times_from_wparams(
+        wparams=wparams, n_frames=stack.shape[2], precision=precision)
 
     n_frames = stack.shape[2]
     roi_idxs = extract_roi_idxs(roi_mask, npixartifact=0)
@@ -373,17 +403,20 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, w_params: dict, os_p
     traces_times = np.full((n_frames, roi_idxs.size), np.nan)
     traces = np.full((n_frames, roi_idxs.size), np.nan)
 
-    os_params = {k.lower(): v for k, v in os_params.items()}
-    delay_ms = os_params['stimulatordelay']
-
-    for ii, roi_idx in enumerate(roi_idxs):
+    for i, roi_idx in enumerate(roi_idxs):
         roi_mask_i = roi_mask == roi_idx
-        assert np.any(roi_mask_i)
-
-        traces_times[:, ii] = frame_times + np.median(frame_dt_offset[roi_mask_i]) + delay_ms / 1000.
-        traces[:, ii] = np.mean(stack[roi_mask_i], axis=0)
+        traces_times[:, i] = frame_times + np.median(frame_dt_offset[roi_mask_i])
+        traces[:, i] = np.mean(stack[roi_mask_i], axis=0)
 
     return traces, traces_times
+
+
+def check_if_scanm_roi_mask(roi_mask: np.ndarray):
+    """Test if ROI mask is in ScanM format, raise error otherwise"""
+    if roi_mask.ndim != 2:
+        raise ValueError(f"roi_mask must be 2d but ndim={roi_mask.ndim}")
+    if np.max(roi_mask) != 1 or np.any(np.sum(roi_mask == 0)):
+        raise ValueError('ROI mask contains unexpected values')
 
 
 def get_roi_center(roi_mask: np.ndarray, roi_id: int) -> (float, float):

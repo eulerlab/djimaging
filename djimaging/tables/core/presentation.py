@@ -6,10 +6,11 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 
+from djimaging.utils import scanm_utils
 from djimaging.utils.alias_utils import get_field_files
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm_utils import get_triggers_and_data
+from djimaging.utils.scanm_utils import get_stimulator_delay
 
 
 class PresentationTemplate(dj.Computed):
@@ -19,6 +20,8 @@ class PresentationTemplate(dj.Computed):
     def definition(self):
         definition = """
         # information about each stimulus presentation
+        
+        -> self.params_table
         -> self.field_table
         -> self.stimulus_table
         condition             :varchar(255)     # condition (pharmacological or other)
@@ -31,6 +34,11 @@ class PresentationTemplate(dj.Computed):
         ch1_average           :longblob         # Stack median of channel 1
         """
         return definition
+
+    @property
+    @abstractmethod
+    def params_table(self):
+        pass
 
     @property
     @abstractmethod
@@ -211,8 +219,17 @@ class PresentationTemplate(dj.Computed):
                     print(f"Error for key: {key}")
                     raise e
 
-    def __add_presentation(self, key, filepath: str):
-        triggertimes, triggervalues, ch0_stack, ch1_stack, wparams = get_triggers_and_data(filepath)
+    def __add_presentation(self, key, filepath: str, compute_from_stack: bool = True):
+        ch_stacks, wparams = scanm_utils.load_stacks_from_h5(filepath, ('wDataCh0', 'wDataCh1', 'wDataCh2'))
+
+        if compute_from_stack:
+            setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
+            stimulator_delay = get_stimulator_delay(date=key['date'], setupid=setupid)
+            trigger_precision = (self.params_table() & key).fetch1("trigger_precision")
+            triggertimes, triggervalues = scanm_utils.compute_triggertimes_from_wparams(
+                ch_stacks['wDataCh2'], wparams=wparams, precision=trigger_precision, stimulator_delay=stimulator_delay)
+        else:
+            triggertimes, triggervalues = scanm_utils.load_triggers_from_h5(filepath)
 
         isrepeated, ntrigger_rep = (self.stimulus_table() & key).fetch1("isrepeated", "ntrigger_rep")
 
@@ -229,8 +246,8 @@ class PresentationTemplate(dj.Computed):
         pres_key["trigger_flag"] = int(trigger_flag)
         pres_key["triggertimes"] = triggertimes
         pres_key["triggervalues"] = triggervalues
-        pres_key["ch0_average"] = np.mean(ch0_stack, 2)
-        pres_key["ch1_average"] = np.mean(ch1_stack, 2)
+        pres_key["ch0_average"] = np.mean(ch_stacks['wDataCh0'], 2)
+        pres_key["ch1_average"] = np.mean(ch_stacks['wDataCh1'], 2)
 
         # extract params for scaninfo
         scaninfo_key = deepcopy(key)

@@ -8,3 +8,4 @@ from .snippets import SnippetsTemplate
 from .stimulus import StimulusTemplate
 from .traces import TracesTemplate
 from .userinfo import UserInfoTemplate
+from .raw_data import RawDataParamsTemplate

@@ -9,8 +9,8 @@ from djimaging.utils.alias_utils import check_shared_alias_str
 from djimaging.utils.datafile_utils import get_filename_info
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm_utils import get_pixel_size_xy_um, load_ch0_ch1_stacks_from_h5, get_npixartifact, \
-    load_roi_mask
+from djimaging.utils.scanm_utils import get_pixel_size_xy_um, load_stacks_from_h5, get_npixartifact, \
+    load_roi_mask_from_h5
 
 
 class FieldTemplate(dj.Computed):
@@ -211,7 +211,7 @@ def load_field_roi_mask(pre_data_path, files, mask_alias='', highres_alias=''):
     sorted_files = files[np.argsort(penalties)]
 
     for file in sorted_files:
-        roi_mask = load_roi_mask(filepath=os.path.join(pre_data_path, file), ignore_not_found=True)
+        roi_mask = load_roi_mask_from_h5(filepath=os.path.join(pre_data_path, file), ignore_not_found=True)
         if roi_mask is not None:
             return roi_mask, file
     else:
@@ -231,7 +231,7 @@ def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, 
     filepath = os.path.join(pre_data_path, file)
 
     ch0_stack, ch1_stack, wparams = \
-        load_ch0_ch1_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh1')
+        load_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh1')
 
     nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
     nypix = wparams["user_dypix"]

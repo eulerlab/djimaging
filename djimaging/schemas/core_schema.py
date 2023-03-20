@@ -50,11 +50,17 @@ class Stimulus(core.StimulusTemplate):
 
 
 @schema
+class RawDataParams(core.RawDataParamsTemplate):
+    pass
+
+
+@schema
 class Presentation(core.PresentationTemplate):
     experiment_table = Experiment
     userinfo_table = UserInfo
     field_table = Field
     stimulus_table = Stimulus
+    params_table = RawDataParams
 
     class ScanInfo(core.PresentationTemplate.ScanInfo):
         pass
@@ -65,6 +71,7 @@ class Traces(core.TracesTemplate):
     presentation_table = Presentation
     field_table = Field
     roi_table = Roi
+    params_table = RawDataParams
 
 
 @schema
@@ -91,4 +98,3 @@ class Snippets(core.SnippetsTemplate):
 class Averages(core.AveragesTemplate):
     _norm_kind = 'amp_one'
     snippets_table = Snippets
-
