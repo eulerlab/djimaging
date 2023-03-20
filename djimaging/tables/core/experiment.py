@@ -142,7 +142,7 @@ class ExperimentTemplate(dj.Computed):
         expinfo_key["darkadapt_hrs"] = header_dict["darkadapt_hrs"]
         expinfo_key["slicethickness_um"] = header_dict["slicethickness_um"]
         expinfo_key["bathtemp_degc"] = header_dict["bathtemp_degc"]
-        expinfo_key["prepwmorient"] = header_dict["prepwmorient"] if header_dict["prepwmorient"] != "" else -1
+        expinfo_key["prepwmorient"] = header_dict["prepwmorient"] if header_dict["prepwmorient"] != "" else 0
 
         # find optic disk information if available
         odx, ody, odz, od_ini_flag = 0, 0, 0, 0

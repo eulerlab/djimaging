@@ -9,6 +9,7 @@ from djimaging.utils.trace_utils import find_closest
 
 
 def get_npixartifact(setupid):
+    """Get number of lines that affected by the light artifact."""
     setupid = int(setupid)
     assert setupid in [1, 2, 3], setupid
 
@@ -25,6 +26,7 @@ def get_npixartifact(setupid):
 
 
 def get_setup_xscale(setupid: int):
+    """Get pixel scale in x and y for setup."""
     setupid = int(setupid)
     assert setupid in [1, 2, 3], setupid
 
@@ -113,7 +115,7 @@ def get_roi2trace(traces, traces_times, roi_ids):
 
 
 def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.1, allow_drop_last=True):
-    """Split trace in snippets, using triggertimes"""
+    """Split trace in snippets, using triggertimes."""
 
     t_idxs = [find_closest(target=tt + delay, data=times, atol=atol, as_index=True)
               for tt in triggertimes[::ntrigger_rep]]
@@ -160,12 +162,13 @@ def load_ch0_ch1_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh
 
 
 def check_dims_ch_stack_wparams(ch_stack, wparams):
+    """Check if the dimensions of a stack match what is expected from wparams"""
     nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
     nypix = wparams["user_dypix"]
     nzpix = wparams.get("user_dzpix", 0)
 
-    assert ch_stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)], \
-        f'Stack shape error: {ch_stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]'
+    if not (ch_stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)]):
+        ValueError(f'Stack shape error: {ch_stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]')
 
 
 def load_ch0_ch1_stacks_from_smp(filepath):
@@ -381,3 +384,20 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, w_params: dict, os_p
         traces[:, ii] = np.mean(stack[roi_mask_i], axis=0)
 
     return traces, traces_times
+
+
+def get_roi_center(roi_mask: np.ndarray, roi_id: int) -> (float, float):
+    binary_arr = -roi_mask == roi_id
+    if not np.any(binary_arr):
+        raise ValueError(f'roi_id={roi_id} not found in roi_mask with values {np.unique(roi_mask)}')
+    x, y = np.mean(np.stack(np.where(binary_arr), axis=1), axis=0)
+    return x, y
+
+
+def get_roi_centers(roi_mask: np.ndarray, roi_ids: np.ndarray) -> np.ndarray:
+    # TODO test if x, y should be swapped
+    roi_centers = np.zeros((len(roi_ids), 2))
+    for i, roi_id in enumerate(roi_ids):
+        x, y = get_roi_center(roi_mask, roi_id)
+        roi_centers[i, :] = (x, y)
+    return roi_centers

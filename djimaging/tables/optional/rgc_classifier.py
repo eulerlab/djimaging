@@ -30,7 +30,7 @@ def prepare_dj_config_rgc_classifier(output_folder, input_folder="/gpfs01/euler/
     os.environ["DJ_SUPPORT_FILEPATH_MANAGEMENT"] = "TRUE"
     dj.config['enable_python_native_blobs'] = True
 
-    dj_config_stores = dj.config['stores'] or dict()
+    dj_config_stores = dj.config.get('stores', None) or dict()
     dj_config_stores.update(stores_dict)
     dj.config['stores'] = dj_config_stores
 
