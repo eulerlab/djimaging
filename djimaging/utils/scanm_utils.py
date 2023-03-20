@@ -9,6 +9,7 @@ from djimaging.utils.trace_utils import find_closest
 
 
 def get_npixartifact(setupid):
+    """Get number of lines that affected by the light artifact."""
     setupid = int(setupid)
     assert setupid in [1, 2, 3], setupid
 
@@ -25,6 +26,7 @@ def get_npixartifact(setupid):
 
 
 def get_setup_xscale(setupid: int):
+    """Get pixel scale in x and y for setup."""
     setupid = int(setupid)
     assert setupid in [1, 2, 3], setupid
 
@@ -75,7 +77,7 @@ def get_retinal_position(rel_xcoord_um: float, rel_ycoord_um: float, rotation: f
 
 
 def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.1, allow_drop_last=True):
-    """Split trace in snippets, using triggertimes"""
+    """Split trace in snippets, using triggertimes."""
 
     t_idxs = [find_closest(target=tt + delay, data=times, atol=atol, as_index=True)
               for tt in triggertimes[::ntrigger_rep]]
@@ -109,7 +111,7 @@ def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol
 
 
 def load_traces_from_h5_file(filepath, roi_ids):
-    """Extract traces from ScanM h5 file"""
+    """Extract traces from ScanM h5 file."""
 
     with h5py.File(filepath, "r", driver="stdio") as h5_file:
         traces, traces_times = extract_traces(h5_file)
@@ -157,12 +159,13 @@ def load_ch0_ch1_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh
 
 
 def check_dims_ch_stack_wparams(ch_stack, wparams):
+    """Check if the dimensions of a stack match what is expected from wparams"""
     nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
     nypix = wparams["user_dypix"]
     nzpix = wparams.get("user_dzpix", 0)
 
-    assert ch_stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)], \
-        f'Stack shape error: {ch_stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]'
+    if not (ch_stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)]):
+        ValueError(f'Stack shape error: {ch_stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]')
 
 
 def load_ch0_ch1_stacks_from_smp(filepath):
@@ -279,7 +282,12 @@ def extract_ch0_ch1_stacks_from_h5(h5_file_open, ch0_name='wDataCh0', ch1_name='
     return ch0_stack, ch1_stack
 
 
-def compute_triggertimes(w_params, data, threshold=30_000, os_params=None):
+def compute_triggertimes(w_params, data, threshold=30_000, os_params=None, stimulator_delay=0.):
+    """Extract triggertimes from channel=wDataCh2 by thresholding"""
+    # TODO: Add stimulator delay
+    if stimulator_delay != 0.:
+        raise NotImplementedError('Not implemented for non-zero stimulator delay.')
+
     npix_x_offset_left = int(w_params['User_nXPixLineOffs'])
     npix_x_offset_right = int(w_params['User_nPixRetrace'])
     npix_x = int(w_params['User_dxPix'])
