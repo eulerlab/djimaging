@@ -1,15 +1,31 @@
 import warnings
 
+import os
 import h5py
 import numpy as np
+import pandas as pd
 
 from djimaging.utils.data_utils import extract_h5_table
 from djimaging.utils.misc_utils import CapturePrints
 from djimaging.utils.trace_utils import find_closest
 
 
-def get_stimulator_delay(date, setupid) -> float:
-    raise NotImplementedError
+def get_stimulator_delay(date, setupid, file=None) -> float:
+    """Get delay of stimulator which is the time that passes between the electrical trigger recorded in
+    the third channel until the stimulus is actually displayed.
+    For the light crafter these are 20-100 ms, for the Arduino it is zero."""
+    if file is None:
+        file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'stimulator_delay.csv')
+
+    eval_time = pd.Timestamp(date) + pd.to_timedelta(23, unit='h')  # Use end of day
+
+    df = pd.read_csv(file, sep=';', parse_dates=['date'])
+    df.loc[np.max(df.index) + 1] = {'date': eval_time}
+    df.set_index('date', inplace=True)
+    df.sort_index(ascending=True, inplace=True)
+    df.fillna(method='ffill', inplace=True)
+    stimulator_delay_ms = df.loc[eval_time, f"setup{setupid}"] / 1000.
+    return stimulator_delay_ms
 
 
 def get_npixartifact(setupid):
@@ -152,10 +168,10 @@ def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol
     return snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag
 
 
-def load_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh1') -> (dict, dict):
+def load_stacks_from_h5(filepath, ch_names=('wDataCh0', 'wDataCh1')) -> (dict, dict):
     """Load high resolution stack channel 0 and 1 from h5 file"""
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        ch_stacks = extract_stacks_from_h5(h5_file, ch_names=(ch0_name, ch1_name))
+        ch_stacks = extract_stacks_from_h5(h5_file, ch_names=ch_names)
         wparams = extract_wparams_from_h5(h5_file)
 
     for name, stack in ch_stacks.items():
@@ -353,17 +369,18 @@ def compute_frame_times(n_frames: int, pix_dt: int, npix_x: int, npix_y: int,
 
 def compute_triggertimes_from_wparams(
         stack: np.ndarray, wparams: dict, stimulator_delay: float,
-        threshold: int = 30_000, precision: str = 'line') -> np.ndarray:
+        threshold: int = 30_000, precision: str = 'line') -> (np.ndarray, np.ndarray):
     """Extract triggertimes from stack, get parameters from wparams"""
     frame_times, frame_dt_offset = compute_frame_times_from_wparams(
         wparams=wparams, n_frames=stack.shape[2], precision=precision)
-    triggertimes = compute_triggertimes(
-        stack=stack, frame_times=frame_times, frame_dt_offset=frame_dt_offset, threshold=threshold)
-    return triggertimes
+    triggertimes, triggervalues = compute_triggers(
+        stack=stack, frame_times=frame_times, frame_dt_offset=frame_dt_offset,
+        threshold=threshold, stimulator_delay=stimulator_delay)
+    return triggertimes, triggervalues
 
 
-def compute_triggertimes(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset: np.ndarray,
-                         threshold: int = 30_000, stimulator_delay: float = 0.) -> np.ndarray:
+def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset: np.ndarray,
+                     threshold: int = 30_000, stimulator_delay: float = 0.) -> (np.ndarray, np.ndarray):
     """Extract triggertimes from stack"""
     if stack.ndim != 3:
         raise ValueError(f"stack must be 3d but ndim={stack.ndim}")
@@ -378,7 +395,9 @@ def compute_triggertimes(stack: np.ndarray, frame_times: np.ndarray, frame_dt_of
     triggertimes = frame_times[trigger_frame_idxs] + np.array(
         [np.min(frame_dt_offset[trigger_pixels[:, :, idx]]) for idx in trigger_frame_idxs]) + stimulator_delay
 
-    return triggertimes
+    triggervalues = [np.mean(stack[:, :, idx]) for idx in trigger_frame_idxs]
+
+    return triggertimes, triggervalues
 
 
 def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, precision: str = 'line') \

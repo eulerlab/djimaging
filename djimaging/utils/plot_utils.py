@@ -1,31 +1,29 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.utils import trace_utils
 
-
-def plot_field(ch0_average, ch1_average, roi_mask=None, roi_ch_average=None, npixartifact=0,
+def plot_field(main_ch_average, alt_ch_average, roi_mask=None, roi_ch_average=None, npixartifact=0,
                title='', figsize=(16, 4), highlight_roi=None, fig=None, axs=None):
     if roi_mask is not None and roi_mask.size == 0:
         roi_mask = None
 
     if roi_ch_average is None:
-        roi_ch_average = ch0_average
+        roi_ch_average = main_ch_average
 
     if (fig is None) or (axs is None):
         fig, axs = plt.subplots(1, 2 if roi_mask is None else 4, figsize=figsize, sharex='all', sharey='all')
 
     fig.suptitle(title)
 
-    extent = (0, ch0_average.shape[0], 0, ch0_average.shape[1])
+    extent = (0, main_ch_average.shape[0], 0, main_ch_average.shape[1])
 
     ax = axs[0]
-    ax.imshow(ch0_average.T, origin='lower', extent=extent)
-    ax.set(title='ch0_average')
+    ax.imshow(main_ch_average.T, origin='lower', extent=extent)
+    ax.set(title='main average')
 
     ax = axs[1]
-    ax.imshow(ch1_average.T, origin='lower', extent=extent)
-    ax.set(title='ch1_average')
+    ax.imshow(alt_ch_average.T, origin='lower', extent=extent)
+    ax.set(title='alt average')
 
     if roi_mask is not None:
         rois = -roi_mask.astype(float).T
@@ -61,7 +59,7 @@ def plot_field(ch0_average, ch1_average, roi_mask=None, roi_ch_average=None, npi
     plt.tight_layout()
 
 
-def plot_field_and_traces(ch0_average, ch1_average, roi_mask, title='', figsize=(16, 8), highlight_roi=None):
+def plot_field_and_traces(main_ch_average, alt_ch_average, roi_mask, title='', figsize=(16, 8), highlight_roi=None):
     fig = plt.figure(figsize=figsize)
     field_axs = [
         plt.subplot2grid((2, 4), (0, 0)),
@@ -72,7 +70,7 @@ def plot_field_and_traces(ch0_average, ch1_average, roi_mask, title='', figsize=
 
     trace_ax = plt.subplot2grid((2, 4), (1, 0), colspan=4)
 
-    plot_field(ch0_average=ch0_average, ch1_average=ch1_average, roi_mask=roi_mask,
+    plot_field(main_ch_average=main_ch_average, alt_ch_average=alt_ch_average, roi_mask=roi_mask,
                title=title, highlight_roi=highlight_roi, fig=fig, axs=field_axs)
 
     trace_ax.plot([0, 1], [0, 1])

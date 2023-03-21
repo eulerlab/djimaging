@@ -38,6 +38,9 @@ class Field(core.FieldTemplate):
     class Zstack(core.FieldTemplate.Zstack):
         pass
 
+    class StackAverages(core.FieldTemplate.StackAverages):
+        pass
+
 
 @schema
 class Roi(core.RoiTemplate):
@@ -63,6 +66,9 @@ class Presentation(core.PresentationTemplate):
     params_table = RawDataParams
 
     class ScanInfo(core.PresentationTemplate.ScanInfo):
+        pass
+
+    class StackAverages(core.PresentationTemplate.StackAverages):
         pass
 
 

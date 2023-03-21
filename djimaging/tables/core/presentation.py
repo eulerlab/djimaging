@@ -10,7 +10,7 @@ from djimaging.utils import scanm_utils
 from djimaging.utils.alias_utils import get_field_files
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm_utils import get_stimulator_delay
+from djimaging.utils.scanm_utils import get_stimulator_delay, load_roi_mask_from_h5
 
 
 class PresentationTemplate(dj.Computed):
@@ -20,18 +20,15 @@ class PresentationTemplate(dj.Computed):
     def definition(self):
         definition = """
         # information about each stimulus presentation
-        
-        -> self.params_table
         -> self.field_table
         -> self.stimulus_table
+        -> self.params_table
         condition             :varchar(255)     # condition (pharmacological or other)
         ---
         h5_header             :varchar(255)     # path to h5 file
         trigger_flag          :tinyint unsigned # Are triggers as expected (1) or not (0)?
         triggertimes          :longblob         # triggertimes in each presentation
         triggervalues         :longblob         # values of the recorded triggers
-        ch0_average           :longblob         # Stack median of channel 0
-        ch1_average           :longblob         # Stack median of channel 1
         """
         return definition
 
@@ -63,9 +60,34 @@ class PresentationTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return (self.field_table().RoiMask() * self.stimulus_table()).proj()
+            return self.params_table.proj() * self.field_table.RoiMask.proj() * self.stimulus_table.proj()
         except TypeError:
             pass
+        except AttributeError:
+            pass
+
+    class StackAverages(dj.Part):
+        @property
+        def definition(self):
+            definition = """
+            # Stack median (over time of the available channels)
+            -> master
+            ch_name : varchar(255)  # name of the channel
+            ---
+            ch_average : longblob  # Stack median over time
+            """
+            return definition
+
+    class RoiMask(dj.Part):
+        @property
+        def definition(self):
+            definition = """
+            # ROI Mask of presentation
+            -> master
+            ---
+            roi_mask    :longblob       # roi mask for the recording field
+            """
+            return definition
 
     class ScanInfo(dj.Part):
         @property
@@ -246,8 +268,14 @@ class PresentationTemplate(dj.Computed):
         pres_key["trigger_flag"] = int(trigger_flag)
         pres_key["triggertimes"] = triggertimes
         pres_key["triggervalues"] = triggervalues
-        pres_key["ch0_average"] = np.mean(ch_stacks['wDataCh0'], 2)
-        pres_key["ch1_average"] = np.mean(ch_stacks['wDataCh1'], 2)
+
+        # get stack avgs
+        avg_keys = []
+        for name, stack in ch_stacks.items():
+            avg_key = deepcopy(key)
+            avg_key["ch_name"] = name
+            avg_key["ch_average"] = np.median(stack, 2)
+            avg_keys.append(avg_key)
 
         # extract params for scaninfo
         scaninfo_key = deepcopy(key)
@@ -258,20 +286,32 @@ class PresentationTemplate(dj.Computed):
             scaninfo_key["scan_frequency"] = 1. / scaninfo_key["scan_period"]
         except KeyError:
             pass
-
         remove_list = ["user_warpparamslist", "user_nwarpparams"]
         for k in remove_list:
             scaninfo_key.pop(k, None)
 
+        # Roi mask key
+        roi_mask = load_roi_mask_from_h5(filepath=filepath, ignore_not_found=True)
+        if roi_mask is not None:
+            roimask_key = deepcopy(key)
+            roimask_key["roi_mask"] = roi_mask
+        else:
+            roimask_key = None
+
         self.insert1(pres_key, allow_direct_insert=True)
-        (self.ScanInfo() & key).insert1(scaninfo_key, allow_direct_insert=True)
+        (self.ScanInfo & key).insert1(scaninfo_key, allow_direct_insert=True)
+        if roimask_key is not None:
+            (self.RoiMask & key).insert1(roimask_key, allow_direct_insert=True)
+        for avg_key in avg_keys:
+            (self.StackAverages & key).insert1(avg_key, allow_direct_insert=True)
 
     def plot1(self, key=None, figsize=(16, 4)):
         key = get_primary_key(table=self, key=key)
 
-        ch0_average = (self & key).fetch1("ch0_average")
-        ch1_average = (self & key).fetch1("ch1_average")
-        roi_mask = (self.field_table().RoiMask() & key).fetch1("roi_mask")
-        npixartifact = (self.field_table() & key).fetch1('npixartifact')
-
-        plot_field(ch0_average, ch1_average, roi_mask, title=key, figsize=figsize, npixartifact=npixartifact)
+        roi_mask = (self.field_table.RoiMask & key).fetch1("roi_mask")
+        npixartifact = (self.field_table & key).fetch1('npixartifact')
+        data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
+        main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+        plot_field(main_ch_average, alt_ch_average,
+                   roi_mask, title=key, figsize=figsize, npixartifact=npixartifact)

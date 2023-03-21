@@ -34,8 +34,6 @@ class FieldTemplate(dj.Computed):
         nxpix_offset: int unsigned  # number of offset pixels in x
         nxpix_retrace: int unsigned  # number of retrace pixels in x
         pixel_size_um :float  # width / height of a pixel in um
-        ch0_average :longblob # Stack median of channel 0
-        ch1_average :longblob # Stack median of channel 1
         """
         return definition
 
@@ -48,6 +46,18 @@ class FieldTemplate(dj.Computed):
     @abstractmethod
     def userinfo_table(self):
         pass
+
+    class StackAverages(dj.Part):
+        @property
+        def definition(self):
+            definition = """
+            # Stack median (over time of the available channels)
+            -> master
+            ch_name : varchar(255)  # name of the channel
+            ---
+            ch_average :longblob  # Stack median over time
+            """
+            return definition
 
     class Zstack(dj.Part):
         @property
@@ -67,7 +77,6 @@ class FieldTemplate(dj.Computed):
             # ROI Mask
             -> master
             ---
-            fromfile    :varchar(255)   # from which file the roi mask was extracted from
             roi_mask    :longblob       # roi mask for the recording field
             """
             return definition
@@ -140,7 +149,7 @@ class FieldTemplate(dj.Computed):
 
         setupid = (self.experiment_table().ExpInfo() & key).fetch1("setupid")
 
-        field_key, roimask_key, zstack_key = load_scan_info(
+        field_key, roimask_key, zstack_key, avg_keys = load_scan_info(
             key=key, field=field, pre_data_path=pre_data_path, files=files,
             mask_alias=mask_alias, highres_alias=highres_alias, setupid=setupid, verboselvl=verboselvl)
 
@@ -149,20 +158,19 @@ class FieldTemplate(dj.Computed):
             (self.RoiMask & field_key).insert1(roimask_key, allow_direct_insert=True)
         if zstack_key is not None:
             (self.Zstack & field_key).insert1(zstack_key, allow_direct_insert=True)
+        for avg_key in avg_keys:
+            (self.StackAverages & field_key).insert1(avg_key, allow_direct_insert=True)
 
     def plot1(self, key=None, figsize=(16, 4)):
         key = get_primary_key(table=self, key=key)
 
-        data_stack_name = (self.userinfo_table() & key).fetch1('data_stack_name')
-
-        ch0_average = (self & key).fetch1("ch0_average")
-        ch1_average = (self & key).fetch1("ch1_average")
-
         roi_masks = (self.RoiMask() & key).fetch("roi_mask")
-
-        plot_field(ch0_average, ch1_average, roi_masks[0] if len(roi_masks) == 1 else None,
-                   roi_ch_average=ch1_average if '1' in data_stack_name else ch0_average,
-                   title=key, figsize=figsize)
+        data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
+        main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+        plot_field(main_ch_average, alt_ch_average,
+                   roi_masks[0] if len(roi_masks) == 1 else None,
+                   roi_ch_average=main_ch_average, title=key, figsize=figsize)
 
 
 def scan_fields_and_files(pre_data_path: str, user_dict: dict, verbose: bool = False) -> dict:
@@ -229,9 +237,7 @@ def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, 
         file = files[0]
 
     filepath = os.path.join(pre_data_path, file)
-
-    ch0_stack, ch1_stack, wparams = \
-        load_stacks_from_h5(filepath, ch0_name='wDataCh0', ch1_name='wDataCh1')
+    ch_stacks, wparams = load_stacks_from_h5(filepath, ch_names=('wDataCh0', 'wDataCh1'))
 
     nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
     nypix = wparams["user_dypix"]
@@ -241,9 +247,10 @@ def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, 
     npixartifact = get_npixartifact(setupid=setupid)
 
     # keys
-    field_key = deepcopy(key)
-    field_key["field"] = field
+    base_key = deepcopy(key)
+    base_key["field"] = field
 
+    field_key = deepcopy(base_key)
     field_key["fromfile"] = filepath
     field_key["absx"] = wparams['xcoord_um']
     field_key["absy"] = wparams['ycoord_um']
@@ -255,23 +262,26 @@ def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, 
     field_key["nxpix_offset"] = wparams["user_nxpixlineoffs"]
     field_key["nxpix_retrace"] = wparams["user_npixretrace"]
     field_key["pixel_size_um"] = pixel_size_um
-    field_key['ch0_average'] = np.mean(ch0_stack, 2)
-    field_key['ch1_average'] = np.mean(ch1_stack, 2)
 
     # subkey for adding Fields to ZStack
     if wparams['user_scantype'] == 11:
-        zstack_key = deepcopy(key)
-        zstack_key["field"] = field
+        zstack_key = deepcopy(base_key)
         zstack_key["zstep"] = wparams['zstep_um']
     else:
         zstack_key = None
 
     if roi_mask is not None:
-        roimask_key = deepcopy(key)
-        roimask_key["field"] = field
-        roimask_key["fromfile"] = os.path.join(pre_data_path, file)
+        roimask_key = deepcopy(base_key)
         roimask_key["roi_mask"] = roi_mask
     else:
         roimask_key = None
 
-    return field_key, roimask_key, zstack_key
+    # get stack avgs
+    avg_keys = []
+    for name, stack in ch_stacks.items():
+        avg_key = deepcopy(base_key)
+        avg_key["ch_name"] = name
+        avg_key["ch_average"] = np.median(stack, 2)
+        avg_keys.append(avg_key)
+
+    return field_key, roimask_key, zstack_key, avg_keys

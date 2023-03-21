@@ -46,3 +46,6 @@ class HighRes(optional.HighResTemplate):
     field_table = Field
     experiment_table = Experiment
     userinfo_table = UserInfo
+
+    class StackAverages(optional.HighResTemplate.StackAverages):
+        pass

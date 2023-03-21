@@ -16,11 +16,9 @@ class TracesTemplate(dj.Computed):
     def definition(self):
         definition = """
         # Raw Traces for each roi under a specific presentation
-    
-        -> self.params_table
         -> self.presentation_table
         -> self.roi_table
-    
+        -> self.params_table
         ---
         trace          :longblob              # array of raw trace
         trace_times    :longblob              # numerical array of trace times

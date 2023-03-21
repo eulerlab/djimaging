@@ -22,8 +22,8 @@ def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
 
     if filepath is not None:
         try:
-            ch0_stack, ch1_stack, wparams = load_stacks_from_h5(filepath)
-            return filepath, ch0_stack, ch1_stack, wparams
+            ch_stacks, wparams = load_stacks_from_h5(filepath)
+            return filepath, ch_stacks, wparams
         except OSError:
             warnings.warn(f'OSError when reading file: {filepath}')
             pass
@@ -71,8 +71,6 @@ class HighResTemplate(dj.Computed):
         -> self.field_table
         ---
         fromfile : varchar(255)  # Absolute path to file
-        ch0_average : longblob  # Stack median of the high resolution image channel 0
-        ch1_average : longblob  # Stack median of the high resolution image channel 1
         nframes : int  # Number of frames averaged
         absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
         absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
@@ -89,15 +87,30 @@ class HighResTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def field_table(self): pass
+    def field_table(self):
+        pass
 
     @property
     @abstractmethod
-    def experiment_table(self): pass
+    def experiment_table(self):
+        pass
 
     @property
     @abstractmethod
-    def userinfo_table(self): pass
+    def userinfo_table(self):
+        pass
+
+    class StackAverages(dj.Part):
+        @property
+        def definition(self):
+            definition = """
+            # Stack median (over time of the available channels)
+            -> master
+            ch_name : varchar(255)  # name of the channel
+            ---
+            ch_average :longblob  # Stack median over time
+            """
+            return definition
 
     def make(self, key):
         field = (self.field_table() & key).fetch1("field")
@@ -109,12 +122,13 @@ class HighResTemplate(dj.Computed):
         raw_data_path = os.path.join(header_path, (self.userinfo_table() & key).fetch1("raw_data_dir"))
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
         setupid = (self.experiment_table().ExpInfo() & key).fetch1("setupid")
+        data_name, alt_name = (self.userinfo_table & key).fetch('data_stack_name', 'alt_stack_name')
 
-        filepath, ch0_stack, ch1_stack, wparams = load_high_res_stack(
+        filepath, ch_stacks, wparams = load_high_res_stack(
             pre_data_path=pre_data_path, raw_data_path=raw_data_path,
             highres_alias=highres_alias, field=field, field_loc=field_loc)
 
-        if filepath is None or ch0_stack is None or ch1_stack is None:
+        if (filepath is None) or (data_name not in ch_stacks) or (alt_name not in ch_stacks):
             return
 
         # Get pixel sizes
@@ -123,11 +137,9 @@ class HighResTemplate(dj.Computed):
         nzpix = wparams["user_dzpix"]
         pixel_size_um = get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nxpix)
 
-        # Insert key
+        # Get key
         highres_key = deepcopy(key)
         highres_key["fromfile"] = filepath
-        highres_key["ch0_average"] = np.median(ch0_stack, 2)
-        highres_key["ch1_average"] = np.median(ch1_stack, 2)
 
         highres_key["absx"] = wparams['xcoord_um']
         highres_key["absy"] = wparams['ycoord_um']
@@ -142,14 +154,24 @@ class HighResTemplate(dj.Computed):
         highres_key["zoom"] = wparams["zoom"]
         highres_key["pixel_size_um"] = pixel_size_um
 
-        highres_key["nframes"] = ch0_stack.shape[2]
+        highres_key["nframes"] = ch_stacks['wDataCh0'].shape[2]
+
+        # get stack avgs
+        avg_keys = []
+        for name, stack in ch_stacks.items():
+            avg_key = deepcopy(key)
+            avg_key["ch_name"] = name
+            avg_key["ch_average"] = np.median(stack, 2)
+            avg_keys.append(avg_key)
 
         self.insert1(highres_key)
+        for avg_key in avg_keys:
+            (self.StackAverages & key).insert1(avg_key, allow_direct_insert=True)
 
     def plot1(self, key=None, figsize=(8, 4)):
         key = get_primary_key(table=self, key=key)
 
-        ch0_average = (self & key).fetch1("ch0_average")
-        ch1_average = (self & key).fetch1("ch1_average")
-
-        plot_field(ch0_average, ch1_average, roi_mask=None, title=key, figsize=figsize)
+        data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
+        main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+        plot_field(main_ch_average, alt_ch_average, roi_mask=None, title=key, figsize=figsize)

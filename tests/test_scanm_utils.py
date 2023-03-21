@@ -155,7 +155,7 @@ def _test_compute_triggertimes(filepath, precision):
         igor_triggertimes, _ = scanm_utils.extract_triggers(h5_file, check_triggervalues=False)
         ch2_stack = np.copy(h5_file['wDataCh2'])
 
-    triggertimes = scanm_utils.compute_triggertimes_from_wparams(
+    triggertimes, triggervalues = scanm_utils.compute_triggertimes_from_wparams(
         stack=ch2_stack, wparams=wparams, precision=precision, stimulator_delay=0)
 
     assert igor_triggertimes.shape == triggertimes.shape
