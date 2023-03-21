@@ -148,6 +148,8 @@ def prepare_data(stim, stimtime, trace, tracetime, fupsample_trace=None, fupsamp
     else:
         stim = math_utils.normalize_zscore(stim)
 
+    assert stim.shape[0] == trace.shape[0], (stim.shape[0], trace.shape[0])
+
     return stim, trace, dt, t0, dt_rel_error
 
 

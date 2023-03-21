@@ -118,6 +118,9 @@ class DNoiseTraceTemplate(dj.Computed):
         raw_trace, raw_tracetime = (self.traces_table() & key).fetch1('preprocess_trace', 'preprocess_trace_times')
 
         time, trace, stim = (self & key).fetch1('time', 'trace', 'stim')
+        assert time.shape[0] == trace.shape[0], (time.shape[0], trace.shape[0])
+        assert time.shape[0] == stim.shape[0], (time.shape[0], stim.shape[0])
+
         fit_kind = (self.params_table() & key).fetch1('fit_kind')
 
         fig, axs = plt.subplots(2, 1, figsize=(10, 5), sharex='all')

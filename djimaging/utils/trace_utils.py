@@ -19,15 +19,19 @@ def align_stim_to_trace(stim, stimtime, trace, tracetime):
      Modified from RFEst"""
     dt, dt_rel_error = get_mean_dt(tracetime)
 
-    valid_idxs = (tracetime >= stimtime[0]) & (tracetime <= (stimtime[-1] + np.max(np.diff(stimtime))))
+    stim_end = stimtime[-1] + np.max(np.diff(stimtime))
+
+    valid_idxs = (tracetime >= stimtime[0]) & (tracetime < stim_end)
     r_tracetime, aligned_trace = filter_utils.resample_trace(
         tracetime=tracetime[valid_idxs], trace=trace[valid_idxs], dt=dt)
     t0 = r_tracetime[0]
 
-    num_repeats = np.array([np.sum((r_tracetime > t_a) & (r_tracetime <= t_b))
+    num_repeats = np.array([np.sum((r_tracetime >= t_a) & (r_tracetime < t_b))
                             for t_a, t_b in
-                            zip(stimtime, np.append(stimtime[1:], stimtime[-1] + np.max(np.diff(stimtime))))])
+                            zip(stimtime, np.append(stimtime[1:], r_tracetime[-1] + 1.))])
     aligned_stim = np.repeat(stim, num_repeats, axis=0)
+
+    assert aligned_stim.shape[0] == aligned_trace.shape[0], (aligned_stim.shape[0], aligned_trace.shape[0])
 
     return aligned_stim, aligned_trace, dt, t0, dt_rel_error
 

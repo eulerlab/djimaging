@@ -82,8 +82,9 @@ def upsample_stim(stimtime, stim, fupsample):
 
 
 def upsample_trace(tracetime, trace, fupsample):
-    assert isinstance(fupsample, int)
-    assert fupsample > 1
+    assert fupsample == int(fupsample), fupsample
+    fupsample = int(fupsample)
+    assert fupsample > 1, fupsample
 
     dt = np.mean(np.diff(tracetime))
     tracetime_upsampled = np.tile(tracetime, (fupsample, 1)).T
