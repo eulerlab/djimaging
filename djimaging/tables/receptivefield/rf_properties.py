@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
+from djimaging.utils.trace_utils import sort_traces
 from matplotlib import pyplot as plt
 
 from djimaging.tables.receptivefield.rf_properties_utils import compute_gauss_srf_area, compute_surround_index, \
@@ -72,7 +73,7 @@ class SplitRFTemplate(dj.Computed):
     def make(self, key):
         # Get data
         strf = (self.rf_table() & key).fetch1("rf")
-        
+
         try:
             shift = (self.rf_table() & key).fetch1("shift")
         except dj.DataJointError:
@@ -121,11 +122,15 @@ class SplitRFTemplate(dj.Computed):
         plt.tight_layout()
         plt.show()
 
-    def plot(self, restriction=None):
+    def plot(self, restriction=None, sort=False):
         if restriction is None:
             restriction = dict()
 
         trf = np.stack((self & restriction).fetch('trf'))
+
+        if sort:
+            trf = sort_traces(trf)
+
         ax = plot_signals_heatmap(signals=trf)
         ax.set(title='tRF')
         plt.show()

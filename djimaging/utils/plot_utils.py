@@ -158,7 +158,7 @@ def plot_trf(trf, t_trf=None, peak_idxs=None, ax=None):
     return ax
 
 
-def plot_signals_heatmap(signals, ax=None, cb=True, vabsmax=None, sort=False):
+def plot_signals_heatmap(signals, ax=None, cb=True, vabsmax=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(8, 3))
 

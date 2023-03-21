@@ -74,9 +74,9 @@ def resample_trace(tracetime, trace, dt):
     return tracetime_resampled, trace_resampled
 
 
-def upsample_stim(stimtime, stim, fupsample):
+def upsample_stim(stimtime: np.ndarray, stim: np.ndarray, fupsample: int) -> (np.ndarray, np.ndarray):
     dt = np.mean(np.diff(stimtime))
-    stimtime = np.sort(np.concatenate([stimtime, stimtime + dt / 2]))
+    stimtime = np.sort(np.concatenate([stimtime + dt * float(i / fupsample) for i in range(0, fupsample)]))
     stim = np.repeat(stim, fupsample, axis=0)
     return stimtime, stim
 
