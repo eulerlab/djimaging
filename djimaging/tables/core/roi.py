@@ -15,7 +15,7 @@ class RoiTemplate(dj.Computed):
     def definition(self):
         definition = """
         # ROI information
-        -> self.field_table
+        -> self.field_or_pres_table
         roi_id           :int                # integer id of each ROI
         ---
         roi_size         :int                # number of pixels in ROI
@@ -27,29 +27,31 @@ class RoiTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def field_table(self):
+    def field_or_pres_table(self):
         pass
 
+    @property
+    @abstractmethod
     def userinfo_table(self):
-        return self.field_table.userinfo_table
+        pass
 
     @property
     def key_source(self):
         try:
-            return self.field_table().RoiMask().proj()
+            return self.field_or_pres_table().RoiMask().proj()
         except TypeError:
             pass
 
     def make(self, key):
         # load roi_mask for insert roi for a specific experiment and field
-        roi_mask = (self.field_table().RoiMask() & key).fetch1("roi_mask")
-        pixel_size_um = (self.field_table() & key).fetch1("pixel_size_um")
-        npixartifact = (self.field_table() & key).fetch1("npixartifact")
+        roi_mask = (self.field_or_pres_table.RoiMask() & key).fetch1("roi_mask")
+        pixel_size_um = (self.field_or_pres_table() & key).fetch1("pixel_size_um")
+        npixartifact = (self.field_or_pres_table() & key).fetch1("npixartifact")
 
         if not np.any(roi_mask):
             return
 
-        field_key = {k: v for k, v in key.items() if k in self.field_table.primary_key}
+        field_key = {k: v for k, v in key.items() if k in self.field_or_pres_table.primary_key}
 
         roi_idxs = extract_roi_idxs(roi_mask)
 
@@ -72,12 +74,12 @@ class RoiTemplate(dj.Computed):
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
-        npixartifact = (self.field_table() & key).fetch1('npixartifact')
-        roi_mask = (self.field_table().RoiMask() & key).fetch1("roi_mask")
+        npixartifact = (self.field_or_pres_table() & key).fetch1('npixartifact')
+        roi_mask = (self.field_or_pres_table().RoiMask() & key).fetch1("roi_mask")
 
         data_name, alt_name = (self.userinfo_table() & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.field_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
-        alt_ch_average = (self.field_table.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+        main_ch_average = (self.field_or_pres_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        alt_ch_average = (self.field_or_pres_table.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
 
         plot_field(main_ch_average, alt_ch_average, roi_mask=roi_mask, roi_ch_average=main_ch_average,
                    title=key, figsize=(16, 4), highlight_roi=key['roi_id'], npixartifact=npixartifact)

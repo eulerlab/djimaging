@@ -15,6 +15,7 @@ from djimaging.utils.scanm_utils import get_pixel_size_xy_um, load_stacks_from_h
 
 class FieldTemplate(dj.Computed):
     database = ""
+    __load_field_roi_masks = True  # Set to False if all roi masks and roi ids should be based on presentation
 
     @property
     def definition(self):
@@ -154,8 +155,10 @@ class FieldTemplate(dj.Computed):
             mask_alias=mask_alias, highres_alias=highres_alias, setupid=setupid, verboselvl=verboselvl)
 
         self.insert1(field_key, allow_direct_insert=True)
-        if roimask_key is not None:
-            (self.RoiMask & field_key).insert1(roimask_key, allow_direct_insert=True)
+
+        if self.__load_field_roi_masks:
+            if roimask_key is not None:
+                (self.RoiMask & field_key).insert1(roimask_key, allow_direct_insert=True)
         if zstack_key is not None:
             (self.Zstack & field_key).insert1(zstack_key, allow_direct_insert=True)
         for avg_key in avg_keys:

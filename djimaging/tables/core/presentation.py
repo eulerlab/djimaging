@@ -49,12 +49,12 @@ class PresentationTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def userinfo_table(self):
+    def experiment_table(self):
         pass
 
     @property
     @abstractmethod
-    def experiment_table(self):
+    def userinfo_table(self):
         pass
 
     @property
@@ -85,7 +85,7 @@ class PresentationTemplate(dj.Computed):
             # ROI Mask of presentation
             -> master
             ---
-            roi_mask    :longblob       # roi mask for the recording field
+            roi_mask    :longblob       # roi mask for the presentation, can be same as field
             """
             return definition
 
@@ -305,10 +305,20 @@ class PresentationTemplate(dj.Computed):
         for avg_key in avg_keys:
             (self.StackAverages & key).insert1(avg_key, allow_direct_insert=True)
 
-    def plot1(self, key=None, figsize=(16, 4)):
+    def plot1(self, key=None, figsize=(16, 4), plot_field_rois=False):
         key = get_primary_key(table=self, key=key)
 
-        roi_mask = (self.field_table.RoiMask & key).fetch1("roi_mask")
+        field_roi_mask = (self.field_table.RoiMask & key).fetch1("roi_mask")
+        pres_roi_mask = (self.RoiMask & key).fetch1("roi_mask")
+
+        if not np.all(field_roi_mask == pres_roi_mask):
+            warnings.warn(f'field_roi_mask and pres_roi_mask are not equal, plot_field_rois={plot_field_rois}')
+
+        if plot_field_rois:
+            roi_mask = field_roi_mask
+        else:
+            roi_mask = pres_roi_mask
+
         npixartifact = (self.field_table & key).fetch1('npixartifact')
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
         main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')

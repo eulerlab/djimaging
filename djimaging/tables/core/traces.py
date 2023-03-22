@@ -11,6 +11,7 @@ from djimaging.utils.plot_utils import plot_trace_and_trigger
 
 class TracesTemplate(dj.Computed):
     database = ""
+    __ignore_incompatible_roi_masks = False
 
     @property
     def definition(self):
@@ -39,12 +40,12 @@ class TracesTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def field_table(self):
+    def roi_table(self):
         pass
 
     @property
     @abstractmethod
-    def roi_table(self):
+    def userinfo_table(self):
         pass
 
     @property
@@ -62,9 +63,18 @@ class TracesTemplate(dj.Computed):
         roi_ids = (self.roi_table() & key).fetch("roi_id")
 
         if compute_from_stack:
-            data_stack_name = (self.field_table.experiment_table.userinfo_table & key).fetch1("data_stack_name")
-            roi_mask = (self.field_table.RoiMask & key).fetch1("roi_mask")
-            assert np.all(roi_ids == np.abs(scanm_utils.extract_roi_idxs(roi_mask))), f'ROIs do not match for {key}'
+            data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
+            roi_mask = (self.presentation_table.RoiMask() & key).fetch1("roi_mask")
+
+            if not self.__ignore_incompatible_roi_masks:
+                roi_mask_roi_ids = np.abs(scanm_utils.extract_roi_idxs(roi_mask)).astype(int)
+                if not np.all(np.sort(roi_ids) == np.sort(roi_mask_roi_ids)):
+                    # TODO: Allow single ROIs to drop. Rather base on similarity, e.g. by correlating pixels
+                    raise ValueError(f"""
+                    ROI mask of presentation is inconsistent with ROI ids from roi_table for key: \n{key}
+                    Do your roi_ids depend on Field instead of Presentation?
+                    If so, make sure that the ROI masks are compatible, i.e. they should have the same number of ROIs.
+                    To ignore this error, set Traces.__ignore_incompatible_roi_masks=True.""")
 
             roi2trace = self._roi2trace_from_stack(
                 filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,

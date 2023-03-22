@@ -7,6 +7,8 @@ from numpy.testing import assert_almost_equal
 
 from djimaging.utils import scanm_utils
 
+__RAW_DATA_PATH = "/gpfs01/euler/data/Data/DataJointTestData/"
+
 
 def test_get_pixel_size_um_64_default_scan1():
     setupid = 1
@@ -111,20 +113,8 @@ def _test_compute_tracetimes(filepath, stack_name, precision, atol):
                        atol=atol), f"{np.max(np.abs(igor_traces_times - traces_times))} > {atol}"
 
 
-def test_compute_tracetimes_line_precision(
-        filepath="/gpfs01/euler/data/Data/DataJointTestData/20220304/1/Pre/SMP_M1_LR_GCL0_chirp.h5",
-        stack_name='wDataCh0'):
-    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='line', atol=1e-3)
-
-
-def test_compute_tracetimes_pixel_precision(
-        filepath="/gpfs01/euler/data/Data/DataJointTestData/20220304/1/Pre/SMP_M1_LR_GCL0_chirp.h5",
-        stack_name='wDataCh0'):
-    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='pixel', atol=3e-3)
-
-
 def test_compute_traces(
-        filepath="/gpfs01/euler/data/Data/DataJointTestData/20220304/1/Pre/SMP_M1_LR_GCL0_chirp.h5",
+        filepath=os.path.join(__RAW_DATA_PATH, "xy-RGCs/20220304/1/Pre/SMP_M1_LR_GCL0_chirp.h5"),
         stack_name='wDataCh0'):
     if not os.path.isfile(filepath):
         pytest.skip(f"File not found {filepath}")
@@ -162,19 +152,67 @@ def _test_compute_triggertimes(filepath, precision):
     assert np.allclose(igor_triggertimes, triggertimes, atol=2e-3)
 
 
-def test_compute_triggertimes_line_precision(
-        filepath="/gpfs01/euler/data/Data/DataJointTestData2/20201127/1/Pre/SMP_C1_d1_Chirp.h5"):
+def test_compute_triggertimes_line_precision_xy_dendrites(
+        filepath=os.path.join(__RAW_DATA_PATH, "xy-dendrites/20201127/1/Pre/SMP_C1_d1_Chirp.h5")):
     _test_compute_triggertimes(filepath=filepath, precision='line')
 
 
-def test_compute_triggertimes_pixel_precision(
-        filepath="/gpfs01/euler/data/Data/DataJointTestData2/20201127/1/Pre/SMP_C1_d1_Chirp.h5"):
+def test_compute_triggertimes_pixel_precision_xy_dendrites(
+        filepath=os.path.join(__RAW_DATA_PATH, "xy-dendrites/20201127/1/Pre/SMP_C1_d1_Chirp.h5")):
     _test_compute_triggertimes(filepath=filepath, precision='pixel')
 
 
-if __name__ == "__main__":
-    test_compute_tracetimes_line_precision()
-    test_compute_tracetimes_pixel_precision()
+def test_compute_triggertimes_line_precision_xy_rgcs(
+        filepath=os.path.join(__RAW_DATA_PATH, "xy-RGCs/20220215/1/Pre/SMP_M1_LR_GCL1_MB_D.h5")):
+    _test_compute_triggertimes(filepath=filepath, precision='line')
 
-    test_compute_triggertimes_line_precision()
-    test_compute_triggertimes_pixel_precision()
+
+def test_compute_triggertimes_pixel_precision_xy_rgcs(
+        filepath=os.path.join(__RAW_DATA_PATH, "xy-RGCs/20220215/1/Pre/SMP_M1_LR_GCL1_MB_D.h5")):
+    _test_compute_triggertimes(filepath=filepath, precision='pixel')
+
+
+def test_compute_triggertimes_line_precision_xz_bcs(
+        filepath=os.path.join(__RAW_DATA_PATH, "xz-BCs/20220921/2/Pre/SMP_M1_RR_xz1_BCnoise_C1.h5")):
+    _test_compute_triggertimes(filepath=filepath, precision='line')
+
+
+def test_compute_triggertimes_pixel_precision_xz_bcs(
+        filepath=os.path.join(__RAW_DATA_PATH, "xz-BCs/20220921/2/Pre/SMP_M1_RR_xz1_BCnoise_C1.h5")):
+    _test_compute_triggertimes(filepath=filepath, precision='pixel')
+
+
+def test_compute_tracetimes_line_precision(
+        filepath=os.path.join(__RAW_DATA_PATH, "xy-RGCs/20220304/1/Pre/SMP_M1_LR_GCL0_chirp.h5"),
+        stack_name='wDataCh0'):
+    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='line', atol=1e-3)
+
+
+def test_compute_tracetimes_pixel_precision(
+        filepath=os.path.join(__RAW_DATA_PATH, "xy-RGCs/20220304/1/Pre/SMP_M1_LR_GCL0_chirp.h5"),
+        stack_name='wDataCh0'):
+    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='pixel', atol=3e-3)
+
+
+def test_compute_tracetimes_line_precision_xy_rgcs(
+        filepath=os.path.join(__RAW_DATA_PATH, "xy-RGCs/20220304/1/Pre/SMP_M1_LR_GCL0_chirp.h5"),
+        stack_name='wDataCh0'):
+    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='line', atol=1e-3)
+
+
+def test_compute_tracetimes_pixel_precision_xy_rgcs(
+        filepath=os.path.join(__RAW_DATA_PATH, "xy-RGCs/20220304/1/Pre/SMP_M1_LR_GCL0_chirp.h5"),
+        stack_name='wDataCh0'):
+    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='pixel', atol=3e-3)
+
+
+def test_compute_tracetimes_line_precision_xz_bcs(
+        filepath=os.path.join(__RAW_DATA_PATH, "xz-BCs/20220921/2/Pre/SMP_M1_RR_xz1_BCnoise_C1.h5"),
+        stack_name='wDataCh0'):
+    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='line', atol=1e-3)
+
+
+def test_compute_tracetimes_pixel_precision_xz_bcs(
+        filepath=os.path.join(__RAW_DATA_PATH, "xz-BCs/20220921/2/Pre/SMP_M1_RR_xz1_BCnoise_C1.h5"),
+        stack_name='wDataCh0'):
+    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='pixel', atol=3e-3)

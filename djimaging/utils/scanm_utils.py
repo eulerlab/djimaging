@@ -328,6 +328,22 @@ def extract_stacks_from_h5(h5_file_open, ch_names=('wDataCh0', 'wDataCh1')) -> d
     return ch_stacks
 
 
+def get_scan_type_from_wparams(wparams: dict, assume_lower=False) -> str:
+    if assume_lower:
+        wparams = {k.lower(): v for k, v in wparams.items()}
+
+    npix_x = int(wparams['user_dxpix'])
+    npix_y = int(wparams['user_dypix'])
+    npix_z = int(wparams['user_dzpix'])
+
+    if (npix_y > 1) and (npix_z <= 1):
+        return 'xy'
+    elif (npix_y <= 1) and (npix_z > 1):
+        return 'xz'
+    else:
+        raise NotImplementedError(f"xyz = {npix_x}, {npix_y}, {npix_z}")
+
+
 def compute_frame_times_from_wparams(wparams: dict, n_frames: int, precision: str = 'line') \
         -> (np.ndarray, np.ndarray):
     """Compute timepoints of frames and relative delay of individual pixels. Extract relevant parameters from wparams"""
@@ -336,26 +352,36 @@ def compute_frame_times_from_wparams(wparams: dict, n_frames: int, precision: st
 
     wparams = {k.lower(): v for k, v in wparams.items()}
 
+    scan_type = get_scan_type_from_wparams(wparams=wparams, assume_lower=True)
+
     npix_x_offset_left = int(wparams['user_nxpixlineoffs'])
     npix_x_offset_right = int(wparams['user_npixretrace'])
     npix_x = int(wparams['user_dxpix'])
-    npix_y = int(wparams['user_dypix'])
     pix_dt = wparams['realpixdur'] * 1e-6
 
+    if scan_type == 'xy':
+        npix_2nd = int(wparams['user_dypix'])
+    elif scan_type == 'xz':
+        npix_2nd = int(wparams['user_dzpix'])
+    else:
+        raise NotImplementedError(scan_type)
+
     frame_times, frame_dt_offset = compute_frame_times(
-        n_frames=n_frames, pix_dt=pix_dt, npix_x=npix_x, npix_y=npix_y,
+        n_frames=n_frames, pix_dt=pix_dt, npix_x=npix_x, npix_2nd=npix_2nd,
         npix_x_offset_left=npix_x_offset_left, npix_x_offset_right=npix_x_offset_right, precision=precision)
 
     return frame_times, frame_dt_offset
 
 
-def compute_frame_times(n_frames: int, pix_dt: int, npix_x: int, npix_y: int,
+def compute_frame_times(n_frames: int, pix_dt: int, npix_x: int, npix_2nd: int,
                         npix_x_offset_left: int, npix_x_offset_right: int,
                         precision: str = 'line') -> (np.ndarray, np.ndarray):
-    """Compute timepoints of frames and relative delay of individual pixels"""
-    frame_dt = pix_dt * npix_x * npix_y
+    """Compute timepoints of frames and relative delay of individual pixels.
+    npix_2nd can be npix_y (xy-scan) or npix_z (xz-scan)
+    """
+    frame_dt = pix_dt * npix_x * npix_2nd
 
-    frame_dt_offset = (np.arange(npix_x * npix_y) * pix_dt).reshape(npix_y, npix_x).T
+    frame_dt_offset = (np.arange(npix_x * npix_2nd) * pix_dt).reshape(npix_2nd, npix_x).T
 
     if precision == 'line':
         frame_dt_offset = np.tile(frame_dt_offset[0, :], (npix_x, 1))
@@ -435,7 +461,7 @@ def check_if_scanm_roi_mask(roi_mask: np.ndarray):
     if roi_mask.ndim != 2:
         raise ValueError(f"roi_mask must be 2d but ndim={roi_mask.ndim}")
     if np.max(roi_mask) != 1 or np.any(np.sum(roi_mask == 0)):
-        raise ValueError('ROI mask contains unexpected values')
+        raise ValueError(f'ROI mask contains unexpected values {np.unique(roi_mask)}')
 
 
 def get_roi_center(roi_mask: np.ndarray, roi_id: int) -> (float, float):

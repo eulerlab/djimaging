@@ -29,6 +29,7 @@ class Experiment(core.ExperimentTemplate):
 
 @schema
 class Field(core.FieldTemplate):
+    __load_field_roi_masks = True  # Set to False if you don't want to use Field level Roi masks!
     userinfo_table = UserInfo
     experiment_table = Experiment
 
@@ -43,11 +44,6 @@ class Field(core.FieldTemplate):
 
 
 @schema
-class Roi(core.RoiTemplate):
-    field_table = Field
-
-
-@schema
 class Stimulus(core.StimulusTemplate):
     pass
 
@@ -59,8 +55,8 @@ class RawDataParams(core.RawDataParamsTemplate):
 
 @schema
 class Presentation(core.PresentationTemplate):
-    experiment_table = Experiment
     userinfo_table = UserInfo
+    experiment_table = Experiment
     field_table = Field
     stimulus_table = Stimulus
     params_table = RawDataParams
@@ -71,13 +67,23 @@ class Presentation(core.PresentationTemplate):
     class StackAverages(core.PresentationTemplate.StackAverages):
         pass
 
+    class RoiMask(core.PresentationTemplate.RoiMask):
+        pass
+
+
+@schema
+class Roi(core.RoiTemplate):
+    userinfo_table = UserInfo
+    field_or_pres_table = Field  # Can also be set to Presentation
+
 
 @schema
 class Traces(core.TracesTemplate):
-    presentation_table = Presentation
-    field_table = Field
-    roi_table = Roi
+    userinfo_table = UserInfo
     params_table = RawDataParams
+    presentation_table = Presentation
+    roi_mask_table = Field.RoiMask  # Can also be set to Presentation.RoiMask
+    roi_table = Roi
 
 
 @schema
