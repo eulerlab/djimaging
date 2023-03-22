@@ -1,9 +1,11 @@
+import warnings
+
 import numpy as np
 
 from djimaging.utils import filter_utils
 
 
-def get_mean_dt(tracetime, rtol_error=1.0) -> (float, float):
+def get_mean_dt(tracetime, rtol_error=2.0, rtol_warning=1.0) -> (float, float):
     dts = np.diff(tracetime)
     dt = np.mean(dts)
     dt_rel_error = np.maximum(np.max(dts) - dt, dt - np.min(dts)) / dt
@@ -11,13 +13,17 @@ def get_mean_dt(tracetime, rtol_error=1.0) -> (float, float):
     if dt_rel_error >= rtol_error:
         raise ValueError(f"Inconsistent dts. dt_mean={dt:.3g}, but " +
                          f"dt_max={np.max(dts):.3g}, dt_min={np.min(dts):.3g}, dt_std={np.std(dts):.3g}")
+    elif dt_rel_error >= rtol_warning:
+        warnings.warn(f"Inconsistent dts. dt_mean={dt:.3g}, but " +
+                      f"dt_max={np.max(dts):.3g}, dt_min={np.min(dts):.3g}, dt_std={np.std(dts):.3g}")
+
     return dt, dt_rel_error
 
 
 def align_stim_to_trace(stim, stimtime, trace, tracetime):
     """Align stimulus and trace.
      Modified from RFEst"""
-    dt, dt_rel_error = get_mean_dt(tracetime)
+    dt, dt_rel_error = get_mean_dt(tracetime, rtol_error=np.inf, rtol_warning=0.5)
 
     stim_end = stimtime[-1] + np.max(np.diff(stimtime))
 
@@ -40,7 +46,7 @@ def align_trace_to_stim(stim, stimtime, trace, tracetime):
     """Align stimulus and trace."""
     assert stim.shape[0] == stimtime.shape[0], (stim.shape[0], stimtime.shape[0])
 
-    dt, dt_rel_error = get_mean_dt(stimtime)
+    dt, dt_rel_error = get_mean_dt(stimtime, rtol_error=np.inf, rtol_warning=0.5)
 
     t0 = stimtime[0]
     aligned_stim = stim
