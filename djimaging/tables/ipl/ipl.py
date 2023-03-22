@@ -50,7 +50,7 @@ class RoiIplDepthTemplate(dj.Computed):
 
     @property
     def field_or_pre_table(self):
-        return ipl_border_table.field_or_pre_table
+        return self.ipl_border_table.field_or_pre_table
 
     @property
     def key_source(self):
