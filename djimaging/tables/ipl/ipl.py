@@ -12,7 +12,7 @@ class IplBordersTemplate(dj.Manual):
         definition = """
             # Manually determined index and thickness information for the IPL.
             USe XZ widget notebook to determine values.
-            -> roi_mask_table
+            -> field_or_pre_table
             ---
             left   :tinyint    # pixel index where gcl/ipl border intersects on left of image (with GCL up)
             right  :tinyint    # pixel index where gcl/ipl border intersects on right side of image
@@ -22,7 +22,7 @@ class IplBordersTemplate(dj.Manual):
 
     @property
     @abstractmethod
-    def roi_mask_table(self):
+    def field_or_pre_table(self):
         pass
 
 
@@ -49,24 +49,20 @@ class RoiIplDepthTemplate(dj.Computed):
         pass
 
     @property
-    @abstractmethod
-    def roi_mask_table(self):
-        """Can be RoiMask table from either Field or Presentation.
-        Default: Field.RoiMask
-        """
-        pass
+    def field_or_pre_table(self):
+        return ipl_border_table.field_or_pre_table
 
     @property
     def key_source(self):
         try:
-            return self.roi_mask_table().proj()
+            return self.field_or_pre_table().proj()
         except TypeError:
             pass
 
     def make(self, key):
         roi_ids = (self.roi_table & key).fetch("roi_id")
         left, right, thick = (self.ipl_border_table & key).fetch1('left', 'right', 'thick')
-        roi_mask = (self.roi_mask_table & key).fetch1('roi_mask')
+        roi_mask = (self.field_or_pre_table.roi_mask_table & key).fetch1('roi_mask')
 
         roi_centers = get_roi_centers(roi_mask, roi_ids)
 

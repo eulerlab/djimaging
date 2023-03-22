@@ -4,7 +4,7 @@ from scipy.optimize import curve_fit
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
-from utils import get_primary_key
+from djimaging.utils.dj_utils import get_primary_key
 
 
 def compute_csl_metrics(csl_norm):
