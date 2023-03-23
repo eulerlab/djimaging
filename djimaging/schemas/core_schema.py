@@ -36,9 +36,6 @@ class Field(core.FieldTemplate):
     class RoiMask(core.FieldTemplate.RoiMask):
         pass
 
-    class Zstack(core.FieldTemplate.Zstack):
-        pass
-
     class StackAverages(core.FieldTemplate.StackAverages):
         pass
 

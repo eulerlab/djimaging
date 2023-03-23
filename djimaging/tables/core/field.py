@@ -4,13 +4,12 @@ from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
+from djimaging.utils import scanm_utils
 
 from djimaging.utils.alias_utils import check_shared_alias_str
 from djimaging.utils.datafile_utils import get_filename_info
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm_utils import get_pixel_size_xy_um, load_stacks_from_h5, get_npixartifact, \
-    load_roi_mask_from_h5
 
 
 class FieldTemplate(dj.Computed):
@@ -28,13 +27,16 @@ class FieldTemplate(dj.Computed):
         absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
         absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
         absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
-        npixartifact : int unsigned # Number of pixel with light artifact 
+        scan_type: enum("xy", "xz", "xyz")  # Type of scan
+        npixartifact : int unsigned # Number of pixel with light artifact
         nxpix: int unsigned  # number of pixels in x
         nypix: int unsigned  # number of pixels in y
         nzpix: int unsigned  # number of pixels in z
         nxpix_offset: int unsigned  # number of offset pixels in x
         nxpix_retrace: int unsigned  # number of retrace pixels in x
         pixel_size_um :float  # width / height of a pixel in um
+        z_step_um :float  # z-step in um
+        z_stack_flag : tinyint unsigned  # Is z-stack?
         """
         return definition
 
@@ -57,17 +59,6 @@ class FieldTemplate(dj.Computed):
             ch_name : varchar(255)  # name of the channel
             ---
             ch_average :longblob  # Stack median over time
-            """
-            return definition
-
-    class Zstack(dj.Part):
-        @property
-        def definition(self):
-            definition = """
-            #was there a zstack in the field
-            -> master
-            ---
-            zstep       :float      #size of step size in um
             """
             return definition
 
@@ -150,7 +141,7 @@ class FieldTemplate(dj.Computed):
 
         setupid = (self.experiment_table().ExpInfo() & key).fetch1("setupid")
 
-        field_key, roimask_key, zstack_key, avg_keys = load_scan_info(
+        field_key, roimask_key, avg_keys = load_scan_info(
             key=key, field=field, pre_data_path=pre_data_path, files=files,
             mask_alias=mask_alias, highres_alias=highres_alias, setupid=setupid, verboselvl=verboselvl)
 
@@ -159,21 +150,21 @@ class FieldTemplate(dj.Computed):
         if self.__load_field_roi_masks:
             if roimask_key is not None:
                 (self.RoiMask & field_key).insert1(roimask_key, allow_direct_insert=True)
-        if zstack_key is not None:
-            (self.Zstack & field_key).insert1(zstack_key, allow_direct_insert=True)
         for avg_key in avg_keys:
             (self.StackAverages & field_key).insert1(avg_key, allow_direct_insert=True)
 
-    def plot1(self, key=None, figsize=(16, 4)):
+    def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
         roi_masks = (self.RoiMask() & key).fetch("roi_mask")
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
         main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
         alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+        npixartifact = (self & key).fetch1('npixartifact')
+
         plot_field(main_ch_average, alt_ch_average,
                    roi_masks[0] if len(roi_masks) == 1 else None,
-                   roi_ch_average=main_ch_average, title=key, figsize=figsize)
+                   roi_ch_average=main_ch_average, title=key, npixartifact=npixartifact)
 
 
 def scan_fields_and_files(pre_data_path: str, user_dict: dict, verbose: bool = False) -> dict:
@@ -222,7 +213,7 @@ def load_field_roi_mask(pre_data_path, files, mask_alias='', highres_alias=''):
     sorted_files = files[np.argsort(penalties)]
 
     for file in sorted_files:
-        roi_mask = load_roi_mask_from_h5(filepath=os.path.join(pre_data_path, file), ignore_not_found=True)
+        roi_mask = scanm_utils.load_roi_mask_from_h5(filepath=os.path.join(pre_data_path, file), ignore_not_found=True)
         if roi_mask is not None:
             return roi_mask, file
     else:
@@ -240,14 +231,17 @@ def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, 
         file = files[0]
 
     filepath = os.path.join(pre_data_path, file)
-    ch_stacks, wparams = load_stacks_from_h5(filepath, ch_names=('wDataCh0', 'wDataCh1'))
+    ch_stacks, wparams = scanm_utils.load_stacks_from_h5(filepath, ch_names=('wDataCh0', 'wDataCh1'))
 
     nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
     nypix = wparams["user_dypix"]
     nzpix = wparams["user_dzpix"]
 
-    pixel_size_um = get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nxpix)
-    npixartifact = get_npixartifact(setupid=setupid)
+    pixel_size_um = scanm_utils.get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nxpix)
+    z_step_um = wparams.get('zstep_um', 0.)
+    z_stack_flag = int(wparams['user_scantype'] == 11)
+    npixartifact = scanm_utils.get_npixartifact(setupid=setupid)
+    scan_type = scanm_utils.get_scan_type_from_wparams(wparams)
 
     # keys
     base_key = deepcopy(key)
@@ -258,6 +252,7 @@ def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, 
     field_key["absx"] = wparams['xcoord_um']
     field_key["absy"] = wparams['ycoord_um']
     field_key["absz"] = wparams['zcoord_um']
+    field_key["scan_type"] = scan_type
     field_key["npixartifact"] = npixartifact
     field_key["nxpix"] = nxpix
     field_key["nypix"] = nypix
@@ -265,13 +260,8 @@ def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, 
     field_key["nxpix_offset"] = wparams["user_nxpixlineoffs"]
     field_key["nxpix_retrace"] = wparams["user_npixretrace"]
     field_key["pixel_size_um"] = pixel_size_um
-
-    # subkey for adding Fields to ZStack
-    if wparams['user_scantype'] == 11:
-        zstack_key = deepcopy(base_key)
-        zstack_key["zstep"] = wparams['zstep_um']
-    else:
-        zstack_key = None
+    field_key["z_step_um"] = z_step_um
+    field_key["z_stack_flag"] = z_stack_flag
 
     if roi_mask is not None:
         roimask_key = deepcopy(base_key)
@@ -287,4 +277,4 @@ def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, 
         avg_key["ch_average"] = np.median(stack, 2)
         avg_keys.append(avg_key)
 
-    return field_key, roimask_key, zstack_key, avg_keys
+    return field_key, roimask_key, avg_keys

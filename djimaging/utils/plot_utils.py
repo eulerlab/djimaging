@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 
 
 def plot_field(main_ch_average, alt_ch_average, roi_mask=None, roi_ch_average=None, npixartifact=0,
-               title='', figsize=(16, 4), highlight_roi=None, fig=None, axs=None):
+               title='', figsize=(20, 4), highlight_roi=None, fig=None, axs=None):
     if roi_mask is not None and roi_mask.size == 0:
         roi_mask = None
 

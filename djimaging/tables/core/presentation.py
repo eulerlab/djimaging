@@ -29,6 +29,10 @@ class PresentationTemplate(dj.Computed):
         trigger_flag          :tinyint unsigned # Are triggers as expected (1) or not (0)?
         triggertimes          :longblob         # triggertimes in each presentation
         triggervalues         :longblob         # values of the recorded triggers
+        scan_type: enum("xy", "xz", "xyz")  # Type of scan
+        npixartifact : int unsigned # Number of pixel with light artifact
+        pixel_size_um :float  # width / height of a pixel in um
+        z_step_um :float  # z-step in um
         """
         return definition
 
@@ -85,6 +89,7 @@ class PresentationTemplate(dj.Computed):
             # ROI Mask of presentation
             -> master
             ---
+            pres_and_field_mask  : enum("same", "different", "shifted", "similar", "no_field_mask")  # relationship to field mask
             roi_mask    :longblob       # roi mask for the presentation, can be same as field
             """
             return definition
@@ -248,7 +253,7 @@ class PresentationTemplate(dj.Computed):
             setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
             stimulator_delay = get_stimulator_delay(date=key['date'], setupid=setupid)
             trigger_precision = (self.params_table() & key).fetch1("trigger_precision")
-            triggertimes, triggervalues = scanm_utils.compute_triggertimes_from_wparams(
+            triggertimes, triggervalues = scanm_utils.compute_triggers_from_wparams(
                 ch_stacks['wDataCh2'], wparams=wparams, precision=trigger_precision, stimulator_delay=stimulator_delay)
         else:
             triggertimes, triggervalues = scanm_utils.load_triggers_from_h5(filepath)
@@ -263,11 +268,40 @@ class PresentationTemplate(dj.Computed):
         if trigger_flag == 0:
             warnings.warn(f'Found {triggertimes.size} triggers, expected {ntrigger_rep} (per rep): key={key}.')
 
+        roi_mask = load_roi_mask_from_h5(filepath=filepath, ignore_not_found=True)
+        field_roi_masks = (self.field_table.RoiMask & key).fetch('roi_mask')
+
+        if len(field_roi_masks) == 0:
+            pres_and_field_mask = 'no_field_mask'
+        elif len(field_roi_masks) == 1:
+            pres_and_field_mask = scanm_utils.check_if_roi_masks_equal_shifted_or_different(
+                roi_mask, field_roi_masks[0])
+        else:
+            raise ValueError(f'Found multiple ROI masks for key={key} in Field. Should be 0 or 1.')
+
+        setupid = (self.experiment_table().ExpInfo() & key).fetch1("setupid")
+        nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
+        pixel_size_um = scanm_utils.get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nxpix)
+        z_step_um = wparams.get('zstep_um', 0.)
+        npixartifact = scanm_utils.get_npixartifact(setupid=setupid)
+        scan_type = scanm_utils.get_scan_type_from_wparams(wparams)
+
+        field_pixel_size_um = (self.field_table & key).fetch1("pixel_size_um")
+        if not np.isclose(pixel_size_um, field_pixel_size_um):
+            warnings.warn(
+                f"""pixel_size_um {pixel_size_um:.3g} is different in field {field_pixel_size_um}.
+                Did you use a different zoom?
+                This can resul in unexpected problem.""")
+
         pres_key = deepcopy(key)
         pres_key["h5_header"] = filepath
         pres_key["trigger_flag"] = int(trigger_flag)
         pres_key["triggertimes"] = triggertimes
         pres_key["triggervalues"] = triggervalues
+        pres_key["scan_type"] = scan_type
+        pres_key["npixartifact"] = npixartifact
+        pres_key["pixel_size_um"] = pixel_size_um
+        pres_key["z_step_um"] = z_step_um
 
         # get stack avgs
         avg_keys = []
@@ -291,10 +325,10 @@ class PresentationTemplate(dj.Computed):
             scaninfo_key.pop(k, None)
 
         # Roi mask key
-        roi_mask = load_roi_mask_from_h5(filepath=filepath, ignore_not_found=True)
         if roi_mask is not None:
             roimask_key = deepcopy(key)
             roimask_key["roi_mask"] = roi_mask
+            roimask_key["pres_and_field_mask"] = pres_and_field_mask
         else:
             roimask_key = None
 
@@ -305,14 +339,15 @@ class PresentationTemplate(dj.Computed):
         for avg_key in avg_keys:
             (self.StackAverages & key).insert1(avg_key, allow_direct_insert=True)
 
-    def plot1(self, key=None, figsize=(16, 4), plot_field_rois=False):
+    def plot1(self, key=None, plot_field_rois=False):
         key = get_primary_key(table=self, key=key)
 
         field_roi_mask = (self.field_table.RoiMask & key).fetch1("roi_mask")
-        pres_roi_mask = (self.RoiMask & key).fetch1("roi_mask")
+        pres_roi_mask, pres_and_field_mask = (self.RoiMask & key).fetch1("roi_mask", "pres_and_field_mask")
 
-        if not np.all(field_roi_mask == pres_roi_mask):
-            warnings.warn(f'field_roi_mask and pres_roi_mask are not equal, plot_field_rois={plot_field_rois}')
+        if pres_and_field_mask != 'same':
+            warnings.warn(f'field_roi_mask and pres_roi_mask are {pres_and_field_mask}, ' +
+                          f'plot_field_rois={plot_field_rois}')
 
         if plot_field_rois:
             roi_mask = field_roi_mask
@@ -324,4 +359,4 @@ class PresentationTemplate(dj.Computed):
         main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
         alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
         plot_field(main_ch_average, alt_ch_average,
-                   roi_mask, title=key, figsize=figsize, npixartifact=npixartifact)
+                   roi_mask, title=key, npixartifact=npixartifact)

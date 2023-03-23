@@ -45,7 +45,9 @@ class RoiTemplate(dj.Computed):
     def make(self, key):
         # load roi_mask for insert roi for a specific experiment and field
         roi_mask = (self.field_or_pres_table.RoiMask() & key).fetch1("roi_mask")
+        scan_type = (self.field_or_pres_table() & key).fetch1("scan_type")
         pixel_size_um = (self.field_or_pres_table() & key).fetch1("pixel_size_um")
+        z_step_um = (self.field_or_pres_table() & key).fetch1("z_step_um")
         npixartifact = (self.field_or_pres_table() & key).fetch1("npixartifact")
 
         if not np.any(roi_mask):
@@ -60,7 +62,12 @@ class RoiTemplate(dj.Computed):
             roi_mask_i = roi_mask == roi_idx
             artifact_flag = np.any(roi_mask_i[:npixartifact, :])
             roi_size = np.sum(roi_mask_i)
-            roi_size_um2 = roi_size * pixel_size_um ** 2
+            if scan_type == 'xy':
+                roi_size_um2 = roi_size * pixel_size_um ** 2
+            elif scan_type == 'xz':
+                roi_size_um2 = roi_size * pixel_size_um * z_step_um
+            else:
+                raise NotImplementedError(f"Can't compute ROI size for scan_type={scan_type}.")
             roi_dia_um = 2 * np.sqrt(roi_size_um2 / np.pi)
 
             self.insert1({
@@ -82,4 +89,4 @@ class RoiTemplate(dj.Computed):
         alt_ch_average = (self.field_or_pres_table.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
 
         plot_field(main_ch_average, alt_ch_average, roi_mask=roi_mask, roi_ch_average=main_ch_average,
-                   title=key, figsize=(16, 4), highlight_roi=key['roi_id'], npixartifact=npixartifact)
+                   title=key, highlight_roi=key['roi_id'], npixartifact=npixartifact)

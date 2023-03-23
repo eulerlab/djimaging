@@ -336,10 +336,12 @@ def get_scan_type_from_wparams(wparams: dict, assume_lower=False) -> str:
     npix_y = int(wparams['user_dypix'])
     npix_z = int(wparams['user_dzpix'])
 
-    if (npix_y > 1) and (npix_z <= 1):
+    if (npix_x > 1) and (npix_y > 1) and (npix_z <= 1):
         return 'xy'
-    elif (npix_y <= 1) and (npix_z > 1):
+    elif (npix_x > 1) and (npix_y <= 1) and (npix_z > 1):
         return 'xz'
+    elif (npix_x > 1) and (npix_y > 1) and (npix_z > 1):
+        return 'xyz'
     else:
         raise NotImplementedError(f"xyz = {npix_x}, {npix_y}, {npix_z}")
 
@@ -483,6 +485,30 @@ def check_if_scanm_roi_mask(roi_mask: np.ndarray):
         return
     else:
         raise ValueError(f'ROI mask contains unexpected values {np.unique(roi_mask)}')
+
+
+def check_if_roi_masks_equal_shifted_or_different(roi_mask1: np.ndarray, roi_mask2: np.ndarray, max_shift=4) -> str:
+    """Test if two roi masks are the same"""
+    check_if_scanm_roi_mask(roi_mask1)
+    check_if_scanm_roi_mask(roi_mask2)
+
+    if roi_mask1.shape != roi_mask2.shape:
+        return 'different'
+    if np.all(roi_mask1 == roi_mask2):
+        return 'same'
+
+    max_shift_x = np.minimum(max_shift, roi_mask1.shape[0] - 2)
+    max_shift_y = np.minimum(max_shift, roi_mask1.shape[1] - 2)
+
+    for dx in range(-max_shift_x, max_shift_x + 1):
+        for dy in range(-max_shift_y, max_shift_y + 1):
+            shifted1 = roi_mask1[dx:, dy:]
+            dx = -roi_mask2.shape[0] if dx == 0 else dx  # Handle zero case
+            dy = -roi_mask2.shape[0] if dy == 0 else dy
+            shifted2 = roi_mask2[:-dx, :-dy]
+            if np.all(shifted1 == shifted2):
+                return 'shifted'
+    return 'different'
 
 
 def get_roi_center(roi_mask: np.ndarray, roi_id: int) -> (float, float):
