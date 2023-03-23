@@ -393,7 +393,7 @@ def compute_frame_times(n_frames: int, pix_dt: int, npix_x: int, npix_2nd: int,
     return frame_times, frame_dt_offset
 
 
-def compute_triggertimes_from_wparams(
+def compute_triggers_from_wparams(
         stack: np.ndarray, wparams: dict, stimulator_delay: float,
         threshold: int = 30_000, precision: str = 'line') -> (np.ndarray, np.ndarray):
     """Extract triggertimes from stack, get parameters from wparams"""
@@ -406,7 +406,8 @@ def compute_triggertimes_from_wparams(
 
 
 def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset: np.ndarray,
-                     threshold: int = 30_000, stimulator_delay: float = 0.) -> (np.ndarray, np.ndarray):
+                     threshold: int = 30_000, stimulator_delay: float = 0.) \
+        -> (np.ndarray, np.ndarray):
     """Extract triggertimes from stack"""
     if stack.ndim != 3:
         raise ValueError(f"stack must be 3d but ndim={stack.ndim}")
@@ -415,13 +416,21 @@ def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset
     if stack.shape[:2] != frame_dt_offset.shape:
         raise ValueError(f"stack shape not not match frame_dt_offset {stack.shape} {frame_dt_offset.shape}")
 
-    trigger_pixels = stack > threshold
-    trigger_frame_idxs = np.where(np.diff(np.any(trigger_pixels, axis=(0, 1)).astype(int)) > 0)[0] + 1
+    stack_times = np.tile(np.atleast_3d(frame_dt_offset), (frame_times.shape[0])) + frame_times
+    stack_times = stack_times.T.flatten()
 
-    triggertimes = frame_times[trigger_frame_idxs] + np.array(
-        [np.min(frame_dt_offset[trigger_pixels[:, :, idx]]) for idx in trigger_frame_idxs]) + stimulator_delay
+    if np.any(np.diff(stack_times) < 0):
+        raise ValueError(f"Unexpected value in stack_times. This is probably a bug that needs to be fixed.")
 
-    triggervalues = [np.mean(stack[:, :, idx]) for idx in trigger_frame_idxs]
+    min_diff_n_pixels = stack.shape[0] * 2  # Require at least 2 lines difference
+    stack = stack.T.flatten()  # Order in time
+
+    trigger_idxs = np.where((stack[1:] >= threshold) & (stack[:-1] < threshold))[0] + 1
+    if np.any(np.diff(trigger_idxs) < min_diff_n_pixels):
+        trigger_idxs = trigger_idxs[np.append(True, np.diff(trigger_idxs) >= min_diff_n_pixels)]
+
+    triggertimes = stack_times[trigger_idxs] + stimulator_delay
+    triggervalues = stack[trigger_idxs]
 
     return triggertimes, triggervalues
 
@@ -458,9 +467,21 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, preci
 
 def check_if_scanm_roi_mask(roi_mask: np.ndarray):
     """Test if ROI mask is in ScanM format, raise error otherwise"""
+    roi_mask = np.asarray(roi_mask)
+
     if roi_mask.ndim != 2:
         raise ValueError(f"roi_mask must be 2d but ndim={roi_mask.ndim}")
-    if np.max(roi_mask) != 1 or np.any(np.sum(roi_mask == 0)):
+
+    if np.any(roi_mask != roi_mask.astype(int)):
+        raise ValueError(f'ROI mask contains non-integers: {np.unique(roi_mask)}')
+
+    if np.max(roi_mask) == 0 and not np.any(roi_mask > 0) and np.any(roi_mask < 0):
+        # Allow zero background mask
+        return
+    elif np.max(roi_mask) == 1 and not np.any(roi_mask == 0) and np.any(roi_mask < 0):
+        # Allow one background mask, then zero should not be used
+        return
+    else:
         raise ValueError(f'ROI mask contains unexpected values {np.unique(roi_mask)}')
 
 

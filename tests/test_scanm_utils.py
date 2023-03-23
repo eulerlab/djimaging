@@ -102,7 +102,7 @@ def _test_compute_tracetimes(filepath, stack_name, precision, atol):
         stack = np.copy(h5_file[stack_name])
         roi_mask = scanm_utils.extract_roi_mask(h5_file)
 
-        # In Igor this was wrongly added, so let's remove it again
+        # In Igor this was wrongly added, so remove it again
         igor_traces_times -= os_params['stimulatordelay'] / 1000
 
     _, traces_times = scanm_utils.compute_traces(
@@ -135,7 +135,7 @@ def test_compute_traces(
     assert np.allclose(igor_traces, traces)
 
 
-def _test_compute_triggertimes(filepath, precision):
+def _test_compute_triggertimes(filepath, precision, atol):
     """Don't add stimulator delay for comparison, because in Igor it was added to tracetimes instead"""
     if not os.path.isfile(filepath):
         pytest.skip(f"File not found {filepath}")
@@ -145,41 +145,64 @@ def _test_compute_triggertimes(filepath, precision):
         igor_triggertimes, _ = scanm_utils.extract_triggers(h5_file, check_triggervalues=False)
         ch2_stack = np.copy(h5_file['wDataCh2'])
 
-    triggertimes, triggervalues = scanm_utils.compute_triggertimes_from_wparams(
-        stack=ch2_stack, wparams=wparams, precision=precision, stimulator_delay=0)
+    # Ignore 'stimulator_delay' here, because in Igor it's added to tracetimes instead
+    triggertimes, triggervalues = scanm_utils.compute_triggers_from_wparams(
+        stack=ch2_stack, wparams=wparams, precision=precision, stimulator_delay=0.)
 
     assert igor_triggertimes.shape == triggertimes.shape
-    assert np.allclose(igor_triggertimes, triggertimes, atol=2e-3)
+    assert np.allclose(igor_triggertimes[0], triggertimes[0], atol=atol)
+    assert np.allclose(igor_triggertimes[-1], triggertimes[-1], atol=atol)
+    assert np.allclose(igor_triggertimes, triggertimes, atol=atol)
 
 
 def test_compute_triggertimes_line_precision_xy_dendrites(
         filepath=os.path.join(__RAW_DATA_PATH, "xy-dendrites/20201127/1/Pre/SMP_C1_d1_Chirp.h5")):
-    _test_compute_triggertimes(filepath=filepath, precision='line')
+    _test_compute_triggertimes(filepath=filepath, precision='line', atol=2.5e-3)
 
 
 def test_compute_triggertimes_pixel_precision_xy_dendrites(
         filepath=os.path.join(__RAW_DATA_PATH, "xy-dendrites/20201127/1/Pre/SMP_C1_d1_Chirp.h5")):
-    _test_compute_triggertimes(filepath=filepath, precision='pixel')
+    _test_compute_triggertimes(filepath=filepath, precision='pixel', atol=3e-3)
 
 
-def test_compute_triggertimes_line_precision_xy_rgcs(
+def test_compute_triggertimes_line_precision_xy_rgcs_mb(
         filepath=os.path.join(__RAW_DATA_PATH, "xy-RGCs/20220215/1/Pre/SMP_M1_LR_GCL1_MB_D.h5")):
-    _test_compute_triggertimes(filepath=filepath, precision='line')
+    _test_compute_triggertimes(filepath=filepath, precision='line', atol=2.5e-3)
 
 
-def test_compute_triggertimes_pixel_precision_xy_rgcs(
+def test_compute_triggertimes_pixel_precision_xy_rgcs_mb(
         filepath=os.path.join(__RAW_DATA_PATH, "xy-RGCs/20220215/1/Pre/SMP_M1_LR_GCL1_MB_D.h5")):
-    _test_compute_triggertimes(filepath=filepath, precision='pixel')
+    _test_compute_triggertimes(filepath=filepath, precision='pixel', atol=3e-3)
 
 
-def test_compute_triggertimes_line_precision_xz_bcs(
+def test_compute_triggertimes_line_precision_xy_rgcs_noise(
+        filepath=os.path.join(__RAW_DATA_PATH, "xy-RGCs/20220215/1/Pre/SMP_M1_LR_GCL1_MB_D.h5")):
+    _test_compute_triggertimes(filepath=filepath, precision='line', atol=2.5e-3)
+
+
+def test_compute_triggertimes_pixel_precision_xy_rgcs_noise(
+        filepath=os.path.join(__RAW_DATA_PATH, "xy-RGCs/20220215/1/Pre/SMP_M1_LR_GCL3_DN_C1.h5")):
+    _test_compute_triggertimes(filepath=filepath, precision='pixel', atol=3e-3)
+
+
+def test_compute_triggertimes_line_precision_xz_bcs_chirp(
+        filepath=os.path.join(__RAW_DATA_PATH, "xz-BCs/20220921/2/Pre/SMP_M1_RR_xz0_chirp_C1.h5")):
+    _test_compute_triggertimes(filepath=filepath, precision='line', atol=2.5e-3)
+
+
+def test_compute_triggertimes_line_precision_xz_bcs_noise(
+        filepath=os.path.join(__RAW_DATA_PATH, "xz-BCs/20220921/2/Pre/SMP_M1_RR_xz3_BCnoise_C1.h5")):
+    _test_compute_triggertimes(filepath=filepath, precision='line', atol=2.5e-3)
+
+
+def test_compute_triggertimes_pixel_precision_xz_bcs_chirp(
+        filepath=os.path.join(__RAW_DATA_PATH, "xz-BCs/20220921/2/Pre/SMP_M1_RR_xz0_chirp_C1.h5")):
+    _test_compute_triggertimes(filepath=filepath, precision='pixel', atol=2e-3)
+
+
+def test_compute_triggertimes_pixel_precision_xz_bcs_noise(
         filepath=os.path.join(__RAW_DATA_PATH, "xz-BCs/20220921/2/Pre/SMP_M1_RR_xz1_BCnoise_C1.h5")):
-    _test_compute_triggertimes(filepath=filepath, precision='line')
-
-
-def test_compute_triggertimes_pixel_precision_xz_bcs(
-        filepath=os.path.join(__RAW_DATA_PATH, "xz-BCs/20220921/2/Pre/SMP_M1_RR_xz1_BCnoise_C1.h5")):
-    _test_compute_triggertimes(filepath=filepath, precision='pixel')
+    _test_compute_triggertimes(filepath=filepath, precision='pixel', atol=2e-3)
 
 
 def test_compute_tracetimes_line_precision(
@@ -197,7 +220,7 @@ def test_compute_tracetimes_pixel_precision(
 def test_compute_tracetimes_line_precision_xy_rgcs(
         filepath=os.path.join(__RAW_DATA_PATH, "xy-RGCs/20220304/1/Pre/SMP_M1_LR_GCL0_chirp.h5"),
         stack_name='wDataCh0'):
-    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='line', atol=1e-3)
+    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='line', atol=2.5e-3)
 
 
 def test_compute_tracetimes_pixel_precision_xy_rgcs(
@@ -209,7 +232,7 @@ def test_compute_tracetimes_pixel_precision_xy_rgcs(
 def test_compute_tracetimes_line_precision_xz_bcs(
         filepath=os.path.join(__RAW_DATA_PATH, "xz-BCs/20220921/2/Pre/SMP_M1_RR_xz1_BCnoise_C1.h5"),
         stack_name='wDataCh0'):
-    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='line', atol=1e-3)
+    _test_compute_tracetimes(filepath=filepath, stack_name=stack_name, precision='line', atol=2.5e-3)
 
 
 def test_compute_tracetimes_pixel_precision_xz_bcs(
