@@ -29,7 +29,7 @@ class Experiment(core.ExperimentTemplate):
 
 @schema
 class Field(core.FieldTemplate):
-    __load_field_roi_masks = True  # Set to False if you don't want to use Field level Roi masks!
+    _load_field_roi_masks = True  # Set to False if you don't want to use Field level Roi masks!
     userinfo_table = UserInfo
     experiment_table = Experiment
 

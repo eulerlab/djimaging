@@ -14,7 +14,7 @@ from djimaging.utils.plot_utils import plot_field
 
 class FieldTemplate(dj.Computed):
     database = ""
-    __load_field_roi_masks = True  # Set to False if all roi masks and roi ids should be based on presentation
+    _load_field_roi_masks = True  # Set to False if all roi masks and roi ids should be based on presentation
 
     @property
     def definition(self):
@@ -147,7 +147,7 @@ class FieldTemplate(dj.Computed):
 
         self.insert1(field_key, allow_direct_insert=True)
 
-        if self.__load_field_roi_masks:
+        if self._load_field_roi_masks:
             if roimask_key is not None:
                 (self.RoiMask & field_key).insert1(roimask_key, allow_direct_insert=True)
         for avg_key in avg_keys:

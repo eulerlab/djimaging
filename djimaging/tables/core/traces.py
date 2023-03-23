@@ -11,7 +11,7 @@ from djimaging.utils.plot_utils import plot_trace_and_trigger
 
 class TracesTemplate(dj.Computed):
     database = ""
-    __ignore_incompatible_roi_masks = False
+    _ignore_incompatible_roi_masks = False
 
     @property
     def definition(self):
@@ -66,7 +66,7 @@ class TracesTemplate(dj.Computed):
             data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
             roi_mask = (self.presentation_table.RoiMask() & key).fetch1("roi_mask")
 
-            if not self.__ignore_incompatible_roi_masks:
+            if not self._ignore_incompatible_roi_masks:
                 roi_mask_roi_ids = np.abs(scanm_utils.extract_roi_idxs(roi_mask)).astype(int)
                 if not np.all(np.sort(roi_ids) == np.sort(roi_mask_roi_ids)):
                     # TODO: Allow single ROIs to drop. Rather base on similarity, e.g. by correlating pixels
