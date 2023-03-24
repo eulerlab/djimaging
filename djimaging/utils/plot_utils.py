@@ -86,11 +86,11 @@ def prep_long_title(title=None):
     return title
 
 
-def set_long_title(ax=None, fig=None, title=None):
+def set_long_title(ax=None, fig=None, title=None, **kwargs):
     if ax is not None:
-        ax.set_title(prep_long_title(title=title))
+        ax.set_title(prep_long_title(title=title), **kwargs)
     elif fig is not None:
-        fig.suptitle(prep_long_title(title=title))
+        fig.suptitle(prep_long_title(title=title), **kwargs)
 
 
 def plot_traces(time, traces, ax=None, title=None):
@@ -211,7 +211,7 @@ def plot_clusters(traces_list, stim_names, clusters, kind='averages', title=None
         fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, 2 * (1 + n_rows)), squeeze=False,
                                 sharex='col', sharey='row', gridspec_kw=dict(height_ratios=cluster_counts[:n_rows] + 1))
 
-    set_long_title(fig=fig, title=title)
+    set_long_title(fig=fig, title=title, y=1, va='bottom')
 
     for ax_col, stim_i, traces_i in zip(axs.T, stim_names, traces_list):
         ax_col[0].set(title=f"stim={stim_i}")

@@ -4,6 +4,8 @@ from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
+from djimaging.utils import math_utils
+
 from djimaging.utils.trace_utils import sort_traces
 from matplotlib import pyplot as plt
 
@@ -74,11 +76,6 @@ class SplitRFTemplate(dj.Computed):
         # Get data
         strf = (self.rf_table() & key).fetch1("rf")
 
-        try:
-            shift = (self.rf_table() & key).fetch1("shift")
-        except dj.DataJointError:
-            shift = (self.rf_table & key).fetch1('model_dict')['shift']
-
         # Get preprocess params
         blur_std, blur_npix, upsample_srf_scale, peak_nstd = \
             self.split_rf_params_table().fetch1('blur_std', 'blur_npix', 'upsample_srf_scale', 'peak_nstd')
@@ -87,7 +84,7 @@ class SplitRFTemplate(dj.Computed):
         srf, trf = split_strf(strf, blur_std=blur_std, blur_npix=blur_npix, upsample_srf_scale=upsample_srf_scale)
 
         # Make tRF always positive, so that sRF reflects the polarity of the RF
-        polarity, peak_idxs = compute_polarity_and_peak_idxs(trf, nstd=peak_nstd, shift=shift)
+        polarity, peak_idxs = compute_polarity_and_peak_idxs(trf, nstd=peak_nstd)
         if polarity == -1:
             srf *= -1
             trf *= -1
@@ -126,7 +123,7 @@ class SplitRFTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        trf = np.stack((self & restriction).fetch('trf'))
+        trf = math_utils.padded_vstack((self & restriction).fetch('trf'))
 
         if sort:
             trf = sort_traces(trf)
