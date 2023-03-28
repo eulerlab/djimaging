@@ -1,5 +1,5 @@
 import os
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 from copy import deepcopy
 
 import datajoint as dj
@@ -85,8 +85,7 @@ class FieldTemplate(dj.Computed):
             key = {k: v for k, v in row.items() if k in self.experiment_table.primary_key}
             self.add_experiment_fields(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
-
+    def compute_field2info(self, key, verboselvl=0):
         header_path = (self.experiment_table() & key).fetch1('header_path')
         pre_data_dir = (self.userinfo_table() & key).fetch1("pre_data_dir")
         pre_data_path = os.path.join(header_path, pre_data_dir)
@@ -108,6 +107,10 @@ class FieldTemplate(dj.Computed):
         for remove_field in remove_fields:
             field2info.pop(remove_field)
 
+        return field2info
+
+    def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
+        field2info = self.compute_field2info(key=key, verboselvl=verboselvl)
         # Go through remaining fields and add them
         for field, info in field2info.items():
             exists = len((self & key & dict(field=field)).fetch()) > 0
@@ -130,20 +133,17 @@ class FieldTemplate(dj.Computed):
     def add_field(self, key, field, files, verboselvl):
         assert field is not None
 
-        header_path = (self.experiment_table() & key).fetch1('header_path')
-        pre_data_dir = (self.userinfo_table() & key).fetch1("pre_data_dir")
-        pre_data_path = os.path.join(header_path, pre_data_dir)
+        pre_data_path = os.path.join((self.experiment_table() & key).fetch1('header_path'),
+                                     (self.userinfo_table() & key).fetch1("pre_data_dir"))
+        assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
         mask_alias = (self.userinfo_table() & key).fetch1("mask_alias")
         highres_alias = (self.userinfo_table() & key).fetch1("highres_alias")
 
-        assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
-
         setupid = (self.experiment_table().ExpInfo() & key).fetch1("setupid")
 
-        field_key, roimask_key, avg_keys = load_scan_info(
-            key=key, field=field, pre_data_path=pre_data_path, files=files,
-            mask_alias=mask_alias, highres_alias=highres_alias, setupid=setupid, verboselvl=verboselvl)
+        field_key, roimask_key, avg_keys = self.load_new_keys(
+            key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl)
 
         self.insert1(field_key, allow_direct_insert=True)
 
@@ -152,6 +152,12 @@ class FieldTemplate(dj.Computed):
                 (self.RoiMask & field_key).insert1(roimask_key, allow_direct_insert=True)
         for avg_key in avg_keys:
             (self.StackAverages & field_key).insert1(avg_key, allow_direct_insert=True)
+
+    def load_new_keys(self, key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl):
+        field_key, roimask_key, avg_keys = load_scan_info(
+            key=key, field=field, pre_data_path=pre_data_path, files=files,
+            mask_alias=mask_alias, highres_alias=highres_alias, setupid=setupid, verboselvl=verboselvl)
+        return field_key, roimask_key, avg_keys
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
@@ -165,6 +171,78 @@ class FieldTemplate(dj.Computed):
         plot_field(main_ch_average, alt_ch_average,
                    roi_masks[0] if len(roi_masks) == 1 else None,
                    roi_ch_average=main_ch_average, title=key, npixartifact=npixartifact)
+
+
+class FieldWithCondition(FieldTemplate, ABC):
+    @property
+    def definition(self):
+        new_line = 'condition    :varchar(255)    # condition (pharmacological or other)\n        '
+        d = super().definition
+        i_primary = d.find('---')
+        assert i_primary > 0
+        print(d[:i_primary] + new_line + d[i_primary:])
+        return d
+
+    def get_condition(self, data_file, userinfo_key):
+        condition_loc = (self.userinfo_table() & userinfo_key).fetch('condition_loc')
+        split_string = data_file[:data_file.find(".h5")].split("_")
+        condition = split_string[condition_loc] if condition_loc < len(split_string) else 'control'
+
+        return condition
+
+    def load_new_keys(self, key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl):
+        field_key, roimask_key, avg_keys = load_scan_info(
+            key=key, field=field, pre_data_path=pre_data_path, files=files,
+            mask_alias=mask_alias, highres_alias=highres_alias, setupid=setupid, verboselvl=verboselvl)
+
+        condition = self.get_condition(data_file=field_key["fromfile"], userinfo_key=key)
+        for file in files:
+            if self.get_condition(data_file=file, userinfo_key=key) != condition:
+                ValueError(f"{self.get_condition(data_file=file, userinfo_key=key)} != {condition}, {files}")
+
+        field_key["condition"] = condition
+        roimask_key["condition"] = condition
+        for avg_key in avg_keys:
+            avg_key["condition"] = condition
+
+        return field_key, roimask_key, avg_keys
+
+    def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
+        condition_loc = (self.userinfo_table() & key).fetch('condition_loc')
+
+        field2info = self.compute_field2info(key=key, verboselvl=verboselvl)
+
+        for field, info in field2info.items():
+            conditions = []
+            for data_file in info['files']:
+                split_string = data_file[:data_file.find(".h5")].split("_")
+                condition = split_string[condition_loc] if condition_loc < len(split_string) else 'control'
+                conditions.append(condition)
+            field2info[field]['conditions'] = conditions
+
+        # Go through remaining fields and add them
+        for field, info in field2info.items():
+            files = np.asarray(info['files'])
+            conditions = np.asarray(info['conditions'])
+
+            for condition in np.unique(conditions):
+                condition_files = files[conditions == condition]
+                exists = len((self & key & dict(field=field, condition=condition)).fetch()) > 0
+                if only_new and exists:
+                    if verboselvl > 1:
+                        print(f"\tSkipping field `{field}` with files: {condition_files}")
+                    continue
+
+                if verboselvl > 0:
+                    print(f"\tAdding field: `{field}` with files: {condition_files}")
+
+                try:
+                    self.add_field(key=key, field=field, files=condition_files, verboselvl=verboselvl)
+                except Exception as e:
+                    if suppress_errors:
+                        print("Suppressed Error:", e, '\n\tfor key:', key)
+                    else:
+                        raise e
 
 
 def scan_fields_and_files(pre_data_path: str, user_dict: dict, verbose: bool = False) -> dict:
@@ -220,7 +298,8 @@ def load_field_roi_mask(pre_data_path, files, mask_alias='', highres_alias=''):
         raise ValueError(f'No ROI mask found in any file in {pre_data_path}: {files}')
 
 
-def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl=0):
+def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl=0) \
+        -> (dict, dict, list):
     try:
         roi_mask, file = load_field_roi_mask(
             pre_data_path, files, mask_alias=mask_alias, highres_alias=highres_alias)
