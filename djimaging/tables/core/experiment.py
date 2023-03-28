@@ -37,6 +37,10 @@ class ExperimentTemplate(dj.Computed):
         self.add_experiments(key=key, data_dir=data_dir, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
                              only_new=False, restrictions=None, verboselvl=1, suppress_errors=False)
 
+    @property
+    def key_source(self):
+        return self.userinfo_table.proj()
+
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 1, suppress_errors: bool = False) -> None:
         """Scan filesystem for new experiments and add them to the database.
         :param restrictions: Restriction to users table, e.g. to scan only for specific user(s)
@@ -47,15 +51,16 @@ class ExperimentTemplate(dj.Computed):
         if restrictions is None:
             restrictions = dict()
 
-        for row in (self.userinfo_table() & restrictions):
-            key = {k: v for k, v in row.items() if k in self.userinfo_table.primary_key}
-
+        for key in (self.key_source & restrictions).fetch(as_dict=True):
             if verboselvl > 0:
                 print(f"Scanning for experimenter: {key['experimenter']}")
 
+            data_dir = (self.userinfo_table & key).fetch1("data_dir")
+            pre_data_dir = (self.userinfo_table & key).fetch1("pre_data_dir")
+            raw_data_dir = (self.userinfo_table & key).fetch1("raw_data_dir")
+
             self.add_experiments(
-                key=key, data_dir=row["data_dir"],
-                pre_data_dir=row["pre_data_dir"], raw_data_dir=row["raw_data_dir"],
+                key=key, data_dir=data_dir, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
                 only_new=True, restrictions=restrictions, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
     def add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir,

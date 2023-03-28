@@ -41,6 +41,10 @@ class FieldTemplate(dj.Computed):
         return definition
 
     @property
+    def key_source(self):
+        return self.experiment_table.proj()
+
+    @property
     @abstractmethod
     def experiment_table(self):
         pass
@@ -81,8 +85,7 @@ class FieldTemplate(dj.Computed):
         if restrictions is None:
             restrictions = dict()
 
-        for row in (self.experiment_table() & restrictions):
-            key = {k: v for k, v in row.items() if k in self.experiment_table.primary_key}
+        for key in (self.key_source & restrictions):
             self.add_experiment_fields(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
     def compute_field2info(self, key, verboselvl=0):
@@ -173,18 +176,51 @@ class FieldTemplate(dj.Computed):
                    roi_ch_average=main_ch_average, title=key, npixartifact=npixartifact)
 
 
-class FieldWithCondition(FieldTemplate, ABC):
+class FieldWithConditionTemplate(FieldTemplate):
     @property
     def definition(self):
         new_line = 'condition    :varchar(255)    # condition (pharmacological or other)\n        '
         d = super().definition
         i_primary = d.find('---')
         assert i_primary > 0
-        print(d[:i_primary] + new_line + d[i_primary:])
-        return d
+        definition = d[:i_primary] + new_line + d[i_primary:]
+        return definition
+
+    @property
+    @abstractmethod
+    def experiment_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def userinfo_table(self):
+        pass
+
+    class StackAverages(dj.Part):
+        @property
+        def definition(self):
+            definition = """
+                # Stack median (over time of the available channels)
+                -> master
+                ch_name : varchar(255)  # name of the channel
+                ---
+                ch_average :longblob  # Stack median over time
+                """
+            return definition
+
+    class RoiMask(dj.Part):
+        @property
+        def definition(self):
+            definition = """
+                # ROI Mask
+                -> master
+                ---
+                roi_mask    :longblob       # roi mask for the recording field
+                """
+            return definition
 
     def get_condition(self, data_file, userinfo_key):
-        condition_loc = (self.userinfo_table() & userinfo_key).fetch('condition_loc')
+        condition_loc = (self.userinfo_table() & userinfo_key).fetch1('condition_loc')
         split_string = data_file[:data_file.find(".h5")].split("_")
         condition = split_string[condition_loc] if condition_loc < len(split_string) else 'control'
 
@@ -208,15 +244,12 @@ class FieldWithCondition(FieldTemplate, ABC):
         return field_key, roimask_key, avg_keys
 
     def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
-        condition_loc = (self.userinfo_table() & key).fetch('condition_loc')
-
         field2info = self.compute_field2info(key=key, verboselvl=verboselvl)
 
         for field, info in field2info.items():
             conditions = []
             for data_file in info['files']:
-                split_string = data_file[:data_file.find(".h5")].split("_")
-                condition = split_string[condition_loc] if condition_loc < len(split_string) else 'control'
+                condition = self.get_condition(data_file, userinfo_key=key)
                 conditions.append(condition)
             field2info[field]['conditions'] = conditions
 

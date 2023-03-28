@@ -1,6 +1,6 @@
 from .averages import AveragesTemplate
 from .experiment import ExperimentTemplate
-from .field import FieldTemplate
+from .field import FieldTemplate, FieldWithConditionTemplate
 from .preprocesstraces import PreprocessTracesTemplate, PreprocessParamsTemplate
 from .presentation import PresentationTemplate
 from .roi import RoiTemplate

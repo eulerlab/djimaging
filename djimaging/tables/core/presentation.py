@@ -192,9 +192,7 @@ class PresentationTemplate(dj.Computed):
         if restrictions is None:
             restrictions = dict()
 
-        for row in ((self.field_table * self.stimulus_table) & restrictions):
-            key = {k: v for k, v in row.items()
-                   if k in self.field_table.primary_key or k in self.stimulus_table.primary_key}
+        for key in (self.key_source & restrictions):
             self.add_field_presentations(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
     def make(self, key):
