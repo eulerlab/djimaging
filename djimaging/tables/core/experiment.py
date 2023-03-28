@@ -34,8 +34,8 @@ class ExperimentTemplate(dj.Computed):
     def make(self, key: dict) -> None:
         data_dir, pre_data_dir, raw_data_dir = (self.userinfo_table() & key).fetch1(
             "data_dir", "pre_data_dir", "raw_data_dir")
-        self.__add_experiments(key=key, data_dir=data_dir, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
-                               only_new=False, restrictions=None, verboselvl=1, suppress_errors=False)
+        self.add_experiments(key=key, data_dir=data_dir, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
+                             only_new=False, restrictions=None, verboselvl=1, suppress_errors=False)
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 1, suppress_errors: bool = False) -> None:
         """Scan filesystem for new experiments and add them to the database.
@@ -53,19 +53,19 @@ class ExperimentTemplate(dj.Computed):
             if verboselvl > 0:
                 print(f"Scanning for experimenter: {key['experimenter']}")
 
-            self.__add_experiments(
+            self.add_experiments(
                 key=key, data_dir=row["data_dir"],
                 pre_data_dir=row["pre_data_dir"], raw_data_dir=row["raw_data_dir"],
                 only_new=True, restrictions=restrictions, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def __add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir,
-                          only_new, restrictions, verboselvl, suppress_errors):
+    def add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir,
+                        only_new, restrictions, verboselvl, suppress_errors):
 
         os_walk_output = find_folders_with_file_of_type(data_dir)
 
         for header_path in os_walk_output:
             try:
-                self.__add_experiment(
+                self.add_experiment(
                     key=key, header_path=header_path, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
                     only_new=only_new, restrictions=restrictions, verboselvl=verboselvl)
             except Exception as e:
@@ -74,7 +74,7 @@ class ExperimentTemplate(dj.Computed):
                 else:
                     raise e
 
-    def __add_experiment(self, key, header_path, pre_data_dir, raw_data_dir, only_new, restrictions, verboselvl):
+    def add_experiment(self, key, header_path, pre_data_dir, raw_data_dir, only_new, restrictions, verboselvl):
 
         if verboselvl > 0:
             print('\theader_path:', header_path)

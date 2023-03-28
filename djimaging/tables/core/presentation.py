@@ -195,12 +195,12 @@ class PresentationTemplate(dj.Computed):
         for row in ((self.field_table * self.stimulus_table) & restrictions):
             key = {k: v for k, v in row.items()
                    if k in self.field_table.primary_key or k in self.stimulus_table.primary_key}
-            self.__add_field_presentations(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
+            self.add_field_presentations(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
     def make(self, key):
-        self.__add_field_presentations(key, only_new=False, verboselvl=0, suppress_errors=False)
+        self.add_field_presentations(key, only_new=False, verboselvl=0, suppress_errors=False)
 
-    def __add_field_presentations(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
+    def add_field_presentations(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
         field = (self.field_table() & key).fetch1("field")
         stim_loc, field_loc, condition_loc = (self.userinfo_table() & key).fetch1(
             "stimulus_loc", "field_loc", "condition_loc")
@@ -238,7 +238,7 @@ class PresentationTemplate(dj.Computed):
                 print(f"\tAdding presentation for `{h5_file}`.")
 
             try:
-                self.__add_presentation(key=new_key, filepath=os.path.join(pre_data_path, h5_file))
+                self.add_presentation(key=new_key, filepath=os.path.join(pre_data_path, h5_file))
             except Exception as e:
                 if suppress_errors:
                     print("Suppressed Error:", e, '\n\tfor key:', key)
@@ -246,7 +246,7 @@ class PresentationTemplate(dj.Computed):
                     print(f"Error for key: {key}")
                     raise e
 
-    def __add_presentation(self, key, filepath: str, compute_from_stack: bool = True):
+    def add_presentation(self, key, filepath: str, compute_from_stack: bool = True):
         ch_stacks, wparams = scanm_utils.load_stacks_from_h5(filepath, ('wDataCh0', 'wDataCh1', 'wDataCh2'))
 
         if compute_from_stack:

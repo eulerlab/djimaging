@@ -74,7 +74,7 @@ class FieldTemplate(dj.Computed):
             return definition
 
     def make(self, key):
-        self.__add_experiment_fields(key, only_new=False, verboselvl=0, suppress_errors=False)
+        self.add_experiment_fields(key, only_new=False, verboselvl=0, suppress_errors=False)
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False):
         """Scan filesystem for new fields and add them to the database."""
@@ -83,9 +83,9 @@ class FieldTemplate(dj.Computed):
 
         for row in (self.experiment_table() & restrictions):
             key = {k: v for k, v in row.items() if k in self.experiment_table.primary_key}
-            self.__add_experiment_fields(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
+            self.add_experiment_fields(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def __add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
+    def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
 
         header_path = (self.experiment_table() & key).fetch1('header_path')
         pre_data_dir = (self.userinfo_table() & key).fetch1("pre_data_dir")
@@ -120,14 +120,14 @@ class FieldTemplate(dj.Computed):
                 print(f"\tAdding field: `{field}` with files: {info['files']}")
 
             try:
-                self.__add_field(key=key, field=field, files=info['files'], verboselvl=verboselvl)
+                self.add_field(key=key, field=field, files=info['files'], verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
                     print("Suppressed Error:", e, '\n\tfor key:', key)
                 else:
                     raise e
 
-    def __add_field(self, key, field, files, verboselvl):
+    def add_field(self, key, field, files, verboselvl):
         assert field is not None
 
         header_path = (self.experiment_table() & key).fetch1('header_path')
