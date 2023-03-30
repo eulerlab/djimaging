@@ -39,7 +39,10 @@ class ExperimentTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.userinfo_table.proj()
+        try:
+            return self.userinfo_table.proj()
+        except AttributeError:
+            pass
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 1, suppress_errors: bool = False) -> None:
         """Scan filesystem for new experiments and add them to the database.

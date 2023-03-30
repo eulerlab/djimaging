@@ -42,7 +42,10 @@ class FieldTemplate(dj.Computed):
 
     @property
     def key_source(self):
-        return self.experiment_table.proj()
+        try:
+            return self.experiment_table.proj()
+        except AttributeError:
+            pass
 
     @property
     @abstractmethod
@@ -148,6 +151,9 @@ class FieldTemplate(dj.Computed):
         field_key, roimask_key, avg_keys = self.load_new_keys(
             key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl)
 
+        if verboselvl > 2:
+            print(f"For key=\n{key} add \nfield_key=\n{field_key}")
+
         self.insert1(field_key, allow_direct_insert=True)
 
         if self._load_field_roi_masks:
@@ -220,6 +226,7 @@ class FieldWithConditionTemplate(FieldTemplate):
             return definition
 
     def get_condition(self, data_file, userinfo_key):
+        data_file = os.path.split(data_file)[1]
         condition_loc = (self.userinfo_table() & userinfo_key).fetch1('condition_loc')
         split_string = data_file[:data_file.find(".h5")].split("_")
         condition = split_string[condition_loc] if condition_loc < len(split_string) else 'control'
@@ -263,11 +270,11 @@ class FieldWithConditionTemplate(FieldTemplate):
                 exists = len((self & key & dict(field=field, condition=condition)).fetch()) > 0
                 if only_new and exists:
                     if verboselvl > 1:
-                        print(f"\tSkipping field `{field}` with files: {condition_files}")
+                        print(f"\tSkipping field '{field}' '{condition}' with files: {condition_files}")
                     continue
 
                 if verboselvl > 0:
-                    print(f"\tAdding field: `{field}` with files: {condition_files}")
+                    print(f"\tAdding field: '{field}' '{condition}' with files: {condition_files}")
 
                 try:
                     self.add_field(key=key, field=field, files=condition_files, verboselvl=verboselvl)
