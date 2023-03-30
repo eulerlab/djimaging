@@ -56,3 +56,17 @@ def find_folders_with_file_of_type(data_dir: str, ending: str = '.ini') -> list:
         if np.any([f.endswith(ending) for f in files]):
             os_walk_output.append(folder)
     return os_walk_output
+
+
+def get_condition(data_file, loc, fill_value='control'):
+    data_file = os.path.split(data_file)[1]
+    split_string = data_file[:data_file.find(".h5")].split("_")
+    condition = split_string[loc] if loc < len(split_string) else fill_value
+    return condition
+
+
+def get_stim(data_file, loc, fill_value='nostim'):
+    data_file = os.path.split(data_file)[1]
+    split_string = data_file[:data_file.find(".h5")].split("_")
+    condition = split_string[loc] if loc < len(split_string) else fill_value
+    return condition

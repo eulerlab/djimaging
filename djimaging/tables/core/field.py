@@ -1,5 +1,5 @@
 import os
-from abc import abstractmethod, ABC
+from abc import abstractmethod
 from copy import deepcopy
 
 import datajoint as dj
@@ -7,7 +7,7 @@ import numpy as np
 from djimaging.utils import scanm_utils
 
 from djimaging.utils.alias_utils import check_shared_alias_str
-from djimaging.utils.datafile_utils import get_filename_info
+from djimaging.utils.datafile_utils import get_filename_info, get_condition
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 
@@ -92,9 +92,8 @@ class FieldTemplate(dj.Computed):
             self.add_experiment_fields(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
     def compute_field2info(self, key, verboselvl=0):
-        header_path = (self.experiment_table() & key).fetch1('header_path')
-        pre_data_dir = (self.userinfo_table() & key).fetch1("pre_data_dir")
-        pre_data_path = os.path.join(header_path, pre_data_dir)
+        pre_data_path = os.path.join((self.experiment_table() & key).fetch1('header_path'),
+                                     (self.userinfo_table() & key).fetch1("pre_data_dir"))
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
         if verboselvl > 0:
@@ -137,15 +136,12 @@ class FieldTemplate(dj.Computed):
                     raise e
 
     def add_field(self, key, field, files, verboselvl):
-        assert field is not None
-
         pre_data_path = os.path.join((self.experiment_table() & key).fetch1('header_path'),
                                      (self.userinfo_table() & key).fetch1("pre_data_dir"))
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
 
         mask_alias = (self.userinfo_table() & key).fetch1("mask_alias")
         highres_alias = (self.userinfo_table() & key).fetch1("highres_alias")
-
         setupid = (self.experiment_table().ExpInfo() & key).fetch1("setupid")
 
         field_key, roimask_key, avg_keys = self.load_new_keys(
@@ -225,23 +221,17 @@ class FieldWithConditionTemplate(FieldTemplate):
                 """
             return definition
 
-    def get_condition(self, data_file, userinfo_key):
-        data_file = os.path.split(data_file)[1]
-        condition_loc = (self.userinfo_table() & userinfo_key).fetch1('condition_loc')
-        split_string = data_file[:data_file.find(".h5")].split("_")
-        condition = split_string[condition_loc] if condition_loc < len(split_string) else 'control'
-
-        return condition
-
     def load_new_keys(self, key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl):
         field_key, roimask_key, avg_keys = load_scan_info(
             key=key, field=field, pre_data_path=pre_data_path, files=files,
             mask_alias=mask_alias, highres_alias=highres_alias, setupid=setupid, verboselvl=verboselvl)
 
-        condition = self.get_condition(data_file=field_key["fromfile"], userinfo_key=key)
+        condition_loc = (self.userinfo_table() & key).fetch1('condition_loc')
+
+        condition = get_condition(data_file=field_key["fromfile"], loc=condition_loc)
         for file in files:
-            if self.get_condition(data_file=file, userinfo_key=key) != condition:
-                ValueError(f"{self.get_condition(data_file=file, userinfo_key=key)} != {condition}, {files}")
+            if get_condition(data_file=file, loc=condition_loc) != condition:
+                ValueError(f"{get_condition(data_file=file, loc=condition_loc)} != {condition}, {files}")
 
         field_key["condition"] = condition
         roimask_key["condition"] = condition
@@ -253,10 +243,11 @@ class FieldWithConditionTemplate(FieldTemplate):
     def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
         field2info = self.compute_field2info(key=key, verboselvl=verboselvl)
 
+        condition_loc = (self.userinfo_table() & key).fetch1('condition_loc')
         for field, info in field2info.items():
             conditions = []
             for data_file in info['files']:
-                condition = self.get_condition(data_file, userinfo_key=key)
+                condition = get_condition(data_file, loc=condition_loc)
                 conditions.append(condition)
             field2info[field]['conditions'] = conditions
 

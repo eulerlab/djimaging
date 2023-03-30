@@ -49,8 +49,9 @@ def match_file(file, pattern, pattern_loc=None, ftype=None, case_sensitive=False
 
 
 def match_files(files, pattern, pattern_loc=None, ftype=None, case_sensitive=False, sep='_', mode='full'):
-    matching_files = [file for file in files if match_file(file, pattern=pattern, pattern_loc=pattern_loc, ftype=ftype,
-                                                           case_sensitive=case_sensitive, sep=sep, mode=mode)]
+    matching_files = [file for file in files
+                      if match_file(file, pattern=pattern, pattern_loc=pattern_loc,
+                                    ftype=ftype, case_sensitive=case_sensitive, sep=sep, mode=mode)]
     return matching_files
 
 

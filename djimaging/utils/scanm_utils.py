@@ -487,7 +487,7 @@ def check_if_scanm_roi_mask(roi_mask: np.ndarray):
         raise ValueError(f'ROI mask contains unexpected values {np.unique(roi_mask)}')
 
 
-def check_if_roi_masks_equal_shifted_or_different(roi_mask1: np.ndarray, roi_mask2: np.ndarray, max_shift=4) -> str:
+def compare_roi_masks(roi_mask1: np.ndarray, roi_mask2: np.ndarray, max_shift=4) -> str:
     """Test if two roi masks are the same"""
     check_if_scanm_roi_mask(roi_mask1)
     check_if_scanm_roi_mask(roi_mask2)
