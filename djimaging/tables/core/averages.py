@@ -17,7 +17,6 @@ class AveragesTemplate(dj.Computed):
     def definition(self):
         definition = """
         # Averages of snippets
-    
         -> self.snippets_table
         ---
         average             :longblob  # array of snippet average (time)
@@ -31,6 +30,13 @@ class AveragesTemplate(dj.Computed):
     @abstractmethod
     def snippets_table(self):
         pass
+
+    @property
+    def key_source(self):
+        try:
+            return self.snippets_table.proj()
+        except AttributeError:
+            pass
 
     def normalize_average(self, average):
         if self._norm_kind == 'zscore':
