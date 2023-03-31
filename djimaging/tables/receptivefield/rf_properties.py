@@ -72,6 +72,13 @@ class SplitRFTemplate(dj.Computed):
     def split_rf_params_table(self):
         pass
 
+    @property
+    def key_source(self):
+        try:
+            return self.rf_table.proj() * self.split_rf_params_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
     def make(self, key):
         # Get data
         strf = (self.rf_table() & key).fetch1("rf")
@@ -180,12 +187,21 @@ class FitGauss2DRFTemplate(dj.Computed):
     _polarity = None
 
     @property
-    @abstractmethod
-    def split_rf_table(self): pass
+    def key_source(self):
+        try:
+            return self.split_rf_table.proj()
+        except (AttributeError, TypeError):
+            pass
 
     @property
     @abstractmethod
-    def stimulus_table(self): pass
+    def split_rf_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
 
     def make(self, key):
         srf = (self.split_rf_table() & key).fetch1("srf")
@@ -260,6 +276,13 @@ class FitDoG2DRFTemplate(dj.Computed):
     _polarity = None
 
     @property
+    def key_source(self):
+        try:
+            return self.split_rf_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
+    @property
     @abstractmethod
     def split_rf_table(self):
         pass
@@ -282,7 +305,7 @@ class FitDoG2DRFTemplate(dj.Computed):
             srf_eff_center = np.zeros_like(srf_fit)
 
         if np.allclose(srf_eff_center, 0.):
-            warnings.warn(f'Failed to fit DoG to key={key}')
+            warnings.warn(f'Failed to fit DoG for key={key}')
             return
 
         center_index = compute_center_index(srf=srf, srf_center=srf_eff_center)
@@ -290,6 +313,11 @@ class FitDoG2DRFTemplate(dj.Computed):
 
         # Compute area from gaussian fit to effective center
         srf_gauss_params = fit_rf_model(srf_eff_center, kind='gauss', polarity=eff_polarity)[1]
+
+        if srf_gauss_params is None:
+            warnings.warn(f'Failed to fit DoG center for key={key}')
+            return
+
         area, diameter = compute_gauss_srf_area(
             srf_gauss_params, stim_dict["pix_scale_x_um"], stim_dict["pix_scale_y_um"])
 
@@ -359,6 +387,13 @@ class TempRFPropertiesTemplate(dj.Computed):
         main_peak_lag : float
         """
         return definition
+
+    @property
+    def key_source(self):
+        try:
+            return self.split_rf_table.proj()
+        except (AttributeError, TypeError):
+            pass
 
     @property
     @abstractmethod

@@ -39,7 +39,7 @@ class RoiTemplate(dj.Computed):
     def key_source(self):
         try:
             return self.field_or_pres_table().RoiMask().proj()
-        except TypeError:
+        except (AttributeError, TypeError):
             pass
 
     def make(self, key):

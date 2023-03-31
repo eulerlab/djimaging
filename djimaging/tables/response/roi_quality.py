@@ -62,8 +62,8 @@ class RoiQualityTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return ((self.roi_table() & "artifact_flag=0") * (self.params_table())).proj()
-        except TypeError:
+            return (self.roi_table & "artifact_flag=0").proj() * self.params_table.proj()
+        except (AttributeError, TypeError):
             pass
 
     @staticmethod

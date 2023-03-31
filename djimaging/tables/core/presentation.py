@@ -66,9 +66,7 @@ class PresentationTemplate(dj.Computed):
     def key_source(self):
         try:
             return self.params_table.proj() * self.field_table.RoiMask.proj() * self.stimulus_table.proj()
-        except TypeError:
-            pass
-        except AttributeError:
+        except (AttributeError, TypeError):
             pass
 
     class StackAverages(dj.Part):

@@ -61,6 +61,13 @@ class STATemplate(dj.Computed):
         return definition
 
     @property
+    def key_source(self):
+        try:
+            return (self.params_table * self.noise_traces_table).proj()
+        except (AttributeError, TypeError):
+            pass
+
+    @property
     @abstractmethod
     def noise_traces_table(self):
         pass

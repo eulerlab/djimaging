@@ -65,7 +65,7 @@ class SineSpotFeaturesTemplate(dj.Computed):
         try:
             return self.preprocesstraces_table().proj() & \
                 (self.stimulus_table() & "stim_name = 'sinespot' or stim_family = 'sinespot'")
-        except TypeError:
+        except (AttributeError, TypeError):
             pass
 
     _delay = 0.1
