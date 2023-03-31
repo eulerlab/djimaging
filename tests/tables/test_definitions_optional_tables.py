@@ -1,5 +1,5 @@
 from djimaging.tables import optional, response, location
-from .utils import _test_definition
+from tests.utils import _test_definition
 
 
 # location
