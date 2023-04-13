@@ -1,6 +1,6 @@
 from djimaging.tables import core
 
-from .utils import _test_definition
+from tests.utils import _test_definition
 
 
 def test_definition_experiment():
