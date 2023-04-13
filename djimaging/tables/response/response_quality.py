@@ -11,10 +11,10 @@ class RepeatQITemplate(dj.Computed):
     @property
     def definition(self):
         definition = f'''
-        #Computes the QI index for (chirp) responses as described in Baden et al. (2016) for chirp
+        # Computes the QI index for responses for repeated stimuli as a signal to noise ratio
         -> self.snippets_table
         ---
-        qidx: float   # chirp quality index
+        qidx: float   # quality index as signal to noise ratio
         min_qidx: float   # minimum quality index as 1/r (r = #repetitions)
         '''
         return definition
@@ -54,7 +54,7 @@ class RepeatQITemplate(dj.Computed):
         try:
             return self.snippets_table().proj() & \
                 (self.stimulus_table() & "isrepeated=1" & self.get_stim_restriction())
-        except TypeError:
+        except (AttributeError, TypeError):
             pass
 
     def make(self, key):
@@ -80,3 +80,30 @@ class RepeatQITemplate(dj.Computed):
 
         plt.tight_layout()
         plt.show()
+
+
+class RepeatQIPresentationTemplate(dj.Computed):
+    database = ""
+
+    @property
+    def definition(self):
+        definition = f'''
+        # Summarizes Quality Indexes for all ROIs in one presentation 
+        -> self.presentation_table
+        -> self.qi_table
+        ---
+        mean_qidx: float   # mean quality index
+        min_qidx: float   # mean quality index
+        max_qidx: float   # mean quality index
+        '''
+        return definition
+
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def qi_table(self):
+        pass

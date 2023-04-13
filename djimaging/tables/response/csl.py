@@ -67,7 +67,7 @@ class CslFeaturesTemplate(dj.Computed):
         try:
             return self.averages_table().proj() & \
                 (self.stimulus_table() & "stim_name = 'csl' or stim_family = 'csl'")
-        except TypeError:
+        except (AttributeError, TypeError):
             pass
 
     @property

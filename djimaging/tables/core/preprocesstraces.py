@@ -3,7 +3,7 @@ from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
-from djimaging.utils import filter_utils
+from djimaging.utils import filter_utils, math_utils, plot_utils, trace_utils
 from matplotlib import pyplot as plt
 from scipy import signal
 
@@ -222,7 +222,7 @@ class PreprocessTracesTemplate(dj.Computed):
     def key_source(self):
         try:
             return ((self.traces_table() & 'trace_flag=1' & 'trigger_flag=1') * self.preprocessparams_table()).proj()
-        except TypeError:
+        except (AttributeError, TypeError):
             pass
 
     def make(self, key):
@@ -267,4 +267,22 @@ class PreprocessTracesTemplate(dj.Computed):
         plot_trace_and_trigger(time=preprocess_trace_times, trace=preprocess_trace, triggertimes=triggertimes, ax=ax)
         ax.set(ylabel='preprocessed\ntrace')
 
+        plt.show()
+
+    def plot(self, restriction=None, sort=True):
+        if restriction is None:
+            restriction = dict()
+
+        preprocess_traces = (self & restriction).fetch("preprocess_trace")
+        preprocess_traces = math_utils.padded_vstack(preprocess_traces, cval=np.nan)
+        n = preprocess_traces.shape[0]
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 1 + np.minimum(n * 0.1, 10)))
+        if len(restriction) > 0:
+            plot_utils.set_long_title(fig=fig, title=restriction)
+
+        sort_idxs = trace_utils.argsort_traces(preprocess_traces, ignore_nan=True) if sort else np.arange(n)
+
+        ax.set_title('preprocess_traces')
+        plot_utils.plot_signals_heatmap(ax=ax, signals=preprocess_traces[sort_idxs, :], symmetric=False)
         plt.show()

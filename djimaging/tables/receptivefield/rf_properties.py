@@ -29,6 +29,7 @@ class SplitRFParamsTemplate(dj.Lookup):
         blur_npix : int unsigned
         upsample_srf_scale : int unsigned
         peak_nstd : float  # How many standard deviations does a peak need to be considered peak?
+        npeaks_max : int unsigned # Maxium number of peaks, ignored if zero
         """
         return definition
 
@@ -40,6 +41,7 @@ class SplitRFParamsTemplate(dj.Lookup):
             blur_npix=1,
             upsample_srf_scale=0,
             peak_nstd=1,
+            npeaks_max=0,
         )
         key.update(**params)
         self.insert1(key, skip_duplicates=skip_duplicates)
@@ -47,6 +49,7 @@ class SplitRFParamsTemplate(dj.Lookup):
 
 class SplitRFTemplate(dj.Computed):
     database = ""
+    _rel_nframes_future = 0.65
 
     @property
     def definition(self):
@@ -63,6 +66,13 @@ class SplitRFTemplate(dj.Computed):
         return definition
 
     @property
+    def key_source(self):
+        try:
+            return self.rf_table.proj() * self.split_rf_params_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
+    @property
     @abstractmethod
     def rf_table(self):
         pass
@@ -73,25 +83,28 @@ class SplitRFTemplate(dj.Computed):
         pass
 
     @property
-    def key_source(self):
-        try:
-            return self.rf_table.proj() * self.split_rf_params_table.proj()
-        except (AttributeError, TypeError):
-            pass
+    @abstractmethod
+    def stimulus_table(self):
+        pass
 
     def make(self, key):
         # Get data
         strf = (self.rf_table() & key).fetch1("rf")
+        rf_time = self.fetch1_rf_time(key=key)
+        stim_Hz = (self.stimulus_table() & key).fetch('framerate')
 
         # Get preprocess params
-        blur_std, blur_npix, upsample_srf_scale, peak_nstd = \
-            self.split_rf_params_table().fetch1('blur_std', 'blur_npix', 'upsample_srf_scale', 'peak_nstd')
+        blur_std, blur_npix, upsample_srf_scale, peak_nstd, npeaks_max = self.split_rf_params_table().fetch1(
+            'blur_std', 'blur_npix', 'upsample_srf_scale', 'peak_nstd', 'npeaks_max')
 
         # Get tRF and sRF
         srf, trf = split_strf(strf, blur_std=blur_std, blur_npix=blur_npix, upsample_srf_scale=upsample_srf_scale)
 
         # Make tRF always positive, so that sRF reflects the polarity of the RF
-        polarity, peak_idxs = compute_polarity_and_peak_idxs(trf, nstd=peak_nstd)
+        polarity, peak_idxs = compute_polarity_and_peak_idxs(
+            trf[rf_time <= (0 + self._rel_nframes_future * (1. / stim_Hz))],
+            nstd=peak_nstd, npeaks_max=npeaks_max if npeaks_max > 0 else None)
+
         if polarity == -1:
             srf *= -1
             trf *= -1
@@ -107,13 +120,17 @@ class SplitRFTemplate(dj.Computed):
         rf_key['split_qidx'] = split_qidx
         self.insert1(rf_key)
 
-    def plot1(self, key=None):
-        key = get_primary_key(table=self, key=key)
+    def fetch1_rf_time(self, key):
         try:
             rf_time = (self.rf_table & key).fetch1('rf_time')
         except dj.DataJointError:
             rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
+        return rf_time
 
+    def plot1(self, key=None):
+        key = get_primary_key(table=self, key=key)
+
+        rf_time = self.fetch1_rf_time(key=key)
         srf, trf, peak_idxs = (self & key).fetch1("srf", "trf", "trf_peak_idxs")
 
         fig, axs = plt.subplots(1, 2, figsize=(8, 3))
@@ -251,6 +268,15 @@ class FitGauss2DRFTemplate(dj.Computed):
         plt.tight_layout()
         plt.show()
 
+    def plot(self, by=("preprocess_id",)):
+        columns = ["rf_qidx", "rf_cdia_um", "center_index", "surround_index"]
+        df = self.proj(*columns).fetch(format='frame').reset_index()
+        for params, group in df.groupby(list(by)):
+            print(by)
+            print(params)
+            group.hist(column=columns)
+            plt.show()
+
 
 class FitDoG2DRFTemplate(dj.Computed):
     database = ""
@@ -372,6 +398,15 @@ class FitDoG2DRFTemplate(dj.Computed):
 
         plt.tight_layout()
         plt.show()
+
+    def plot(self, by=("preprocess_id",)):
+        columns = ["rf_qidx", "rf_cdia_um", "center_index", "surround_index"]
+        df = self.proj(*columns).fetch(format='frame').reset_index()
+        for params, group in df.groupby(list(by)):
+            print(by)
+            print(params)
+            group.hist(column=columns)
+            plt.show()
 
 
 class TempRFPropertiesTemplate(dj.Computed):

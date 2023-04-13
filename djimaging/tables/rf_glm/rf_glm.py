@@ -78,6 +78,13 @@ class RFGLMTemplate(dj.Computed):
         return definition
 
     @property
+    def key_source(self):
+        try:
+            return self.noise_traces_table.proj() * self.params_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
+    @property
     @abstractmethod
     def params_table(self):
         pass
@@ -87,26 +94,31 @@ class RFGLMTemplate(dj.Computed):
     def noise_traces_table(self):
         pass
 
-    def make(self, key):
+    def make(self, key, suppress_outputs=False, clear_outputs=True):
         params = (self.params_table() & key).fetch1()
-        other_params_dict = params.pop('other_params_dict')
         dt, time, trace, stim = (self.noise_traces_table() & key).fetch1('dt', 'time', 'trace', 'stim')
+        other_params_dict = params.pop('other_params_dict')
+        if suppress_outputs:
+            other_params_dict['verbose'] = 0
 
         model = ReceptiveFieldGLM(
             dt=dt, trace=trace, stim=stim,
-            filter_dur_s_past=params['filter_dur_s_past'], filter_dur_s_future=params['filter_dur_s_future'],
+            filter_dur_s_past=params['filter_dur_s_past'],
+            filter_dur_s_future=params['filter_dur_s_future'],
             df_ts=params['df_ts'], df_ws=params['df_ws'],
             betas=params['betas'], kfold=params['kfold'], metric=params['metric'],
             output_nonlinearity=params['output_nonlinearity'], **other_params_dict)
 
         rf, quality_dict, model_dict = model.compute_glm_receptive_field()
 
-        from IPython.display import clear_output
-        clear_output(wait=True)
+        if clear_outputs or suppress_outputs:
+            from IPython.display import clear_output
+            clear_output(wait=True)
 
-        plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
-                        title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
-        plt.show()
+        if not suppress_outputs:
+            plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
+                            title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
+            plt.show()
 
         rf_key = deepcopy(key)
         rf_key['rf'] = rf
@@ -165,13 +177,19 @@ class RFGLMSingleModelTemplate(dj.Computed):
         return definition
 
     @property
+    def key_source(self):
+        try:
+            return self.glm_table.noise_traces_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
+    @property
     @abstractmethod
     def glm_table(self):
         pass
 
     def make(self, key):
         roi_key = key.copy()
-        roi_key.pop('rf_glm_params_id')
         quality_dicts, model_dicts, param_ids = (self.glm_table & roi_key).fetch(
             'quality_dict', 'model_dict', 'rf_glm_params_id')
 
@@ -234,9 +252,16 @@ class RFGLMQualityTemplate(dj.Computed):
             -> self.glm_single_model_table
             -> self.params_table
             ---
-            rf_glm_qidx : float  
+            rf_glm_qidx : float
             '''
         return definition
+
+    @property
+    def key_source(self):
+        try:
+            return self.glm_single_model_table().proj() * self.params_table().proj()
+        except (AttributeError, TypeError):
+            pass
 
     @property
     @abstractmethod
@@ -258,6 +283,9 @@ class RFGLMQualityTemplate(dj.Computed):
         min_corrcoef, max_mse, perm_alpha = (self.params_table() & key).fetch1(
             'min_corrcoef', 'max_mse', 'perm_alpha')
 
+        rf_glm_qidx_sum = 0.
+        rf_glm_qidx_count = 0
+
         if perm_alpha > 0:
             p_value = quality_test(
                 score_trueX=quality_dict['score_test'],
@@ -265,24 +293,26 @@ class RFGLMQualityTemplate(dj.Computed):
                 metric=model_dict['metric'])
 
             rf_glm_qidx_perm = p_value <= perm_alpha
-        else:
-            rf_glm_qidx_perm = None
+            rf_glm_qidx_sum += float(rf_glm_qidx_perm)
+            rf_glm_qidx_count += 1
 
-        rf_glm_qidx_corrcoeff = \
-            (quality_dict['corrcoef_train'] >= min_corrcoef) & \
-            (quality_dict.get('corrcoef_dev', 1.) >= min_corrcoef) & \
-            (quality_dict['corrcoef_test'] >= min_corrcoef)
+        if min_corrcoef > 0:
+            rf_glm_qidx_corrcoeff = \
+                (quality_dict['corrcoef_train'] >= min_corrcoef) & \
+                (quality_dict.get('corrcoef_dev', np.inf) >= min_corrcoef) & \
+                (quality_dict['corrcoef_test'] >= min_corrcoef)
+            rf_glm_qidx_sum += float(rf_glm_qidx_corrcoeff)
+            rf_glm_qidx_count += 1
 
-        rf_glm_qidx_mse = \
-            (quality_dict['mse_train'] <= max_mse) & \
-            (quality_dict.get('mse_dev', 1.) <= max_mse) & \
-            (quality_dict['mse_test'] <= max_mse)
+        if max_mse > 0:
+            rf_glm_qidx_mse = \
+                (quality_dict['mse_train'] <= max_mse) & \
+                (quality_dict.get('mse_dev', np.NINF) <= max_mse) & \
+                (quality_dict['mse_test'] <= max_mse)
+            rf_glm_qidx_sum += float(rf_glm_qidx_mse)
+            rf_glm_qidx_count += 1
 
-        if perm_alpha > 0:
-            rf_glm_qidx = \
-                np.around((float(rf_glm_qidx_perm) + float(rf_glm_qidx_corrcoeff) + float(rf_glm_qidx_mse)) / 3., 2)
-        else:
-            rf_glm_qidx = np.around((float(rf_glm_qidx_corrcoeff) + float(rf_glm_qidx_mse)) / 2., 2)
+        rf_glm_qidx = rf_glm_qidx_sum / rf_glm_qidx_count
 
         q_key = key.copy()
         q_key['rf_glm_qidx'] = rf_glm_qidx
@@ -295,4 +325,5 @@ class RFGLMQualityTemplate(dj.Computed):
         fig, ax = plt.subplots(1, 1, figsize=(4, 3))
         ax.hist(rf_glm_qidx)
         ax.set(title=f"glm_quality_params_id={glm_quality_params_id}", ylabel="rf_glm_qidx")
+        ax.set_xlim(-0.1, 1.1)
         plt.show()

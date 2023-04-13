@@ -309,7 +309,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                     self.classifier_table() * self.cell_filter_parameter_table()).proj() & \
                 ((self.snippets_table() & f"stim_name = '{self._stim_name_chirp}'").proj(chirp='stim_name') *
                  (self.snippets_table() & f"stim_name = '{self._stim_name_bar}'").proj(bar='stim_name'))
-        except TypeError:
+        except (AttributeError, TypeError):
             pass
 
     @property

@@ -41,7 +41,7 @@ class ExperimentTemplate(dj.Computed):
     def key_source(self):
         try:
             return self.userinfo_table.proj()
-        except AttributeError:
+        except (AttributeError, TypeError):
             pass
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 1, suppress_errors: bool = False) -> None:

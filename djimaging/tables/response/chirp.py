@@ -62,7 +62,7 @@ class ChirpFeaturesTemplate(dj.Computed):
         try:
             return self.snippets_table().proj() & \
                 (self.stimulus_table() & "stim_name = 'chirp' or stim_family = 'chirp'")
-        except TypeError:
+        except (AttributeError, TypeError):
             pass
 
     def make(self, key):

@@ -82,7 +82,7 @@ class DNoiseTraceTemplate(dj.Computed):
         try:
             return self.params_table() * self.traces_table().proj() & \
                 (self.stimulus_table() & "stim_family = 'noise'")
-        except TypeError:
+        except (AttributeError, TypeError):
             pass
 
     def make(self, key):
@@ -138,7 +138,7 @@ class DNoiseTraceTemplate(dj.Computed):
         ax.plot(time, trace, label='output trace')
         ax.legend(loc='upper left')
         ax = ax.twinx()
-        ax.plot(raw_tracetime, raw_trace, 'r.-', label='input trace')
+        ax.plot(raw_tracetime, raw_trace, 'r-', label='input trace', alpha=0.5)
         ax.legend(loc='upper right')
         ax.set(xlabel='Time', title='Input trace')
         plt.tight_layout()

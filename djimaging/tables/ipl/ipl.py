@@ -10,15 +10,22 @@ class IplBordersTemplate(dj.Manual):
     @property
     def definition(self):
         definition = """
-            # Manually determined index and thickness information for the IPL.
-            USe XZ widget notebook to determine values.
-            -> field_or_pres_table
-            ---
-            left   :tinyint    # pixel index where gcl/ipl border intersects on left of image (with GCL up)
-            right  :tinyint    # pixel index where gcl/ipl border intersects on right side of image
-            thick  :tinyint    # pixel width of the ipl
-            """
+        # Manually determined index and thickness information for the IPL.
+        # You can use the XZ widget notebook to determine values.
+        -> self.field_or_pres_table
+        ---
+        left   :tinyint    # pixel index where gcl/ipl border intersects on left of image (with GCL up)
+        right  :tinyint    # pixel index where gcl/ipl border intersects on right side of image
+        thick  :tinyint    # pixel width of the ipl
+        """
         return definition
+
+    @property
+    def key_source(self):
+        try:
+            return self.field_or_pres_table.proj()
+        except (AttributeError, TypeError):
+            pass
 
     @property
     @abstractmethod
@@ -30,9 +37,8 @@ class RoiIplDepthTemplate(dj.Computed):
     @property
     def definition(self):
         definition = """
-        # Gives the IPL depth of the field's ROIs relative to the GCL (=0) and INL (=1)
-        -> ipl_border_table
-        -> roi_table
+        -> self.ipl_border_table
+        -> self.roi_table
         ---
         ipl_depth : float  # Depth in the IPL relative to the GCL (=0) and INL (=1)
         """
@@ -48,6 +54,13 @@ class RoiIplDepthTemplate(dj.Computed):
     def roi_table(self):
         pass
 
+    @property
+    def key_source(self):
+        try:
+            return self.ipl_border_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
     def make(self, key):
         roi_ids = (self.roi_table & key).fetch("roi_id")
         left, right, thick = (self.ipl_border_table & key).fetch1('left', 'right', 'thick')
@@ -55,12 +68,14 @@ class RoiIplDepthTemplate(dj.Computed):
 
         roi_centers = get_roi_centers(roi_mask, roi_ids)
 
+        assert roi_centers.shape[0] == roi_ids.shape[0], 'Mismatch between ROI ids and roi_centers'
+
         # calculate the depth relative to the IPL borders
         m1, b1 = self.get_line([(0, left), (roi_mask.shape[0] - 1, right)])
 
-        for roi_id in roi_ids:
-            shifts = m1 * roi_centers[:, 0] + b1
-            ipl_depth = (roi_centers[:, 1] - shifts) / thick
+        for roi_id, roi_center_xy in zip(roi_ids, roi_centers):
+            shifts = m1 * roi_center_xy[0] + b1
+            ipl_depth = (roi_center_xy[1] - shifts) / thick
 
             self.insert1(dict(**key, roi_id=roi_id, ipl_depth=ipl_depth))
 

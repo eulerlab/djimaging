@@ -73,6 +73,13 @@ class RetinalFieldLocationFromTableTemplate(dj.Computed):
         return definition
 
     @property
+    def key_source(self):
+        try:
+            return self.field_table.proj() * self.params_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
+    @property
     @abstractmethod
     def field_table(self):
         pass

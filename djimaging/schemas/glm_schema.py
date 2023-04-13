@@ -32,6 +32,7 @@ class RFGLM(rf_glm.RFGLMTemplate):
 
 @schema
 class RFGLMSingleModel(rf_glm.RFGLMSingleModelTemplate):
+    noise_traces_table = DNoiseTrace
     glm_table = RFGLM
 
 
@@ -54,6 +55,7 @@ class SplitRFParams(receptivefield.SplitRFParamsTemplate):
 
 @schema
 class SplitRF(receptivefield.SplitRFTemplate):
+    stimulus_table = Stimulus
     rf_table = RFGLM
     split_rf_params_table = SplitRFParams
 

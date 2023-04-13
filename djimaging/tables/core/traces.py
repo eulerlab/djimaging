@@ -3,8 +3,9 @@ from abc import abstractmethod
 import datajoint as dj
 import h5py
 import numpy as np
+from matplotlib import pyplot as plt
 
-from djimaging.utils import scanm_utils
+from djimaging.utils import scanm_utils, plot_utils, math_utils, trace_utils
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 
@@ -52,7 +53,7 @@ class TracesTemplate(dj.Computed):
     def key_source(self):
         try:
             return self.presentation_table().proj()
-        except TypeError:
+        except (AttributeError, TypeError):
             pass
 
     def make(self, key):
@@ -136,3 +137,22 @@ class TracesTemplate(dj.Computed):
 
         plot_trace_and_trigger(
             time=trace_times, trace=trace, triggertimes=triggertimes, title=str(key))
+
+    def plot(self, restriction=None, sort=True):
+        if restriction is None:
+            restriction = dict()
+
+        traces = (self & restriction).fetch("trace")
+
+        traces = math_utils.padded_vstack(traces, cval=np.nan)
+        n = traces.shape[0]
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 1 + np.minimum(n * 0.1, 10)))
+        if len(restriction) > 0:
+            plot_utils.set_long_title(fig=fig, title=restriction)
+
+        sort_idxs = trace_utils.argsort_traces(traces, ignore_nan=True) if sort else np.arange(n)
+
+        ax.set_title('traces')
+        plot_utils.plot_signals_heatmap(ax=ax, signals=traces[sort_idxs, :], symmetric=False)
+        plt.show()

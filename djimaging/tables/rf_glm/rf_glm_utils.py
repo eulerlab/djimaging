@@ -24,7 +24,8 @@ except ImportError:
 class ReceptiveFieldGLM:
     def __init__(self, dt, stim, trace, filter_dur_s_past, filter_dur_s_future, df_ts, df_ws, betas, metric,
                  output_nonlinearity='none', alphas=(1.,), kfold=1,
-                 tolerance=5, atol=1e-5, step_size=0.01, max_iters=2000, min_iters=200,
+                 tolerance=5, atol=1e-5, step_size=0.01, step_size_finetune=0.001,
+                 max_iters=2000, min_iters=200,
                  init_method=None, n_perm=20, min_cc=0.2, seed=42, verbose=0, fit_R=False, fit_intercept=True,
                  num_subunits=1, distr='gaussian', frac_test=0.2, t_burn_min=0., shift=None):
         # Data
@@ -53,6 +54,7 @@ class ReceptiveFieldGLM:
         self.tolerance = tolerance
         self.atol = atol
         self.step_size = step_size
+        self.step_size_finetune = step_size_finetune if step_size_finetune is not None else step_size
         self.max_iters = max_iters
         self.min_iters = min_iters
         self.verbose = verbose
@@ -111,7 +113,10 @@ class ReceptiveFieldGLM:
             quality_dict = dict(
                 score_test=float(score_trueX), score_permX=score_permX, perm_test_success=p_value < 0.001)
 
-        y_pred_train = model.forwardpass(kind='train', p=model.p['opt'])
+        if self.kfold != 1:
+            y_pred_train = model.forwardpass(kind='train', p=model.p['opt'])
+        else:
+            y_pred_train = model.predict({'stimulus': stim_dict['train']})
 
         for metric_ in ['corrcoef', 'mse']:
             quality_dict[f'{metric_}_train'] = model.compute_score(
@@ -234,7 +239,7 @@ class ReceptiveFieldGLM:
         best_df = dfs[best_df_idx]
         best_beta = self.betas[best_beta_idx]
 
-        if self.kfold >= 1:
+        if self.kfold > 1:
             if self.verbose > 0:
                 print(f'###### Optimize on all data with best HPs ######\n' +
                       f'\tdf={best_df} and beta={best_beta:.4g}')
@@ -328,7 +333,8 @@ class ReceptiveFieldGLM:
             metric_dev_opt_hp_sets = model.fit_hps(
                 y={'train': y_train, 'dev': y_dev},
                 num_iters=self.max_iters, verbose=self.verbose, tolerance=self.tolerance, metric=self.metric,
-                step_size=self.step_size, alphas=alphas, betas=betas, min_iters=self.min_iters,
+                step_size=self.step_size, step_size_finetune=self.step_size_finetune,
+                alphas=alphas, betas=betas, min_iters=self.min_iters,
                 min_iters_other=min_iters_other, atol=self.atol, return_model='best_train_cost',
                 early_stopping=False)
 
@@ -409,9 +415,7 @@ def plot_rf_summary(rf, quality_dict, model_dict, title=""):
     ax = axs[0]
     ax.set(title='tRF')
     try:
-        dt = model_dict['dt']
-        shift = model_dict['shift']['stimulus']
-        t_tRF = (np.arange(-trf.size + 1, 0.1, 1) - shift).astype(float) * dt
+        t_tRF = model_dict['rf_time']
         ax.set_xlabel('Time')
     except KeyError:
         t_tRF = np.arange(-trf.size + 1, 0.1, 1)
@@ -445,9 +449,9 @@ def plot_rf_summary(rf, quality_dict, model_dict, title=""):
         ax.set(title=f"Metrics\n{model_dict['return_model']}", xlabel='Iteration', ylabel='Corrcoef')
         ax.plot(model_dict['metric_train'], label='train', c='blue')
         ax.axvline(model_dict['best_iteration'], ls='-', c='orange')
-        if model_dict.get('metric_dev', False):
+        if model_dict.get('metric_dev', None) is not None:
             ax.plot(model_dict.get('metric_dev', np.zeros(0)), label='dev', c='red')
-        if model_dict.get('metric_dev_opt', False):
+        if model_dict.get('metric_dev_opt', None) is not None:
             ax.axhline(model_dict['metric_dev_opt'], label='dev-opt', ls='--', c='red')
         ax.legend()
 
@@ -455,14 +459,14 @@ def plot_rf_summary(rf, quality_dict, model_dict, title=""):
         ax.set(title=f"Cost\n{model_dict['return_model']}", xlabel='Iteration', ylabel='Cost')
         ax.plot(model_dict['cost_train'], label='train', c='blue')
         ax.axvline(model_dict['best_iteration'], ls='-', c='orange')
-        if model_dict.get('cost_dev', False):
-            ax.plot(model_dict.get['cost_dev'], label='dev', c='red', marker='.')
+        if model_dict.get('cost_dev', None) is not None:
+            ax.plot(model_dict['cost_dev'], label='dev', c='red', marker='.')
 
         ax = axs[6]
         ax.set(title=f"loglog-Cost\n{model_dict['return_model']}", xlabel='Iteration', ylabel='Cost')
         ax.loglog(np.arange(1, model_dict['cost_train'].size + 1), model_dict['cost_train'], label='train', c='blue')
         ax.axvline(1 + model_dict['best_iteration'], ls='-', c='orange')
-        if model_dict.get('cost_dev', False):
+        if model_dict.get('cost_dev', None) is not None:
             ax.loglog(np.arange(1, model_dict['cost_dev'].size + 1), model_dict['cost_dev'], 'r.', label='dev')
 
     if (quality_dict is not None) and ('score_permX' in quality_dict):

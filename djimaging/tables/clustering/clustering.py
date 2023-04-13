@@ -60,7 +60,8 @@ def plot_grid_search_results(grid_search):
     plt.show()
 
 
-def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic', seed=45312, plot_results=True):
+def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic',
+                covariance_types=("spherical", "tied", "diag", "full"), seed=45312, plot_results=True):
     from sklearn.mixture import GaussianMixture
     from sklearn.model_selection import GridSearchCV
 
@@ -86,7 +87,7 @@ def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic', seed=45312,
 
     param_grid = {
         "n_components": range(ncomp_min, ncomp_max + 1),
-        "covariance_type": ["spherical", "tied", "diag", "full"],
+        "covariance_type": covariance_types,
     }
 
     if cv == 1:
@@ -165,6 +166,13 @@ class ClusteringTemplate(dj.Computed):
         clusters : longblob
         """
         return definition
+
+    @property
+    def key_source(self):
+        try:
+            return self.features_table.proj() * self.params_table.proj()
+        except (AttributeError, TypeError):
+            pass
 
     @property
     @abstractmethod

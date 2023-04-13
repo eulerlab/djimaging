@@ -35,7 +35,7 @@ class AveragesTemplate(dj.Computed):
     def key_source(self):
         try:
             return self.snippets_table.proj()
-        except AttributeError:
+        except (AttributeError, TypeError):
             pass
 
     def normalize_average(self, average):
@@ -92,7 +92,7 @@ class AveragesTemplate(dj.Computed):
 
         plt.show()
 
-    def plot(self, restriction=None):
+    def plot(self, restriction=None, sort=True):
         if restriction is None:
             restriction = dict()
 
@@ -102,10 +102,13 @@ class AveragesTemplate(dj.Computed):
         averages = math_utils.padded_vstack(averages, cval=np.nan)
         averages_norm = math_utils.padded_vstack(averages_norm, cval=np.nan)
 
-        fig, axs = plt.subplots(2, 1, figsize=(10, 8))
+        n = averages.shape[0]
+
+        fig, axs = plt.subplots(1, 2, figsize=(14, 1 + np.minimum(n * 0.1, 10)))
         if len(restriction) > 0:
             plot_utils.set_long_title(fig=fig, title=restriction)
-        sort_idxs = trace_utils.argsort_traces(averages, ignore_nan=True)
+
+        sort_idxs = trace_utils.argsort_traces(averages_norm, ignore_nan=True) if sort else np.arange(n)
 
         axs[0].set_title('average')
         plot_utils.plot_signals_heatmap(ax=axs[0], signals=averages[sort_idxs, :])

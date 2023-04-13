@@ -44,7 +44,7 @@ class FieldTemplate(dj.Computed):
     def key_source(self):
         try:
             return self.experiment_table.proj()
-        except AttributeError:
+        except (AttributeError, TypeError):
             pass
 
     @property

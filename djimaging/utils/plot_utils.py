@@ -158,17 +158,29 @@ def plot_trf(trf, t_trf=None, peak_idxs=None, ax=None):
     return ax
 
 
-def plot_signals_heatmap(signals, ax=None, cb=True, vabsmax=None):
+def plot_signals_heatmap(signals, ax=None, cb=True, vabsmax=None, symmetric=True):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(8, 3))
 
     if vabsmax is None:
         vabsmax = np.nanmax(np.abs(signals))
 
-    im = ax.imshow(signals, aspect='auto', vmin=-vabsmax, vmax=vabsmax, cmap='bwr',
+    if symmetric:
+        vmin = -vabsmax
+        vmax = vabsmax
+        cmap = 'bwr'
+    else:
+        vmin = np.nanmin(signals)
+        vmax = np.nanmax(signals)
+        cmap = 'viridis'
+
+    im = ax.imshow(signals, aspect='auto', vmin=vmin, vmax=vmax, cmap=cmap,
                    interpolation='none', origin='lower')
     if cb:
         plt.colorbar(im, ax=ax)
+
+    ax.set_yticks((0, signals.shape[0] - 1))
+    ax.set_yticks(np.arange(signals.shape[0]), minor=True)
 
     return ax
 

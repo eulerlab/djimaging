@@ -268,7 +268,7 @@ class OsDsIndexesTemplate(dj.Computed):
         try:
             return self.snippets_table().proj() & \
                 (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
-        except TypeError:
+        except (AttributeError, TypeError):
             pass
 
     def make(self, key):

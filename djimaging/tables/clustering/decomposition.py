@@ -155,6 +155,13 @@ class FeaturesTemplate(dj.Computed):
     def roi_quality_table(self):
         pass
 
+    @property
+    def key_source(self):
+        try:
+            return self.params_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
     def fetch_traces(self, key):
         norm_trace, stim_names = (self.params_table & key).fetch1('norm_trace', 'stim_names')
         average_key = 'average_norm' if norm_trace else 'average'
@@ -205,6 +212,10 @@ class FeaturesTemplate(dj.Computed):
         key = get_primary_key(table=self, key=key)
         decomp_infos = (self & key).fetch1('decomp_infos')
 
+        if 'components' not in decomp_infos[0].keys():
+            print(f'No component available for key={key}')
+            return
+
         hsize = np.max([decomp_info['components'].shape[0] for decomp_info in decomp_infos])
 
         fig, axs = plt.subplots(1, len(decomp_infos), sharex='all',
@@ -215,7 +226,6 @@ class FeaturesTemplate(dj.Computed):
         fig.suptitle(f"{key!r}", y=1, va='bottom')
         for ax, decomp_info in zip(axs, decomp_infos):
             components = decomp_info['components']
-
             if sort:
                 sort_idxs = np.argsort(np.argmax(np.cumsum(np.abs(components), axis=1) > 0.5, axis=1))
             else:
