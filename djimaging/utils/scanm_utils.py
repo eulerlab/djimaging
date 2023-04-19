@@ -142,7 +142,7 @@ def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol
 
     assert len(t_idxs) > 1, 'Cannot split a single repetition'
 
-    n_frames_per_rep = np.median(np.diff(t_idxs))  # Use median rep length to ignore outliers
+    n_frames_per_rep = int(np.median(np.diff(t_idxs)))  # Use median rep length to ignore outliers
 
     assert trace.shape == times.shape, 'Shapes do not match'
 
