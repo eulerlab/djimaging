@@ -142,7 +142,7 @@ def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol
 
     assert len(t_idxs) > 1, 'Cannot split a single repetition'
 
-    n_frames_per_rep = int(np.round(np.mean(np.diff(t_idxs))))
+    n_frames_per_rep = np.median(np.diff(t_idxs))  # Use median rep length to ignore outliers
 
     assert trace.shape == times.shape, 'Shapes do not match'
 
@@ -430,6 +430,16 @@ def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset
     trigger_idxs = np.where((stack[1:] >= threshold) & (stack[:-1] < threshold))[0] + 1
     if np.any(np.diff(trigger_idxs) < min_diff_n_pixels):
         trigger_idxs = trigger_idxs[np.append(True, np.diff(trigger_idxs) >= min_diff_n_pixels)]
+
+    # If trigger is on from the beginning it will be reset the first time a real trigger occurs.
+    # In this case we miss the onset of the trigger.
+    # In this case we have to derive the trigger-length from the other triggers.
+    if stack[0] >= threshold:
+        first_trigger_end_idx = np.argmax(stack < threshold)
+        mean_trigger_dur = int(np.median([np.argmax(stack[trigger_idx + 1:] < threshold)
+                                          for trigger_idx in trigger_idxs]))
+        first_trigger_start_idx = first_trigger_end_idx - mean_trigger_dur
+        trigger_idxs = np.append(first_trigger_start_idx, trigger_idxs)
 
     triggertimes = stack_times[trigger_idxs] + stimulator_delay
     triggervalues = stack[trigger_idxs]
