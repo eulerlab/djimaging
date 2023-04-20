@@ -143,11 +143,11 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds,
         trace /= np.std(trace)
 
     if (fs_resample is not None) and (fs_resample != 0) and (fs != fs_resample):
-        if fs_resample < fs and np.isclose((fs / fs_resample), np.round(fs / fs_resample)):
+        if (fs_resample < fs) and np.isclose((fs / fs_resample), np.round(fs / fs_resample)):
             trace_times, trace = filter_utils.downsample_trace(
                 tracetime=trace_times, trace=trace, fdownsample=int(np.round(fs / fs_resample)))
         else:
-            trace_times, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=dt)
+            trace_times, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=1. / fs_resample)
 
     return trace_times, trace, smoothed_trace
 
@@ -243,7 +243,7 @@ class PreprocessTracesTemplate(dj.Computed):
         self.insert1(dict(key, preprocess_trace_times=preprocess_trace_times,
                           preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
 
-    def plot1(self, key=None):
+    def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(self, key)
 
         preprocess_trace_times, preprocess_trace, smoothed_trace = (self & key).fetch1(
@@ -266,6 +266,8 @@ class PreprocessTracesTemplate(dj.Computed):
         ax = axs[2]
         plot_trace_and_trigger(time=preprocess_trace_times, trace=preprocess_trace, triggertimes=triggertimes, ax=ax)
         ax.set(ylabel='preprocessed\ntrace')
+
+        ax.set(xlim=xlim, ylim=ylim)
 
         plt.show()
 

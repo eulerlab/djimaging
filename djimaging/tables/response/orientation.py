@@ -3,6 +3,9 @@ from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
+from djimaging.utils.trace_utils import get_mean_dt
+
+from djimaging.utils import math_utils
 from matplotlib import pyplot as plt
 from scipy import stats
 
@@ -13,7 +16,7 @@ from djimaging.utils.dj_utils import get_primary_key
 def quality_index_ds(raw_sorted_resp_mat):
     """
     This function computes the quality index for responses to moving bar as described in
-    Baden et al 2016. QI is computed for each direction separately and the best QI is taken
+    Baden et al. 2016. QI is computed for each direction separately and the best QI is taken
     Inputs:
     raw_sorted_resp_mat:    3d array (time x directions x reps per direction)
     Output:
@@ -29,7 +32,7 @@ def quality_index_ds(raw_sorted_resp_mat):
     return np.max(qis)
 
 
-def sort_response_matrix(snippets, idxs, directions):
+def sort_response_matrix(snippets: np.ndarray, idxs: list, directions: np.ndarray):
     """
     Sorts the snippets according to stimulus condition and repetition into a time x direction x repetition matrix
     Inputs:
@@ -47,7 +50,7 @@ def sort_response_matrix(snippets, idxs, directions):
     return sorted_responses, sorted_directions
 
 
-def get_time_dir_kernels(sorted_responses):
+def get_time_dir_kernels(sorted_responses, dt):
     """
     Performs singular value decomposition on the time x direction matrix (averaged across repetitions)
     Uses a heuristic to try to determine whether a sign flip occurred during svd
@@ -56,6 +59,7 @@ def get_time_dir_kernels(sorted_responses):
     For the direction/orientation tuning curve, the vector is normalized to the range (0,1)
     Input:
     sorted_responses:   array, time x direction
+    dt: 1 / sampling_rate of trace
     Outputs:
     time_kernel     array, time x 1 (time component, 1st component of U)
     direction_tuning    array, directions x 1 (direction tuning, 1st component of V)
@@ -63,12 +67,13 @@ def get_time_dir_kernels(sorted_responses):
     """
 
     U, S, V = np.linalg.svd(sorted_responses)
-    u = U[:, 0]
-    s = S[0]
-    v = V[0, :]
+
+    time_component = U[:, 0]
+    dir_component = V[0, :]
+
     # the time_kernel determined by SVD should be correlated to the average response across all directions. if the
     # correlation is negative, U is likely flipped
-    r, _ = stats.spearmanr(u, np.mean(sorted_responses, axis=-1), axis=1)
+    r, _ = stats.spearmanr(time_component, np.mean(sorted_responses, axis=-1), axis=1)
     su = np.sign(r)
     if su == 0:
         su = 1
@@ -84,21 +89,23 @@ def get_time_dir_kernels(sorted_responses):
     else:
         s = 1
 
-    u = s * u
+    time_component *= s
+    dir_component *= s
+
     # determine which entries correspond to the first second, assuming 4 seconds presentation time
-    idx = int(len(u) / 4)
-    u -= np.mean(u[:idx])
-    u = u / np.max(abs(u))
-    v = s * v
-    v -= np.min(v)
-    v /= np.max(abs(v))
+    first_second_idx = np.minimum(int(1. / dt), 1)
+    time_component -= np.mean(time_component[:first_second_idx])
+    time_component = time_component / np.max(abs(time_component))
 
-    return u, v, s
+    dir_component = math_utils.normalize_zero_one(dir_component)
+
+    return time_component, dir_component
 
 
-def get_si(v, dirs, per):
+def get_si(dir_component, dirs, per):
     """
-    Computes direction/orientation selectivity index and preferred direction/orientation of a cell by projecting the tuning curve v on a
+    Computes direction/orientation selectivity index and preferred direction/orientation
+    of a cell by projecting the tuning curve v on a
     complex exponential of the according directions dirs (as in Baden et al. 2016)
     Inputs:
     v:  array, dirs x 1, tuning curve as returned by SVD
@@ -110,10 +117,10 @@ def get_si(v, dirs, per):
     """
     bin_spacing = np.diff(per * dirs)[0]
     correction_factor = bin_spacing / (2 * (np.sin(bin_spacing / 2)))  # Zar 1999, Equation 26.16
-    complExp = [np.exp(per * 1j * d) for d in dirs]
-    vector = np.dot(complExp, v)
+    compl_exp = [np.exp(per * 1j * d) for d in dirs]
+    vector = np.dot(compl_exp, dir_component)
     # get the absolute of the vector, normalize to make it range between 0 and 1
-    index = correction_factor * np.abs(vector) / np.sum(v)
+    index = correction_factor * np.abs(vector) / np.sum(dir_component)
 
     direction = cmath.phase(vector) / per
     # for orientation, the directions are mapped to the right half of a circle. Map instead to upper half
@@ -124,6 +131,7 @@ def get_si(v, dirs, per):
 
 def compute_null_dist(rep_dir_resps, dirs, per, iters=1000):
     """
+    Compute null distribution for direction selectivity
     """
     (rep_n, dir_n) = rep_dir_resps.shape
     flattened = np.reshape(rep_dir_resps, (rep_n * dir_n))
@@ -142,16 +150,20 @@ def compute_null_dist(rep_dir_resps, dirs, per, iters=1000):
     return null_dist
 
 
-def get_on_off_index(time_kernel):
+def get_on_off_index(time_kernel, dt, t_start=1.152, t_change=2.432, t_end=3.712):
     """
     Computes a preliminary On-Off Index based on the responses to the On (first half) and the OFF (2nd half) part of
     the responses to the moving bars stimulus
     """
-    normed_kernel = time_kernel - np.min(time_kernel)
-    normed_kernel = normed_kernel / np.max(normed_kernel)
+
+    idx_start = int(np.round(t_start / dt))
+    idx_change = int(np.round(t_change / dt))
+    idx_end = int(np.round(t_end / dt))
+
+    normed_kernel = math_utils.normalize_zero_one(time_kernel)
     deriv = np.diff(normed_kernel)
-    on_response = np.max(deriv[9:19])
-    off_response = np.max(deriv[19:29])
+    on_response = np.max(deriv[idx_start:idx_change])
+    off_response = np.max(deriv[idx_change:idx_end])
     off_response = np.max((0, off_response))
     on_response = np.max((0, on_response))
 
@@ -194,7 +206,7 @@ def compute_mb_qi(snippets, dir_order):
     return d_qi
 
 
-def compute_osdsindexes(snippets, dir_order):
+def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float):
     assert snippets.ndim == 2
     assert np.asarray(dir_order).ndim == 1
 
@@ -202,12 +214,13 @@ def compute_osdsindexes(snippets, dir_order):
 
     sorted_responses, sorted_directions = sort_response_matrix(snippets, dir_idx, dir_rad)
     avg_sorted_responses = np.mean(sorted_responses, axis=-1)
-    u, v, s = get_time_dir_kernels(avg_sorted_responses)
-    dsi, pref_dir = get_si(v, sorted_directions, 1)
-    osi, pref_or = get_si(v, sorted_directions, 2)
+    time_component, dir_component = get_time_dir_kernels(avg_sorted_responses, dt=dt)
+
+    dsi, pref_dir = get_si(dir_component, sorted_directions, 1)
+    osi, pref_or = get_si(dir_component, sorted_directions, 2)
     (t, d, r) = sorted_responses.shape
     temp = np.reshape(sorted_responses, (t, d * r))
-    projected = np.dot(np.transpose(temp), u)  # we do this whole projection thing to make the result
+    projected = np.dot(np.transpose(temp), time_component)  # we do this whole projection thing to make the result
     projected = np.reshape(projected, (d, r))  # between the original and the shuffled comparable
     surrogate_v = np.mean(projected, axis=-1)
     surrogate_v -= np.min(surrogate_v)
@@ -220,9 +233,10 @@ def compute_osdsindexes(snippets, dir_order):
     null_dist_osi = compute_null_dist(np.transpose(projected), sorted_directions, 2)
     p_osi = np.mean(null_dist_osi > osi_s)
     d_qi = quality_index_ds(sorted_responses)
-    on_off = get_on_off_index(u)
+    on_off = get_on_off_index(time_component, dt=dt)
+
     return dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
-        on_off, d_qi, u, v, surrogate_v, dsi_s, avg_sorted_responses
+        on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses
 
 
 class OsDsIndexesTemplate(dj.Computed):
@@ -235,19 +249,19 @@ class OsDsIndexesTemplate(dj.Computed):
         #as well as a quality index of DS responses as described in Baden et al. (2016)
         -> self.snippets_table
         ---
-        ds_index:   float   #direction selectivity index as resulting vector length (absolute of projection on complex exponential)
-        ds_pvalue:  float   #p-value indicating the percentile of the vector length in null distribution
-        ds_null:    longblob    #null distribution of DSIs
-        pref_dir:  float    #preferred direction
-        os_index:   float   #orientation selectivity index in analogy to ds_index
-        os_pvalue:  float   #analogous to ds_pvalue for orientation tuning
-        os_null:    longblob    #null distribution of OSIs
-        pref_or:    float   #preferred orientation
-        on_off:     float   #on off index based on time kernel
-        d_qi:       float   #quality index for moving bar response
-        time_component:  longblob
-        dir_component:   longblob
-        surrogate_v:    longblob    #computed by projecting on time
+        ds_index:   float     # direction selectivity index as resulting vector length (absolute of projection on complex exponential)
+        ds_pvalue:  float     # p-value indicating the percentile of the vector length in null distribution
+        ds_null:    blob      # null distribution of DSIs
+        pref_dir:   float     # preferred direction
+        os_index:   float     # orientation selectivity index in analogy to ds_index
+        os_pvalue:  float     # analogous to ds_pvalue for orientation tuning
+        os_null:    blob      # null distribution of OSIs
+        pref_or:    float     # preferred orientation
+        on_off:     float     # on off index based on time kernel
+        d_qi:       float     # quality index for moving bar response
+        time_component: blob
+        dir_component:  blob
+        surrogate_v:    blob    #computed by projecting on time
         surrogate_dsi:  float   #DSI of surrogate v 
         avg_sorted_resp:    longblob    # response matrix, averaged across reps
         """
@@ -273,11 +287,13 @@ class OsDsIndexesTemplate(dj.Computed):
 
     def make(self, key):
         dir_order = (self.stimulus_table() & key).fetch1('trial_info')
-        snippets = (self.snippets_table() & key).fetch1('snippets')  # get the response snippets
+        snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
+
+        dt = float(np.mean([get_mean_dt(snippets_time)[0] for snippets_time in snippets_times.T]))
 
         dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
-            on_off, d_qi, u, v, surrogate_v, dsi_s, avg_sorted_responses = \
-            compute_osdsindexes(snippets=snippets, dir_order=dir_order)
+            on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses = \
+            compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=dt)
 
         self.insert1(dict(key,
                           ds_index=dsi, ds_pvalue=p_dsi,
@@ -285,7 +301,7 @@ class OsDsIndexesTemplate(dj.Computed):
                           os_index=osi, os_pvalue=p_osi,
                           os_null=null_dist_osi, pref_or=pref_or,
                           on_off=on_off, d_qi=d_qi,
-                          time_component=u, dir_component=v,
+                          time_component=time_component, dir_component=dir_component,
                           surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
                           avg_sorted_resp=avg_sorted_responses))
 
