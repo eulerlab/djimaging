@@ -260,6 +260,7 @@ class OsDsIndexesTemplate(dj.Computed):
         on_off:     float     # on off index based on time kernel
         d_qi:       float     # quality index for moving bar response
         time_component: blob
+        time_component_dt: float
         dir_component:  blob
         surrogate_v:    blob    #computed by projecting on time
         surrogate_dsi:  float   #DSI of surrogate v 
@@ -303,7 +304,7 @@ class OsDsIndexesTemplate(dj.Computed):
                           on_off=on_off, d_qi=d_qi,
                           time_component=time_component, dir_component=dir_component,
                           surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
-                          avg_sorted_resp=avg_sorted_responses))
+                          avg_sorted_resp=avg_sorted_responses, time_component_dt=dt))
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
