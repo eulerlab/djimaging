@@ -130,13 +130,14 @@ class TracesTemplate(dj.Computed):
         else:
             return 0
 
-    def plot1(self, key=None):
+    def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(table=self, key=key)
         trace_times, trace = (self & key).fetch1("trace_times", "trace")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
 
-        plot_trace_and_trigger(
+        ax = plot_trace_and_trigger(
             time=trace_times, trace=trace, triggertimes=triggertimes, title=str(key))
+        ax.set(xlim=xlim, ylim=ylim)
 
     def plot(self, restriction=None, sort=True):
         if restriction is None:

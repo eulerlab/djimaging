@@ -2,7 +2,7 @@ import pickle as pkl
 
 import numpy as np
 
-from djimaging.tables.response.orientation import compute_osdsindexes
+from djimaging.tables.response.orientation import compute_os_ds_idxs
 
 
 def load_test_data(cell_type):
@@ -25,7 +25,7 @@ def test_ds():
 
     snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op = load_test_data('ds')
     dsi, p_dsi, _, _, osi, p_osi, _, _, _, _, _, _, _, _, _ = \
-        compute_osdsindexes(snippets=snippets.T.reshape((-1, 32)).T, dir_order=dir_order)
+        compute_os_ds_idxs(snippets=snippets.T.reshape((-1, 32)).T, dir_order=dir_order, dt=0.128)
 
     assert np.isclose(dsi, 0.4797128907324086, atol=0.01, rtol=0.01)
     assert np.isclose(p_dsi, 0.04, atol=0.01, rtol=0.01)
@@ -39,7 +39,7 @@ def test_nonds():
 
     snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op = load_test_data('nds')
     dsi, p_dsi, _, _, osi, p_osi, _, _, _, _, _, _, _, _, _ = \
-        compute_osdsindexes(snippets=snippets.T.reshape((-1, 32)).T, dir_order=dir_order)
+        compute_os_ds_idxs(snippets=snippets.T.reshape((-1, 32)).T, dir_order=dir_order, dt=0.128)
 
     assert np.isclose(dsi, 0.05624592170528586, atol=0.01, rtol=0.01)
     assert np.isclose(p_dsi, 0.982, atol=0.01, rtol=0.01)
