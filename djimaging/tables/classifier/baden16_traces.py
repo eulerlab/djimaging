@@ -71,12 +71,13 @@ class Baden16TracesTemplate(dj.Computed):
 
     _stim_name_chirp = 'gChirp'
     _stim_name_bar = 'movingbar'
+    _condition = 'control'
 
     @property
     def key_source(self):
         try:
             return self.roi_table.proj() * self.preprocessparams_table.proj() \
-                & (self.chirp_tab().proj() * self.bar_tab().proj())
+                & (self.chirp_tab().proj() * self.bar_tab().proj() & dict(condition=self._condition))
         except (AttributeError, TypeError):
             pass
 
@@ -102,12 +103,13 @@ class Baden16TracesTemplate(dj.Computed):
 
     def chirp_tab(self):
         secondary_keys = get_secondary_keys(self.averages_table)
-        return (self.averages_table() & f"stim_name = '{self._stim_name_chirp}'").proj(
+        return (self.averages_table() & f"stim_name = '{self._stim_name_chirp}'" & dict(
+            condition=self._condition)).proj(
             **{f"chirp_{k}": k for k in secondary_keys + ['stim_name']})
 
     def bar_tab(self):
         secondary_keys = get_secondary_keys(self.os_ds_table)
-        return (self.os_ds_table() & f"stim_name = '{self._stim_name_bar}'").proj(
+        return (self.os_ds_table() & f"stim_name = '{self._stim_name_bar}'" & dict(condition=self._condition)).proj(
             **{f"bar_{k}": k for k in secondary_keys + ['stim_name']})
 
     def make(self, key):

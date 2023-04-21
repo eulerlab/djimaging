@@ -277,25 +277,26 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         return celltype, confidence_scores
 
-    def plot(self):
+    def plot(self, threshold_confidence: float):
         from matplotlib import pyplot as plt
-        import pandas as pd
 
-        groups = pd.DataFrame(self.fetch()).groupby([
-            'training_data_hash', 'classifier_params_hash', 'preprocess_id'])
+        df = self.fetch(format='frame')
+        groups = df.groupby(['training_data_hash', 'classifier_params_hash', 'preprocess_id'])
 
         fig, axs = plt.subplots(len(groups), 1, figsize=(12, 3 * len(groups)), squeeze=False)
         axs = axs.flatten()
 
         for ax, ((tdh, cph, pid), df) in zip(axs, groups):
-            celltypes = df["celltype"]
+            celltypes = df.apply(
+                lambda row: row["celltype"] if row["max_confidence"] > threshold_confidence else -1, axis=1)
+
             ax.hist(celltypes[celltypes > 0], bins=np.arange(1, 47, 0.5), align='left')
-            ax.hist(celltypes[celltypes < 0], bins=[-1, -0.5, 0], align='left', color='red', alpha=0.5)
+            ax.hist(celltypes[celltypes < 0], bins=(-1, -0.5, 0), align='left', color='red', alpha=0.5)
             ax.set_xticks(np.append(-1, np.arange(1, 47)))
             ax.set_xticklabels(np.append("NA", np.arange(1, 47)), rotation=90)
             ax.set(ylabel='Count', xlabel='celltype')
             ax.set_title(
-                f"training_data_hash={tdh}\nclassifier_params_hash={cph}\npreprocess_id={pid}")
-
+                f"training_data_hash={tdh}\nclassifier_params_hash={cph}\npreprocess_id={pid}", loc='left')
+    
         plt.tight_layout()
         plt.show()
