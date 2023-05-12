@@ -15,3 +15,7 @@ astropy
 
 ipython
 numba
+
+# dependencies of autorois
+pytorch_lightning
+torch
