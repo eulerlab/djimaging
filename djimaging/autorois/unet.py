@@ -128,21 +128,22 @@ class UNet(pl.LightningModule):
         predicted_mask = self.create_mask_image_stack(neural_input)
         return predicted_mask
 
-    def create_mask_image_stack(self, image_stack: np.array, n_rows_artifacts: int = 0) -> np.array:
+    def create_mask_image_stack(self, image_stack: np.array) -> np.array:
         image_stack_torch = torch.from_numpy(image_stack).unsqueeze(0).to(torch.float32)
         binary_mask_logits_pred, offset_pred, center_pred = self.forward(image_stack_torch)
         binary_mask_pred = torch.sigmoid(binary_mask_logits_pred).squeeze(0)
         predicted_mask = create_mask(binary_mask_pred.squeeze(0), offset_pred.squeeze(0),
-                                      center_pred.squeeze(0).squeeze(0))
+                                     center_pred.squeeze(0).squeeze(0))
         return predicted_mask.cpu().numpy()
 
     @classmethod
     def from_checkpoint(cls, config_path: str, checkpoint_path: str, map_location: str = "cpu"):
+        print(f"Load model weights for {map_location} from checkpoint {checkpoint_path} using config {config_path}")
+
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         network_config = config["network"]
 
-        print(f"Load model weights from checkpoint {checkpoint_path}")
         model = UNet.load_from_checkpoint(
             checkpoint_path,
             in_channels=network_config["in_channels"],
