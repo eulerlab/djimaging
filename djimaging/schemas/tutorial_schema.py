@@ -1,5 +1,5 @@
 from djimaging.schemas.core_schema import *
-from djimaging.tables import optional, response, location
+from djimaging.tables import misc, response, location
 
 
 @schema
@@ -40,7 +40,7 @@ class OsDsIndexes(response.OsDsIndexesTemplate):
 
 
 @schema
-class HighRes(optional.HighResTemplate):
+class HighRes(misc.HighResTemplate):
     field_table = Field
     experiment_table = Experiment
     userinfo_table = UserInfo

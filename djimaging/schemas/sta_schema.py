@@ -1,4 +1,4 @@
-from djimaging.schemas.advanced_schema import *
+from djimaging.schemas.core_schema import *
 from djimaging.tables import receptivefield
 
 
@@ -36,6 +36,7 @@ class SplitRFParams(receptivefield.SplitRFParamsTemplate):
 
 @schema
 class SplitRF(receptivefield.SplitRFTemplate):
+    stimulus_table = Stimulus
     rf_table = STA
     split_rf_params_table = SplitRFParams
 

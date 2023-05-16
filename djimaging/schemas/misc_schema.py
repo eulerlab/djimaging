@@ -1,6 +1,6 @@
 from djimaging.schemas.core_schema import *
 from djimaging.tables import location
-from djimaging.tables import optional
+from djimaging.tables import misc
 from djimaging.tables import response
 
 
@@ -42,10 +42,10 @@ class OsDsIndexes(response.OsDsIndexesTemplate):
 
 
 @schema
-class HighRes(optional.HighResTemplate):
+class HighRes(misc.HighResTemplate):
     field_table = Field
     experiment_table = Experiment
     userinfo_table = UserInfo
 
-    class StackAverages(optional.HighResTemplate.StackAverages):
+    class StackAverages(misc.HighResTemplate.StackAverages):
         pass

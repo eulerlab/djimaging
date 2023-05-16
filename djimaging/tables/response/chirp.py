@@ -188,3 +188,9 @@ def compute_transience_index(snippets, snippets_times, trigger_times, upsam_fre=
 
     transience_index = np.mean(transience_indexes)
     return transience_index
+
+
+def split_ChirpInterleaved(chirp_trace):
+    chirp_trace_ave = np.mean(chirp_trace, axis=1)
+    chirp_trace_global = chirp_trace_ave[int(chirp_trace_ave.shape[0] / 2):]
+    return chirp_trace_global
