@@ -5,8 +5,8 @@ import numpy as np
 from djimaging.tables.response.orientation import compute_os_ds_idxs
 
 
-def load_test_data(cell_type):
-    with open('testdata/test_mb.pkl', 'rb') as f:
+def load_test_data(cell_type, path='testdata/test_mb.pkl'):
+    with open(path, 'rb') as f:
         temp_dict = pkl.load(f)
         snippets = temp_dict[f'{cell_type}_bar_byrepeat']
         dir_order = np.array(temp_dict[f'{cell_type}_dir_deg'])
@@ -19,11 +19,11 @@ def load_test_data(cell_type):
     return snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op
 
 
-def test_ds():
+def test_ds(path='testdata/test_mb.pkl'):
     # TODO: Find out why gt is different
     np.random.seed(42)
 
-    snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op = load_test_data('ds')
+    snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op = load_test_data('ds', path=path)
     dsi, p_dsi, _, _, osi, p_osi, _, _, _, _, _, _, _, _, _ = \
         compute_os_ds_idxs(snippets=snippets.T.reshape((-1, 32)).T, dir_order=dir_order, dt=0.128)
 
@@ -33,11 +33,11 @@ def test_ds():
     assert np.isclose(p_osi, 0.996, atol=0.01, rtol=0.01)
 
 
-def test_nonds():
+def test_nonds(path='testdata/test_mb.pkl'):
     # TODO: Find out why gt is different
-    np.random.seed(789789)
+    np.random.seed(42)
 
-    snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op = load_test_data('nds')
+    snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op = load_test_data('nds', path=path)
     dsi, p_dsi, _, _, osi, p_osi, _, _, _, _, _, _, _, _, _ = \
         compute_os_ds_idxs(snippets=snippets.T.reshape((-1, 32)).T, dir_order=dir_order, dt=0.128)
 

@@ -93,7 +93,7 @@ def get_time_dir_kernels(sorted_responses, dt):
     dir_component *= s
 
     # determine which entries correspond to the first second, assuming 4 seconds presentation time
-    first_second_idx = np.minimum(int(np.round(1. / dt)), 1)
+    first_second_idx = np.maximum(int(np.round(1. / dt)), 1)
     time_component -= np.mean(time_component[:first_second_idx])
     time_component = time_component / np.max(abs(time_component))
 
