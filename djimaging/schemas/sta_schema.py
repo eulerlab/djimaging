@@ -1,4 +1,4 @@
-from djimaging.schemas.advanced_schema import *
+from djimaging.schemas.core_schema import *
 from djimaging.tables import receptivefield
 
 

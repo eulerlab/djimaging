@@ -40,7 +40,7 @@ def replace_schema_name(filepath, username):
         filedata = file.read()
 
     # Replace the target string
-    filedata = filedata.replace('djimaging.schemas.advanced_schema', f'djimaging.user.{username}.schemas.my_schema')
+    filedata = filedata.replace('djimaging.schemas.tutorial_schema', f'djimaging.user.{username}.schemas.my_schema')
 
     # Write the file out again
     with open(filepath, 'w') as file:
@@ -61,7 +61,7 @@ def copy_notebooks(djimaging_dir, user_dir, username):
 
 
 def copy_schema(djimaging_dir, user_dir, username):
-    src = os.path.join(djimaging_dir, 'djimaging/schemas/_new_schema_example.py')
+    src = os.path.join(djimaging_dir, 'djimaging/schemas/tutorial_schema.py')
     dst = os.path.join(user_dir, 'schemas/my_schema.py')
 
     if not os.path.isfile(dst):

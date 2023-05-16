@@ -175,9 +175,9 @@ class CelltypeAssignmentTemplate(dj.Computed):
         -> self.baden_trace_table
         -> self.classifier_table
         ---
-        celltype:        int         # predicted group (-1, 1-46)
-        max_confidence:  float       # confidence score for assigned cluster for easy restriction
-        confidence:      blob        # confidence score (probability) for all groups
+        celltype:        int         # predicted group (1-46), without quality or confidence threshold
+        max_confidence:  float       # confidence score for assigned celltype for easy restriction
+        confidence:      blob        # confidence score (probability) for all 46 celltypes
         """
         return definition
 
@@ -268,10 +268,10 @@ class CelltypeAssignmentTemplate(dj.Computed):
             [feature_activation_chirp, feature_activation_bar, np.array([bar_ds_pvalue]), np.array([roi_size_um2])])
 
         confidence_scores = self.classifier.predict_proba(features[np.newaxis, :]).flatten()
-        celltype = int(self.classifier.predict(features[np.newaxis, :]))
+        celltype = np.argmax(confidence_scores) + 1
 
-        assert confidence_scores.size == 46, f"Expected 46 confidence scores, got {confidence_scores.size}"
-
+        assert confidence_scores.size == 46, \
+            f"Expected 46 confidence scores, got {confidence_scores.size}"
         assert np.isclose(np.sum(confidence_scores), 1., rtol=0.01, atol=0.01), \
             f"Confidences should sum up to 1, but are {np.sum(confidence_scores)}."
 
@@ -297,6 +297,6 @@ class CelltypeAssignmentTemplate(dj.Computed):
             ax.set(ylabel='Count', xlabel='celltype')
             ax.set_title(
                 f"training_data_hash={tdh}\nclassifier_params_hash={cph}\npreprocess_id={pid}", loc='left')
-    
+
         plt.tight_layout()
         plt.show()

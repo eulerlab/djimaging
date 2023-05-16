@@ -1,5 +1,25 @@
-from djimaging.schemas.advanced_schema import *
+from djimaging.schemas.core_schema import *
 from djimaging.tables import classifier
+from djimaging.tables import response
+
+
+@schema
+class ChirpQI(response.ChirpQITemplate):
+    stimulus_table = Stimulus
+    snippets_table = Snippets
+
+
+@schema
+class ChirpFeatures(response.ChirpFeaturesTemplate):
+    stimulus_table = Stimulus
+    snippets_table = Snippets
+    presentation_table = Presentation
+
+
+@schema
+class OsDsIndexes(response.OsDsIndexesTemplate):
+    stimulus_table = Stimulus
+    snippets_table = Snippets
 
 
 @schema

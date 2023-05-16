@@ -1,4 +1,5 @@
-from djimaging.tables import optional, response, location
+from djimaging.tables import classifier, response, location, misc
+from djimaging.utils.dj_utils import get_input_tables, get_class_attributes
 
 
 def _test_definition(djclass):
@@ -33,25 +34,21 @@ def test_definition_OsDsIndexesTemplate():
 
 
 # rgc_classifier
-def test_definition_CellFilterParametersTemplate():
-    _test_definition(optional.CellFilterParamsTemplate)
-
-
 def test_definition_ClassifierTemplate():
-    _test_definition(optional.ClassifierTemplate)
+    _test_definition(classifier.ClassifierTemplate)
 
 
 def test_definition_ClassifierTrainingDataTemplate():
-    _test_definition(optional.ClassifierTrainingDataTemplate)
+    _test_definition(classifier.ClassifierTrainingDataTemplate)
 
 
 def test_definition_CelltypeAssignmentTemplate():
-    _test_definition(optional.CelltypeAssignmentTemplate)
+    _test_definition(classifier.CelltypeAssignmentTemplate)
 
 
 def test_definition_ClassifierMethodTemplate():
-    _test_definition(optional.ClassifierMethodTemplate)
+    _test_definition(classifier.ClassifierMethodTemplate)
 
 
 def test_definition_HighResTemplate():
-    _test_definition(optional.HighResTemplate)
+    _test_definition(misc.HighResTemplate)
