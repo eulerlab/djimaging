@@ -11,7 +11,7 @@ class IplBordersTemplate(dj.Manual):
     def definition(self):
         definition = """
         # Manually determined index and thickness information for the IPL.
-        # You can use the XZ widget notebook to determine values.
+        # Use XZ widget notebook to determine values.
         -> self.field_or_pres_table
         ---
         left   :tinyint    # pixel index where gcl/ipl border intersects on left of image (with GCL up)
@@ -21,22 +21,23 @@ class IplBordersTemplate(dj.Manual):
         return definition
 
     @property
+    @abstractmethod
+    def field_or_pres_table(self):
+        pass
+
+    @property
     def key_source(self):
         try:
             return self.field_or_pres_table.proj()
         except (AttributeError, TypeError):
             pass
 
-    @property
-    @abstractmethod
-    def field_or_pres_table(self):
-        pass
-
 
 class RoiIplDepthTemplate(dj.Computed):
     @property
     def definition(self):
         definition = """
+        # Gives the IPL depth of the field's ROIs relative to the GCL (=0) and INL (=1)
         -> self.ipl_border_table
         -> self.roi_table
         ---
@@ -57,18 +58,17 @@ class RoiIplDepthTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.ipl_border_table.proj()
+            return self.roi_table.field_or_pres_table.proj()
         except (AttributeError, TypeError):
             pass
 
     def make(self, key):
-        roi_ids = (self.roi_table & key).fetch("roi_id")
         left, right, thick = (self.ipl_border_table & key).fetch1('left', 'right', 'thick')
-        roi_mask = (self.ipl_border_table.field_or_pres_table.RoiMask & key).fetch1('roi_mask')
+
+        roi_ids = (self.roi_table & key).fetch("roi_id")
+        roi_mask = (self.roi_table.field_or_pres_table.RoiMask & key).fetch1('roi_mask')
 
         roi_centers = get_roi_centers(roi_mask, roi_ids)
-
-        assert roi_centers.shape[0] == roi_ids.shape[0], 'Mismatch between ROI ids and roi_centers'
 
         # calculate the depth relative to the IPL borders
         m1, b1 = self.get_line([(0, left), (roi_mask.shape[0] - 1, right)])

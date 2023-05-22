@@ -329,6 +329,8 @@ def extract_stacks_from_h5(h5_file_open, ch_names=('wDataCh0', 'wDataCh1')) -> d
 
 
 def get_scan_type_from_wparams(wparams: dict, assume_lower=False) -> str:
+    # ToDo: Does not work for Z-Stacks.
+
     if assume_lower:
         wparams = {k.lower(): v for k, v in wparams.items()}
 
