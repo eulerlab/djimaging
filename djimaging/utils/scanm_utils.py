@@ -47,6 +47,7 @@ def get_npixartifact(setupid):
 
 def get_setup_xscale(setupid: int):
     """Get pixel scale in x and y for setup."""
+    # TODO: these values depend on the date. add date param and table, and read from table
     setupid = int(setupid)
     assert setupid in [1, 2, 3], setupid
 
