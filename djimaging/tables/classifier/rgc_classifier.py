@@ -1,5 +1,6 @@
 import os
 import pickle as pkl
+import warnings
 from abc import abstractmethod
 from typing import Mapping, Dict, Any
 
@@ -244,6 +245,20 @@ class CelltypeAssignmentTemplate(dj.Computed):
             "chirp_feats_file")
         features_chirp = np.load(features_chirp_file)
         return features_chirp
+
+    def populate(
+            self, *restrictions, suppress_errors=False,
+            return_exception_objects=False, reserve_jobs=False, order="original", limit=None, max_calls=None,
+            display_progress=False, processes=1, make_kwargs=None,
+    ):
+        if processes > 1:
+            warnings.warn('Parallel processing not implemented!')
+
+        super().populate(
+            *restrictions,
+            suppress_errors=suppress_errors, return_exception_objects=return_exception_objects,
+            reserve_jobs=reserve_jobs, order=order, limit=limit, max_calls=max_calls,
+            display_progress=display_progress, processes=1, make_kwargs=make_kwargs)
 
     def make(self, key):
         self.current_model_key = dict(
