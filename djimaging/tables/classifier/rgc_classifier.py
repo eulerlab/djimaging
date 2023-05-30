@@ -185,7 +185,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.classifier_table.proj() * self.baden_trace_table.proj()
+            return self.classifier_table.proj()
         except (AttributeError, TypeError):
             pass
 
@@ -265,24 +265,40 @@ class CelltypeAssignmentTemplate(dj.Computed):
             classifier_params_hash=key["classifier_params_hash"],
             training_data_hash=key["training_data_hash"])
 
-        celltype, confidence_scores = self.classify_cell(key=key)
+        classifier = self.classifier
+        bar_features = self.bar_features
+        chirp_features = self.chirp_features
 
-        self.insert1(dict(key, celltype=celltype, confidence=confidence_scores,
-                          max_confidence=np.max(confidence_scores)))
+        roi_tab = self.baden_trace_table * self.baden_trace_table().bar_tab() * self.baden_trace_table.roi_table
+        roi_keys = (self.baden_trace_table & key).proj()
 
-    def classify_cell(self, key):
-        preproc_chirp, preproc_bar = (self.baden_trace_table & key).fetch1('preproc_chirp', 'preproc_bar')
-        bar_ds_pvalue = (self.baden_trace_table().bar_tab() & key).fetch1('bar_ds_pvalue')
-        roi_size_um2 = (self.baden_trace_table.roi_table & key).fetch1('roi_size_um2')
+        for roi_key in roi_keys:
+            print(roi_key)
+            # TODO: make parallel
+
+            preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2 = (roi_tab & roi_key).fetch1(
+                'preproc_chirp', 'preproc_bar', 'bar_ds_pvalue', 'roi_size_um2')
+
+            celltype, confidence_scores = self.classify_cell(
+                preproc_chirp=preproc_chirp, preproc_bar=preproc_bar,
+                bar_ds_pvalue=bar_ds_pvalue, roi_size_um2=roi_size_um2,
+                classifier=classifier, chirp_features=chirp_features, bar_features=bar_features)
+
+            self.insert1(dict(**key, **roi_key, celltype=celltype, confidence=confidence_scores,
+                              max_confidence=np.max(confidence_scores)))
+
+    @staticmethod
+    def classify_cell(preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2,
+                      chirp_features, bar_features, classifier):
 
         # feature activation matrix
-        feature_activation_chirp = np.dot(preproc_chirp, self.chirp_features)
-        feature_activation_bar = np.dot(preproc_bar, self.bar_features)
+        feature_activation_chirp = np.dot(preproc_chirp, chirp_features)
+        feature_activation_bar = np.dot(preproc_bar, bar_features)
 
         features = np.concatenate(
             [feature_activation_chirp, feature_activation_bar, np.array([bar_ds_pvalue]), np.array([roi_size_um2])])
 
-        confidence_scores = self.classifier.predict_proba(features[np.newaxis, :]).flatten()
+        confidence_scores = classifier.predict_proba(features[np.newaxis, :]).flatten()
         celltype = np.argmax(confidence_scores) + 1
 
         assert confidence_scores.size == 46, \
