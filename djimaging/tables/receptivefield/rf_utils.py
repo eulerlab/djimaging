@@ -166,16 +166,13 @@ def prepare_trace(tracetime, trace, kind='trace', fupsample=None, dt=None):
         else:
             fit_tracetime, fit_trace = tracetime, trace
 
-    elif kind in ['gradient', 'negative-gradient']:
+    elif kind == 'gradient':
         diff_trace = np.append(0, np.diff(trace))
         if fupsample > 1:
             fit_tracetime, fit_trace = filter_utils.upsample_trace(
                 tracetime=tracetime, trace=diff_trace, fupsample=fupsample)
         else:
             fit_tracetime, fit_trace = tracetime, diff_trace
-
-        if kind == 'negative-gradient':
-            fit_trace = -fit_trace
 
         fit_trace = np.clip(fit_trace, 0, None)
 
@@ -347,4 +344,21 @@ def svd_rf(w):
     else:
         raise NotImplementedError
 
+    # Rescale
+    trf /= np.max(np.abs(trf))
+
+    max_sign = np.sign(srf[np.unravel_index(np.argmax(np.abs(srf)), srf.shape)])
+    srf *= (np.max(max_sign * w) / np.max(max_sign * srf))
+
+    merged_w = merge_strf(srf=srf, trf=trf)
+    if not np.isclose(np.max(max_sign * merged_w), np.max(max_sign * w), rtol=0.1):
+        warnings.warn(f"{np.max(max_sign * merged_w)} vs. {np.max(max_sign * w)}")
+
     return srf, trf
+
+
+def normalize_strf(strf):
+    peak_sign = np.sign(strf[np.unravel_index(np.argmax(np.abs(strf)), strf.shape)])
+    weight = np.sum(peak_sign * strf[(peak_sign * strf) > 0])
+    norm_strf = strf / weight
+    return norm_strf
