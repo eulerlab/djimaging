@@ -166,13 +166,16 @@ def prepare_trace(tracetime, trace, kind='trace', fupsample=None, dt=None):
         else:
             fit_tracetime, fit_trace = tracetime, trace
 
-    elif kind == 'gradient':
+    elif kind in ['gradient', 'negative-gradient']:
         diff_trace = np.append(0, np.diff(trace))
         if fupsample > 1:
             fit_tracetime, fit_trace = filter_utils.upsample_trace(
                 tracetime=tracetime, trace=diff_trace, fupsample=fupsample)
         else:
             fit_tracetime, fit_trace = tracetime, diff_trace
+
+        if kind == 'negative-gradient':
+            fit_trace = -fit_trace
 
         fit_trace = np.clip(fit_trace, 0, None)
 

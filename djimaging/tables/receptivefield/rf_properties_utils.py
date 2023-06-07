@@ -28,7 +28,7 @@ def compute_center_index(srf, srf_center):
     return np.sum(srf_center) / np.sum(np.abs(srf))
 
 
-def fit_rf_model(srf, kind='gaussian', polarity=None):
+def fit_rf_model(srf, kind='gaussian', polarity=None, center=None):
     assert srf.ndim == 2, 'Provide 2d RF'
 
     xx, yy = np.meshgrid(np.arange(0, srf.shape[1]), np.arange(0, srf.shape[0]))
@@ -40,9 +40,9 @@ def fit_rf_model(srf, kind='gaussian', polarity=None):
 
     for polarity_i in polarities:
         if kind == 'gauss':
-            model_i = srf_gauss_model(srf, polarity=polarity_i)
+            model_i = srf_gauss_model(srf, polarity=polarity_i, center=center)
         elif kind == 'dog':
-            model_i = srf_dog_model(srf, polarity=polarity_i)
+            model_i = srf_dog_model(srf, polarity=polarity_i, center=center)
         else:
             raise NotImplementedError(kind)
 
@@ -103,24 +103,36 @@ def estimate_srf_center_model_init_params(srf, polarity=None, amplimscale=2.):
     return x0, y0, amp0, std0, xlim, ylim, amplim
 
 
-def srf_gauss_model(srf, polarity=None):
+def srf_gauss_model(srf, polarity=None, center=None):
     assert srf.ndim == 2, 'Provide 2d RF'
 
     x0, y0, amp0, std0, xlim, ylim, amplim = estimate_srf_center_model_init_params(
         srf=srf, polarity=polarity, amplimscale=2.)
 
+    if center is not None:
+        x0, y0 = center
+        fixed_params = dict(x_mean=True, y_mean=True)
+    else:
+        fixed_params = dict()
+
     model = Gaussian2D(
         amplitude=amp0, x_mean=x0, y_mean=y0, x_stddev=std0, y_stddev=std0,
-        bounds={'amplitude': amplim, 'x_mean': xlim, 'y_mean': ylim})
+        bounds={'amplitude': amplim, 'x_mean': xlim, 'y_mean': ylim}, fixed=fixed_params)
 
     return model
 
 
-def srf_dog_model(srf, polarity=None):
+def srf_dog_model(srf, polarity=None, center=None):
     assert srf.ndim == 2, 'Provide 2d RF'
 
     x0, y0, amp0, std0, xlim, ylim, amplim = estimate_srf_center_model_init_params(
         srf=srf, polarity=polarity, amplimscale=10.)
+
+    if center is not None:
+        x0, y0 = center
+        fixed_params = dict(x_mean=True, y_mean=True)
+    else:
+        fixed_params = dict()
 
     xlim = (np.maximum(xlim[0], x0 - std0), np.minimum(xlim[1], x0 + std0))
     ylim = (np.maximum(ylim[0], y0 - std0), np.minimum(ylim[1], y0 + std0))
@@ -128,11 +140,13 @@ def srf_dog_model(srf, polarity=None):
 
     f_c = Gaussian2D(
         amplitude=amp0, x_mean=x0, y_mean=y0, x_stddev=std0, y_stddev=std0,
-        bounds={'amplitude': amplim, 'x_mean': xlim, 'y_mean': ylim, 'x_stddev': stdlim, 'y_stddev': stdlim})
+        bounds={'amplitude': amplim, 'x_mean': xlim, 'y_mean': ylim, 'x_stddev': stdlim, 'y_stddev': stdlim},
+        fixed=fixed_params)
 
     f_s = Gaussian2D(
         amplitude=1. / 50. * amp0, x_mean=x0, y_mean=y0, x_stddev=5. * std0, y_stddev=5. * std0,
-        bounds={'amplitude': amplim, 'x_mean': xlim, 'y_mean': ylim})
+        bounds={'amplitude': amplim, 'x_mean': xlim, 'y_mean': ylim},
+        fixed=fixed_params)
 
     model = f_c - f_s
 

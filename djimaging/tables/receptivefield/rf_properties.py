@@ -191,8 +191,8 @@ class FitGauss2DRFTemplate(dj.Computed):
         definition = """
         -> self.split_rf_table
         ---
-        srf_fit: longblob
-        srf_params: longblob
+        srf_fit: mediumblob
+        srf_params: blob
         rf_area_um2: float # Area covered by 2 standard deviations
         rf_cdia_um: float # Circle equivalent diameter
         center_index: float # Weight and sign of center in sRF
@@ -286,11 +286,12 @@ class FitDoG2DRFTemplate(dj.Computed):
         definition = """
         -> self.split_rf_table
         ---
-        srf_fit: longblob
-        srf_center_fit: longblob
-        srf_surround_fit: longblob
-        srf_params: longblob
-        srf_eff_center: longblob
+        srf_fit: mediumblob
+        srf_center_fit: mediumblob
+        srf_surround_fit: mediumblob
+        srf_params: blob
+        srf_eff_center: mediumblob
+        srf_eff_center_params: blob
         rf_qidx: float
         rf_area_um2: float # Area covered by 2 standard deviations
         rf_cdia_um: float # Circle equivalent diameter
@@ -338,7 +339,8 @@ class FitDoG2DRFTemplate(dj.Computed):
         surround_index = compute_surround_index(srf=srf, srf_center=srf_eff_center)
 
         # Compute area from gaussian fit to effective center
-        srf_gauss_params = fit_rf_model(srf_eff_center, kind='gauss', polarity=eff_polarity)[1]
+        srf_gauss_params = fit_rf_model(srf_eff_center, kind='gauss', polarity=eff_polarity,
+                                        center=(srf_params['x_mean_0'], srf_params['y_mean_0']))[1]
 
         if srf_gauss_params is None:
             warnings.warn(f'Failed to fit DoG center for key={key}')
@@ -354,6 +356,7 @@ class FitDoG2DRFTemplate(dj.Computed):
         fit_key['srf_surround_fit'] = srf_surround_fit
         fit_key['srf_params'] = srf_params
         fit_key['srf_eff_center'] = srf_eff_center
+        fit_key['srf_eff_center_params'] = srf_gauss_params
         fit_key['rf_cdia_um'] = diameter
         fit_key['rf_area_um2'] = area
         fit_key['center_index'] = center_index
