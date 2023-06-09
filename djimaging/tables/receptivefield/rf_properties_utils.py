@@ -172,9 +172,9 @@ def srf_dog_model_from_params(params):
     return model
 
 
-def get_main_and_pre_peak(rf_time, trf, trf_peak_idxs):
+def get_main_and_pre_peak(rf_time, trf, trf_peak_idxs, max_dt_future=np.inf):
     """Compute amplitude and time of main peak, and pre peak if available (e.g. in biphasic tRFs)"""
-    trf_peak_idxs = trf_peak_idxs[rf_time[trf_peak_idxs] <= 0]
+    trf_peak_idxs = trf_peak_idxs[rf_time[trf_peak_idxs] <= max_dt_future]  # Remove peaks far in the future
     trf_peak_idxs = trf_peak_idxs[np.argsort(np.abs(trf[trf_peak_idxs]))[-2:]]  # Consider two biggest peaks
     trf_peak_idxs = trf_peak_idxs[np.argsort(rf_time[trf_peak_idxs])][::-1]  # Order by time
 
@@ -196,11 +196,11 @@ def get_main_and_pre_peak(rf_time, trf, trf_peak_idxs):
     return main_peak, t_main_peak, main_peak_idx, pre_peak, t_pre_peak, pre_peak_idx
 
 
-def compute_trf_transience_index(rf_time, trf, trf_peak_idxs):
+def compute_trf_transience_index(rf_time, trf, trf_peak_idxs, max_dt_future=np.inf):
     """Compute transience index of temporal receptive field. Requires precomputed peak indexes"""
 
     main_peak, t_main_peak, main_peak_idx, pre_peak, t_pre_peak, pre_peak_idx = \
-        get_main_and_pre_peak(rf_time, trf, trf_peak_idxs)
+        get_main_and_pre_peak(rf_time, trf, trf_peak_idxs, max_dt_future=max_dt_future)
 
     if main_peak is None:
         return None
@@ -216,10 +216,11 @@ def compute_trf_transience_index(rf_time, trf, trf_peak_idxs):
     return transience_index
 
 
-def compute_half_amp_width(rf_time, trf, trf_peak_idxs, plot=False):
+def compute_half_amp_width(rf_time, trf, trf_peak_idxs, plot=False, max_dt_future=np.inf):
     """Compute max amplitude half width of temporal receptive field"""
 
-    main_peak, t_main_peak, main_peak_idx, *_ = get_main_and_pre_peak(rf_time, trf, trf_peak_idxs)
+    main_peak, t_main_peak, main_peak_idx, *_ = get_main_and_pre_peak(
+        rf_time, trf, trf_peak_idxs, max_dt_future=max_dt_future)
 
     if main_peak is None:
         return None
@@ -233,10 +234,10 @@ def compute_half_amp_width(rf_time, trf, trf_peak_idxs, plot=False):
     pre_root = roots[(roots - t_main_peak) < 0][-1] if np.any(roots[(roots - t_main_peak) < 0]) else rf_time[0]
     post_root = roots[(roots - t_main_peak) > 0][0] if np.any(roots[(roots - t_main_peak) > 0]) else rf_time[-1]
 
-    right_sol = minimize(lambda x: (trf_fun(x) - half_amp) ** 2, x0=np.array([t_main_peak * 0.8]),
-                         bounds=[(t_main_peak, 0)])
-    left_sol = minimize(lambda x: (trf_fun(x) - half_amp) ** 2, x0=np.array([t_main_peak * 1.2]),
-                        bounds=[(np.min(rf_time), t_main_peak)])
+    right_sol = minimize(lambda x: (trf_fun(x) - half_amp) ** 2, x0=np.mean([post_root, t_main_peak]),
+                         bounds=[(t_main_peak, post_root)])
+    left_sol = minimize(lambda x: (trf_fun(x) - half_amp) ** 2, x0=np.mean([pre_root, t_main_peak]),
+                        bounds=[(pre_root, t_main_peak)])
 
     assert right_sol.success and left_sol.success
 
@@ -246,17 +247,20 @@ def compute_half_amp_width(rf_time, trf, trf_peak_idxs, plot=False):
         plt.figure()
         plt.fill_between(rf_time, trf, label='trf', alpha=0.5)
         plt.fill_between(t_trf_int, trf_fun(t_trf_int), color='gray', label='trf (interpolated)', alpha=0.5)
-        plt.axvline(pre_root, c='c')
-        plt.axvline(post_root, c='purple')
-        plt.plot([left_sol.x, right_sol.x], [half_amp, half_amp], c='red', lw=2, alpha=0.7, label='solution')
+        plt.axvline(t_main_peak, c='green', label='main peak')
+        plt.axvline(pre_root, c='c', label='search start')
+        plt.axvline(post_root, c='purple', label='search end')
+        plt.plot([left_sol.x, right_sol.x], [half_amp, half_amp], c='red', lw=2, alpha=0.7, marker='o',
+                 label='solution')
         plt.legend()
         plt.show()
 
     return half_amp_width
 
 
-def compute_main_peak_lag(rf_time, trf, trf_peak_idxs, plot=False):
-    main_peak, t_main_peak, main_peak_idx, *_ = get_main_and_pre_peak(rf_time, trf, trf_peak_idxs)
+def compute_main_peak_lag(rf_time, trf, trf_peak_idxs, plot=False, max_dt_future=np.inf):
+    main_peak, t_main_peak, main_peak_idx, *_ = get_main_and_pre_peak(
+        rf_time, trf, trf_peak_idxs, max_dt_future=max_dt_future)
 
     if main_peak is None:
         return None

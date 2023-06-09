@@ -36,7 +36,6 @@ class SplitRFParams(receptivefield.SplitRFParamsTemplate):
 
 @schema
 class SplitRF(receptivefield.SplitRFTemplate):
-    stimulus_table = Stimulus
     rf_table = STA
     split_rf_params_table = SplitRFParams
 

@@ -247,11 +247,14 @@ def resize_srf(srf, scale=None, output_shape=None):
     return resize_image(srf, output_shape=output_shape, order=1)
 
 
-def compute_polarity_and_peak_idxs(trf, nstd=1., npeaks_max=None):
+def compute_polarity_and_peak_idxs(trf, nstd=1., npeaks_max=None, rf_time=None, max_dt_future=np.inf):
     """Estimate polarity. 1 for ON-cells, -1 for OFF-cells, 0 for uncertain cells"""
 
     trf = trf.copy()
     std_trf = np.std(trf)
+
+    if (rf_time is not None) or (np.isfinite(max_dt_future)):
+        trf[rf_time > max_dt_future] = 0.
 
     pos_peak_idxs, _ = find_peaks(trf, prominence=nstd * std_trf / 2., height=nstd * std_trf)
     neg_peak_idxs, _ = find_peaks(-trf, prominence=nstd * std_trf / 2., height=nstd * std_trf)

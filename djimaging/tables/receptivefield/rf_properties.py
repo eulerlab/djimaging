@@ -14,7 +14,7 @@ from djimaging.tables.receptivefield.rf_properties_utils import compute_gauss_sr
 from djimaging.tables.receptivefield.rf_utils import compute_explained_rf, resize_srf, split_strf, \
     compute_polarity_and_peak_idxs, merge_strf
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.plot_utils import plot_srf, plot_trf, plot_signals_heatmap
+from djimaging.utils.plot_utils import plot_srf, plot_trf, plot_signals_heatmap, set_long_title
 
 
 class SplitRFParamsTemplate(dj.Lookup):
@@ -49,7 +49,7 @@ class SplitRFParamsTemplate(dj.Lookup):
 
 class SplitRFTemplate(dj.Computed):
     database = ""
-    _rel_nframes_future = 0.65
+    _max_dt_future = np.inf
 
     @property
     def definition(self):
@@ -82,16 +82,10 @@ class SplitRFTemplate(dj.Computed):
     def split_rf_params_table(self):
         pass
 
-    @property
-    @abstractmethod
-    def stimulus_table(self):
-        pass
-
     def make(self, key):
         # Get data
         strf = (self.rf_table() & key).fetch1("rf")
         rf_time = self.fetch1_rf_time(key=key)
-        stim_Hz = (self.stimulus_table() & key).fetch('framerate')
 
         # Get preprocess params
         blur_std, blur_npix, upsample_srf_scale, peak_nstd, npeaks_max = self.split_rf_params_table().fetch1(
@@ -102,8 +96,8 @@ class SplitRFTemplate(dj.Computed):
 
         # Make tRF always positive, so that sRF reflects the polarity of the RF
         polarity, peak_idxs = compute_polarity_and_peak_idxs(
-            trf[rf_time <= (0 + self._rel_nframes_future * (1. / stim_Hz))],
-            nstd=peak_nstd, npeaks_max=npeaks_max if npeaks_max > 0 else None)
+            rf_time=rf_time, trf=trf, nstd=peak_nstd, npeaks_max=npeaks_max if npeaks_max > 0 else None,
+            max_dt_future=self._max_dt_future)
 
         if polarity == -1:
             srf *= -1
@@ -414,6 +408,7 @@ class FitDoG2DRFTemplate(dj.Computed):
 
 class TempRFPropertiesTemplate(dj.Computed):
     database = ""
+    _max_dt_future = np.inf
 
     @property
     def definition(self):
@@ -443,16 +438,23 @@ class TempRFPropertiesTemplate(dj.Computed):
     def split_rf_table(self):
         pass
 
-    def make(self, key):
+    def fetch1_rf_time(self, key):
         try:
             rf_time = (self.rf_table & key).fetch1('rf_time')
         except dj.DataJointError:
             rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
+        return rf_time
 
+    def make(self, key):
+        rf_time = self.fetch1_rf_time(key=key)
         trf, trf_peak_idxs = (self.split_rf_table & key).fetch1('trf', 'trf_peak_idxs')
-        transience_idx = compute_trf_transience_index(rf_time, trf, trf_peak_idxs)
-        half_amp_width = compute_half_amp_width(rf_time, trf, trf_peak_idxs, plot=False)
-        main_peak_lag = compute_main_peak_lag(rf_time, trf, trf_peak_idxs, plot=False)
+
+        transience_idx = compute_trf_transience_index(
+            rf_time, trf, trf_peak_idxs, max_dt_future=self._max_dt_future)
+        half_amp_width = compute_half_amp_width(
+            rf_time, trf, trf_peak_idxs, plot=False, max_dt_future=self._max_dt_future)
+        main_peak_lag = compute_main_peak_lag(
+            rf_time, trf, trf_peak_idxs, plot=False, max_dt_future=self._max_dt_future)
 
         key = key.copy()
         key['transience_idx'] = transience_idx if transience_idx is not None else -1.
@@ -467,4 +469,23 @@ class TempRFPropertiesTemplate(dj.Computed):
             ax.hist(self.fetch(name))
             ax.set_title(name)
         plt.tight_layout()
-        plt.show()
+        return fig, axs
+
+    def plot1(self, key=None):
+        key = get_primary_key(table=self, key=key)
+
+        rf_time = self.fetch1_rf_time(key=key)
+        trf, peak_idxs = (self.split_rf_table & key).fetch1('trf', 'trf_peak_idxs')
+        transience_idx, half_amp_width, main_peak_lag = (self & key).fetch1(
+            'transience_idx', 'half_amp_width', 'main_peak_lag')
+
+        fig, ax = plt.subplots(1, 1, figsize=(6, 2.5))
+        plot_trf(trf, t_trf=rf_time, peak_idxs=peak_idxs, ax=ax)
+        ax.axvline(-main_peak_lag, color='k', ls='--', label='main_peak')
+        ax.axvline(-main_peak_lag - half_amp_width / 2, color='gray', ls=':', label='width')
+        ax.axvline(-main_peak_lag + half_amp_width / 2, color='gray', ls=':', label='_')
+        ax.axvline(0, color='gray', ls='-', label='_', zorder=-2)
+        set_long_title(ax=ax, title=key, fontsize=8)
+        plt.legend()
+        plt.tight_layout()
+        return fig, ax
