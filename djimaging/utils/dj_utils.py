@@ -4,6 +4,7 @@ from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 
 import datajoint as dj
+import numpy as np
 
 
 def get_class_attributes(class_):
@@ -94,3 +95,27 @@ def get_secondary_keys(table):
     row = (table & key).fetch1()
     secondary_keys = list(set(row.keys()) - set(key.keys()))
     return secondary_keys
+
+
+def merge_keys(key1, key2):
+    """Merge two keys"""
+    merged_key = key1.copy()
+    for k, v2 in key2.items():
+        if k in key1.keys():
+            v1 = key1[k]
+            if not is_equal(v1, v2):
+                raise ValueError(f'Keys are inconsistent for key {k} with values {v2} and {v1}.')
+        else:
+            merged_key[k] = v2
+    return merged_key
+
+
+def is_equal(v1, v2):
+    try:
+        if v1 == v2:
+            return True
+        elif np.asarry(v1) == np.asarray(v2):
+            return True
+    except:
+        pass
+    return False

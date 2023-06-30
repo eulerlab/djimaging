@@ -10,7 +10,7 @@ from scipy import interpolate
 import datajoint as dj
 
 
-def preprocess_chirp(chirp_average, dt):
+def preprocess_chirp(chirp_average, dt, delay=0.):
     """
     Preprocesses chirp traces by resampling if necessary, averaging across repetitions, cutting off
     last 7 frames and downsampling to 249 frames to match Baden traces;
@@ -28,7 +28,7 @@ def preprocess_chirp(chirp_average, dt):
 
     # Resample to Baden frequency which was (in stimulus space) slightly different
     baden16_average = interpolate.interp1d(
-        time_avg, chirp_average, assume_sorted=True, bounds_error=False, fill_value='extrapolate')(baden16_time)
+        time_avg + delay, chirp_average, assume_sorted=True, bounds_error=False, fill_value='extrapolate')(baden16_time)
 
     # Normalize
     baden16_average -= np.mean(baden16_average[:8])
@@ -37,7 +37,7 @@ def preprocess_chirp(chirp_average, dt):
     return baden16_average
 
 
-def preprocess_bar(bar_average, dt):
+def preprocess_bar(bar_average, dt, delay=0.):
     """
     Preprocesses bar time component by resampling if necessary and by rolling to match Baden traces;
     :param bar_average: moving bar average trace in preferred direction
@@ -49,7 +49,7 @@ def preprocess_bar(bar_average, dt):
     time = np.arange(bar_average.size) * dt
     baden16_time = np.arange(32) * 0.128
     baden16_average = interpolate.interp1d(
-        time, bar_average, assume_sorted=True, bounds_error=False, fill_value='extrapolate')(baden16_time)
+        time + delay, bar_average, assume_sorted=True, bounds_error=False, fill_value='extrapolate')(baden16_time)
     baden16_average = np.roll(baden16_average, -5)
     return baden16_average
 
@@ -69,6 +69,7 @@ class Baden16TracesTemplate(dj.Computed):
         """
         return definition
 
+    _trace_delay = 0.  # The classifier was optimized for non-stim-delay corrected traces. set this to 0.128 to add it
     _stim_name_chirp = 'gChirp'
     _stim_name_bar = 'movingbar'
     _condition = 'control'
@@ -118,8 +119,8 @@ class Baden16TracesTemplate(dj.Computed):
 
         bar_time_component, bar_dt = (self.bar_tab() & key).fetch1('bar_time_component', 'bar_time_component_dt')
 
-        preproc_chirp = preprocess_chirp(chirp_average, dt=chirp_dt)
-        preproc_bar = preprocess_bar(bar_time_component, dt=bar_dt)
+        preproc_chirp = preprocess_chirp(chirp_average, dt=chirp_dt, delay=self._trace_delay)
+        preproc_bar = preprocess_bar(bar_time_component, dt=bar_dt, delay=self._trace_delay)
 
         key = key.copy()
         key['preproc_chirp'] = preproc_chirp

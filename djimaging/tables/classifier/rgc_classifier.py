@@ -7,8 +7,9 @@ from typing import Mapping, Dict, Any
 import datajoint as dj
 import numpy as np
 from cached_property import cached_property
+from matplotlib import pyplot as plt
 
-from djimaging.utils.dj_utils import make_hash
+from djimaging.utils.dj_utils import make_hash, merge_keys, get_primary_key
 from djimaging.utils.import_helpers import dynamic_import, split_module_name
 
 Key = Dict[str, Any]
@@ -122,6 +123,42 @@ class ClassifierTrainingDataTemplate(dj.Manual):
             return training_data
 
 
+def classify_cell(preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2,
+                  chirp_features, bar_features, classifier):
+    # feature activation matrix
+    feature_activation_chirp = np.dot(preproc_chirp, chirp_features)
+    feature_activation_bar = np.dot(preproc_bar, bar_features)
+
+    features = np.concatenate(
+        [feature_activation_chirp, feature_activation_bar, np.array([bar_ds_pvalue]), np.array([roi_size_um2])])
+
+    confidence_scores = classifier.predict_proba(features[np.newaxis, :]).flatten()
+    celltype = np.argmax(confidence_scores) + 1
+
+    return celltype, confidence_scores
+
+
+def extract_features(preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, chirp_features, bar_features):
+    features = np.concatenate([
+        np.dot(preproc_chirps, chirp_features),
+        np.dot(preproc_bars, bar_features),
+        bar_ds_pvalues[:, np.newaxis],
+        roi_size_um2s[:, np.newaxis]
+    ], axis=-1)
+
+    return features
+
+
+def classify_cells(preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s,
+                   chirp_features, bar_features, classifier):
+    features = extract_features(
+        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, chirp_features, bar_features)
+    confidence_scores = classifier.predict_proba(features)
+    celltypes = np.argmax(confidence_scores, axis=1) + 1
+
+    return celltypes, confidence_scores
+
+
 class ClassifierTemplate(dj.Computed):
     database = ""
     store = "classifier_output"
@@ -185,7 +222,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.classifier_table.proj()
+            return self.classifier_table.proj() * self.baden_trace_table.roi_table.field_or_pres_table.proj()
         except (AttributeError, TypeError):
             pass
 
@@ -265,48 +302,22 @@ class CelltypeAssignmentTemplate(dj.Computed):
             classifier_params_hash=key["classifier_params_hash"],
             training_data_hash=key["training_data_hash"])
 
-        classifier = self.classifier
-        bar_features = self.bar_features
-        chirp_features = self.chirp_features
-
         roi_tab = self.baden_trace_table * self.baden_trace_table().bar_tab() * self.baden_trace_table.roi_table
         roi_keys = (self.baden_trace_table & key).proj()
 
-        for roi_key in roi_keys:
-            print(roi_key)
-            # TODO: make parallel
+        if len(roi_keys) == 0:
+            return
 
-            preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2 = (roi_tab & roi_key).fetch1(
-                'preproc_chirp', 'preproc_bar', 'bar_ds_pvalue', 'roi_size_um2')
+        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = (roi_tab & roi_keys).fetch(
+            'preproc_chirp', 'preproc_bar', 'bar_ds_pvalue', 'roi_size_um2')
 
-            celltype, confidence_scores = self.classify_cell(
-                preproc_chirp=preproc_chirp, preproc_bar=preproc_bar,
-                bar_ds_pvalue=bar_ds_pvalue, roi_size_um2=roi_size_um2,
-                classifier=classifier, chirp_features=chirp_features, bar_features=bar_features)
+        celltype, confidence_scores = classify_cells(
+            np.vstack(preproc_chirps), np.vstack(preproc_bars), bar_ds_pvalues, roi_size_um2s,
+            self.chirp_features, self.bar_features, self.classifier)
 
-            self.insert1(dict(**key, **roi_key, celltype=celltype, confidence=confidence_scores,
-                              max_confidence=np.max(confidence_scores)))
-
-    @staticmethod
-    def classify_cell(preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2,
-                      chirp_features, bar_features, classifier):
-
-        # feature activation matrix
-        feature_activation_chirp = np.dot(preproc_chirp, chirp_features)
-        feature_activation_bar = np.dot(preproc_bar, bar_features)
-
-        features = np.concatenate(
-            [feature_activation_chirp, feature_activation_bar, np.array([bar_ds_pvalue]), np.array([roi_size_um2])])
-
-        confidence_scores = classifier.predict_proba(features[np.newaxis, :]).flatten()
-        celltype = np.argmax(confidence_scores) + 1
-
-        assert confidence_scores.size == 46, \
-            f"Expected 46 confidence scores, got {confidence_scores.size}"
-        assert np.isclose(np.sum(confidence_scores), 1., rtol=0.01, atol=0.01), \
-            f"Confidences should sum up to 1, but are {np.sum(confidence_scores)}."
-
-        return celltype, confidence_scores
+        for roi_key, celltype, confidence_scores_i in zip(roi_keys, celltype, confidence_scores):
+            self.insert1(dict(**merge_keys(key, roi_key), celltype=celltype,
+                              confidence=confidence_scores_i, max_confidence=np.max(confidence_scores_i)))
 
     def plot(self, threshold_confidence: float):
         from matplotlib import pyplot as plt
@@ -331,3 +342,113 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         plt.tight_layout()
         plt.show()
+
+    def plot_features(self, threshold_confidence: float, key=None, celltypes=None, n_celltypes_max=3,
+                      features=None, n_features_max=5):
+        key = get_primary_key(self.classifier_table, key)
+
+        # Get new data
+        self.current_model_key = dict(
+            classifier_params_hash=key["classifier_params_hash"],
+            training_data_hash=key["training_data_hash"])
+
+        roi_tab = self * self.baden_trace_table * self.baden_trace_table().bar_tab() * self.baden_trace_table.roi_table
+        roi_keys = (self.baden_trace_table & key).proj()
+        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, data_celltypes = \
+            (roi_tab & roi_keys & f'max_confidence>="{threshold_confidence}"').fetch(
+                'preproc_chirp', 'preproc_bar', 'bar_ds_pvalue', 'roi_size_um2', 'celltype')
+
+        data_features = extract_features(
+            np.vstack(preproc_chirps), np.vstack(preproc_bars), bar_ds_pvalues, roi_size_um2s,
+            self.chirp_features, self.bar_features)
+
+        # Get training data
+        training_data = self.classifier_training_data_table().get_training_data(key)
+
+        if celltypes is None:
+            celltypes = np.arange(0, 46) + 1
+        if features is None:
+            features = np.arange(0, training_data['X'].shape[1])
+
+        celltypes = np.sort(np.random.choice(celltypes, n_celltypes_max, replace=False))
+        features = np.sort(np.random.choice(features, n_features_max, replace=False))
+
+        n_celltypes = celltypes.size
+        n_features = features.size
+
+        # Plot
+        fig, axs = plt.subplots(n_celltypes, n_features,
+                                figsize=(np.minimum(3 * n_features, 20), np.minimum(2 * n_celltypes, 20)),
+                                sharex='col', sharey='col', squeeze=False)
+
+        for ax_row, celltype in zip(axs, celltypes):
+            ax_row[0].set_ylabel(f"celltype={celltype}")
+            for ax, feature_i in zip(ax_row, features):
+                ax.set_title(f"feature={feature_i}")
+                bins = np.linspace(training_data['X'][:, feature_i].min(), training_data['X'][:, feature_i].max(), 51)
+                ax.hist(training_data['X'][training_data['y'] == celltype, feature_i],
+                        bins=bins, color='gray', alpha=1, label='train')
+
+                if np.any(data_celltypes == celltype):
+                    ax = ax.twinx()
+                    ax.hist(data_features[data_celltypes == celltype, feature_i],
+                            bins=bins, color='r', alpha=0.5, label='new')
+
+        axs[0, 0].legend()
+
+        plt.tight_layout()
+
+    def plot_group_traces(self, threshold_confidence: float, key=None, celltypes=None, n_celltypes_max=32):
+        key = get_primary_key(self.classifier_table, key)
+
+        # Get new data
+        self.current_model_key = dict(
+            classifier_params_hash=key["classifier_params_hash"],
+            training_data_hash=key["training_data_hash"])
+
+        roi_tab = self * self.baden_trace_table * self.baden_trace_table().bar_tab() * self.baden_trace_table.roi_table
+        roi_keys = (self.baden_trace_table & key).proj()
+        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, data_celltypes = \
+            (roi_tab & roi_keys & f'max_confidence>="{threshold_confidence}"').fetch(
+                'preproc_chirp', 'preproc_bar', 'bar_ds_pvalue', 'roi_size_um2', 'celltype')
+
+        preproc_chirps = np.vstack(preproc_chirps)
+        preproc_bars = np.vstack(preproc_bars)
+
+        if celltypes is None:
+            celltypes = np.arange(0, 32) + 1
+
+        celltypes = np.sort(np.random.choice(celltypes, n_celltypes_max, replace=False))
+
+        fig, axs = plt.subplots(celltypes.size, 4,
+                                figsize=(12, np.minimum(2 * celltypes.size, 20)),
+                                sharex='col', sharey='col', squeeze=False,
+                                gridspec_kw=dict(width_ratios=[1, 0.6, 0.3, 0.3]))
+
+        import seaborn as sns
+        sns.despine(fig=fig)
+
+        for ax_row, celltype in zip(axs, celltypes):
+
+            ax_row[0].set_ylabel(f"{celltype}")
+
+            if not np.any(data_celltypes == celltype):
+                continue
+
+            ax = ax_row[0]
+            ax.plot(preproc_chirps[data_celltypes == celltype].T, lw=0.5)
+            ax.plot(np.mean(preproc_chirps[data_celltypes == celltype], axis=0), c='k', lw=2)
+
+            ax = ax_row[1]
+            ax.plot(preproc_bars[data_celltypes == celltype].T, lw=0.5)
+            ax.plot(np.mean(preproc_bars[data_celltypes == celltype], axis=0), c='k', lw=2)
+
+            ax = ax_row[2]
+            ax.hist(bar_ds_pvalues[data_celltypes == celltype],
+                    bins=np.linspace(np.min(bar_ds_pvalues), np.max(bar_ds_pvalues), 51))
+
+            ax = ax_row[3]
+            ax.hist(roi_size_um2s[data_celltypes == celltype],
+                    bins=np.linspace(np.min(roi_size_um2s), np.max(roi_size_um2s), 51))
+
+        plt.tight_layout()
