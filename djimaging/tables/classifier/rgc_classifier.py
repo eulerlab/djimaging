@@ -320,8 +320,6 @@ class CelltypeAssignmentTemplate(dj.Computed):
                               confidence=confidence_scores_i, max_confidence=np.max(confidence_scores_i)))
 
     def plot(self, threshold_confidence: float):
-        from matplotlib import pyplot as plt
-
         df = self.fetch(format='frame')
         groups = df.groupby(['training_data_hash', 'classifier_params_hash', 'preprocess_id'])
 
@@ -370,11 +368,13 @@ class CelltypeAssignmentTemplate(dj.Computed):
         if features is None:
             features = np.arange(0, training_data['X'].shape[1])
 
-        celltypes = np.sort(np.random.choice(celltypes, n_celltypes_max, replace=False))
-        features = np.sort(np.random.choice(features, n_features_max, replace=False))
+        if n_celltypes_max is not None and len(celltypes) > n_celltypes_max:
+            celltypes = np.sort(np.random.choice(celltypes, n_celltypes_max, replace=False))
+        if n_features_max is not None and len(features) > n_features_max:
+            features = np.sort(np.random.choice(features, n_features_max, replace=False))
 
-        n_celltypes = celltypes.size
-        n_features = features.size
+        n_celltypes = len(celltypes)
+        n_features = len(features)
 
         # Plot
         fig, axs = plt.subplots(n_celltypes, n_features,
@@ -418,10 +418,11 @@ class CelltypeAssignmentTemplate(dj.Computed):
         if celltypes is None:
             celltypes = np.arange(0, 32) + 1
 
-        celltypes = np.sort(np.random.choice(celltypes, n_celltypes_max, replace=False))
+        if n_celltypes_max is not None and len(celltypes) > n_celltypes_max:
+            celltypes = np.sort(np.random.choice(celltypes, n_celltypes_max, replace=False))
 
-        fig, axs = plt.subplots(celltypes.size, 4,
-                                figsize=(12, np.minimum(2 * celltypes.size, 20)),
+        fig, axs = plt.subplots(len(celltypes), 4,
+                                figsize=(12, np.minimum(2 * len(celltypes), 20)),
                                 sharex='col', sharey='col', squeeze=False,
                                 gridspec_kw=dict(width_ratios=[1, 0.6, 0.3, 0.3]))
 
@@ -446,9 +447,13 @@ class CelltypeAssignmentTemplate(dj.Computed):
             ax = ax_row[2]
             ax.hist(bar_ds_pvalues[data_celltypes == celltype],
                     bins=np.linspace(np.min(bar_ds_pvalues), np.max(bar_ds_pvalues), 51))
+            if celltype == celltypes[0]:
+                ax.set_title('bar_ds_pvalues')
 
             ax = ax_row[3]
             ax.hist(roi_size_um2s[data_celltypes == celltype],
                     bins=np.linspace(np.min(roi_size_um2s), np.max(roi_size_um2s), 51))
+            if celltype == celltypes[0]:
+                ax.set_title('roi_size_um2s')
 
         plt.tight_layout()
