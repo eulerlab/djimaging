@@ -5,6 +5,7 @@ from numba import jit
 from scipy.ndimage import gaussian_filter
 from scipy.signal import find_peaks
 from sklearn.decomposition import randomized_svd
+from tqdm.notebook import tqdm
 
 from djimaging.utils import math_utils, filter_utils
 from djimaging.utils.filter_utils import upsample_stim, lowpass_filter_trace
@@ -14,7 +15,8 @@ from djimaging.utils.trace_utils import align_stim_to_trace, get_mean_dt, align_
 
 def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
                       filter_dur_s_past, filter_dur_s_future=0.,
-                      kind='sta', threshold_pred=False, dtype=np.float32):
+                      kind='sta', threshold_pred=False, dtype=np.float32,
+                      batch_size_n=6_000_000, verbose=False):
     kind = kind.lower()
 
     assert trace.size == stim.shape[0]
@@ -25,18 +27,18 @@ def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
 
     x, y = split_data(x=stim, y=trace, frac_train=frac_train, frac_dev=frac_dev, as_dict=True)
 
-    x_train_dm = build_design_matrix(x['train'], n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
-    y_train_dm = y['train'][burn_in:].astype(dtype)
+    is_spikes = np.all(y['train'] == y['train'].astype(int))
 
-    if kind.lower() == 'sta':
-        rf = compute_rf_sta(X=x_train_dm, y=y_train_dm, is_spikes=False)
-    elif kind.lower() == 'mle':
-        rf = compute_rf_mle(X=x_train_dm, y=y_train_dm)
+    if np.product(stim.shape) <= batch_size_n:
+        rf, y_pred_train = _compute_linear_rf_single_batch(
+            x_train=x['train'], y_train=y['train'], kind=kind, dim_t=dim_t, shift=shift, burn_in=burn_in,
+            threshold_pred=threshold_pred, is_spikes=is_spikes, dtype=dtype)
     else:
-        raise NotImplementedError()
-
-    y_pred_train = predict_linear_rf_response(
-        rf=rf, stim_design_matrix=x_train_dm, threshold=threshold_pred, dtype=dtype)
+        assert kind == 'sta', f"kind={kind} not supported for compute_per='feature'"
+        rf, y_pred_train = _compute_sta_batchwise(
+            x_train=x['train'], y_train=y['train'], kind=kind, dim_t=dim_t, shift=shift, burn_in=burn_in,
+            threshold_pred=threshold_pred, is_spikes=is_spikes, dtype=dtype,
+            batch_size=np.maximum(batch_size_n // stim.shape[0], 1), verbose=verbose)
 
     model_eval = dict()
     model_eval['burn_in'] = burn_in
@@ -57,6 +59,72 @@ def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
     return rf, rf_time, model_eval, x, y, shift
 
 
+def _compute_linear_rf_single_batch(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred, is_spikes,
+                                    dtype=np.float32):
+    x_train_dm = build_design_matrix(x_train, n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
+    y_train_dm = y_train[burn_in:].astype(dtype)
+
+    if kind == 'sta':
+        rf = compute_rf_sta(X=x_train_dm, y=y_train_dm, is_spikes=is_spikes)
+    elif kind == 'mle':
+        rf = compute_rf_mle(X=x_train_dm, y=y_train_dm)
+    else:
+        raise NotImplementedError()
+
+    y_pred_train = predict_linear_rf_response(
+        rf=rf, stim_design_matrix=x_train_dm, threshold=threshold_pred, dtype=dtype)
+
+    return rf, y_pred_train
+
+
+def _compute_sta_batchwise(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred, is_spikes,
+                           batch_size=400, dtype=np.float32, verbose=False):
+    x_shape = x_train.shape
+    n_frames = x_shape[0]
+    n_features = np.product(x_shape[1:])
+
+    rf = np.zeros((dim_t, n_features), dtype=dtype)
+
+    x_train = x_train.reshape((n_frames, n_features))
+    y_train_dm = y_train[burn_in:].astype(dtype)
+
+    batches = np.array_split(np.arange(n_features), np.ceil(n_features / batch_size))
+    y_pred_train_per_batch = np.zeros((n_frames - burn_in, len(batches)), dtype=dtype)
+
+    bar = tqdm(batches, desc='STA batches', leave=False) if verbose else None
+
+    for i, batch in enumerate(batches):
+        x_train_dm_i = build_design_matrix(x_train[:, batch], n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
+
+        if kind == 'sta':
+            rf_i = compute_rf_sta(X=x_train_dm_i, y=y_train_dm, is_spikes=is_spikes)
+        elif kind == 'mle':
+            rf_i = compute_rf_mle(X=x_train_dm_i, y=y_train_dm)
+        else:
+            raise NotImplementedError()
+
+        rf[:, batch] = rf_i.reshape(-1, len(batch))
+        y_pred_train_per_batch[:, i] = predict_linear_rf_response(
+            rf=rf_i, stim_design_matrix=x_train_dm_i, threshold=False, dtype=dtype)
+
+        if bar is not None:
+            bar.update(1)
+
+    if bar is not None:
+        bar.close()
+
+    # Reshape back. Is this necessary for x?
+    rf = rf.reshape((dim_t,) + x_shape[1:])
+    x_train.reshape(x_shape)
+
+    y_pred_train = np.sum(y_pred_train_per_batch, axis=1)
+
+    if threshold_pred:
+        y_pred_train = np.clip(y_pred_train, 0, None)
+
+    return rf, y_pred_train
+
+
 def get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt):
     n_t_past = int(np.ceil(filter_dur_s_past / dt))
     n_t_future = int(np.ceil(filter_dur_s_future / dt))
@@ -70,12 +138,8 @@ def get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt):
 @jit(nopython=True)
 def compute_rf_sta(X, y, is_spikes=False):
     """From RFEst"""
-    XtY = X.T @ y
-    if is_spikes:
-        w = XtY / np.sum(y)
-    else:
-        w = XtY / len(y)
-
+    w = X.T @ y
+    w /= np.sum(y) if is_spikes else len(y)
     return w
 
 
@@ -97,9 +161,9 @@ def predict_linear_rf_response(rf, stim_design_matrix, threshold=False, dtype=np
     return y_pred.astype(dtype)
 
 
-def prepare_data(stim, triggertimes, trace, tracetime, ntrigger_per_frame=1,
-                 fupsample_trace=None, fupsample_stim=None, fit_kind='trace',
-                 lowpass_cutoff=0, ref_time='trace', pre_blur_sigma_s=0, post_blur_sigma_s=0, dt_rtol=0.1):
+def prepare_noise_data(stim, triggertimes, trace, tracetime, ntrigger_per_frame=1,
+                       fupsample_trace=None, fupsample_stim=None, fit_kind='trace',
+                       lowpass_cutoff=0, ref_time='trace', pre_blur_sigma_s=0, post_blur_sigma_s=0, dt_rtol=0.1):
     assert triggertimes.ndim == 1, triggertimes.shape
     assert trace.ndim == 1, trace.shape
     assert tracetime.ndim == 1, tracetime.shape
@@ -294,26 +358,23 @@ def build_design_matrix(X, n_lag, shift=0, n_c=1, dtype=None):
     if dtype is None:
         dtype = X.dtype
 
-    n_sample = X.shape[0]
+    n_frames = X.shape[0]
     n_feature = np.product(X.shape[1:])
-    X = np.reshape(X, (n_sample, n_feature))
+
+    X_design = np.reshape(X.copy(), (n_frames, n_feature))
 
     if n_lag + shift > 0:
-        X_padded = np.vstack([np.zeros([n_lag + shift - 1, n_feature]), X])
-    else:
-        X_padded = X
+        X_design = np.vstack([np.zeros([n_lag + shift - 1, n_feature]), X_design])
 
     if shift < 0:
-        X_padded = np.vstack([X_padded, np.zeros([-shift, n_feature])])
+        X_design = np.vstack([X_design, np.zeros([-shift, n_feature])])
 
-    X_design = np.hstack([X_padded[i:n_sample + i] for i in range(n_lag)])
+    X_design = np.hstack([X_design[i:n_frames + i] for i in range(n_lag)])
 
     if n_c > 1:
-        X_design = np.reshape(X_design, (X_design.shape[0], -1, n_c)).astype(dtype)
-    else:
-        X_design = X_design.astype(dtype)
+        X_design = np.reshape(X_design, (X_design.shape[0], -1, n_c))
 
-    return X_design
+    return X_design.astype(dtype)
 
 
 def split_strf(strf, blur_std: float = 0, blur_npix: int = 1, upsample_srf_scale: int = 0):

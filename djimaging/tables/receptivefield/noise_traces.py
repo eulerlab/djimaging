@@ -3,7 +3,7 @@ from abc import abstractmethod
 import datajoint as dj
 import numpy as np
 
-from djimaging.tables.receptivefield.rf_utils import prepare_data
+from djimaging.tables.receptivefield.rf_utils import prepare_noise_data
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -94,7 +94,7 @@ class DNoiseTraceTemplate(dj.Computed):
             "fupsample_trace", "fupsample_stim", "fit_kind", "lowpass_cutoff",
             "pre_blur_sigma_s", "post_blur_sigma_s", "ref_time")
 
-        stim, trace, dt, t0, dt_rel_error = prepare_data(
+        stim, trace, dt, t0, dt_rel_error = prepare_noise_data(
             trace=trace, tracetime=tracetime, stim=stim, triggertimes=triggertimes,
             ntrigger_per_frame=stim_dict.get('ntrigger_per_frame', 1),
             fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim, ref_time=ref_time,

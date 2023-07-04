@@ -93,7 +93,7 @@ class STATemplate(dj.Computed):
             """
             return definition
 
-    def make(self, key):
+    def make(self, key, verbose=False):
         filter_dur_s_past, filter_dur_s_future, rf_method = (self.params_table() & key).fetch1(
             "filter_dur_s_past", "filter_dur_s_future", "rf_method")
         store_x, store_y = (self.params_table() & key).fetch1("store_x", "store_y")
@@ -104,7 +104,7 @@ class STATemplate(dj.Computed):
         rf, rf_time, rf_pred, x, y, shift = compute_linear_rf(
             dt=dt, trace=trace, stim=stim, frac_train=frac_train, frac_dev=frac_dev, kind=rf_method,
             filter_dur_s_past=filter_dur_s_past, filter_dur_s_future=filter_dur_s_future,
-            threshold_pred=np.all(trace >= 0))
+            threshold_pred=np.all(trace >= 0), batch_size_n=6_000_000, verbose=verbose)
 
         rf_key = deepcopy(key)
         rf_key['rf'] = rf

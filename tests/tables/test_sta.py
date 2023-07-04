@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from djimaging.tables.receptivefield import rf_utils
-from djimaging.tables.receptivefield.rf_utils import prepare_data, split_data
+from djimaging.tables.receptivefield.rf_utils import prepare_noise_data, split_data
 
 try:
     import rfest
@@ -43,7 +43,7 @@ def generate_data_3d(seed, trace_dt=0.1, trace_trng=(0.3, 64), dims_xy=(6, 8), s
 
 def test_split_train():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=42)
-    stim, trace, dt, t0, dt_rel_error = prepare_data(
+    stim, trace, dt, t0, dt_rel_error = prepare_noise_data(
         trace=trace, tracetime=tracetime, stim=stim, triggertimes=stimtime,
         fupsample_trace=2, fit_kind='trace', lowpass_cutoff=0)
 
@@ -54,7 +54,7 @@ def test_split_train():
 def test_split_train_dev():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=42)
 
-    stim, trace, dt, t0, dt_rel_error = prepare_data(
+    stim, trace, dt, t0, dt_rel_error = prepare_noise_data(
         trace=trace, tracetime=tracetime, stim=stim, triggertimes=stimtime,
         fupsample_trace=2, fit_kind='trace', lowpass_cutoff=0)
 
@@ -67,7 +67,7 @@ def test_split_train_dev():
 def test_split_train_test():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=461)
 
-    stim, trace, dt, t0, dt_rel_error = prepare_data(
+    stim, trace, dt, t0, dt_rel_error = prepare_noise_data(
         trace=trace, tracetime=tracetime, stim=stim, triggertimes=stimtime,
         fupsample_trace=2, fit_kind='trace', lowpass_cutoff=0)
 
@@ -80,7 +80,7 @@ def test_split_train_test():
 def test_split_train_dev_test():
     stim, stimtime, trace, tracetime, trace_dt = generate_data_3d(seed=50)
 
-    stim, trace, dt, t0, dt_rel_error = prepare_data(
+    stim, trace, dt, t0, dt_rel_error = prepare_noise_data(
         trace=trace, tracetime=tracetime, stim=stim, triggertimes=stimtime,
         fupsample_trace=1, fit_kind='trace', lowpass_cutoff=0)
 
@@ -103,6 +103,70 @@ def test_sta_fit():
     w_fit = rf_utils.compute_rf_sta(X=X, y=y)
     fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
     assert fit_mse < np.mean(random_mses) - 2 * np.std(random_mses)
+
+
+@pytest.mark.skipif(rfest is None, reason="requires rfest")
+def test_sta_fit_single_batch():
+    np.random.seed(13488)
+
+    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
+        stim_noise='white', rf_kind='gauss', response_noise='none', design_matrix=False,
+        n_stim_frames=500, n_reps_per_frame=3, shift=0)
+
+    assert w_true.shape[1:] == X.shape[1:]
+
+    w_fit, _ = rf_utils._compute_linear_rf_single_batch(
+        x_train=X, y_train=y, kind='sta', dim_t=w_true.shape[0], shift=0, burn_in=w_true.shape[0] - 1,
+        threshold_pred=False, is_spikes=False, dtype=y.dtype)
+
+    w_fit = w_fit.reshape(w_true.shape)
+
+    fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
+    assert fit_mse < np.mean(random_mses) - 2 * np.std(random_mses)
+
+
+@pytest.mark.skipif(rfest is None, reason="requires rfest")
+def test_sta_fit_batchwise():
+    np.random.seed(13488)
+
+    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
+        stim_noise='white', rf_kind='gauss', response_noise='none', design_matrix=False,
+        n_stim_frames=500, n_reps_per_frame=3, shift=0)
+
+    assert w_true.shape[1:] == X.shape[1:]
+
+    w_fit, _ = rf_utils._compute_sta_batchwise(
+        x_train=X, y_train=y, kind='sta', dim_t=w_true.shape[0], shift=0, burn_in=w_true.shape[0] - 1,
+        threshold_pred=False, is_spikes=False, dtype=y.dtype, batch_size=3)
+
+    fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
+    assert fit_mse < np.mean(random_mses) - 2 * np.std(random_mses)
+
+
+@pytest.mark.skipif(rfest is None, reason="requires rfest")
+def test_sta_fit_single_batch_vs_batchwise():
+    np.random.seed(13488)
+
+    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
+        stim_noise='white', rf_kind='gauss', response_noise='none', design_matrix=False,
+        n_stim_frames=500, n_reps_per_frame=3, shift=0)
+
+    assert w_true.shape[1:] == X.shape[1:]
+
+    w_fit, y_pred = rf_utils._compute_linear_rf_single_batch(
+        x_train=X, y_train=y, kind='sta', dim_t=w_true.shape[0], shift=0, burn_in=w_true.shape[0] - 1,
+        threshold_pred=False, is_spikes=False, dtype=y.dtype)
+
+    w_fit = w_fit.reshape(w_true.shape)
+
+    for batch_size in [1, 7, 400, 1000]:
+        w_fit2, y_pred2 = rf_utils._compute_sta_batchwise(
+            x_train=X, y_train=y, kind='sta', dim_t=w_true.shape[0], shift=0, burn_in=w_true.shape[0] - 1,
+            threshold_pred=False, is_spikes=False, dtype=y.dtype, batch_size=batch_size)
+
+        w_fit2 = w_fit.reshape(w_true.shape)
+        assert np.allclose(w_fit, w_fit2)
+        assert np.allclose(y_pred, y_pred2)
 
 
 @pytest.mark.skipif(rfest is None, reason="requires rfest")
