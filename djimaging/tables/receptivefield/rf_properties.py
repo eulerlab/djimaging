@@ -29,7 +29,7 @@ class SplitRFParamsTemplate(dj.Lookup):
         blur_npix : int unsigned
         upsample_srf_scale : int unsigned
         peak_nstd : float  # How many standard deviations does a peak need to be considered peak?
-        npeaks_max : int unsigned # Maxium number of peaks, ignored if zero
+        npeaks_max : int unsigned # Maximum number of peaks, ignored if zero
         """
         return definition
 

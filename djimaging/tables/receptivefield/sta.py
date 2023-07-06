@@ -124,7 +124,7 @@ class STATemplate(dj.Computed):
             rf_dataset_key['mse'] = rf_pred[f'mse_{k}']
             self.DataSet().insert1(rf_dataset_key)
 
-    def plot1(self, key=None, xlim=None):
+    def plot1_traces(self, key=None, xlim=None):
         key = get_primary_key(table=self, key=key)
 
         from matplotlib import pyplot as plt
@@ -148,3 +148,28 @@ class STATemplate(dj.Computed):
 
         axs[-1].set(xlabel='Time')
         plt.tight_layout()
+
+    def plot1_frames(self, key=None):
+        key = get_primary_key(table=self, key=key)
+
+        from matplotlib import pyplot as plt
+        from djimaging.utils.plot_utils import plot_srf
+
+        rf, rf_time = (self & key).fetch1('rf', 'rf_time')
+
+        if rf.ndim == 2:
+            fig, axs = plt.subplots(1, 1, figsize=(10, 3))
+            axs.plot(rf_time, rf)
+        elif rf.ndim == 3:
+            n_rows = int(np.ceil(np.sqrt(rf.shape[0])))
+            n_cols = int(np.ceil(rf.shape[0] / n_rows))
+            fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, n_rows * 3), squeeze=False, sharey='all',
+                                    sharex='all')
+            axs = axs.flat
+            vabsmax = np.max(np.abs(rf))
+            for ax, frame in zip(axs, rf):
+                plot_srf(frame, ax=ax, vabsmax=vabsmax)
+        else:
+            raise NotImplementedError(rf.shape)
+
+        return fig, axs

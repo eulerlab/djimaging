@@ -94,19 +94,30 @@ class StimulusTemplate(dj.Manual):
 
     def add_noise(self, stim_name: str = "noise", stim_family: str = 'noise',
                   framerate: float = 5., ntrigger_rep: int = 1500, isrepeated: bool = False,
-                  alias: str = None, pix_n_x: int = None, pix_n_y: int = None,
-                  pix_scale_x_um: float = None, pix_scale_y_um: float = None, stim_trace=None,
+                  alias: str = None, ntrigger_per_frame: int = 1, stim_trace=None,
+                  pix_n_x: int = None, pix_n_y: int = None, pix_scale_x_um: float = None, pix_scale_y_um: float = None,
+                  n_colors: int = None, locations_cats: list = None,
                   skip_duplicates: bool = False) -> None:
 
         if alias is None:
             alias = f"dn_noise_dn{pix_scale_x_um}m_noise{pix_scale_x_um}m"
 
         stim_dict = {
-            "pix_n_x": pix_n_x,
-            "pix_n_y": pix_n_y,
-            "pix_scale_x_um": pix_scale_x_um,
-            "pix_scale_y_um": pix_scale_y_um,
+            "ntrigger_per_frame": ntrigger_per_frame,
         }
+
+        if n_colors is not None:
+            stim_dict["n_colors"] = n_colors
+        if pix_n_x is not None:
+            stim_dict["pix_n_x"] = pix_n_x
+        if pix_n_y is not None:
+            stim_dict["pix_n_y"] = pix_n_y
+        if pix_scale_x_um is not None:
+            stim_dict["pix_scale_x_um"] = pix_scale_x_um
+        if pix_scale_y_um is not None:
+            stim_dict["pix_scale_y_um"] = pix_scale_y_um
+        if locations_cats is not None:
+            stim_dict["locations_cats"] = locations_cats
 
         self.add_stimulus(
             stim_name=stim_name,

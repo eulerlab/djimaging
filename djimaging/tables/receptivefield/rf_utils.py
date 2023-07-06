@@ -97,15 +97,23 @@ def predict_linear_rf_response(rf, stim_design_matrix, threshold=False, dtype=np
     return y_pred.astype(dtype)
 
 
-def prepare_data(stim, stimtime, trace, tracetime, fupsample_trace=None, fupsample_stim=None, fit_kind='trace',
+def prepare_data(stim, triggertimes, trace, tracetime, ntrigger_per_frame=1,
+                 fupsample_trace=None, fupsample_stim=None, fit_kind='trace',
                  lowpass_cutoff=0, ref_time='trace', pre_blur_sigma_s=0, post_blur_sigma_s=0, dt_rtol=0.1):
-    assert stimtime.ndim == 1, stimtime.shape
+    assert triggertimes.ndim == 1, triggertimes.shape
     assert trace.ndim == 1, trace.shape
     assert tracetime.ndim == 1, tracetime.shape
     assert trace.size == tracetime.size
 
+    if ntrigger_per_frame > 1:
+        stimtime = np.repeat(triggertimes, ntrigger_per_frame)
+        stimtime += np.tile(np.arange(ntrigger_per_frame) / ntrigger_per_frame, stim.shape[0] // ntrigger_per_frame)
+    else:
+        stimtime = triggertimes
+
     if stim.shape[0] < stimtime.size:
-        raise ValueError(f"More triggertimes than expected: stim-len {stim.shape[0]} != stimtime-len {stimtime.size}")
+        raise ValueError(
+            f"More triggertimes than expected: stim-len {stim.shape[0]} != stimtime-len {stimtime.size}")
     elif stim.shape[0] > stimtime.size:
         warnings.warn(f"Less triggertimes than expected: stim-len {stim.shape[0]} != stimtime-len {stimtime.size}")
         stim = stim[:stimtime.size].copy()
@@ -143,8 +151,6 @@ def prepare_data(stim, stimtime, trace, tracetime, fupsample_trace=None, fupsamp
 
     if 'bool' in str(stim.dtype) or set(np.unique(stim).astype(float)) == {0., 1.}:
         stim = 2 * stim.astype(np.int8) - 1
-    elif 'int' in str(stim.dtype):
-        stim = stim - np.mean(stim, dtype='int')
     else:
         stim = math_utils.normalize_zscore(stim)
 

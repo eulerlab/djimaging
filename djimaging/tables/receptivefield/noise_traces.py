@@ -86,8 +86,8 @@ class DNoiseTraceTemplate(dj.Computed):
             pass
 
     def make(self, key):
-        stim = (self.stimulus_table() & key).fetch1("stim_trace")
-        stimtime = (self.presentation_table() & key).fetch1('triggertimes')
+        stim, stim_dict = (self.stimulus_table() & key).fetch1("stim_trace", "stim_dict")
+        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
         trace, tracetime = (self.traces_table() & key).fetch1('preprocess_trace', 'preprocess_trace_times')
         fupsample_trace, fupsample_stim, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s, ref_time = (
                 self.params_table() & key).fetch1(
@@ -95,7 +95,8 @@ class DNoiseTraceTemplate(dj.Computed):
             "pre_blur_sigma_s", "post_blur_sigma_s", "ref_time")
 
         stim, trace, dt, t0, dt_rel_error = prepare_data(
-            trace=trace, tracetime=tracetime, stim=stim, stimtime=stimtime,
+            trace=trace, tracetime=tracetime, stim=stim, triggertimes=triggertimes,
+            ntrigger_per_frame=stim_dict.get('ntrigger_per_frame', 1),
             fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim, ref_time=ref_time,
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
             pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s)
@@ -128,7 +129,7 @@ class DNoiseTraceTemplate(dj.Computed):
         ax.plot(time, trace, label='output trace')
         ax.legend(loc='upper left')
         ax = ax.twinx()
-        ax.vlines(time[1:][np.any(np.diff(stim, axis=0) > 0, axis=(1, 2))], 0, 1,
+        ax.vlines(time[1:][np.any(np.diff(stim, axis=0) > 0, axis=tuple(np.arange(1, stim.ndim)))], 0, 1,
                   label='stim changes', alpha=0.1, color='k')
         ax.legend(loc='upper right')
         ax.set(xlabel='Time', title=fit_kind)
