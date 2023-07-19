@@ -398,7 +398,9 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         plt.tight_layout()
 
-    def plot_group_traces(self, threshold_confidence: float, key=None, celltypes=None, n_celltypes_max=32):
+    def plot_group_traces(self, threshold_confidence: float, key=None, celltypes=None, n_celltypes_max=32,
+                          plot_baden_data=True, xlim_chirp=None, xlim_bar=None,
+                          debug_shift_chirp=0, debug_shift_bar=0):
         key = get_primary_key(self.classifier_table, key)
 
         # Get new data
@@ -426,34 +428,128 @@ class CelltypeAssignmentTemplate(dj.Computed):
                                 sharex='col', sharey='col', squeeze=False,
                                 gridspec_kw=dict(width_ratios=[1, 0.6, 0.3, 0.3]))
 
-        import seaborn as sns
-        sns.despine(fig=fig)
+        bar_ds_pvalues_bins = np.linspace(np.min(bar_ds_pvalues), np.max(bar_ds_pvalues), 51)
+        roi_size_um2s_bins = np.linspace(np.min(roi_size_um2s), np.max(roi_size_um2s), 51)
+
+        if plot_baden_data:
+            baden_data_file = (self.classifier_training_data_table() & key).fetch1('baden_data_file')
+            b_celltypes, b_chirp_traces, b_chirp_qi, b_bar_traces, b_bar_qi, b_bar_dsi, b_bar_dp, b_soma_size_um2 = \
+                load_baden_data(baden_data_file)
+
+            for ax_row, celltype in zip(axs, celltypes):
+
+                if not np.any(data_celltypes == celltype):
+                    continue
+
+                ax = ax_row[0]
+                b_chirps = b_chirp_traces[b_celltypes == celltype]
+                b_mean_chirp = np.mean(b_chirps, axis=0)
+                ax.plot(b_chirps.T, lw=0.5, c='gray', alpha=0.5, zorder=-200)
+                ax.plot(b_mean_chirp, c='k', lw=2, alpha=0.5, zorder=1)
+
+                mean_chirp = np.roll(np.mean(preproc_chirps[data_celltypes == celltype], axis=0), debug_shift_chirp)
+                ax.set(title=f"cc={np.corrcoef(mean_chirp, b_mean_chirp)[0, 1]:.2f}", xlim=xlim_chirp)
+
+                ax = ax_row[1]
+                b_bars = b_bar_traces[b_celltypes == celltype]
+                b_mean_bar = np.mean(b_bars, axis=0)
+                ax.plot(b_bars.T, lw=0.5, c='gray', alpha=0.5, zorder=-200)
+                ax.plot(b_mean_bar, c='k', lw=2, alpha=0.5, zorder=1)
+
+                mean_bar = np.roll(np.mean(preproc_bars[data_celltypes == celltype], axis=0), debug_shift_bar)
+                ax.set(title=f"cc={np.corrcoef(mean_bar, b_mean_bar)[0, 1]:.2f}", xlim=xlim_bar)
+
+                ax = ax_row[2].twinx()
+                ax.hist(b_bar_dp[b_celltypes == celltype], bar_ds_pvalues_bins, color='gray', alpha=0.5)
+
+                ax = ax_row[3].twinx()
+                ax.hist(b_soma_size_um2[b_celltypes == celltype], bins=roi_size_um2s_bins, color='gray', alpha=0.5)
 
         for ax_row, celltype in zip(axs, celltypes):
-
             ax_row[0].set_ylabel(f"{celltype}")
 
             if not np.any(data_celltypes == celltype):
                 continue
 
             ax = ax_row[0]
-            ax.plot(preproc_chirps[data_celltypes == celltype].T, lw=0.5)
-            ax.plot(np.mean(preproc_chirps[data_celltypes == celltype], axis=0), c='k', lw=2)
+            ct_chirps = np.roll(preproc_chirps[data_celltypes == celltype], debug_shift_chirp, axis=1)
+            ax.plot(ct_chirps.T, lw=0.5, c='r', alpha=0.5, zorder=-100)
+            ax.plot(np.mean(ct_chirps, axis=0), c='darkred', lw=2, zorder=2)
 
             ax = ax_row[1]
-            ax.plot(preproc_bars[data_celltypes == celltype].T, lw=0.5)
-            ax.plot(np.mean(preproc_bars[data_celltypes == celltype], axis=0), c='k', lw=2)
+            ct_bars = np.roll(preproc_bars[data_celltypes == celltype], debug_shift_bar, axis=1)
+            ax.plot(ct_bars.T, lw=0.5, c='r', alpha=0.5, zorder=-100)
+            ax.plot(np.mean(ct_bars, axis=0), c='darkred', lw=2, zorder=2)
 
             ax = ax_row[2]
-            ax.hist(bar_ds_pvalues[data_celltypes == celltype],
-                    bins=np.linspace(np.min(bar_ds_pvalues), np.max(bar_ds_pvalues), 51))
+            ax.hist(bar_ds_pvalues[data_celltypes == celltype], bins=bar_ds_pvalues_bins, color='r', alpha=0.7)
             if celltype == celltypes[0]:
                 ax.set_title('bar_ds_pvalues')
 
             ax = ax_row[3]
-            ax.hist(roi_size_um2s[data_celltypes == celltype],
-                    bins=np.linspace(np.min(roi_size_um2s), np.max(roi_size_um2s), 51))
+            ax.hist(roi_size_um2s[data_celltypes == celltype], bins=roi_size_um2s_bins, color='r', alpha=0.7)
             if celltype == celltypes[0]:
                 ax.set_title('roi_size_um2s')
 
         plt.tight_layout()
+
+
+def load_baden_data(baden_data_file, merged_celltypes=True):
+    from scipy.io import loadmat
+    baden_data = loadmat(baden_data_file, struct_as_record=True, matlab_compatible=False,
+                         squeeze_me=True, simplify_cells=True)['data']
+    celltypes = baden_data['info']['final_idx']
+    roi_size_um2 = baden_data['info']['area2d']
+
+    chirp_traces = baden_data['chirp']['traces'].T
+    chirp_qi = baden_data['chirp']['qi']
+
+    bar_traces = baden_data['ds']['tc'].T
+    bar_qi = baden_data['ds']['qi']
+    bar_dsi = baden_data['ds']['dsi']
+    bar_dp = baden_data['ds']['dP']
+
+    if merged_celltypes:
+        celltypes = np.array([celltype2merged_celltype(celltype) for celltype in celltypes])
+
+    return celltypes, chirp_traces, chirp_qi, bar_traces, bar_qi, bar_dsi, bar_dp, roi_size_um2
+
+
+def celltype2merged_celltype(celltype):
+    _celltype2merged_celltype = {
+        1: 1,
+        2: 2,
+        3: 3,
+        4: 4, 5: 4,
+        6: 5, 7: 5, 8: 5,
+        9: 6,
+        10: 7,
+        11: 8, 12: 8,
+        13: 9,
+        14: 10,
+        15: 11, 16: 11,
+        17: 12, 18: 12,
+        19: 13,
+        20: 14,
+        21: 15,
+        22: 16,
+        23: 17, 24: 17,
+        25: 17,
+        26: 18, 27: 18,
+        28: 19,
+        29: 20,
+        30: 21,
+        31: 22, 32: 22,
+        33: 23,
+        34: 24,
+        35: 25,
+        36: 26,
+        37: 27,
+        38: 28, 39: 28,
+        40: 29,
+        41: 30,
+        42: 31, 43: 31, 44: 31, 45: 31, 46: 31,
+        47: 32, 48: 32, 49: 32,
+    }  # Add uncertain RGCs and ACs
+
+    return _celltype2merged_celltype.get(celltype, -1)
