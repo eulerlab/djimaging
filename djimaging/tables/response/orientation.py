@@ -341,6 +341,21 @@ class OsDsIndexesTemplate(dj.Computed):
             ax.set_xlim([-len(avg_sorted_resp) * 0.2, len(avg_sorted_resp) * 1.2])
         return None
 
+    def plot(self, restriction=None):
+        if restriction is None:
+            restriction = dict()
+
+        var_names = ['ds_index', 'ds_pvalue', 'os_index', 'os_pvalue', 'on_off', 'd_qi']
+        fig, axs = plt.subplots(1, len(var_names), figsize=(len(var_names) * 2, 2), squeeze=False)
+        axs = axs.flatten()
+        for ax, var_name in zip(axs, var_names):
+            dat = (self & restriction).fetch(var_name)
+            ax.hist(dat)
+            ax.set(title=var_name)
+        plt.tight_layout()
+        plt.show()
+        return fig, axs
+
 
 class MovingBarQITemplate(RepeatQITemplate):
     _stim_family = "movingbar"

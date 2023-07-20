@@ -31,6 +31,13 @@ class OpticDiskTemplate(dj.Computed):
         return definition
 
     @property
+    def key_source(self):
+        try:
+            return self.experiment_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
+    @property
     @abstractmethod
     def experiment_table(self):
         pass
@@ -110,12 +117,21 @@ class RelativeFieldLocationTemplate(dj.Computed):
         return definition
 
     @property
-    @abstractmethod
-    def opticdisk_table(self): pass
+    def key_source(self):
+        try:
+            return self.opticdisk_table.proj() * self.field_table.proj()
+        except (AttributeError, TypeError):
+            pass
 
     @property
     @abstractmethod
-    def field_table(self): pass
+    def opticdisk_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def field_table(self):
+        pass
 
     def make(self, key):
         od_key = key.copy()
@@ -162,12 +178,21 @@ class RetinalFieldLocationTemplate(dj.Computed):
         return definition
 
     @property
-    @abstractmethod
-    def relativefieldlocation_table(self): pass
+    def key_source(self):
+        try:
+            return self.relativefieldlocation_table.proj()
+        except (AttributeError, TypeError):
+            pass
 
     @property
     @abstractmethod
-    def expinfo_table(self): pass
+    def relativefieldlocation_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def expinfo_table(self):
+        pass
 
     def make(self, key):
         relx, rely = (self.relativefieldlocation_table() & key).fetch1('relx', 'rely')
@@ -210,6 +235,13 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
         nvd_t_side  : enum('nv', 'nc', 'nd', 'cv', 'cc', 'cd', 't')
         """
         return definition
+
+    @property
+    def key_source(self):
+        try:
+            return self.retinalfieldlocation_table.proj()
+        except (AttributeError, TypeError):
+            pass
 
     @property
     @abstractmethod
