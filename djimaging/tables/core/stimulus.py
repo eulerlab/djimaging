@@ -3,6 +3,43 @@ import warnings
 import datajoint as dj
 import numpy as np
 
+try:
+    from collections.abc import Iterable
+except ImportError:
+    from collections import Iterable
+
+
+def reformat_numerical_trial_info(trial_info):
+    """Change old list format to new list[dict] format"""
+    return [dict(name=trial_info_i, ntrigger=1) for i, trial_info_i in enumerate(trial_info)]
+
+
+def check_trial_info(trial_info, ntrigger_rep):
+    """Check if trial info is valid and change to new format if necessary"""
+    if not isinstance(trial_info, (list, np.ndarray)):
+        raise TypeError('trial_info must either be a list or an array')
+
+    if np.issubdtype(trial_info[0], np.number):
+        trial_info = reformat_numerical_trial_info(trial_info)
+
+    for trial_info_i in trial_info:
+        for k, v in trial_info_i.items():
+            assert k in ['name', 'ntrigger', 'ntrigger_split'], f'Unknown key in trial_info k={k}'
+
+            if k in ['ntrigger', 'ntrigger_split']:
+                assert int(v) == v, f'Value for k={k} but be an integer but is v={v}'
+
+    ntrigger_ti = sum([trial_info_i["ntrigger"] for trial_info_i in trial_info])
+    if not (ntrigger_ti == ntrigger_rep):
+        msg = f'Number of triggers in trial_info={ntrigger_ti} must match ntrigger_rep={ntrigger_rep}.'
+        if ntrigger_rep > 1:
+            raise ValueError(msg)
+        else:
+            # Raise only warnings for previous work-around solution
+            warnings.warn(msg)
+
+    return trial_info
+
 
 class StimulusTemplate(dj.Manual):
     database = ""
@@ -36,7 +73,7 @@ class StimulusTemplate(dj.Manual):
 
     def add_stimulus(self, stim_name: str, alias: str, stim_family: str = "", framerate: float = 0,
                      isrepeated: bool = 0, ntrigger_rep: int = 0, stim_path: str = "", commit_id: str = "",
-                     trial_info: object = None, stim_trace: np.ndarray = None, stim_dict: dict = None,
+                     trial_info: Iterable = None, stim_trace: np.ndarray = None, stim_dict: dict = None,
                      skip_duplicates: bool = False, unique_alias: bool = True) -> None:
         """
         Add stimulus to database
@@ -66,6 +103,10 @@ class StimulusTemplate(dj.Manual):
                 warnings.warn(f'Values for {missing_info} in `stim_dict` for stimulus `{stim_name}` are None. '
                               + 'This may cause problems downstream.')
 
+        if trial_info is not None:
+            # noinspection PyTypeChecker
+            check_trial_info(trial_info=trial_info, ntrigger_rep=ntrigger_rep)
+
         key = {
             "stim_name": stim_name,
             "alias": alias.lower(),
@@ -81,6 +122,17 @@ class StimulusTemplate(dj.Manual):
         }
 
         self.insert1(key, skip_duplicates=skip_duplicates)
+
+    def update_trial_info_format(self, restriction=None):
+        """Update all trial info formats to list[dict] format. Breaks compatability with old code!"""
+        if restriction is None:
+            restriction = dict()
+
+        for key in (self & restriction).proj().fetch(as_dict=True):
+            trial_info, ntrigger_rep = (self & key).fetch1('trial_info', 'ntrigger_rep')
+            if trial_info is not None:
+                trial_info = check_trial_info(trial_info=trial_info, ntrigger_rep=ntrigger_rep)
+                self.update1(dict(**key, trial_info=trial_info))
 
     def add_nostim(self, alias="nostim_none", skip_duplicates=False):
         """Add none stimulus"""

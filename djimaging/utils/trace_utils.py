@@ -64,6 +64,39 @@ def find_closest(target: float, data: np.ndarray, atol=np.inf, as_index=False):
     """Find the closest point in data"""
     closest_index = np.argmin(np.abs(target - data))
     closest = data[closest_index]
+
+    eps = np.abs(target - closest)
+    if eps > atol:
+        raise ValueError(f'Did not find any point being close enough {eps} vs. atol={atol}')
+    if as_index:
+        return closest_index
+    else:
+        return closest
+
+
+def find_closest_after(target: float, data: np.ndarray, atol=np.inf, as_index=False):
+    """Find the closest point in sorted data that is larger"""
+    data_larger = data[data >= target]
+    closest_index_larger = np.argmin(data_larger - target)
+    closest = data_larger[closest_index_larger]
+    closest_index = np.argmax(data == closest)
+
+    eps = np.abs(target - closest)
+    if eps > atol:
+        raise ValueError(f'Did not find any point being close enough {eps} vs. atol={atol}')
+    if as_index:
+        return closest_index
+    else:
+        return closest
+
+
+def find_closest_before(target: float, data: np.ndarray, atol=np.inf, as_index=False):
+    """Find the closest point in sorted data that is lower"""
+    data_lower = data[data <= target]
+    closest_index_larger = np.argmin(target - data_lower)
+    closest = data_lower[closest_index_larger]
+    closest_index = np.argmax(data == closest)
+
     eps = np.abs(target - closest)
     if eps > atol:
         raise ValueError(f'Did not find any point being close enough {eps} vs. atol={atol}')

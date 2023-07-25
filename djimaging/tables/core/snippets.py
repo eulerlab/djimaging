@@ -5,9 +5,10 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.tables.core.stimulus import reformat_numerical_trial_info
 from djimaging.utils import plot_utils
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.scanm_utils import split_trace_by_reps
+from djimaging.utils.scanm_utils import split_trace_by_reps, split_trace_by_group_reps
 
 
 def get_aligned_snippets_times(snippets_times, raise_error=True, tol=1e-4):
@@ -80,7 +81,7 @@ class SnippetsTemplate(dj.Computed):
             snippets=snippets,
             snippets_times=snippets_times,
             triggertimes_snippets=triggertimes_snippets,
-            droppedlastrep_flag=droppedlastrep_flag,
+            droppedlastrep_flag=int(droppedlastrep_flag),
         ))
 
     def plot1(self, key=None, xlim=None):
@@ -97,3 +98,104 @@ class SnippetsTemplate(dj.Computed):
         aligned_times = get_aligned_snippets_times(snippets_times=snippets_times)
         plot_utils.plot_traces(
             ax=axs[1], time=aligned_times, traces=snippets.T)
+
+
+class GroupSnippetsTemplate(dj.Computed):
+    database = ""
+
+    @property
+    def definition(self):
+        definition = """
+        # Snippets created from slicing traces using the triggertimes. 
+        -> self.preprocesstraces_table
+        ---
+        snippets               :longblob          # dict of array of snippets (group: time [x repetitions])
+        snippets_times         :longblob          # dict of array of snippet times (group: time [x repetitions])
+        triggertimes_snippets  :longblob          # dict of array of triggertimes (group: time [x repetitions])
+        droppedlastrep_flag    :tinyint unsigned  # Was the last repetition incomplete and therefore dropped?
+        """
+        return definition
+
+    @property
+    @abstractmethod
+    def preprocesstraces_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def traces_table(self):
+        pass
+
+    @property
+    def key_source(self):
+        try:
+            return (self.preprocesstraces_table() & (self.stimulus_table() & "trial_info!='None'")).proj()
+        except (AttributeError, TypeError):
+            pass
+
+    def make(self, key):
+        trial_info = (self.stimulus_table() & key).fetch1('trial_info')
+        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        trace_times, traces = (self.preprocesstraces_table() & key).fetch1('preprocess_trace_times', 'preprocess_trace')
+
+        if not isinstance(trial_info[0], dict):
+            trial_info = reformat_numerical_trial_info(trial_info)
+
+        snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_group_reps(
+            traces, trace_times, triggertimes, trial_info=trial_info, allow_drop_last=True,
+            stack_kind='pad')
+
+        self.insert1(dict(
+            **key,
+            snippets=snippets,
+            snippets_times=snippets_times,
+            triggertimes_snippets=triggertimes_snippets,
+            droppedlastrep_flag=droppedlastrep_flag,
+        ))
+
+    def plot1(self, key=None, xlim=None):
+        key = get_primary_key(table=self, key=key)
+        snippets, snippets_times, triggertimes_snippets = (self & key).fetch1(
+            "snippets", "snippets_times", "triggertimes_snippets")
+
+        import matplotlib as mpl
+
+        names = list(snippets.keys())
+
+        colors = mpl.colormaps['jet'](np.linspace(0, 1, len(names)))
+        name2color = {name: colors[i] for i, name in enumerate(names)}
+
+        fig, axs = plt.subplot_mosaic([["all"]] + [[name] for name in names], figsize=(8, 2 * (len(names) + 1)))
+
+        tt_min = np.min([np.nanmin(snippets[name]) for name in names])
+        tt_max = np.max([np.nanmax(snippets[name]) for name in names])
+
+        for i, name in enumerate(names):
+            axs['all'].vlines(triggertimes_snippets[name], tt_min, tt_max, color='k', zorder=-100, lw=0.5, alpha=0.5,
+                              label='trigger' if name == names[0] else '_')
+            axs['all'].plot(snippets_times[name], snippets[name], color=name2color[name],
+                            label=[name] + ['_'] * (snippets[name].shape[1] - 1), alpha=0.8)
+
+            axs[name].set(title='trace', xlabel='absolute time')
+            axs[name].plot(snippets_times[name] - triggertimes_snippets[name][0], snippets[name], lw=1)
+            axs[name].set(title=name, xlabel='relative time')
+            axs[name].title.set_color(name2color[name])
+            axs[name].vlines(triggertimes_snippets[name] - triggertimes_snippets[name][0],
+                             tt_min, tt_max, color='k', zorder=-100, lw=0.5, alpha=0.5,
+                             label='trigger' if name == names[0] else '_')
+
+        axs['all'].set(xlim=xlim)
+        plt.tight_layout()
+        axs['all'].legend(bbox_to_anchor=(1, 1), loc='upper left')
+
+        return fig, axs

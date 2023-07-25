@@ -102,12 +102,12 @@ def plot_traces(time, traces, ax=None, title=None):
         ax.plot(time, trace, alpha=np.maximum(1. / len(traces), 0.3))
 
 
-def plot_trace_and_trigger(time, trace, triggertimes, trace_norm=None, title=None, ax=None):
+def plot_trace_and_trigger(time, trace, triggertimes, trace_norm=None, title=None, ax=None, label=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(10, 2))
 
     set_long_title(ax, title=title)
-    ax.plot(time, trace)
+    ax.plot(time, trace, label=label)
     ax.set(xlabel='time', ylabel='trace')
     ax.vlines(triggertimes, np.min(trace), np.max(trace), color='r', label='trigger', zorder=-2)
     ax.legend(loc='upper right')
