@@ -19,7 +19,7 @@ def check_trial_info(trial_info, ntrigger_rep):
     if not isinstance(trial_info, (list, np.ndarray)):
         raise TypeError('trial_info must either be a list or an array')
 
-    if np.issubdtype(trial_info[0], np.number):
+    if not isinstance(trial_info[0], dict):
         trial_info = reformat_numerical_trial_info(trial_info)
 
     for trial_info_i in trial_info:
