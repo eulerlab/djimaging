@@ -1,5 +1,8 @@
 import numpy as np
+from matplotlib import pyplot as plt
 from skimage.transform import rotate, resize
+
+from djimaging.utils.math_utils import normalize_zero_one
 
 
 def resize_image(image, output_shape: tuple, order: int = 0):
@@ -32,3 +35,16 @@ def rescale_image(image, scale, order=0):
     output_shape = np.ceil(np.asarray(image.shape) * scale).astype('int')
     resized_image = resize_image(image, output_shape=output_shape, order=order)
     return resized_image
+
+
+def color_image(data_img, cmap='viridis', gamma=1.0, alpha=255):
+    assert data_img.ndim == 2
+    assert isinstance(alpha, int)
+
+    color_img = (plt.get_cmap(cmap)(normalize_zero_one(data_img) ** gamma) * 255).astype(int)
+    color_img[:, :, -1] = alpha
+    return color_img
+
+
+def upscale_image(data_img, upscale):
+    return np.repeat(np.repeat(data_img, upscale, axis=0), upscale, axis=1)

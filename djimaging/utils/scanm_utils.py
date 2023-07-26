@@ -278,6 +278,52 @@ def load_stacks_from_h5(filepath, ch_names=('wDataCh0', 'wDataCh1')) -> (dict, d
     return ch_stacks, wparams
 
 
+def load_stacks_from_smp(filepath, ch_names=('wDataCh0', 'wDataCh1')):
+    """Load stacks channel 0 and 1 from raw file"""
+    try:
+        from scanmsupport.scanm.scanm_smp import SMP
+    except ImportError as e:
+        raise ImportError('Failed to load custom package`scanmsupport`: Cannot load raw files.')
+
+    scmf = SMP()
+
+    with CapturePrints():
+        scmf.loadSMH(filepath, verbose=False)
+        scmf.loadSMP(filepath)
+
+    wparams = dict()
+    for k, v in scmf._kvPairDict.items():
+        wparams[k.lower()] = v[2]
+
+    wparams['user_dxpix'] = scmf.dxFr_pix
+    wparams['user_dypix'] = scmf.dyFr_pix
+    wparams['user_dzpix'] = scmf.dzFr_pix or 0
+    wparams['user_npixretrace'] = scmf.dxRetrace_pix
+    wparams['user_nxpixlineoffs'] = scmf.dxOffs_pix
+    wparams['user_scantype'] = scmf.scanType
+
+    # Handle different naming conventions
+    renaming_dict = {
+        "realpixelduration_µs": 'realpixdur',
+    }
+
+    for k, v in renaming_dict.items():
+        if k in wparams.keys():
+            wparams[v] = wparams.pop(k)
+
+    ch_stacks = dict()
+    ch_name_main = ch_names[0]
+    ch_stacks[ch_name_main] = scmf.getData(ch=int(ch_name_main[-1]), crop=True).T
+    for ch_name in ch_names[1:]:
+        try:
+            ch_stacks[ch_name] = scmf.getData(ch=int(ch_name[-1]), crop=True).T
+        except IndexError:
+            warnings.warn(f'Failed to load channel={ch_name} for file={filepath}. Set values to zero.')
+            ch_stacks[ch_name] = np.zeros_like(ch_stacks[ch_name_main])
+
+    return ch_stacks, wparams
+
+
 def check_dims_ch_stack_wparams(ch_stack, wparams):
     """Check if the dimensions of a stack match what is expected from wparams"""
     nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
@@ -290,32 +336,8 @@ def check_dims_ch_stack_wparams(ch_stack, wparams):
 
 def load_ch0_ch1_stacks_from_smp(filepath):
     """Load high resolution stack channel 0 and 1 from raw file"""
-    try:
-        from scanmsupport.scanm.scanm_smp import SMP
-    except ImportError:
-        print('Failed to load `scanmsupport`: Cannot load raw files.')
-        return None, None, None
-
-    scmf = SMP()
-
-    with CapturePrints():
-        scmf.loadSMH(filepath, verbose=False)
-        scmf.loadSMP(filepath)
-
-    ch0_stack = scmf.getData(ch=0, crop=True).T
-    ch1_stack = scmf.getData(ch=1, crop=True).T
-
-    wparams = dict()
-    for k, v in scmf._kvPairDict.items():
-        wparams[k.lower()] = v[2]
-
-    wparams['user_dxpix'] = scmf.dxFr_pix
-    wparams['user_dypix'] = scmf.dyFr_pix
-    wparams['user_dzpix'] = scmf.dzFr_pix or 0
-    wparams['user_npixretrace'] = scmf.dxRetrace_pix
-    wparams['user_nxpixlineoffs'] = scmf.dxOffs_pix
-
-    return ch0_stack, ch1_stack, wparams
+    ch_stacks, wparams = load_stacks_from_smp(filepath, ch_names=('wDataCh0', 'wDataCh1'))
+    return ch_stacks['wDataCh0'], ch_stacks['wDataCh1'], wparams
 
 
 def load_triggers_from_h5(filepath):

@@ -1,11 +1,17 @@
 import os
+from pathlib import Path
 
 import numpy as np
 
 
-def get_filename_info(filename, datatype_loc, animal_loc, region_loc, field_loc, stimulus_loc, condition_loc):
+def get_filename_info(filename, datatype_loc, animal_loc, region_loc, field_loc, stimulus_loc, condition_loc,
+                      from_raw_data=False):
     """Extract information from filename"""
-    file_info = filename.replace('.h5', '').split('_')
+    file_info = str(Path(filename).with_suffix('')).split('_')
+
+    if from_raw_data:
+        file_info = ['SMP'] + file_info
+
     datatype = file_info[datatype_loc] if len(file_info) > datatype_loc else None
     animal = file_info[animal_loc] if len(file_info) > animal_loc else None
     region = file_info[region_loc] if len(file_info) > region_loc else None

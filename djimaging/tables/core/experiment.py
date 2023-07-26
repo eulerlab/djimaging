@@ -3,6 +3,7 @@ import warnings
 from abc import abstractmethod
 from copy import deepcopy
 from datetime import datetime
+from typing import Optional
 
 import datajoint as dj
 
@@ -44,11 +45,13 @@ class ExperimentTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 1, suppress_errors: bool = False) -> None:
+    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 1, suppress_errors: bool = False,
+                          restr_headers: Optional[list] = None) -> None:
         """Scan filesystem for new experiments and add them to the database.
         :param restrictions: Restriction to users table, e.g. to scan only for specific user(s)
         :param verboselvl: Print (0) no / (1) only new data / (2) all data information
         :param suppress_errors: Stop on errors or only print?
+        :param restr_headers: List of headers to be included
         """
 
         if restrictions is None:
@@ -64,14 +67,19 @@ class ExperimentTemplate(dj.Computed):
 
             self.add_experiments(
                 key=key, data_dir=data_dir, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
-                only_new=True, restrictions=restrictions, verboselvl=verboselvl, suppress_errors=suppress_errors)
+                only_new=True, restrictions=restrictions, restr_headers=restr_headers,
+                verboselvl=verboselvl, suppress_errors=suppress_errors)
 
     def add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir,
-                        only_new, restrictions, verboselvl, suppress_errors):
+                        only_new, restrictions, restr_headers=None, verboselvl=0, suppress_errors=False):
 
-        os_walk_output = find_folders_with_file_of_type(data_dir)
+        header_paths = find_folders_with_file_of_type(data_dir)
 
-        for header_path in os_walk_output:
+        for header_path in header_paths:
+            if restr_headers is not None and header_path not in restr_headers:
+                if verboselvl > 1:
+                    print('\t\t\tSkipping:', header_path)
+                continue
             try:
                 self.add_experiment(
                     key=key, header_path=header_path, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
@@ -119,22 +127,12 @@ class ExperimentTemplate(dj.Computed):
                     print('\t\tAlready present:', primary_key)
                 return
 
-        for k, v in restrictions.items():
-            if k not in primary_key:
-                warnings.warn(f'Restriction not in primary key, ignoring {k}')
-                continue
-
-            if primary_key[k] != v:
-                if verboselvl > 0:
-                    warnings.warn(f'Skipping {primary_key} because of restriction: {k}={v}.')
-                return
-
         pre_data_path = header_path + "/" + pre_data_dir + "/"
         assert os.path.isdir(pre_data_path), f"{pre_data_dir} not found {header_path}"
 
         raw_data_path = header_path + "/" + raw_data_dir + "/"
         if not os.path.isdir(raw_data_path):
-            print(f"WARNING: Folder {raw_data_dir} not found in {header_path}")
+            warnings.warn(f"Folder {raw_data_dir} not found in {header_path}")
 
         exp_key = deepcopy(primary_key)
         exp_key["header_path"] = header_path + "/"
@@ -142,7 +140,7 @@ class ExperimentTemplate(dj.Computed):
 
         # Populate ExpInfo table for this experiment
         expinfo_key = deepcopy(primary_key)
-        expinfo_key["eye"] = header_dict["eye"]
+        expinfo_key["eye"] = header_dict["eye"] if header_dict["eye"] != "" else "unknown"
         expinfo_key["projname"] = header_dict["projname"]
         expinfo_key["setupid"] = header_dict["setupid"]
         expinfo_key["prep"] = header_dict["prep"]
