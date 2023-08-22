@@ -63,19 +63,15 @@ class TracesTemplate(dj.Computed):
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
         roi_ids = (self.roi_table() & key).fetch("roi_id")
 
+        if not self._ignore_incompatible_roi_masks:
+            if (self.presentation_table.RoiMask & key).fetch1('pres_and_field_mask') == 'different':
+                raise ValueError(f'Tried to populate traces with inconsistent roi mask for key=\n{key}\n' +
+                                 'Compare ROI mask of Field and Presentation.' +
+                                 'To ignore this error set self._ignore_incompatible_roi_masks=True')
+
         if compute_from_stack:
             data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
             roi_mask = (self.presentation_table.RoiMask() & key).fetch1("roi_mask")
-
-            if not self._ignore_incompatible_roi_masks:
-                roi_mask_roi_ids = np.abs(scanm_utils.extract_roi_idxs(roi_mask)).astype(int)
-                if not np.all(np.sort(roi_ids) == np.sort(roi_mask_roi_ids)):
-                    # TODO: Allow single ROIs to drop. Rather base on similarity, e.g. by correlating pixels
-                    raise ValueError(f"""
-                    ROI mask of presentation is inconsistent with ROI ids from roi_table for key: \n{key}
-                    Do your roi_ids depend on Field instead of Presentation?
-                    If so, make sure that the ROI masks are compatible, i.e. they should have the same number of ROIs.
-                    To ignore this error, set Traces.__ignore_incompatible_roi_masks=True.""")
 
             roi2trace = self._roi2trace_from_stack(
                 filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
@@ -83,10 +79,12 @@ class TracesTemplate(dj.Computed):
         else:
             roi2trace = self._roi2trace_from_h5_file(filepath, roi_ids)
 
-        for roi_id, roi_data in roi2trace.items():
+        for roi_id in roi_ids:
             if not include_artifacts:
                 if (self.roi_table() & key & dict(roi_id=roi_id)).fetch1("artifact_flag") == 1:
                     continue
+
+            roi_data = roi2trace[roi_id]
 
             trace_key = key.copy()
             trace_key['roi_id'] = roi_id
