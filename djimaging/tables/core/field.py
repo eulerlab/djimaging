@@ -91,7 +91,7 @@ class FieldTemplate(dj.Computed):
         for key in (self.key_source & restrictions):
             self.add_experiment_fields(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def compute_field2info(self, key, verboselvl=0):
+    def compute_field_dicts(self, key, verboselvl=0):
         pre_data_path = os.path.join((self.experiment_table() & key).fetch1('header_path'),
                                      (self.userinfo_table() & key).fetch1("pre_data_dir"))
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
@@ -102,33 +102,45 @@ class FieldTemplate(dj.Computed):
         user_dict = (self.userinfo_table() & key).fetch1()
 
         # Collect all files belonging to this experiment
-        field2info = scan_fields_and_files(pre_data_path, user_dict=user_dict, verbose=verboselvl > 0)
+        field_dicts = scan_fields_and_files(pre_data_path, user_dict=user_dict, verbose=verboselvl > 0)
 
         # Remove opticdisk and outline recordings
         remove_fields = []
-        for field in field2info.keys():
+        for region, field in field_dicts.keys():
             if field.lower() in user_dict['opticdisk_alias'].split('_') + user_dict['outline_alias'].split('_'):
-                remove_fields.append(field)
-        for remove_field in remove_fields:
-            field2info.pop(remove_field)
+                remove_fields.append((region, field))
 
-        return field2info
+        for remove_field in remove_fields:
+            field_dicts.pop(remove_field)
+
+        fields, field_counts = np.unique([field for region, field in field_dicts.keys()], return_counts=True)
+
+        for m_field in fields[field_counts > 1]:
+            regions = [region for region, field in field_dicts.keys() if m_field == field]
+
+            raise ValueError(f"Field `{m_field}` occurs multiple times in {pre_data_path}\n" +
+                             f"You have the same field name for different regions={regions}\n"
+                             "This is currently not supported." +
+                             "Please rename the fields to unique names per experiment.")
+
+        return field_dicts
 
     def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
-        field2info = self.compute_field2info(key=key, verboselvl=verboselvl)
+        field_dicts = self.compute_field_dicts(key=key, verboselvl=verboselvl)
         # Go through remaining fields and add them
-        for field, info in field2info.items():
+        for (region, field), info in field_dicts.items():
+            files = info['files']
             exists = len((self & key & dict(field=field)).fetch()) > 0
             if only_new and exists:
                 if verboselvl > 1:
-                    print(f"\tSkipping field `{field}` with files: {info['files']}")
+                    print(f"\tSkipping field `{field}` with files: {files}")
                 continue
 
             if verboselvl > 0:
-                print(f"\tAdding field: `{field}` with files: {info['files']}")
+                print(f"\tAdding field: `{field}` with files: {files}")
 
             try:
-                self.add_field(key=key, field=field, files=info['files'], verboselvl=verboselvl)
+                self.add_field(key=key, field=field, files=files, verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
                     print("Suppressed Error:", e, '\n\tfor key:', key)
@@ -241,18 +253,18 @@ class FieldWithConditionTemplate(FieldTemplate):
         return field_key, roimask_key, avg_keys
 
     def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
-        field2info = self.compute_field2info(key=key, verboselvl=verboselvl)
+        field_dicts = self.compute_field_dicts(key=key, verboselvl=verboselvl)
 
         condition_loc = (self.userinfo_table() & key).fetch1('condition_loc')
-        for field, info in field2info.items():
+        for (region, field), info in field_dicts.items():
             conditions = []
             for data_file in info['files']:
                 condition = get_condition(data_file, loc=condition_loc)
                 conditions.append(condition)
-            field2info[field]['conditions'] = conditions
+            field_dicts[field]['conditions'] = conditions
 
         # Go through remaining fields and add them
-        for field, info in field2info.items():
+        for (region, field), info in field_dicts.items():
             files = np.asarray(info['files'])
             conditions = np.asarray(info['conditions'])
 
@@ -276,33 +288,33 @@ class FieldWithConditionTemplate(FieldTemplate):
                         raise e
 
 
-def scan_fields_and_files(pre_data_path: str, user_dict: dict, verbose: bool = False) -> dict:
+def scan_fields_and_files(folder: str, user_dict: dict, verbose: bool = False, suffix='.h5') -> dict:
     """Return a dictionary that maps fields to their respective files"""
 
     loc_mapper = {k: v for k, v in user_dict.items() if k.endswith('loc')}
 
-    field2info = dict()
+    file_dicts = dict()
 
-    for file in sorted(os.listdir(pre_data_path)):
-        if file.startswith('.') or not file.endswith('.h5'):
+    files = sorted(os.listdir(folder))
+
+    for file in files:
+        if file.startswith('.') or not file.endswith(suffix):
             continue
 
-        datatype, animal, region, field, stimulus, condition = get_filename_info(file, **loc_mapper)
+        datatype, animal, region, field, stimulus, condition = get_filename_info(
+            file if suffix == '.h5' else 'SMP_' + file, **loc_mapper)  # locs refer to h5 files, which start with SMP
 
         if field is None:
             if verbose:
                 print(f"\tSkipping file with unrecognized field: {file}")
             continue
 
-        # Create new or check for inconsistencies
-        if field not in field2info:
-            field2info[field] = dict(files=[], region=region)
-        else:
-            assert field2info[field]['region'] == region, f"{field2info[field]['region']} vs. {region}"
+        # Add file to list
+        if (region, field) not in file_dicts:
+            file_dicts[(region, field)] = dict(files=[])
+        file_dicts[(region, field)]['files'].append(file)
 
-        # Add file
-        field2info[field]['files'].append(file)
-    return field2info
+    return file_dicts
 
 
 def load_field_roi_mask(pre_data_path, files, mask_alias='', highres_alias=''):
@@ -329,8 +341,7 @@ def load_field_roi_mask(pre_data_path, files, mask_alias='', highres_alias=''):
         raise ValueError(f'No ROI mask found in any file in {pre_data_path}: {files}')
 
 
-def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl=0) \
-        -> (dict, dict, list):
+def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl=0):
     try:
         roi_mask, file = load_field_roi_mask(
             pre_data_path, files, mask_alias=mask_alias, highres_alias=highres_alias)

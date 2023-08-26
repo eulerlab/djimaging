@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 
 from djimaging.tables.core.field import scan_fields_and_files
 from djimaging.utils.data_utils import load_h5_table
-from djimaging.utils.scanm_utils import get_retinal_position
+from djimaging.utils.scanm_utils import get_retinal_position, load_wparams_from_smp
 
 
 class OpticDiskTemplate(dj.Computed):
@@ -50,41 +50,33 @@ class OpticDiskTemplate(dj.Computed):
     def make(self, key):
         user_dict = (self.userinfo_table() & key).fetch1()
 
-        pre_data_path = os.path.join(
-            (self.experiment_table() & key).fetch1('header_path'),
-            (self.userinfo_table() & key).fetch1("pre_data_dir"))
-        assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
+        fromfile = None
 
-        field2info = scan_fields_and_files(pre_data_path, user_dict=user_dict)
+        if fromfile is None:
+            pre_data_path = os.path.join(
+                (self.experiment_table() & key).fetch1('header_path'),
+                (self.userinfo_table() & key).fetch1("pre_data_dir"))
 
-        # Get correct
-        for field, info in field2info.items():
-            if field.lower() in user_dict['opticdisk_alias'].split('_'):
-                files = info['files']
-                assert len(files) == 1, files
-                file = files[0]
-                break
-        else:
-            file = None
+            if os.path.exists(pre_data_path):
+                odx, ody, odz, fromfile = load_od_pos_from_h5_file(pre_data_path, user_dict)
+            else:
+                warnings.warn(f"pre_data_path does not exist: {pre_data_path}")
 
-        # Try to get OD information, either from file or from header
-        if file is not None:
+        if fromfile is None:
+            raw_data_path = os.path.join(
+                (self.experiment_table() & key).fetch1('header_path'),
+                (self.userinfo_table() & key).fetch1("raw_data_dir"))
 
-            filepath = os.path.join(pre_data_path, file)
-            wparamsnum = load_h5_table('wParamsNum', filename=filepath)
+            if os.path.exists(raw_data_path):
+                odx, ody, odz, fromfile = load_od_pos_from_smp_file(raw_data_path, user_dict)
+            else:
+                warnings.warn(f"raw_data_path does not exist: {raw_data_path}")
 
-            # Refers to center of fields
-            odx = wparamsnum['XCoord_um']
-            ody = wparamsnum['YCoord_um']
-            odz = wparamsnum['ZCoord_um']
-
-            fromfile = filepath
-
-        elif (self.experiment_table().ExpInfo() & key).fetch1("od_ini_flag") == 1:
+        if (fromfile is None) and (self.experiment_table().ExpInfo() & key).fetch1("od_ini_flag") == 1:
             odx, ody, odz = (self.experiment_table().ExpInfo() & key).fetch1("odx", "ody", "odz")
             fromfile = os.path.join(*(self.experiment_table() & key).fetch1("header_path", "header_name"))
 
-        else:
+        if fromfile is None:
             warnings.warn(f'No optic disk information found for {key}')
             return
 
@@ -95,6 +87,57 @@ class OpticDiskTemplate(dj.Computed):
         loc_key["od_fromfile"] = fromfile
 
         self.insert1(loc_key)
+
+
+def extract_od_file(field_dicts, user_dict):
+    # Get file with OD information
+    for (region, field), info in field_dicts.items():
+        if field.lower() in user_dict['opticdisk_alias'].split('_'):
+            files = info['files']
+            if len(files) > 1:
+                if input(f'More than one file for optic disk found for {region}, {field}: {files}\n'
+                         + f'Accept first file? [y/n]') != 'y':
+                    raise ValueError('More than one file for optic disk found')
+
+            file = files[0]
+            break
+    else:
+        file = None
+
+    return file
+
+
+def load_od_pos_from_h5_file(pre_data_path, user_dict):
+    field_dicts = scan_fields_and_files(pre_data_path, user_dict=user_dict, suffix='.h5')
+    file = extract_od_file(field_dicts, user_dict)
+
+    # Try to get OD information, either from file or from header
+    if file is not None:
+        fromfile = os.path.join(pre_data_path, file)
+        wparamsnum = load_h5_table('wParamsNum', filename=fromfile)
+
+        # Refers to center of fields
+        odx = wparamsnum['XCoord_um']
+        ody = wparamsnum['YCoord_um']
+        odz = wparamsnum['ZCoord_um']
+
+        return odx, ody, odz, fromfile
+    else:
+        return None, None, None, None
+
+
+def load_od_pos_from_smp_file(raw_data_path, user_dict):
+    field_dicts = scan_fields_and_files(raw_data_path, user_dict=user_dict, suffix='.smp')
+    file = extract_od_file(field_dicts, user_dict)
+
+    # Try to get OD information, either from file or from header
+    if file is not None:
+        fromfile = os.path.join(raw_data_path, file)
+        wparams = load_wparams_from_smp(fromfile, return_file=False)
+        odx, ody, odz = wparams['xcoord_um'], wparams['ycoord_um'], wparams['zcoord_um']
+        return odx, ody, odz, fromfile
+    else:
+        return None, None, None, None
 
 
 class RelativeFieldLocationTemplate(dj.Computed):
