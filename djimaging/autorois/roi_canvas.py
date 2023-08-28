@@ -1,4 +1,3 @@
-import logging
 import os.path
 import pickle
 import warnings
@@ -37,6 +36,7 @@ class RoiCanvas:
             upscale: int = 5,
             autorois_models: Optional[Dict] = None,
             output_files=None,
+            pixel_size_um=(1., 1.),
     ):
         """ROI canvas to draw ROIs"""
 
@@ -69,6 +69,7 @@ class RoiCanvas:
         self.upscale = upscale
         self.npx = self.nx * self.upscale
         self.npy = self.ny * self.upscale
+        self.pixel_size_um = pixel_size_um
 
         if autorois_models is not None:
             self.autorois_models = autorois_models
@@ -81,13 +82,13 @@ class RoiCanvas:
         self.colors = colors
 
         # Arrays
-        self.bg_img = np.zeros((self.ny, self.nx, 4), dtype=int)
+        self.bg_img = np.zeros((self.nx, self.ny, 4), dtype=int)
 
-        self.current_mask = np.zeros((self.ny, self.nx), dtype=bool)
-        self.current_mask_img = np.zeros((self.ny, self.nx, 4), dtype=int)
+        self.current_mask = np.zeros((self.nx, self.ny), dtype=bool)
+        self.current_mask_img = np.zeros((self.nx, self.ny, 4), dtype=int)
 
-        self.roi_masks = np.zeros((self.ny, self.nx), dtype=int)
-        self.roi_mask_img = np.zeros((self.ny, self.nx, 4), dtype=int)
+        self.roi_masks = np.zeros((self.nx, self.ny), dtype=int)
+        self.roi_mask_img = np.zeros((self.nx, self.ny, 4), dtype=int)
 
         # Selection
         self._selected_stim_idx = 0
@@ -128,7 +129,7 @@ class RoiCanvas:
             'ch0_std': mask_utils.shift_array(np.std(self.ch0_stacks[self._selected_stim_idx], axis=2), shift),
             'ch1_mean': mask_utils.shift_array(np.mean(self.ch1_stacks[self._selected_stim_idx], axis=2), shift),
             'ch1_std': mask_utils.shift_array(np.std(self.ch1_stacks[self._selected_stim_idx], axis=2), shift),
-            'none': np.full((self.ny, self.nx), 255)
+            'none': np.full((self.nx, self.ny), 255)
         }
 
         return backgrounds
@@ -151,7 +152,7 @@ class RoiCanvas:
         for roi_idx in np.unique(roi_mask[roi_mask > 0]):
             self._selected_roi = roi_idx
             self.reset_current_mask()
-            self.add_to_current_mask(roi_mask == roi_idx)
+            self.add_to_current_mask(np.asarray(roi_mask == roi_idx))
             self.add_current_mask_to_roi_masks()
         self.roi_masks = mask_utils.relabel_mask(self.roi_masks, connectivity=2)
 
@@ -166,7 +167,7 @@ class RoiCanvas:
 
     def _get_roi_rgb255(self, roi):
         """Get color for ROI"""
-        return (255 * np.array(hex2color(self.colors[roi]))).astype(int)
+        return (255 * np.array(hex2color(self.colors[roi % len(self.colors)]))).astype(int)
 
     def _get_roi_alpha255(self, roi):
         """Get alpha for ROI"""
@@ -285,10 +286,12 @@ class InteractiveRoiCanvas(RoiCanvas):
             canvas_width=50,
             autorois_models: Optional[Dict] = None,
             output_files=None,
+            pixel_size_um=(1., 1.),
     ):
         super().__init__(ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, stim_names=stim_names, n_artifact=n_artifact,
                          initial_roi_mask=initial_roi_mask, shifts=shifts, main_stim_idx=main_stim_idx,
-                         upscale=upscale, autorois_models=autorois_models, output_files=output_files)
+                         upscale=upscale, autorois_models=autorois_models,
+                         output_files=output_files, pixel_size_um=pixel_size_um)
 
         # Create menu elements
         self.widget_progress = self.create_widget_progress()
@@ -329,13 +332,13 @@ class InteractiveRoiCanvas(RoiCanvas):
         # ToDo: Add AutoROIs to keep existing ROI masks.
 
         # Create canvas
-        self.m = MultiCanvas(n_canvases=4, width=self.npx, height=self.npy)
+        self.m = MultiCanvas(n_canvases=4, width=self.npy, height=self.npx)
         self.m.layout.width = f'{canvas_width}%'
         self.m.layout.height = 'auto'
         self.m.sync_image_data = True
 
         self.canvas_k = self.m[0]
-        self.canvas_k.fill_rect(x=0, y=0, width=self.npx, height=self.npy)
+        self.canvas_k.fill_rect(x=0, y=0, width=self.npy, height=self.npx)
         self.canvas_bg = self.m[1]
         self.canvas_masks = self.m[2]
         self.canvas = self.m[3]
@@ -491,13 +494,17 @@ class InteractiveRoiCanvas(RoiCanvas):
         if model is not None:
             roi_mask = model.create_mask_from_data(
                 ch0_stack=self.ch0_stacks[self._selected_stim_idx],
-                ch1_stack=self.ch1_stacks[self._selected_stim_idx], n_artifact=self.n_artifact)
+                ch1_stack=self.ch1_stacks[self._selected_stim_idx],
+                n_artifact=self.n_artifact,
+                pixel_size_um=self.pixel_size_um,
+            )
             self.init_roi_mask(roi_mask)
             self.update_info()
             self.update_roi_options()
             self.draw_current_mask_img(update=True)
             self.draw_roi_masks_img(update=True)
             self.set_dangerzone(False)
+            self.set_selected_tool('select')
 
     def set_new_roi_mask(self, roi_mask):
         self.init_roi_mask(roi_mask)
@@ -804,6 +811,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         n_px = np.sum(self.current_mask)
         if np.sum(self.current_mask) >= 2:
             cc = np.corrcoef(self.get_current_stack()[self.current_mask])
+            cc = cc[np.triu_indices_from(cc, k=1)]
             self.widget_info.value = f"n_px={n_px}, min_cc={np.min(cc):.2f}, mean_cc={np.mean(cc):.2f}"
         else:
             self.widget_info.value = f"n_px={n_px}"

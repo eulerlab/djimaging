@@ -131,7 +131,10 @@ class UNet(pl.LightningModule):
             ch0_stack=data_dict["ch0_stack"], ch1_stack=data_dict["ch1_stack"],
             n_artifact=data_dict.get("meta", {}).get("n_artifact", 0))
 
-    def create_mask_from_data(self, ch0_stack: np.ndarray, ch1_stack: np.ndarray, n_artifact: int = 0) -> np.array:
+    def create_mask_from_data(self, ch0_stack: np.ndarray, ch1_stack: np.ndarray, n_artifact: int = 0, **kwargs):
+        if len(kwargs) > 0:
+            warnings.warn(f'ignoring kwargs: {kwargs}')
+
         ch0_img = ch0_stack.mean(axis=-1)
         ch1_img = ch1_stack.mean(axis=-1)
         ch0_img_normalized = _normalize_image(ch0_img, n_artifact=n_artifact)
