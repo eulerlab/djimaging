@@ -190,7 +190,7 @@ class RelativeFieldLocationTemplate(dj.Computed):
 
         self.insert1(loc_key)
 
-    def plot(self, key=None):
+    def plot(self, key=None, view='igor_local'):
         relx, rely = self.fetch("relx", "rely")
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
         ax.scatter(rely, relx, label='all')
@@ -200,6 +200,15 @@ class RelativeFieldLocationTemplate(dj.Computed):
             ax.legend()
         ax.set(xlabel="rely", ylabel="relx")
         ax.set_aspect(aspect="equal", adjustable="datalim")
+
+        if view == 'igor_local':
+            ax.invert_xaxis()
+            ax.invert_yaxis()
+        elif view == 'igor_setup':
+            ax.invert_yaxis()
+        else:
+            raise NotImplementedError(view)
+
         plt.show()
 
 

@@ -682,3 +682,22 @@ def get_roi_centers(roi_mask: np.ndarray, roi_ids: np.ndarray) -> np.ndarray:
         x, y = get_roi_center(roi_mask, roi_id)
         roi_centers[i, :] = (x, y)
     return roi_centers
+
+
+def get_rel_roi_pos(roi_id, roi_mask, pixel_size_um, ang_deg=0.):
+    """Get position relative to plotting axis"""
+    # Get relative position in pixel space
+    pix_x, pix_y = scanm_utils.get_roi_center(roi_mask, roi_id)
+
+    # Get offset to center in um
+    dx_um = float((pix_x - roi_mask.shape[0] / 2) * pixel_size_um)
+    dy_um = float((pix_y - roi_mask.shape[1] / 2) * pixel_size_um)
+
+    # Rotate around center
+    if ang_deg != 0.:
+        ang_rad = ang_deg * np.pi / 180.
+        dx_um_rot = dx_um * np.cos(ang_rad) - dy_um * np.sin(ang_rad)
+        dy_um = dx_um * np.sin(ang_rad) + dy_um * np.cos(ang_rad)
+        dx_um = dx_um_rot
+
+    return dx_um, dy_um
