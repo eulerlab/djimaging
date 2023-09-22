@@ -302,7 +302,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
             classifier_params_hash=key["classifier_params_hash"],
             training_data_hash=key["training_data_hash"])
 
-        roi_tab = self.baden_trace_table * self.baden_trace_table().bar_tab() * self.baden_trace_table.roi_table
+        roi_tab = self.baden_trace_table * self.baden_trace_table().bar_tab * self.baden_trace_table.roi_table
         roi_keys = (self.baden_trace_table & key).proj()
 
         if len(roi_keys) == 0:
@@ -350,7 +350,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
             classifier_params_hash=key["classifier_params_hash"],
             training_data_hash=key["training_data_hash"])
 
-        roi_tab = self * self.baden_trace_table * self.baden_trace_table().bar_tab() * self.baden_trace_table.roi_table
+        roi_tab = self * self.baden_trace_table * self.baden_trace_table().bar_tab * self.baden_trace_table.roi_table
         roi_keys = (self.baden_trace_table & key).proj()
         preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, data_celltypes = \
             (roi_tab & roi_keys & f'max_confidence>="{threshold_confidence}"').fetch(
@@ -408,7 +408,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
             classifier_params_hash=key["classifier_params_hash"],
             training_data_hash=key["training_data_hash"])
 
-        roi_tab = self * self.baden_trace_table * self.baden_trace_table().bar_tab() * self.baden_trace_table.roi_table
+        roi_tab = self * self.baden_trace_table * self.baden_trace_table().bar_tab * self.baden_trace_table.roi_table
         roi_keys = (self.baden_trace_table & key).proj()
         preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, data_celltypes = \
             (roi_tab & roi_keys & f'max_confidence>="{threshold_confidence}"').fetch(
