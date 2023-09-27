@@ -73,7 +73,7 @@ class ExperimentTemplate(dj.Computed):
     def add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir,
                         only_new, restrictions, restr_headers=None, verboselvl=0, suppress_errors=False):
 
-        header_paths = find_folders_with_file_of_type(data_dir)
+        header_paths = find_folders_with_file_of_type(data_dir, ending='.ini', ignore_hidden=True)
 
         for header_path in header_paths:
             if restr_headers is not None and header_path not in restr_headers:
@@ -96,11 +96,13 @@ class ExperimentTemplate(dj.Computed):
             print('\theader_path:', header_path)
 
         header_names = [s for s in os.listdir(header_path) if s.endswith('.ini') and (not s.startswith('.'))]
-        if len(header_names) != 1:
+        if len(header_names) > 1:
             # Check if they are equal
             header_dicts = [read_config_dict(header_path + "/" + hn) for hn in header_names]
             if any([hd != header_dicts[0] for hd in header_dicts[1:]]):
                 raise ValueError(f'Found {len(header_names)} header files in {header_path} with differences.')
+        elif len(header_names) == 0:
+            raise ValueError(f'No header file found in {header_path}. This should not happen.')
 
         header_name = header_names[0]
 

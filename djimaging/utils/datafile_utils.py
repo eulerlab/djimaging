@@ -50,7 +50,7 @@ def print_tree(startpath, include_types=None, exclude_types=None, nmax=200):
         print('...')
 
 
-def find_folders_with_file_of_type(data_dir: str, ending: str = '.ini') -> list:
+def find_folders_with_file_of_type(data_dir: str, ending: str = '.ini', ignore_hidden=False) -> list:
     """
     Search for header files in folder in given path.
     :param data_dir: Root folder.
@@ -59,7 +59,7 @@ def find_folders_with_file_of_type(data_dir: str, ending: str = '.ini') -> list:
     """
     os_walk_output = []
     for folder, subfolders, files in os.walk(data_dir):
-        if np.any([f.endswith(ending) for f in files]):
+        if np.any([f.endswith(ending) and not (ignore_hidden and f.startswith('.')) for f in files]):
             os_walk_output.append(folder)
     return os_walk_output
 
