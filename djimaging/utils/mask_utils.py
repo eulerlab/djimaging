@@ -1,6 +1,8 @@
 import os
 import pickle
 import queue
+import warnings
+
 import numpy as np
 from matplotlib import pyplot as plt
 from skimage.measure import label
@@ -204,7 +206,7 @@ def remove_small_rois(mask, min_size=3, verbose=True):
     small_roi_ids = roi_ids[roi_sizes < min_size]
     small_roi_locations = np.isin(mask, small_roi_ids)
     if verbose and small_roi_ids.size > 0:
-        print(f'{len(small_roi_ids)} ROIs <{min_size}px removed.')
+        warnings.warn(f'{len(small_roi_ids)} ROIs <{min_size}px removed.')
     mask[small_roi_locations] = 0
 
     return mask
@@ -372,7 +374,7 @@ def add_rois(rois_to_add, rois, connectivity=2, plot=False):
     output_new_labeled = relabel_mask(output_rois_new, connectivity=connectivity)
 
     if n_output_rois_expected != n_output_rois:
-        print('WARNING: expected', n_output_rois_expected, 'ROIs, obtained', n_output_rois, 'ROIS')
+        warnings.warn(f"Expected {n_output_rois_expected} ROIs, obtained {n_output_rois} ROIs")
 
     return output_labeled, output_new_labeled
 
