@@ -150,7 +150,14 @@ class ExperimentTemplate(dj.Computed):
         expinfo_key["darkadapt_hrs"] = header_dict["darkadapt_hrs"]
         expinfo_key["slicethickness_um"] = header_dict["slicethickness_um"]
         expinfo_key["bathtemp_degc"] = header_dict["bathtemp_degc"]
-        expinfo_key["prepwmorient"] = header_dict["prepwmorient"] if header_dict["prepwmorient"] != "" else 0
+
+        if header_dict["prepwmorient"] == "":
+            prepwmorient = 0  # Default to zero if not specified
+        elif str(header_dict["prepwmorient"]).lower() == "unknown" or int(header_dict["prepwmorient"]) == 111:
+            prepwmorient = -1
+        else:
+            prepwmorient = int(header_dict["prepwmorient"])
+        expinfo_key["prepwmorient"] = prepwmorient
 
         # find optic disk information if available
         odx, ody, odz, od_ini_flag = 0, 0, 0, 0
@@ -240,7 +247,7 @@ class ExperimentTemplate(dj.Computed):
                darkadapt_hrs      :varchar(255)                     # time spent dark adapting animal before disection
                slicethickness_um  :varchar(255)                     # thickness of each slice in slice preparation
                bathtemp_degc      :varchar(255)                     # temperature of bath chamber
-               prepwmorient       :smallint         # retina orientation in chamber (0° = dorsal away from experimenter)
+               prepwmorient       :smallint         # retina orientation in chamber (0° = dorsal away from experimenter). Defaults to 0. Use -1, 111 or "unkown" to encode unknown.
                odx                :float            # x location of optic disk as read in from .ini file
                ody                :float            # y location of optic disk as read in from .ini file (if available)
                odz                :float            # z location of optic disk as read in from .ini file (if available)

@@ -250,6 +250,10 @@ class RetinalFieldLocationTemplate(dj.Computed):
         relx, rely = (self.relativefieldlocation_table() & key).fetch1('relx', 'rely')
         eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
 
+        if prepwmorient == -1:
+            warnings.warn(f'prepwmorient is -1 for {key}. skipping')
+            return
+
         ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(
             rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)
 

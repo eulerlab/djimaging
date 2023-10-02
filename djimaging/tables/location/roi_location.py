@@ -1,3 +1,4 @@
+import warnings
 from abc import abstractmethod
 import datajoint as dj
 import numpy as np
@@ -139,6 +140,10 @@ class RetinalRoiLocationTemplate(dj.Computed):
     def make(self, key):
         relx, rely = (self.relative_roi_location_table() & key).fetch1('relx', 'rely')
         eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
+
+        if prepwmorient == -1:
+            warnings.warn(f'prepwmorient is -1 for {key}. Skipping.')
+            return
 
         ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(
             rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)
