@@ -694,13 +694,18 @@ class InteractiveRoiCanvas(RoiCanvas):
         widget.on_click(self.exec_save_to_file)
         return widget
 
-    def exec_save_to_file(self, botton=None):
+    def prep_roi_mask_for_file(self):
         roi_mask = self.roi_masks.copy()
         roi_shift = self.shifts[self._selected_stim_idx]
         roi_shift = np.array([-roi_shift[1], -roi_shift[0]])
 
         roi_mask = mask_utils.shift_image(img=np.swapaxes(np.flipud(roi_mask), 0, 1),
                                           shift=roi_shift, inplace=True, cval=0)
+
+        return roi_mask
+
+    def exec_save_to_file(self, botton=None):
+        roi_mask = self.prep_roi_mask_for_file()
 
         with open(self.output_file, 'wb') as f:
             pickle.dump(roi_mask, f)
@@ -867,3 +872,36 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.draw_bg()
         self.draw_current_mask_img(update=update)
         self.draw_roi_masks_img(update=update)
+
+    @staticmethod
+    def split_name(stim_condition):
+        stim = stim_condition.split('(')[0]
+        condition = stim_condition.split('(')[1].split(')')[0]
+        return stim, condition
+
+    def insert_database(self, roi_mask_tab, field_key):
+        from djimaging.utils.mask_utils import to_igor_format, compare_roi_masks
+
+        stim_to_roi_mask = {}
+        for stim in self.stim_names:
+            self.set_selected_stim(stim)
+            roi_mask = self.prep_roi_mask_for_file()
+            stim_to_roi_mask[stim] = to_igor_format(roi_mask)
+
+        main_stim_condition = self.stim_names[self.main_stim_idx]
+        main_roi_mask = stim_to_roi_mask[main_stim_condition]
+
+        stim, condition = self.split_name(main_stim_condition)
+        new_key = {**field_key, "stim_name": stim, "roi_mask": main_roi_mask, "condition": condition}
+
+        roi_mask_tab().insert1(new_key)
+        for i, (stim_condition, roi_mask) in enumerate(stim_to_roi_mask.items()):
+            stim, condition = self.split_name(stim_condition)
+            new_key = {**field_key, "stim_name": stim, "roi_mask": roi_mask, "condition": condition}
+
+            as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(roi_mask, main_roi_mask)
+            new_key['as_field_mask'] = as_field_mask
+            new_key['shift_dx'] = shift_dx
+            new_key['shift_dy'] = shift_dy
+
+            roi_mask_tab().RoiMaskPresentation().insert1(new_key)
