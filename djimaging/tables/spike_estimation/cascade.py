@@ -12,9 +12,46 @@ from djimaging.utils import math_utils, plot_utils, trace_utils, filter_utils
 
 from djimaging.utils.dj_utils import get_primary_key
 
-from djimaging.tables.core.preprocesstraces import detrend_trace, drop_left_and_right, non_negative_trace
+from djimaging.tables.core.preprocesstraces import detrend_trace, drop_left_and_right
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 from djimaging.utils.trace_utils import get_mean_dt
+
+
+def compute_cascade_trace(trace, trace_times, window_len_seconds, poly_order, q_lower=2.5, q_upper=80, f_cutoff=None):
+    """Preprocess trace for cascade toolbox. Includes detrending, lowpass filtering and dF/F computation."""
+    trace = np.asarray(trace).copy()
+    dt, dt_rel_error = get_mean_dt(tracetime=trace_times)
+
+    if dt_rel_error > 0.1:
+        warnings.warn('Inconsistent step-sizes in trace, resample trace.')
+        trace_times, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=dt)
+
+    trace = drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace=True)
+    trace, smoothed_trace = detrend_trace(trace, window_len_seconds, 1. / dt, poly_order)
+
+    if (f_cutoff is not None) and (f_cutoff > 0):
+        trace = filter_utils.lowpass_filter_trace(trace=trace, fs=1. / dt, f_cutoff=f_cutoff)
+
+    trace = compute_dff(trace, q_lower=q_lower, q_upper=q_upper)
+
+    return trace, trace_times
+
+
+def compute_dff(trace, q_lower=2.5, q_upper=80.):
+    """Compute dF/F proxy from trace."""
+    trace = np.asarray(trace).copy()
+
+    trace_lower = np.percentile(trace, q_lower)
+    trace_upper = np.percentile(trace, q_upper)
+
+    # Compute the change in fluorescence (ΔF)
+    delta_fluorescence = trace - trace_lower
+
+    # Compute ΔF/F
+    if trace_upper - trace_lower > 0.:
+        trace = delta_fluorescence / float(trace_upper - trace_lower)
+
+    return trace
 
 
 class CascadeTracesParamsTemplate(dj.Lookup):
@@ -23,21 +60,30 @@ class CascadeTracesParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        cascadetraces_params_id:    int       # unique param set id
+        cas_params_id:    int       # unique param set id
         ---
         window_length:       int       # window length for SavGol filter in seconds
         poly_order:          int       # order of polynomial for savgol filter
+        q_lower:             float     # lower percentile for dF/F computation
+        q_upper:             float     # upper percentile for dF/F computation
+        f_cutoff:            float     # cutoff frequency for lowpass filter, only applied when > 0.
         fs_resample = 0 :    float     # Resampling frequency, only applied when > 0.
         """
         return definition
 
-    def add_default(self, cascadetraces_params_id=1, window_length=60, poly_order=3, fs_resample=None,
-                    skip_duplicates=False):
+    def add_default(self, cas_params_id=1, window_length=60, poly_order=3,
+                    q_lower=2.5, q_upper=80., f_cutoff=None, fs_resample=None, skip_duplicates=False):
+        assert q_lower < q_upper, f'q_lower={q_lower} must be smaller than q_upper={q_upper}'
+        assert 0 <= q_lower <= 100, f'q_lower={q_lower} must be between 0 and 100'
+        assert 0 <= q_upper <= 100, f'q_upper={q_upper} must be between 0 and 100'
+
         key = dict(
-            cascadetraces_params_id=cascadetraces_params_id,
+            cas_params_id=cas_params_id,
             window_length=window_length,
             poly_order=int(poly_order),
+            q_lower=q_lower, q_upper=q_upper,
             fs_resample=fs_resample if fs_resample is not None else 0,
+            f_cutoff=f_cutoff if f_cutoff is not None else 0,
         )
         """Add default preprocess parameter to table"""
         self.insert1(key, skip_duplicates=skip_duplicates)
@@ -82,46 +128,33 @@ class CascadeTracesTemplate(dj.Computed):
             pass
 
     def make(self, key):
-        window_len_seconds, poly_order, fs_resample = \
-            (self.cascadetraces_params_table() & key).fetch1('window_length', 'poly_order', 'fs_resample')
+        window_len_seconds, poly_order, q_lower, q_upper, f_cutoff, fs_resample = \
+            (self.cascadetraces_params_table() & key).fetch1(
+                'window_length', 'poly_order', 'q_lower', 'q_upper', 'f_cutoff', 'fs_resample')
 
         trace_times, trace = (self.traces_table() & key).fetch1('trace_times', 'trace')
         stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
-
-        trace = np.asarray(trace).copy()
-        # get fs
-        dt, dt_rel_error = get_mean_dt(tracetime=trace_times)
-        fs = 1. / dt
-
-        if dt_rel_error > 0.1:
-            warnings.warn('Inconsistent step-sizes in trace, resample trace.')
-            tracetime, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=dt)
-
-        trace = drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace=True)
-        trace, smoothed_trace = detrend_trace(trace, window_len_seconds, fs, poly_order)
 
         if stim_start is not None:
             if not np.any(trace_times < stim_start):
                 raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
 
-        trace = non_negative_trace(trace, inplace=True)
-        trace /= np.std(trace)
+        trace, trace_times = compute_cascade_trace(
+            trace, trace_times, window_len_seconds, poly_order, q_lower=q_lower, q_upper=q_upper, f_cutoff=f_cutoff)
 
         self.insert1(dict(key, cascade_trace_times=trace_times, cascade_trace=trace))
 
     def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(self, key)
 
-        cascade_trace_times, cascade_trace = (self & key).fetch1(
-            "cascade_trace_times", "cascade_trace")
+        cascade_trace_times, cascade_trace = (self & key).fetch1("cascade_trace_times", "cascade_trace")
         trace_times, trace = (self.traces_table() & key).fetch1("trace_times", "trace")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
 
         fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex='all')
 
         ax = axs[0]
-        plot_trace_and_trigger(time=trace_times, trace=trace,
-                               triggertimes=triggertimes, ax=ax, title=str(key))
+        plot_trace_and_trigger(time=trace_times, trace=trace, triggertimes=triggertimes, ax=ax, title=str(key))
         ax.set(ylabel='mean subtracted\nraw trace')
 
         ax = axs[1]
