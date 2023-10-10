@@ -492,12 +492,18 @@ class InteractiveRoiCanvas(RoiCanvas):
         current_model = self.widget_sel_autorois.value
         model = self.autorois_models[current_model]
         if model is not None:
+            self.update_progress(0)
+            self.set_read_only(True)
+
             roi_mask = model.create_mask_from_data(
                 ch0_stack=self.ch0_stacks[self._selected_stim_idx],
                 ch1_stack=self.ch1_stacks[self._selected_stim_idx],
                 n_artifact=self.n_artifact,
                 pixel_size_um=self.pixel_size_um,
             )
+
+            self.update_progress(50)
+
             self.init_roi_mask(roi_mask)
             self.update_info()
             self.update_roi_options()
@@ -505,6 +511,9 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.draw_roi_masks_img(update=True)
             self.set_dangerzone(False)
             self.set_selected_tool('select')
+
+            self.update_progress(100)
+            self.set_read_only(False)
 
     def set_new_roi_mask(self, roi_mask):
         self.init_roi_mask(roi_mask)
@@ -641,9 +650,11 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_progress.value = percent
 
     def exec_auto_shift(self, button=None):
+        self.set_read_only(True)
         shift_x, shift_y = self.compute_autoshift(fun_progress=self.update_progress)
         self.set_shift(value=shift_x, axis='x', update=False)
         self.set_shift(value=shift_y, axis='y', update=True)
+        self.set_read_only(False)
 
     def set_selected_thresh(self, value):
         self.widget_thresh.value = value
