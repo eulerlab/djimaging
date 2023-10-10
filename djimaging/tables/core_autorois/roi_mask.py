@@ -84,7 +84,7 @@ class RoiMaskTemplate(dj.Manual):
 
     def draw_roi_mask(self, field_key=None, pres_key=None, canvas_width=30, autorois_models='default_rgc'):
         if pres_key is not None:
-            field_key = (self.field_table & pres_key).proj().fetch1(as_dict=True)
+            field_key = (self.field_table & pres_key).proj().fetch1()
         elif field_key is None:
             field_key = np.random.choice(self.list_missing_field())
 
