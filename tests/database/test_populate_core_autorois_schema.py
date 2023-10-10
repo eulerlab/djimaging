@@ -102,7 +102,7 @@ def test_populate_roi_mask():
 
     for missing_key in missing_keys:
         roi_mask_gui = RoiMask().draw_roi_mask(field_key=missing_key)
-        roi_mask_gui.exec_autorois()
+        roi_mask_gui.exec_autorois_all()
         roi_mask_gui.insert_database(RoiMask, missing_key)
 
     assert len(RoiMask()) > 0

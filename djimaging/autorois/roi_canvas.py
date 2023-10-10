@@ -4,6 +4,7 @@ import warnings
 from typing import Optional, Dict
 
 import numpy as np
+from djimaging.utils.mask_utils import add_rois
 from matplotlib import pyplot as plt
 from matplotlib.colors import rgb2hex, hex2color
 
@@ -312,6 +313,7 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         self.widget_sel_autorois = self.create_widget_sel_autorois()
         self.widget_exec_autorois = self.create_widget_exec_autorois()
+        self.widget_exec_autorois_missing = self.create_widget_exec_autorois_missing()
 
         self.widget_save_and_new = self.create_widget_save_and_new()
         self.widget_undo = self.create_widget_undo()
@@ -421,6 +423,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_kill_roi.disabled = read_only
         self.widget_tool.disabled = read_only
         self.widget_clean.disabled = read_only
+        self.widget_exec_autorois_missing.disabled = read_only
 
         if read_only:
             self.set_selected_tool('select')
@@ -485,26 +488,33 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def create_widget_exec_autorois(self):
         widget_exec_autorois = Button(description='Detect ROIs', disabled=True, button_style='success')
-        widget_exec_autorois.on_click(self.exec_autorois)
+        widget_exec_autorois.on_click(self.exec_autorois_all)
         return widget_exec_autorois
 
-    def exec_autorois(self, button=None):
+    def exec_autorois_all(self, button=None):
+        self._exec_autorois(missing_only=False)
+
+    def _exec_autorois(self, missing_only=False):
         current_model = self.widget_sel_autorois.value
         model = self.autorois_models[current_model]
         if model is not None:
             self.update_progress(0)
             self.set_read_only(True)
 
-            roi_mask = model.create_mask_from_data(
+            roi_mask_new = model.create_mask_from_data(
                 ch0_stack=self.ch0_stacks[self._selected_stim_idx],
                 ch1_stack=self.ch1_stacks[self._selected_stim_idx],
                 n_artifact=self.n_artifact,
                 pixel_size_um=self.pixel_size_um,
             )
 
+            if missing_only:
+                roi_mask_old = self.roi_masks.copy()
+                roi_mask_new, new_labels = mask_utils.add_rois(roi_mask_new, roi_mask_old, connectivity=2, plot=False)
+
             self.update_progress(50)
 
-            self.init_roi_mask(roi_mask)
+            self.init_roi_mask(roi_mask_new)
             self.update_info()
             self.update_roi_options()
             self.draw_current_mask_img(update=True)
@@ -514,6 +524,14 @@ class InteractiveRoiCanvas(RoiCanvas):
 
             self.update_progress(100)
             self.set_read_only(False)
+
+    def create_widget_exec_autorois_missing(self):
+        widget = Button(description='Add missing ROIs', disabled=False, button_style='success')
+        widget.on_click(self.exec_autorois_missing)
+        return widget
+
+    def exec_autorois_missing(self, button=None):
+        self._exec_autorois(missing_only=True)
 
     def set_new_roi_mask(self, roi_mask):
         self.init_roi_mask(roi_mask)
@@ -851,7 +869,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             HBox((self.widget_bg, self.widget_gamma, self.widget_cmap)),
             HBox((self.widget_shift_dx, self.widget_shift_dy, self.widget_auto_shift)),
             HBox((self.widget_tool, self.widget_size, self.widget_thresh)),
-            HBox((self.widget_sel_autorois, self.widget_exec_autorois)),
+            HBox((self.widget_sel_autorois, self.widget_exec_autorois, self.widget_exec_autorois_missing)),
             self.widget_info,
             HBox((self.widget_clean, self.widget_kill_roi, self.widget_kill_all, self.widget_reset_all)),
             HBox((self.widget_save_to_file, self.widget_save_all_to_file, self.widget_save_info)),

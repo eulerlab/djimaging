@@ -34,7 +34,7 @@ class CorrRoiMask:
         cut_x = np.array(self.cut_x)
         cut_x[0] = np.maximum(cut_x[0], n_artifact)
 
-        stack = ch0_stack if self.use_ch0_stack else ch1_stac
+        stack = ch0_stack if self.use_ch0_stack else ch1_stack
         stack = np.swapaxes(stack, 0, 1)  # swap x and z axis to match reshaping in canvas
 
         n_pix_min = self.n_pix_min or 2
