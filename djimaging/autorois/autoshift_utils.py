@@ -1,7 +1,9 @@
+import itertools
+
 import numpy as np
 
 
-def compute_corr_map(stack):
+def compute_corr_map(stack, fun_progress=None):
     """
     Calculate the local neighboring pixel correlation matrix for a 3D stack (x, y, t).
 
@@ -17,14 +19,24 @@ def compute_corr_map(stack):
     corr_map = np.zeros((nx, ny))
     counts = np.zeros((nx, ny))
 
-    for ix in range(nx):
-        for iy in range(ny):
-            for idx, idy in [(0, 1), (1, 0), (1, 1), (0, -1), (-1, 0), (-1, -1), (-1, 1), (1, -1)]:
-                if ix + idx >= nx or iy + idy >= ny or ix + idx < 0 or iy + idy < 0:
-                    continue
-                else:
-                    counts[ix, iy] += 1
-                    corr_map[ix, iy] += np.corrcoef(stack[ix + idx, iy + idy, :], stack[ix, iy, :])[0, 1]
+    ixs = np.arange(nx)
+    iys = np.arange(ny)
+
+    ix_iy_pairs = list(itertools.product(ixs, iys))
+
+    if fun_progress is not None:
+        fun_progress(percent=0)
+
+    for i, (ix, iy) in enumerate(ix_iy_pairs, start=1):
+        for idx, idy in [(0, 1), (1, 0), (1, 1), (0, -1), (-1, 0), (-1, -1), (-1, 1), (1, -1)]:
+            if ix + idx >= nx or iy + idy >= ny or ix + idx < 0 or iy + idy < 0:
+                continue
+            else:
+                counts[ix, iy] += 1
+                corr_map[ix, iy] += np.corrcoef(stack[ix + idx, iy + idy, :], stack[ix, iy, :])[0, 1]
+
+        if fun_progress is not None:
+            fun_progress(percent=100 * i / len(ix_iy_pairs))
 
     # Normalize by the number of neighbors
     corr_map /= counts
@@ -33,7 +45,7 @@ def compute_corr_map(stack):
 
 
 def compute_corr_map_match_indexes(corr_map, ref_corr_map, shift_max=20, metric='mse', verbose=False,
-                                   plot=False):
+                                   plot=False, fun_progress=None):
     """Calculate the match_indexes between a stack_corr image and its shifted versions.
 
     Input:
@@ -48,39 +60,49 @@ def compute_corr_map_match_indexes(corr_map, ref_corr_map, shift_max=20, metric=
     # Initialize the cross-correlation matrix with zeros
     match_indexes = np.zeros((2 * shift_max + 1, 2 * shift_max + 1))
 
+    dxs = np.arange(-shift_max, shift_max + 1)
+    dys = np.arange(-shift_max, shift_max + 1)
+
+    dx_dy_pairs = list(itertools.product(dxs, dys))
+
+    if fun_progress is not None:
+        fun_progress(percent=0)
+
     # Iterate over all possible shifts in both x and y directions within the range [-ShiftMax, ShiftMax]
-    for dx in range(-shift_max, shift_max + 1):
-        for dy in range(-shift_max, shift_max + 1):
-            # Crop the shifted_video and stack_corr images to the same size
-            cropped = corr_map[max(0, -dx):min(ref_corr_map.shape[0], ref_corr_map.shape[0] - dx),
-                      max(0, -dy):min(ref_corr_map.shape[1], ref_corr_map.shape[1] - dy)]
+    for i, (dx, dy) in enumerate(dx_dy_pairs, start=1):
+        # Crop the shifted_video and stack_corr images to the same size
+        cropped = corr_map[max(0, -dx):min(ref_corr_map.shape[0], ref_corr_map.shape[0] - dx),
+                  max(0, -dy):min(ref_corr_map.shape[1], ref_corr_map.shape[1] - dy)]
 
-            ref_cropped = ref_corr_map[max(0, dx):min(ref_corr_map.shape[0], ref_corr_map.shape[0] + dx),
-                          max(0, dy):min(ref_corr_map.shape[1], ref_corr_map.shape[1] + dy)]
+        ref_cropped = ref_corr_map[max(0, dx):min(ref_corr_map.shape[0], ref_corr_map.shape[0] + dx),
+                      max(0, dy):min(ref_corr_map.shape[1], ref_corr_map.shape[1] + dy)]
 
-            # Calculate the correlation coefficient between the cropped images
-            if metric == 'corr':
-                score = np.corrcoef(cropped.flatten(), ref_cropped.flatten())[0, 1]
-            elif metric == 'mse':
-                score = -np.mean((cropped - ref_cropped) ** 2)
-            else:
-                raise NotImplementedError(f"Metric {metric} not implemented")
+        # Calculate the correlation coefficient between the cropped images
+        if metric == 'corr':
+            score = np.corrcoef(cropped.flatten(), ref_cropped.flatten())[0, 1]
+        elif metric == 'mse':
+            score = -np.mean((cropped - ref_cropped) ** 2)
+        else:
+            raise NotImplementedError(f"Metric {metric} not implemented")
 
-            if plot:
-                from matplotlib import pyplot as plt
-                fig = plt.figure(figsize=(6, 6))
-                fig.suptitle(f"dx={dx}, dy={dy}, {metric}={score:.2f}")
+        if plot:
+            from matplotlib import pyplot as plt
+            fig = plt.figure(figsize=(6, 6))
+            fig.suptitle(f"dx={dx}, dy={dy}, {metric}={score:.2f}")
 
-                ax1 = fig.add_subplot(2, 2, 1)
-                ax1.imshow(ref_cropped)
+            ax1 = fig.add_subplot(2, 2, 1)
+            ax1.imshow(ref_cropped)
 
-                ax2 = fig.add_subplot(2, 2, 2)
-                ax2.imshow(cropped)
+            ax2 = fig.add_subplot(2, 2, 2)
+            ax2.imshow(cropped)
 
-                plt.show()
+            plt.show()
 
-            # Store the correlation coefficient in the cross-correlation matrix
-            match_indexes[dx + shift_max, dy + shift_max] = score
+        # Store the correlation coefficient in the cross-correlation matrix
+        match_indexes[dx + shift_max, dy + shift_max] = score
+
+        if fun_progress is not None:
+            fun_progress(percent=100 * i / len(dx_dy_pairs))
 
     # Calculate image statistics
     v_max = np.max(match_indexes)
@@ -109,6 +131,8 @@ def extract_best_shift(match_indexes):
 
 
 def shift_img(img, shift_x, shift_y, fun_cval=np.median):
+    # TODO: merge with mask_utils.shift_imgage
+
     shifted_img = np.roll(img, shift=shift_x, axis=0)
     shifted_img = np.roll(shifted_img, shift=shift_y, axis=1)
 

@@ -496,8 +496,8 @@ def load_preferred_roi_mask_pickle(files, mask_alias='', highres_alias=''):
         return None, None
 
 
-def shift_image(img, shift, inplace=False, cval=np.min):
-    """Shift 2d array in x and/or y. Fill borders with cval."""
+def shift_array(img, shift, inplace=False, cval=np.min):
+    """Shift >2d array in x and/or y. Fill borders with cval."""
     if not inplace:
         img = img.copy()
     img = np.asarray(img)
@@ -537,7 +537,7 @@ def compare_roi_masks(roi_mask: np.ndarray, ref_roi_mask: np.ndarray, max_shift=
 
     for dx in range(-max_shift_x, max_shift_x + 1):
         for dy in range(-max_shift_y, max_shift_y + 1):
-            shifted_roi_mask = shift_image(roi_mask, shift=(dx, dy), cval=bg_val)
+            shifted_roi_mask = shift_array(roi_mask, shift=(dx, dy), cval=bg_val)
             if np.all((shifted_roi_mask == ref_roi_mask) | ((shifted_roi_mask == bg_val) & (ref_roi_mask != bg_val))):
                 return 'shifted', (dx, dy)
 

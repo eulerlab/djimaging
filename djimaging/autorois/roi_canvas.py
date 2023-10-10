@@ -1,3 +1,4 @@
+import logging
 import os.path
 import pickle
 import warnings
@@ -7,10 +8,12 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.colors import rgb2hex, hex2color
 
+from djimaging.autorois.autoshift_utils import compute_corr_map, compute_corr_map_match_indexes, extract_best_shift
 from djimaging.utils import image_utils, mask_utils, math_utils
 
 try:
-    from ipywidgets import HTML, Dropdown, FloatSlider, Button, HBox, VBox, Checkbox, IntSlider
+    from ipywidgets import HTML, Dropdown, FloatSlider, Button, HBox, VBox, Checkbox, IntSlider, BoundedIntText, \
+        IntProgress, FloatProgress
 except ImportError:
     warnings.warn('Failed to import ipywidgets. AutoROIs will not work.')
 
@@ -105,6 +108,8 @@ class RoiCanvas:
         self.backgrounds = self.compute_backgrounds()
         self.output_file = self.output_files[self._selected_stim_idx]
 
+        self.ref_corr_map = None
+
         # Initialize roi_mask
         if initial_roi_mask is not None:
             self._initial_roi_mask = np.flipud(np.swapaxes(initial_roi_mask, 0, 1)).copy()
@@ -119,10 +124,10 @@ class RoiCanvas:
         shift = self.shifts[self._selected_stim_idx]
         shift = np.array([shift[0], -shift[1]])
         backgrounds = {
-            'ch0_mean': mask_utils.shift_image(np.mean(self.ch0_stacks[self._selected_stim_idx], axis=2), shift),
-            'ch0_std': mask_utils.shift_image(np.std(self.ch0_stacks[self._selected_stim_idx], axis=2), shift),
-            'ch1_mean': mask_utils.shift_image(np.mean(self.ch1_stacks[self._selected_stim_idx], axis=2), shift),
-            'ch1_std': mask_utils.shift_image(np.std(self.ch1_stacks[self._selected_stim_idx], axis=2), shift),
+            'ch0_mean': mask_utils.shift_array(np.mean(self.ch0_stacks[self._selected_stim_idx], axis=2), shift),
+            'ch0_std': mask_utils.shift_array(np.std(self.ch0_stacks[self._selected_stim_idx], axis=2), shift),
+            'ch1_mean': mask_utils.shift_array(np.mean(self.ch1_stacks[self._selected_stim_idx], axis=2), shift),
+            'ch1_std': mask_utils.shift_array(np.std(self.ch1_stacks[self._selected_stim_idx], axis=2), shift),
             'none': np.full((self.ny, self.nx), 255)
         }
 
@@ -203,6 +208,23 @@ class RoiCanvas:
         self.roi_masks[self.current_mask] = self._selected_roi
         self.reset_current_mask()
 
+    def get_selected_stack(self):
+        """Get selected stack"""
+        return self.ch0_stacks[self._selected_stim_idx]
+
+    def get_ref_stack(self):
+        """Get reference stack"""
+        return self.ch0_stacks[self.main_stim_idx]
+
+    def compute_autoshift(self, shift_max=5, fun_progress=None):
+        self.ref_corr_map = self.ref_corr_map if self.ref_corr_map is not None else compute_corr_map(
+            self.get_ref_stack(), fun_progress=fun_progress)
+        corr_map = compute_corr_map(self.get_selected_stack(), fun_progress=fun_progress)
+        match_indexes = compute_corr_map_match_indexes(corr_map, self.ref_corr_map, shift_max=shift_max,
+                                                       fun_progress=fun_progress)
+        shift_x, shift_y = extract_best_shift(match_indexes)
+        return shift_x, shift_y
+
     def update_roi_mask_img(self):
         """Update ROI masks image"""
         self.roi_mask_img[:] = 0
@@ -269,6 +291,8 @@ class InteractiveRoiCanvas(RoiCanvas):
                          upscale=upscale, autorois_models=autorois_models, output_files=output_files)
 
         # Create menu elements
+        self.widget_progress = self.create_widget_progress()
+
         self.widget_bg = self.create_widget_bg()
         self.widget_cmap = self.create_widget_cmap()
         self.widget_roi = self.create_widget_roi()
@@ -279,6 +303,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_thresh = self.create_widget_thresh()
         self.widget_shift_dx = self.create_widget_shift(axis='x')
         self.widget_shift_dy = self.create_widget_shift(axis='y')
+        self.widget_auto_shift = self.create_widget_auto_shift()
 
         self.widget_sel_stim = self.create_widget_sel_stim()
 
@@ -400,6 +425,17 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         self.update_shift_widget()
 
+    def create_widget_progress(self):
+        widget = FloatProgress(
+            value=100,
+            min=0,
+            max=100,
+            description='Progress:',
+            bar_style='success',
+            orientation='horizontal'
+        )
+        return widget
+
     def create_widget_sel_stim(self):
         widget = Dropdown(options=self.stim_names, value=self.stim_names[self._selected_stim_idx],
                           description='Stimulus:', disabled=False)
@@ -424,9 +460,12 @@ class InteractiveRoiCanvas(RoiCanvas):
         if self._selected_stim_idx == self.main_stim_idx:
             self.widget_shift_dx.disabled = True
             self.widget_shift_dy.disabled = True
+            self.widget_auto_shift.disabled = True
         else:
             self.widget_shift_dx.disabled = self.widget_read_only.value
             self.widget_shift_dy.disabled = self.widget_read_only.value
+            self.widget_auto_shift.disabled = self.widget_read_only.value
+
         self.widget_shift_dx.value, self.widget_shift_dy.value = self.shifts[self._selected_stim_idx]
 
     def create_widget_sel_autorois(self):
@@ -557,7 +596,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         else:
             return self.shifts[self._selected_stim_idx, 1]
 
-    def set_shift(self, value, axis):
+    def set_shift(self, value, axis, update=True):
         if axis == 'x':
             self.widget_shift_dx.value = value
             self.shifts[self._selected_stim_idx, 0] = value
@@ -565,14 +604,18 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.widget_shift_dy.value = value
             self.shifts[self._selected_stim_idx, 1] = value
 
-        self.update_backgrounds()
-        self.draw_bg(update=True)
+        if update:
+            self.update_backgrounds()
+            self.update_info()
+            self.draw_bg(update=True)
 
     def create_widget_shift(self, axis):
         value = self.get_shift(axis=axis)
-        widget = IntSlider(
-            value=value, min=-5, max=5, step=1, description=f'shift_d{axis}:', disabled=False,
-            continuous_update=False, orientation='horizontal', readout=True, readout_format='d'
+
+        widget = BoundedIntText(
+            value=value, min=-5, max=5, step=1,
+            description=f'shift_d{axis}:', disabled=False,
+            continuous_update=False,
         )
 
         def change(value):
@@ -580,6 +623,20 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         widget.observe(change, names='value')
         return widget
+
+    def create_widget_auto_shift(self):
+        widget = Button(description='Auto shift', disabled=False, button_style='success')
+        widget.on_click(self.exec_auto_shift)
+        return widget
+
+    def update_progress(self, percent):
+        assert 0 <= percent <= 100
+        self.widget_progress.value = percent
+
+    def exec_auto_shift(self, button=None):
+        shift_x, shift_y = self.compute_autoshift(fun_progress=self.update_progress)
+        self.set_shift(value=shift_x, axis='x', update=False)
+        self.set_shift(value=shift_y, axis='y', update=True)
 
     def set_selected_thresh(self, value):
         self.widget_thresh.value = value
@@ -699,7 +756,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         roi_shift = self.shifts[self._selected_stim_idx]
         roi_shift = np.array([-roi_shift[1], -roi_shift[0]])
 
-        roi_mask = mask_utils.shift_image(img=np.swapaxes(np.flipud(roi_mask), 0, 1),
+        roi_mask = mask_utils.shift_array(img=np.swapaxes(np.flipud(roi_mask), 0, 1),
                                           shift=roi_shift, inplace=True, cval=0)
 
         return roi_mask
@@ -723,20 +780,30 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def exec_save_all_to_file(self, button=None):
         import time
-        for stim in self.stim_names:
+        self.update_progress(0)
+        for i, stim in enumerate(self.stim_names, start=1):
             self.set_selected_stim(stim)
-            self.exec_save_to_file()
+            try:
+                self.exec_save_to_file()
+            except (OSError, FileNotFoundError) as e:
+                self.widget_save_info.description = 'Error!'.ljust(20)
+                warnings.warn(f'Error saving {stim}: {e}')
             time.sleep(0.5)
+            self.update_progress(100 * i / len(self.stim_names))
 
     def create_widget_save_info(self):
-
         widget = HTML(value=f'{self.output_file}', placeholder='output_file', description=''.ljust(20))
         return widget
+
+    def get_current_stack(self):
+        current_stack = mask_utils.shift_array(
+            self.ch0_stacks[self._selected_stim_idx], (self.get_shift('x'), self.get_shift('y')))
+        return current_stack
 
     def update_info(self):
         n_px = np.sum(self.current_mask)
         if np.sum(self.current_mask) >= 2:
-            cc = np.corrcoef(self.ch0_stacks[self._selected_stim_idx][self.current_mask])
+            cc = np.corrcoef(self.get_current_stack()[self.current_mask])
             self.widget_info.value = f"n_px={n_px}, min_cc={np.min(cc):.2f}, mean_cc={np.mean(cc):.2f}"
         else:
             self.widget_info.value = f"n_px={n_px}"
@@ -757,12 +824,13 @@ class InteractiveRoiCanvas(RoiCanvas):
     def start_gui(self):
         vbox = VBox((
             self.m,
+            self.widget_progress,
             HBox((self.widget_read_only, self.widget_dangerzone,)),
             self.widget_sel_stim,
             HBox((self.widget_roi, self.widget_save_and_new, self.widget_save, self.widget_undo)),
             self.widget_view,
             HBox((self.widget_bg, self.widget_gamma, self.widget_cmap)),
-            HBox((self.widget_shift_dx, self.widget_shift_dy)),
+            HBox((self.widget_shift_dx, self.widget_shift_dy, self.widget_auto_shift)),
             HBox((self.widget_tool, self.widget_size, self.widget_thresh)),
             HBox((self.widget_sel_autorois, self.widget_exec_autorois)),
             self.widget_info,
