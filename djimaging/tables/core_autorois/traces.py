@@ -73,13 +73,9 @@ class TracesTemplate(dj.Computed):
             data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
             roi_mask = (self.roi_mask_table.RoiMaskPresentation & key).fetch1("roi_mask")
 
-            roi_mask_roi_ids = np.abs(scanm_utils.extract_roi_idxs(roi_mask)).astype(int)
-
-            if not np.all(np.sort(roi_ids) == np.sort(roi_mask_roi_ids)):
-                raise ValueError(f"""
-                ROI mask is inconsistent with ROI ids from roi_table for key: \n{key}
-                If so, make sure that the ROI masks are compatible, i.e. they should have the same number of ROIs.
-                To ignore this error, set Traces.__ignore_incompatible_roi_masks=True.""")
+            if (self.roi_mask_table.RoiMaskPresentation & key).fetch1('as_field_mask') == 'different':
+                raise ValueError(f'Tried to populate traces with inconsistent roi mask for key=\n{key}\n' +
+                                 'Compare ROI mask of Field and Presentation.')
 
             roi2trace = self._roi2trace_from_stack(
                 filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
