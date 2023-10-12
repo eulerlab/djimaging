@@ -35,7 +35,6 @@ class CorrRoiMask:
         cut_x[0] = np.maximum(cut_x[0], n_artifact)
 
         stack = ch0_stack if self.use_ch0_stack else ch1_stack
-        stack = np.swapaxes(stack, 0, 1)  # swap x and z axis to match reshaping in canvas
 
         n_pix_min = self.n_pix_min or 2
         n_pix_min = int(np.maximum(np.round(self.min_area_um2 / (pixel_size_um[0] * pixel_size_um[1])), n_pix_min))
@@ -61,8 +60,6 @@ class CorrRoiMask:
             line_threshold_q=self.line_threshold_q, line_threshold_min=self.line_threshold_min,
             only_local_thresh_pixels=self.grow_only_local_thresh_pixels, grow_use_corr_map=self.grow_use_corr_map,
             grow_threshold=self.grow_threshold, plot=plot)
-
-        roi_mask = np.swapaxes(roi_mask, 0, 1)  # swap x and z axis to match reshaping in canvas
 
         return roi_mask
 
@@ -149,12 +146,12 @@ def corr_map_rois(stack, cut_x, cut_z, n_pix_max_x=5, n_pix_max_z=5, n_pix_max=2
 
     if plot:
         fig, axs = plt.subplots(1, 5, figsize=(15, 2.2))
-        axs[0].imshow(np.mean(stack, axis=2).T, cmap='gray')
-        axs[1].imshow(corr_map.T, cmap='viridis')
-        axs[2].plot(line_threshold, np.arange(line_threshold.size)[::-1])
+        axs[0].imshow(np.mean(stack, axis=2).T, cmap='gray', origin='lower')
+        axs[1].imshow(corr_map.T, cmap='viridis', origin='lower')
+        axs[2].plot(line_threshold, np.arange(line_threshold.size))
         axs[2].set_xlim(0, 1)
-        axs[3].imshow((corr_map >= line_threshold).T, cmap='viridis')
-        axs[4].imshow(roi_mask.T, cmap='jet')
+        axs[3].imshow((corr_map >= line_threshold).T, cmap='viridis', origin='lower')
+        axs[4].imshow(roi_mask.T, cmap='jet', origin='lower')
         plt.show()
 
     return roi_mask

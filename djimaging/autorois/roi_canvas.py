@@ -4,7 +4,6 @@ import warnings
 from typing import Optional, Dict
 
 import numpy as np
-from djimaging.utils.mask_utils import add_rois
 from matplotlib import pyplot as plt
 from matplotlib.colors import rgb2hex, hex2color
 
@@ -48,8 +47,8 @@ class RoiCanvas:
         if initial_roi_mask is not None and initial_roi_mask.shape != ch0_stacks[0].shape[:2]:
             raise ValueError('Incompatible shapes between ch0_stack and provided roi_mask')
 
-        self.ch0_stacks = [np.flipud(np.swapaxes(ch0_stack, 0, 1)) for ch0_stack in ch0_stacks]
-        self.ch1_stacks = [np.flipud(np.swapaxes(ch1_stack, 0, 1)) for ch1_stack in ch1_stacks]
+        self.ch0_stacks = ch0_stacks
+        self.ch1_stacks = ch1_stacks
 
         if shifts is None:
             shifts = np.array([np.array([0, 0], dtype=int) for _ in ch0_stacks])
@@ -65,8 +64,9 @@ class RoiCanvas:
         self.output_files = output_files
 
         self.n_artifact = n_artifact
-        self.nx = ch0_stacks[0].shape[1]
-        self.ny = ch0_stacks[0].shape[0]
+        self.nx = ch0_stacks[0].shape[0]
+        self.ny = ch0_stacks[0].shape[1]
+
         self.upscale = upscale
         self.npx = self.nx * self.upscale
         self.npy = self.ny * self.upscale
@@ -102,10 +102,10 @@ class RoiCanvas:
         self._selected_size = 1
         self._selected_thresh = 0.3
 
-        self.alpha_bg = 150
+        self.alpha_bg = 200
         self.alpha_main = 255
-        self.alpha_highlight = 200
-        self.alpha_faint = 100
+        self.alpha_highlight = 150
+        self.alpha_faint = 50
 
         self.backgrounds = self.compute_backgrounds()
         self.output_file = self.output_files[self._selected_stim_idx]
@@ -114,17 +114,17 @@ class RoiCanvas:
 
         # Initialize roi_mask
         if initial_roi_mask is not None:
-            self._initial_roi_mask = np.flipud(np.swapaxes(initial_roi_mask, 0, 1)).copy()
+            self._initial_roi_mask = initial_roi_mask.copy()
             self.init_roi_mask(self._initial_roi_mask)
         else:
             self._initial_roi_mask = None
 
     def __repr__(self):
-        return f"RoiCanvas({self.ny}x{self.nx})"
+        return f"RoiCanvas({self.nx}x{self.ny})"
 
     def compute_backgrounds(self):
         shift = self.shifts[self._selected_stim_idx]
-        shift = np.array([shift[0], -shift[1]])
+        shift = np.array([shift[0], shift[1]])
         backgrounds = {
             'ch0_mean': mask_utils.shift_array(np.mean(self.ch0_stacks[self._selected_stim_idx], axis=2), shift),
             'ch0_std': mask_utils.shift_array(np.std(self.ch0_stacks[self._selected_stim_idx], axis=2), shift),
@@ -201,7 +201,7 @@ class RoiCanvas:
 
     def erase_from_masks(self, x, y):
         """Remove pixels from current mask and all masks"""
-        mask = mask_utils.create_circular_mask(h=self.ny, w=self.nx, center=(x, y), radius=self._selected_size - 1)
+        mask = mask_utils.create_circular_mask(w=self.nx, h=self.ny, center=(x, y), radius=self._selected_size - 1)
         self.current_mask[mask] = 0
         self.roi_masks[mask] = 0  # TODO: allow to undo erase
 
@@ -222,21 +222,25 @@ class RoiCanvas:
         self.ref_corr_map = self.ref_corr_map if self.ref_corr_map is not None else compute_corr_map(
             self.get_ref_stack(), fun_progress=fun_progress)
         corr_map = compute_corr_map(self.get_selected_stack(), fun_progress=fun_progress)
-        match_indexes = compute_corr_map_match_indexes(corr_map, self.ref_corr_map, shift_max=shift_max,
-                                                       fun_progress=fun_progress)
+        match_indexes = compute_corr_map_match_indexes(
+            corr_map, self.ref_corr_map, shift_max=shift_max, fun_progress=fun_progress)
         shift_x, shift_y = extract_best_shift(match_indexes)
-        return shift_x, shift_y
+        return -shift_x, -shift_y  # Flip sign to get from field to roi mask shift
 
     def update_roi_mask_img(self):
         """Update ROI masks image"""
-        self.roi_mask_img[:] = 0
+        self.roi_mask_img = np.zeros_like(self.roi_mask_img)
 
         if self._selected_view == 'none':
             return
 
+        new_roi_mask_img = np.zeros_like(self.roi_mask_img)
+
         for roi in np.unique(self.roi_masks)[1:]:
-            ys, xs = np.where(self.roi_masks == roi)
-            self.roi_mask_img[ys, xs, :] = self._get_roi_rgba255(roi)
+            xs, ys = np.where(self.roi_masks == roi)
+            new_roi_mask_img[xs, ys, :] = self._get_roi_rgba255(roi)
+
+        self.roi_mask_img = new_roi_mask_img
 
     def print_state(self):
         print('bg'.ljust(15), self._selected_bg)
@@ -293,7 +297,6 @@ class InteractiveRoiCanvas(RoiCanvas):
                          initial_roi_mask=initial_roi_mask, shifts=shifts, main_stim_idx=main_stim_idx,
                          upscale=upscale, autorois_models=autorois_models,
                          output_files=output_files, pixel_size_um=pixel_size_um)
-
         # Create menu elements
         self.widget_progress = self.create_widget_progress()
 
@@ -334,16 +337,16 @@ class InteractiveRoiCanvas(RoiCanvas):
         # ToDo: Add AutoROIs to keep existing ROI masks.
 
         # Create canvas
-        self.m = MultiCanvas(n_canvases=4, width=self.npy, height=self.npx)
-        self.m.layout.width = f'{canvas_width}%'
-        self.m.layout.height = 'auto'
-        self.m.sync_image_data = True
+        self.img = MultiCanvas(n_canvases=4, width=self.npx, height=self.npy)
+        self.img.layout.width = f'{canvas_width}%'
+        self.img.layout.height = 'auto'
+        self.img.sync_image_data = True
 
-        self.canvas_k = self.m[0]
-        self.canvas_k.fill_rect(x=0, y=0, width=self.npy, height=self.npx)
-        self.canvas_bg = self.m[1]
-        self.canvas_masks = self.m[2]
-        self.canvas = self.m[3]
+        self.canvas_k = self.img[0]
+        self.canvas_k.fill_rect(x=0, y=0, width=self.npx, height=self.npy)
+        self.canvas_bg = self.img[1]
+        self.canvas_masks = self.img[2]
+        self.canvas = self.img[3]
 
         self.drawing = False
         self.last_mouse_pos_xy = (-1, -1)
@@ -357,6 +360,24 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         self.update_all()
         self.draw_all(update=True)
+
+    def start_gui(self):
+        vbox = VBox((
+            self.img,
+            self.widget_progress,
+            HBox((self.widget_read_only, self.widget_dangerzone,)),
+            self.widget_sel_stim,
+            HBox((self.widget_roi, self.widget_save_and_new, self.widget_save, self.widget_undo)),
+            self.widget_view,
+            HBox((self.widget_bg, self.widget_gamma, self.widget_cmap)),
+            HBox((self.widget_shift_dx, self.widget_shift_dy, self.widget_auto_shift)),
+            HBox((self.widget_tool, self.widget_size, self.widget_thresh)),
+            HBox((self.widget_sel_autorois, self.widget_exec_autorois, self.widget_exec_autorois_missing)),
+            self.widget_info,
+            HBox((self.widget_clean, self.widget_kill_roi, self.widget_kill_all, self.widget_reset_all)),
+            HBox((self.widget_save_to_file, self.widget_save_all_to_file, self.widget_save_info)),
+        ))
+        return vbox
 
     def set_selected_cmap(self, value):
         self.widget_cmap.value = value
@@ -401,7 +422,6 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def set_dangerzone(self, dangerzone):
         self.widget_dangerzone.value = dangerzone
-        self.widget_exec_autorois.disabled = not dangerzone
         self.widget_kill_all.disabled = not dangerzone
         self.widget_reset_all.disabled = not dangerzone
 
@@ -414,7 +434,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         widget.observe(change, names='value')
         return widget
 
-    def set_read_only(self, read_only):
+    def set_read_only(self, read_only, force=False):
         self.widget_read_only.value = read_only
         self.widget_save.disabled = read_only
         self.widget_save_and_new.disabled = read_only
@@ -423,11 +443,15 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_kill_roi.disabled = read_only
         self.widget_tool.disabled = read_only
         self.widget_clean.disabled = read_only
+        self.widget_exec_autorois.disabled = read_only
         self.widget_exec_autorois_missing.disabled = read_only
 
         if read_only:
             self.set_selected_tool('select')
             self.set_dangerzone(False)
+
+            if force:
+                self.widget_read_only.disabled = True
 
         self.update_shift_widget()
 
@@ -487,7 +511,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def create_widget_exec_autorois(self):
-        widget_exec_autorois = Button(description='Detect ROIs', disabled=True, button_style='success')
+        widget_exec_autorois = Button(description='Detect ROIs', disabled=False, button_style='success')
         widget_exec_autorois.on_click(self.exec_autorois_all)
         return widget_exec_autorois
 
@@ -499,7 +523,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         model = self.autorois_models[current_model]
         if model is not None:
             self.update_progress(0)
-            self.set_read_only(True)
+            self.set_read_only(True, force=True)
 
             roi_mask_new = model.create_mask_from_data(
                 ch0_stack=self.ch0_stacks[self._selected_stim_idx],
@@ -638,6 +662,9 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.widget_shift_dy.value = value
             self.shifts[self._selected_stim_idx, 1] = value
 
+        self.widget_exec_autorois.disabled = self.widget_shift_dx.value != 0 or self.widget_shift_dy.value != 0
+        self.widget_exec_autorois_missing.disabled = self.widget_shift_dx.value != 0 or self.widget_shift_dy.value != 0
+
         if update:
             self.update_backgrounds()
             self.update_info()
@@ -668,7 +695,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_progress.value = percent
 
     def exec_auto_shift(self, button=None):
-        self.set_read_only(True)
+        self.set_read_only(True, force=True)
         shift_x, shift_y = self.compute_autoshift(fun_progress=self.update_progress)
         self.set_shift(value=shift_x, axis='x', update=False)
         self.set_shift(value=shift_y, axis='y', update=True)
@@ -790,11 +817,8 @@ class InteractiveRoiCanvas(RoiCanvas):
     def prep_roi_mask_for_file(self):
         roi_mask = self.roi_masks.copy()
         roi_shift = self.shifts[self._selected_stim_idx]
-        roi_shift = np.array([-roi_shift[1], -roi_shift[0]])
-
-        roi_mask = mask_utils.shift_array(img=np.swapaxes(np.flipud(roi_mask), 0, 1),
-                                          shift=roi_shift, inplace=True, cval=0)
-
+        roi_shift = np.array([-roi_shift[0], -roi_shift[1]])
+        roi_mask = mask_utils.shift_array(img=roi_mask, shift=roi_shift, inplace=True, cval=0)
         return roi_mask
 
     def exec_save_to_file(self, botton=None):
@@ -858,31 +882,17 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_roi.disabled = False
         self.set_selected_roi(new_roi)
 
-    def start_gui(self):
-        vbox = VBox((
-            self.m,
-            self.widget_progress,
-            HBox((self.widget_read_only, self.widget_dangerzone,)),
-            self.widget_sel_stim,
-            HBox((self.widget_roi, self.widget_save_and_new, self.widget_save, self.widget_undo)),
-            self.widget_view,
-            HBox((self.widget_bg, self.widget_gamma, self.widget_cmap)),
-            HBox((self.widget_shift_dx, self.widget_shift_dy, self.widget_auto_shift)),
-            HBox((self.widget_tool, self.widget_size, self.widget_thresh)),
-            HBox((self.widget_sel_autorois, self.widget_exec_autorois, self.widget_exec_autorois_missing)),
-            self.widget_info,
-            HBox((self.widget_clean, self.widget_kill_roi, self.widget_kill_all, self.widget_reset_all)),
-            HBox((self.widget_save_to_file, self.widget_save_all_to_file, self.widget_save_info)),
-        ))
-        return vbox
-
     def _apply_tool(self, x, y, down):
         """Apply tool. Down means mouse down event"""
 
-        ix, iy = int(x / self.upscale), int(y / self.upscale)
+        ix = int(x / self.upscale)
+        iy = self.ny - int(y / self.upscale) - 1  # Flip ud
+
+        print(f'Apply tool={self._selected_tool} at x={x}, y={y}, ix={ix}, iy={iy}')
+
         if self._selected_tool == 'draw':
             mask = mask_utils.create_circular_mask(
-                h=self.ny, w=self.nx, center=(ix, iy), radius=self._selected_size - 1)
+                w=self.nx, h=self.ny, center=(ix, iy), radius=self._selected_size - 1)
             self.add_to_current_mask(mask=mask)
         elif self._selected_tool == 'erase':
             self.erase_from_masks(x=ix, y=iy)
@@ -897,8 +907,8 @@ class InteractiveRoiCanvas(RoiCanvas):
                 plot=False, thresh=1. - self._selected_thresh, max_pixel_dist=self._selected_size)
             self.add_to_current_mask(mask=mask)
         elif self._selected_tool == 'select' and down:
-            if self.roi_masks[iy, ix] > 0:
-                self.set_selected_roi(self.roi_masks[iy, ix])
+            if self.roi_masks[ix, iy] > 0:
+                self.set_selected_roi(self.roi_masks[ix, iy])
 
         if down:
             self.update_info()
@@ -941,6 +951,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.update_current_mask_img()
 
         img = image_utils.upscale_image(self.current_mask_img, upscale=self.upscale)
+        img = np.flipud(np.swapaxes(img, 0, 1))
 
         with hold_canvas(self.canvas):
             self.canvas.clear()
@@ -952,6 +963,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.update_roi_mask_img()
 
         img = image_utils.upscale_image(self.roi_mask_img, upscale=self.upscale)
+        img = np.flipud(np.swapaxes(img, 0, 1))
 
         with hold_canvas(self.canvas_masks):
             self.canvas_masks.clear()
@@ -963,6 +975,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.update_bg_img()
 
         img = image_utils.upscale_image(self.bg_img, self.upscale)
+        img = np.flipud(np.swapaxes(img, 0, 1))
 
         with hold_canvas(self.canvas_bg):
             self.canvas_bg.clear()

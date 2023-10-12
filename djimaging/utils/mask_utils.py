@@ -14,7 +14,7 @@ from djimaging.utils.scanm_utils import check_if_scanm_roi_mask
 
 def create_circular_mask(h, w, center, radius):
     """Create a binary mask"""
-    ys, xs = np.ogrid[:h, :w]
+    xs, ys = np.ogrid[:w, :h]
     dist_from_center = np.sqrt((xs - center[0]) ** 2 + (ys - center[1]) ** 2)
     mask = np.asarray(dist_from_center <= radius)
     return mask
@@ -24,6 +24,8 @@ def extract_connected_mask(mask, i, j):
     """https://stackoverflow.com/questions/35224094/extract-connected-pixels-in-a-binary-image-using-python"""
 
     mask = mask.copy()
+
+    nx, ny = mask.shape
 
     x = []
     y = []
@@ -43,7 +45,7 @@ def extract_connected_mask(mask, i, j):
         for dx, dy in zip(dxs, dys):
             xx = u + dx
             yy = v + dy
-            if mask[xx][yy] == 1:
+            if xx < nx and yy < ny and mask[xx][yy] == 1:
                 mask[xx][yy] = 0
                 q.put((xx, yy))
 
@@ -54,24 +56,24 @@ def extract_connected_mask(mask, i, j):
 
 
 def get_mask_by_cc(seed_ix, seed_iy, data, seed_trace=None, thresh=0.2, max_pixel_dist=10, plot=False):
-    nx = data.shape[1]
-    ny = data.shape[0]
+    nx = data.shape[0]
+    ny = data.shape[1]
 
     if seed_trace is None:
-        seed_trace = data[seed_iy, seed_ix]
+        seed_trace = data[seed_ix, seed_iy]
 
-    ccs = np.zeros((ny, nx), dtype='float')
+    ccs = np.zeros((nx, ny), dtype='float')
 
-    dist_mask = create_circular_mask(h=ny, w=nx, center=(seed_ix, seed_iy), radius=max_pixel_dist)
+    dist_mask = create_circular_mask(w=nx, h=ny, center=(seed_ix, seed_iy), radius=max_pixel_dist)
 
     for ix in np.arange(0, nx):
         for iy in np.arange(0, ny):
-            if dist_mask[iy, ix]:
-                ccs[iy, ix] = np.corrcoef(seed_trace, data[iy, ix])[0, 1]
+            if dist_mask[ix, iy]:
+                ccs[ix, iy] = np.corrcoef(seed_trace, data[ix, iy])[0, 1]
 
     mask = (ccs >= thresh) & dist_mask
 
-    mask_connected = extract_connected_mask(mask, seed_iy, seed_ix)
+    mask_connected = extract_connected_mask(mask, seed_ix, seed_iy)
 
     if plot and np.any(mask):
         fig, axs = plt.subplots(1, 6, figsize=(20, 3))
@@ -110,24 +112,24 @@ def get_mask_by_bg(seed_ix, seed_iy, data, ref_value=None, thresh=0.2, max_pixel
     """Get mask based on background image pixel values"""
     assert data.ndim == 2
 
-    nx = data.shape[1]
-    ny = data.shape[0]
+    nx = data.shape[0]
+    ny = data.shape[1]
 
     if ref_value is None:
-        ref_value = data[seed_iy, seed_ix]
+        ref_value = data[seed_ix, seed_iy]
 
-    value_dists = np.zeros((ny, nx), dtype='float')
+    value_dists = np.zeros((nx, ny), dtype='float')
 
-    dist_mask = create_circular_mask(h=ny, w=nx, center=(seed_ix, seed_iy), radius=max_pixel_dist)
+    dist_mask = create_circular_mask(w=nx, h=ny, center=(seed_ix, seed_iy), radius=max_pixel_dist)
 
     for ix in np.arange(0, nx):
         for iy in np.arange(0, ny):
-            if dist_mask[iy, ix]:
-                value_dists[iy, ix] = np.abs(data[iy, ix] - ref_value)
+            if dist_mask[ix, iy]:
+                value_dists[ix, iy] = np.abs(data[ix, iy] - ref_value)
 
     mask = (value_dists <= thresh) & dist_mask
 
-    mask_connected = extract_connected_mask(mask, seed_iy, seed_ix)
+    mask_connected = extract_connected_mask(mask, seed_ix, seed_iy)
 
     if plot and np.any(mask):
         fig, axs = plt.subplots(1, 5, figsize=(20, 3))
@@ -437,7 +439,7 @@ def to_igor_format(roi_mask):
 
 def to_python_format(roi_mask):
     if np.any(roi_mask == 0):
-        raise ValueError
+        warnings.warn('0 is used as background label. Should be +1 for igor roi_mask.')
 
     roi_mask = roi_mask.copy()
     roi_mask[roi_mask == 1] = 0
@@ -502,8 +504,7 @@ def shift_array(img, shift, inplace=False, cval=np.min):
         img = img.copy()
     img = np.asarray(img)
 
-    shift_ax1, shift_ax0 = shift
-    shift_ax0 = -shift_ax0
+    shift_ax0, shift_ax1 = shift
     img = np.roll(np.roll(img, shift_ax0, axis=0), shift_ax1, axis=1)
 
     if callable(cval):

@@ -367,8 +367,8 @@ def _add_autorois_corr(autorois_models: dict, kind: str):
                    use_ch0_stack=True, grow_use_corr_map=False, grow_threshold=0.1,
                    grow_only_local_thresh_pixels=True)
     elif kind == 'default_bc' or kind == 'default_ac':
-        kws = dict(cut_x=(4, 2), cut_z=(2, 8), min_area_um2=0.8, max_area_um2=12.6, n_pix_max=None, line_threshold_q=70,
-                   use_ch0_stack=True, grow_use_corr_map=False, grow_threshold=None,
+        kws = dict(cut_x=(4, 2), cut_z=(8, 2), min_area_um2=0.5, max_area_um2=12.6, n_pix_max=None, line_threshold_q=70,
+                   use_ch0_stack=True, grow_use_corr_map=False, grow_threshold=None, line_threshold_min=0.1,
                    grow_only_local_thresh_pixels=True)
     else:
         raise NotImplementedError(kind)

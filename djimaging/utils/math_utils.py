@@ -4,7 +4,13 @@ import numpy as np
 def normalize_zero_one(x):
     """Normalize array to be between zero and one"""
     x = np.asarray(x)
-    return (x - np.min(x)) / (np.max(x) - np.min(x))
+    vmin = np.nanmin(x)
+    vmax = np.nanmax(x)
+    vrng = vmax - vmin
+    if vrng == 0.:
+        return x - vmin
+    else:
+        return (x - vmin) / vrng
 
 
 def normalize_soft_zero_one(x, dq=5, clip=True):
