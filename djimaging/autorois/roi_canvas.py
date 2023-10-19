@@ -102,10 +102,9 @@ class RoiCanvas:
         self._selected_size = 1
         self._selected_thresh = 0.3
 
-        self.alpha_bg = 200
-        self.alpha_main = 255
-        self.alpha_highlight = 150
-        self.alpha_faint = 50
+        self.alpha_bg = 200. / 255
+        self.alpha_hl = 150. / 255
+        self.alpha_ft = 50. / 255
 
         self.backgrounds = self.compute_backgrounds()
         self.output_file = self.output_files[self._selected_stim_idx]
@@ -174,11 +173,11 @@ class RoiCanvas:
         """Get alpha for ROI"""
         if self._selected_view == 'all' or (
                 self._selected_view in ['highlight', 'selected'] and roi == self._selected_roi):
-            return self.alpha_highlight
+            return int(self.alpha_hl * 255)
         elif self._selected_view == 'selected' and roi != self._selected_roi:
             return 0
         else:
-            return self.alpha_faint
+            return int(self.alpha_ft * 255)
 
     def _get_roi_rgba255(self, roi):
         """Get color and alpha for ROI"""
@@ -197,7 +196,7 @@ class RoiCanvas:
     def update_bg_img(self):
         self.bg_img = image_utils.color_image(
             self.backgrounds[self._selected_bg],
-            cmap=self._selected_cmap, gamma=self._selected_gamma, alpha=self.alpha_bg)
+            cmap=self._selected_cmap, gamma=self._selected_gamma, alpha=int(self.alpha_bg * 255))
 
     def erase_from_masks(self, x, y):
         """Remove pixels from current mask and all masks"""
@@ -302,8 +301,16 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         self.widget_bg = self.create_widget_bg()
         self.widget_cmap = self.create_widget_cmap()
+
         self.widget_roi = self.create_widget_roi()
+        self.widget_roi_next = self.create_widget_roi_next()
+        self.widget_roi_prev = self.create_widget_roi_prev()
+
         self.widget_view = self.create_widget_view()
+        self.widget_alpha_bg = self.create_widget_alpha_bg()
+        self.widget_alpha_hl = self.create_widget_alpha_hl()
+        self.widget_alpha_ft = self.create_widget_alpha_ft()
+
         self.widget_gamma = self.create_widget_gamma()
         self.widget_tool = self.create_widget_tool()
         self.widget_size = self.create_widget_size()
@@ -367,11 +374,12 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.widget_progress,
             HBox((self.widget_read_only, self.widget_dangerzone,)),
             self.widget_sel_stim,
-            HBox((self.widget_roi, self.widget_save_and_new, self.widget_save, self.widget_undo)),
-            self.widget_view,
+            HBox((self.widget_roi, self.widget_roi_prev, self.widget_roi_next)),
+            HBox((self.widget_save_and_new, self.widget_save, self.widget_undo)),
+            HBox((self.widget_tool, self.widget_size, self.widget_thresh)),
+            HBox((self.widget_view, self.widget_alpha_bg, self.widget_alpha_hl, self.widget_alpha_ft)),
             HBox((self.widget_bg, self.widget_gamma, self.widget_cmap)),
             HBox((self.widget_shift_dx, self.widget_shift_dy, self.widget_auto_shift)),
-            HBox((self.widget_tool, self.widget_size, self.widget_thresh)),
             HBox((self.widget_sel_autorois, self.widget_exec_autorois, self.widget_exec_autorois_missing)),
             self.widget_info,
             HBox((self.widget_clean, self.widget_kill_roi, self.widget_kill_all, self.widget_reset_all)),
@@ -410,6 +418,57 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         widget.observe(change, names='value')
         return widget
+
+    def create_widget_alpha_bg(self):
+        widget = FloatSlider(min=0, max=1, step=0.01, value=self.alpha_bg,
+                             description='α[BG]:',
+                             disabled=False, continuous_update=False, orientation='horizontal', readout=True,
+                             readout_format='.2f')
+
+        def change(value):
+            self.set_selected_alpha_bg(value['new'])
+
+        widget.observe(change, names='value')
+        return widget
+
+    def set_selected_alpha_bg(self, value):
+        self.widget_alpha_bg.value = value
+        self.alpha_bg = value
+        self.draw_bg(update=True)
+
+    def create_widget_alpha_hl(self):
+        widget = FloatSlider(min=0, max=1, step=0.01, value=self.alpha_hl,
+                             description='α[HL]:',
+                             disabled=False, continuous_update=False, orientation='horizontal', readout=True,
+                             readout_format='.2f')
+
+        def change(value):
+            self.set_selected_alpha_hl(value['new'])
+
+        widget.observe(change, names='value')
+        return widget
+
+    def set_selected_alpha_hl(self, value):
+        self.widget_alpha_hl.value = value
+        self.alpha_hl = value
+        self.draw_current_mask_img(update=True)
+
+    def create_widget_alpha_ft(self):
+        widget = FloatSlider(min=0, max=1, step=0.01, value=self.alpha_ft,
+                             description='α[FA]:',
+                             disabled=False, continuous_update=False, orientation='horizontal', readout=True,
+                             readout_format='.2f')
+
+        def change(value):
+            self.set_selected_alpha_ft(value['new'])
+
+        widget.observe(change, names='value')
+        return widget
+
+    def set_selected_alpha_ft(self, value):
+        self.widget_alpha_ft.value = value
+        self.alpha_ft = value
+        self.draw_roi_masks_img(update=True)
 
     def create_widget_dangerzone(self):
         widget = Checkbox(value=False, description='Dangerzone', disabled=False)
@@ -575,6 +634,7 @@ class InteractiveRoiCanvas(RoiCanvas):
     def create_widget_roi(self):
         """Create and return button"""
         options = np.unique(np.append(self.roi_masks[self.roi_masks > 0].flatten(), self._selected_roi))
+
         widget = Dropdown(options=options, value=self._selected_roi, description='ROI:', disabled=False)
 
         def change(value):
@@ -607,7 +667,6 @@ class InteractiveRoiCanvas(RoiCanvas):
         if self._selected_tool == 'select':
             self.widget_thresh.disabled = True
             self.widget_size.disabled = True
-            self.set_selected_view("highlight")
         elif self._selected_tool == 'bg':
             self.widget_thresh.disabled = False
             self.widget_size.disabled = False
@@ -769,9 +828,11 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget_save_and_new
 
     def exec_clean(self, button=None):
+        self.set_read_only(True, force=True)
         self.roi_masks = mask_utils.clean_rois(
             self.roi_masks, self.n_artifact, min_size=3, connectivity=2, verbose=False)
         self.draw_all(update=True)
+        self.set_read_only(False)
 
     def create_widget_clean(self):
         widget = Button(description='Clean mask', disabled=False, button_style='warning')
@@ -1023,3 +1084,19 @@ class InteractiveRoiCanvas(RoiCanvas):
             new_key['shift_dy'] = shift_dy
 
             roi_mask_tab().RoiMaskPresentation().insert1(new_key)
+
+    def create_widget_roi_next(self):
+        widget = Button(description='>>', disabled=False, button_style='success')
+        widget.on_click(self.exec_roi_next)
+        return widget
+
+    def exec_roi_next(self, button=None):
+        self.set_selected_roi(self.widget_roi.options[(self.widget_roi.index + 1) % len(self.widget_roi.options)])
+
+    def create_widget_roi_prev(self):
+        widget = Button(description='<<', disabled=False, button_style='success')
+        widget.on_click(self.exec_roi_prev)
+        return widget
+
+    def exec_roi_prev(self, button=None):
+        self.set_selected_roi(self.widget_roi.options[(self.widget_roi.index - 1) % len(self.widget_roi.options)])

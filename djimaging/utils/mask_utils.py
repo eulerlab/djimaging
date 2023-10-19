@@ -218,12 +218,12 @@ def shrink_light_artifact_rois(mask, n_artifact, verbose=True):
     mask = mask.copy()
 
     if verbose:
-        light_artifact_mask = mask[:, :n_artifact]
+        light_artifact_mask = mask[:n_artifact, :]
         n_rois_in_artifact = len(np.unique(light_artifact_mask)) - 1  # to ignore background
         if n_rois_in_artifact:
             print(f'{n_rois_in_artifact} ROIs in light artifact region. ' +
                   f'Setting all artifact region pixel labels to background.')
-    mask[:, :n_artifact] = 0
+    mask[:n_artifact, :] = 0
     return mask
 
 
