@@ -12,7 +12,7 @@ from djimaging.utils import image_utils, mask_utils, math_utils
 
 try:
     from ipywidgets import HTML, Dropdown, FloatSlider, Button, HBox, VBox, Checkbox, IntSlider, BoundedIntText, \
-        IntProgress, FloatProgress
+        IntProgress, FloatProgress, Layout
 except ImportError:
     warnings.warn('Failed to import ipywidgets. AutoROIs will not work.')
 
@@ -420,10 +420,9 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def create_widget_alpha_bg(self):
-        widget = FloatSlider(min=0, max=1, step=0.01, value=self.alpha_bg,
-                             description='α[BG]:',
+        widget = FloatSlider(min=0, max=1, step=0.1, value=self.alpha_bg, description='α[BG]:',
                              disabled=False, continuous_update=False, orientation='horizontal', readout=True,
-                             readout_format='.2f')
+                             readout_format='.2f', layout=Layout(width='250px'))
 
         def change(value):
             self.set_selected_alpha_bg(value['new'])
@@ -437,10 +436,9 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.draw_bg(update=True)
 
     def create_widget_alpha_hl(self):
-        widget = FloatSlider(min=0, max=1, step=0.01, value=self.alpha_hl,
-                             description='α[HL]:',
+        widget = FloatSlider(min=0, max=1, step=0.01, value=self.alpha_hl, description='α[HL]:',
                              disabled=False, continuous_update=False, orientation='horizontal', readout=True,
-                             readout_format='.2f')
+                             readout_format='.2f', layout=Layout(width='250px'))
 
         def change(value):
             self.set_selected_alpha_hl(value['new'])
@@ -454,10 +452,9 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.draw_current_mask_img(update=True)
 
     def create_widget_alpha_ft(self):
-        widget = FloatSlider(min=0, max=1, step=0.01, value=self.alpha_ft,
-                             description='α[FA]:',
+        widget = FloatSlider(min=0, max=1, step=0.01, value=self.alpha_ft, description='α[FA]:',
                              disabled=False, continuous_update=False, orientation='horizontal', readout=True,
-                             readout_format='.2f')
+                             readout_format='.2f', layout=Layout(width='250px'))
 
         def change(value):
             self.set_selected_alpha_ft(value['new'])
@@ -698,8 +695,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         """Create and return button"""
         widget = FloatSlider(min=1, max=10.0, step=0.5, value=self._selected_size,
                              description='Size:', disabled=False, continuous_update=False, orientation='horizontal',
-                             readout=True,
-                             readout_format='.1f')
+                             readout=True, readout_format='.1f')
 
         def change(value):
             self.set_selected_size(value['new'])
@@ -736,6 +732,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             value=value, min=-5, max=5, step=1,
             description=f'shift_d{axis}:', disabled=False,
             continuous_update=False,
+            layout=Layout(width='150px', description_width='50px'),
         )
 
         def change(value):
@@ -823,12 +820,14 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.draw_roi_masks_img(update=True)
 
     def create_widget_save_and_new(self):
-        widget_save_and_new = Button(description='Save & New', disabled=False, button_style='success')
+        widget_save_and_new = Button(description='New ROI', disabled=False, button_style='success')
         widget_save_and_new.on_click(self.exec_save_and_new)
         return widget_save_and_new
 
     def exec_clean(self, button=None):
         self.set_read_only(True, force=True)
+        self.exec_save_and_new()
+        self.set_selected_roi(value=1)
         self.roi_masks = mask_utils.clean_rois(
             self.roi_masks, self.n_artifact, min_size=3, connectivity=2, verbose=False)
         self.draw_all(update=True)
@@ -1086,7 +1085,8 @@ class InteractiveRoiCanvas(RoiCanvas):
             roi_mask_tab().RoiMaskPresentation().insert1(new_key)
 
     def create_widget_roi_next(self):
-        widget = Button(description='>>', disabled=False, button_style='success')
+        widget = Button(description='>>', disabled=False, button_style='success',
+                        layout=Layout(width='50px'))
         widget.on_click(self.exec_roi_next)
         return widget
 
@@ -1094,7 +1094,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.set_selected_roi(self.widget_roi.options[(self.widget_roi.index + 1) % len(self.widget_roi.options)])
 
     def create_widget_roi_prev(self):
-        widget = Button(description='<<', disabled=False, button_style='success')
+        widget = Button(description='<<', disabled=False, button_style='success',
+                        layout=Layout(width='50px'))
         widget.on_click(self.exec_roi_prev)
         return widget
 
