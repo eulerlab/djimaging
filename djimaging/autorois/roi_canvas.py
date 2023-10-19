@@ -4,6 +4,7 @@ import warnings
 from typing import Optional, Dict
 
 import numpy as np
+from IPython.core.display_functions import clear_output
 from matplotlib import pyplot as plt
 from matplotlib.colors import rgb2hex, hex2color
 
@@ -12,7 +13,7 @@ from djimaging.utils import image_utils, mask_utils, math_utils
 
 try:
     from ipywidgets import HTML, Dropdown, FloatSlider, Button, HBox, VBox, Checkbox, IntSlider, BoundedIntText, \
-        IntProgress, FloatProgress, Layout
+        IntProgress, FloatProgress, Layout, Output
 except ImportError:
     warnings.warn('Failed to import ipywidgets. AutoROIs will not work.')
 
@@ -291,13 +292,18 @@ class InteractiveRoiCanvas(RoiCanvas):
             autorois_models: Optional[Dict] = None,
             output_files=None,
             pixel_size_um=(1., 1.),
+            show_diagnostics=False,
     ):
         super().__init__(ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, stim_names=stim_names, n_artifact=n_artifact,
                          initial_roi_mask=initial_roi_mask, shifts=shifts, main_stim_idx=main_stim_idx,
                          upscale=upscale, autorois_models=autorois_models,
                          output_files=output_files, pixel_size_um=pixel_size_um)
         # Create menu elements
+        self.current_traces = np.array([])
+        self.current_cc = np.array([])
         self.widget_progress = self.create_widget_progress()
+
+        self.widget_diagnostics = self.create_widget_diagnostics() if show_diagnostics else None
 
         self.widget_bg = self.create_widget_bg()
         self.widget_cmap = self.create_widget_cmap()
@@ -369,8 +375,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.draw_all(update=True)
 
     def start_gui(self):
-        vbox = VBox((
-            self.img,
+        data_lines = [self.img, self.widget_diagnostics] if self.widget_diagnostics is not None else [self.img]
+        control_lines = [
             self.widget_progress,
             HBox((self.widget_read_only, self.widget_dangerzone,)),
             self.widget_sel_stim,
@@ -380,11 +386,15 @@ class InteractiveRoiCanvas(RoiCanvas):
             HBox((self.widget_view, self.widget_alpha_bg, self.widget_alpha_hl, self.widget_alpha_ft)),
             HBox((self.widget_bg, self.widget_gamma, self.widget_cmap)),
             HBox((self.widget_shift_dx, self.widget_shift_dy, self.widget_auto_shift)),
-            HBox((self.widget_sel_autorois, self.widget_exec_autorois, self.widget_exec_autorois_missing)),
+            HBox(
+                (self.widget_sel_autorois, self.widget_exec_autorois, self.widget_exec_autorois_missing)),
             self.widget_info,
             HBox((self.widget_clean, self.widget_kill_roi, self.widget_kill_all, self.widget_reset_all)),
             HBox((self.widget_save_to_file, self.widget_save_all_to_file, self.widget_save_info)),
-        ))
+        ]
+
+        # concatenate the two line tuple
+        vbox = VBox(data_lines + control_lines)
         return vbox
 
     def set_selected_cmap(self, value):
@@ -621,8 +631,11 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.draw_roi_masks_img(update=True)
 
     def set_selected_roi(self, value):
-        self.widget_roi.value = value
+        if value == self._selected_roi:
+            return
+
         self._selected_roi = value
+        self.widget_roi.value = value
         self.load_current_mask()
         self.update_info()
         self.draw_current_mask_img(update=True)
@@ -635,14 +648,12 @@ class InteractiveRoiCanvas(RoiCanvas):
         widget = Dropdown(options=options, value=self._selected_roi, description='ROI:', disabled=False)
 
         def change(value):
-            if not self.widget_roi.disabled:
-                self.set_selected_roi(value['new'])
+            self.set_selected_roi(value['new'])
 
         widget.observe(change, names='value')
         return widget
 
     def set_selected_view(self, value):  # TODO: Add border view
-        self.widget_view.value = value
         self._selected_view = value
         self.draw_current_mask_img(update=True)
         self.draw_roi_masks_img(update=True)
@@ -659,7 +670,6 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def set_selected_tool(self, value):
-        self.widget_tool.value = value
         self._selected_tool = value
         if self._selected_tool == 'select':
             self.widget_thresh.disabled = True
@@ -688,7 +698,6 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def set_selected_size(self, value):
-        self.widget_size.value = value
         self._selected_size = value
 
     def create_widget_size(self):
@@ -758,7 +767,6 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.set_read_only(False)
 
     def set_selected_thresh(self, value):
-        self.widget_thresh.value = value
         self._selected_thresh = value
 
     def create_widget_thresh(self):
@@ -775,7 +783,6 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def set_selected_gamma(self, value):
-        self.widget_gamma.value = value
         self._selected_gamma = value
         self.draw_bg(update=True)
 
@@ -921,9 +928,63 @@ class InteractiveRoiCanvas(RoiCanvas):
         return current_stack
 
     def update_info(self):
+        self.current_traces = self._compute_traces()
+        self.current_cc = self._compute_cc(self.current_traces)
+
+        self.update_diagnostics(update=False)
+        self.update_cc()
+
+    def _compute_traces(self):
+        return self.get_current_stack()[self.current_mask]
+
+    def _compute_cc(self, traces):
+        return np.corrcoef(traces)
+
+    def update_diagnostics(self, update=True):
+        if self.widget_diagnostics is None:
+            return
+
+        with self.widget_diagnostics:
+            clear_output(wait=True)
+            fig, axs = plt.subplots(1, 3, figsize=(7, 1.5), width_ratios=(2, 1, 1))
+            if np.any(self.current_mask):
+                traces = self._compute_traces() if update else self.current_traces
+
+                axs[0].plot(traces.T, c='dimgray', lw=0.2)
+                axs[0].plot(np.mean(traces, axis=0), c='k', lw=1)
+
+                if np.sum(self.current_mask) > 1:
+                    cc = self._compute_cc(traces) if update else self.current_cc
+                    axs[1].hist(cc[np.triu_indices_from(cc, k=1)])
+                    vabsmax = np.maximum(0.1, np.max(np.abs(cc[np.triu_indices_from(cc, k=1)])))
+                    axs[1].set(xlim=(-vabsmax * 1.05, vabsmax * 1.05))
+
+                    mask = self.current_mask
+                    xs, ys = np.where(mask)
+
+                    # map cc values onto mask
+                    cc_mask = np.full(mask.shape, np.nan, dtype=np.float32)
+
+                    cc = cc.copy()
+                    cc[np.diag_indices_from(cc)] = np.nan
+                    cc_mask[xs, ys] = np.nanmean(cc, axis=0)
+
+                    vabsmax = np.maximum(0.1, np.nanmax(np.abs(cc_mask)))
+                    im = axs[2].imshow(cc_mask.T, origin='lower', cmap='coolwarm', vmin=-vabsmax, vmax=vabsmax)
+                    plt.colorbar(im, ax=axs[2])
+                    axs[2].set(xlim=(np.min(xs) - 3, np.max(xs) + 3), ylim=(np.min(ys) - 3, np.max(ys) + 3))
+
+                plt.tight_layout()
+            else:
+                for ax in axs.flat:
+                    ax.axis('off')
+
+            plt.show()
+
+    def update_cc(self, update=True):
         n_px = np.sum(self.current_mask)
         if np.sum(self.current_mask) >= 2:
-            cc = np.corrcoef(self.get_current_stack()[self.current_mask])
+            cc = self._compute_cc(self._compute_traces()) if update else self.current_cc
             cc = cc[np.triu_indices_from(cc, k=1)]
             self.widget_info.value = f"n_px={n_px}, min_cc={np.min(cc):.2f}, mean_cc={np.mean(cc):.2f}"
         else:
@@ -970,9 +1031,6 @@ class InteractiveRoiCanvas(RoiCanvas):
             if self.roi_masks[ix, iy] > 0:
                 self.set_selected_roi(self.roi_masks[ix, iy])
 
-        if down:
-            self.update_info()
-
     def on_mouse_down(self, x, y):
         """React to mouse done on canvas, e.g. by drawing on canvas"""
         self.drawing = True
@@ -1001,7 +1059,8 @@ class InteractiveRoiCanvas(RoiCanvas):
     def on_mouse_up(self, x, y):
         self.last_mouse_pos_xy = (-1, -1)
         self.drawing = False
-        self.update_info()
+        if self._selected_tool != 'select':
+            self.update_info()
         self.draw_roi_masks_img()
 
     # Draw functions
@@ -1042,9 +1101,9 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.canvas_bg.put_image_data(img, 0, 0)
 
     def update_all(self):
-        self.update_info()
         self.update_shift_widget()
         self.update_roi_options()
+        self.update_info()
 
     def draw_all(self, update=True):
         self.draw_bg()
@@ -1091,7 +1150,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def exec_roi_next(self, button=None):
-        self.set_selected_roi(self.widget_roi.options[(self.widget_roi.index + 1) % len(self.widget_roi.options)])
+        next_roi = self.widget_roi.options[(self.widget_roi.index + 1) % len(self.widget_roi.options)]
+        self.set_selected_roi(next_roi)
 
     def create_widget_roi_prev(self):
         widget = Button(description='<<', disabled=False, button_style='success',
@@ -1100,4 +1160,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def exec_roi_prev(self, button=None):
-        self.set_selected_roi(self.widget_roi.options[(self.widget_roi.index - 1) % len(self.widget_roi.options)])
+        prev_roi = self.widget_roi.options[(self.widget_roi.index - 1) % len(self.widget_roi.options)]
+        self.set_selected_roi(prev_roi)
+
+    def create_widget_diagnostics(self):
+        return Output()
