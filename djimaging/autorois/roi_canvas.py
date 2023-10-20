@@ -30,6 +30,7 @@ class RoiCanvas:
             ch0_stacks,
             ch1_stacks,
             stim_names=None,
+            bg_dict=None,
             shifts=None,
             initial_roi_mask=None,
             main_stim_idx: int = 0,
@@ -40,7 +41,6 @@ class RoiCanvas:
             pixel_size_um=(1., 1.),
     ):
         """ROI canvas to draw ROIs"""
-
         for ch0_stack, ch1_stack in zip(ch0_stacks, ch1_stacks):
             if (ch0_stack.shape[:2] != ch0_stacks[0].shape[:2]) or (ch1_stack.shape[:2] != ch0_stacks[0].shape[:2]):
                 raise ValueError('Incompatible shapes between stacks')
@@ -50,6 +50,7 @@ class RoiCanvas:
 
         self.ch0_stacks = ch0_stacks
         self.ch1_stacks = ch1_stacks
+        self.other_bgs_dict = bg_dict if bg_dict is not None else dict()
 
         if shifts is None:
             shifts = np.array([np.array([0, 0], dtype=int) for _ in ch0_stacks])
@@ -132,6 +133,10 @@ class RoiCanvas:
             'ch1_std': mask_utils.shift_array(np.std(self.ch1_stacks[self._selected_stim_idx], axis=2), shift),
             'none': np.full((self.nx, self.ny), 255)
         }
+
+        if self.other_bgs_dict is not None:
+            for key, bg in self.other_bgs_dict.items():
+                backgrounds[key] = bg
 
         return backgrounds
 
@@ -283,6 +288,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             ch0_stacks,
             ch1_stacks,
             stim_names=None,
+            bg_dict=None,
             main_stim_idx=0,
             initial_roi_mask=None,
             shifts=None,
@@ -294,7 +300,8 @@ class InteractiveRoiCanvas(RoiCanvas):
             pixel_size_um=(1., 1.),
             show_diagnostics=False,
     ):
-        super().__init__(ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, stim_names=stim_names, n_artifact=n_artifact,
+        super().__init__(ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, stim_names=stim_names,
+                         bg_dict=bg_dict, n_artifact=n_artifact,
                          initial_roi_mask=initial_roi_mask, shifts=shifts, main_stim_idx=main_stim_idx,
                          upscale=upscale, autorois_models=autorois_models,
                          output_files=output_files, pixel_size_um=pixel_size_um)
@@ -802,6 +809,7 @@ class InteractiveRoiCanvas(RoiCanvas):
     def exec_undo(self, button=None):
         self.reset_current_mask()
         self.draw_current_mask_img(update=True)
+        self.update_info()
 
     def create_widget_undo(self):
         widget_undo = Button(description='Undo', disabled=False, button_style='warning')
@@ -1023,9 +1031,13 @@ class InteractiveRoiCanvas(RoiCanvas):
                 plot=False, thresh=self._selected_thresh, max_pixel_dist=self._selected_size)
             self.add_to_current_mask(mask=mask)
         elif self._selected_tool == 'bg':
+            img = math_utils.normalize_zero_one(np.mean(self.bg_img, axis=2))
+            if self.bg_img.shape[0] != self.nx or self.bg_img.shape[1] != self.ny:
+                img = image_utils.resize_image(img, output_shape=(self.nx, self.ny))
             mask = mask_utils.get_mask_by_bg(
-                seed_ix=ix, seed_iy=iy, data=math_utils.normalize_zero_one(np.mean(self.bg_img, axis=2)),
-                plot=False, thresh=1. - self._selected_thresh, max_pixel_dist=self._selected_size)
+                seed_ix=ix, seed_iy=iy,
+                data=img, plot=False, thresh=1. - self._selected_thresh,
+                max_pixel_dist=self._selected_size)
             self.add_to_current_mask(mask=mask)
         elif self._selected_tool == 'select' and down:
             if self.roi_masks[ix, iy] > 0:
@@ -1093,7 +1105,23 @@ class InteractiveRoiCanvas(RoiCanvas):
         if update:
             self.update_bg_img()
 
-        img = image_utils.upscale_image(self.bg_img, self.upscale)
+        if self.bg_img.shape[:2] == (self.nx, self.ny):
+            print('Upscaling background image')
+            img = image_utils.upscale_image(self.bg_img, self.upscale)
+        elif self.bg_img.shape[:2] == (self.nx * self.upscale, self.ny * self.upscale):
+            print('Not upscaling background image')
+            img = self.bg_img
+        else:
+            x_upscale = (self.nx * self.upscale) / self.bg_img.shape[0]
+            y_upscale = (self.ny * self.upscale) / self.bg_img.shape[1]
+            bg_rescale = np.mean([x_upscale, y_upscale])
+            print(f'Resizing background image by factor {bg_rescale}')
+
+            if (bg_rescale >= 1) and (int(bg_rescale) == bg_rescale):
+                img = image_utils.upscale_image(self.bg_img, bg_rescale)
+            else:
+                img = image_utils.rescale_image(self.bg_img, bg_rescale)
+
         img = np.flipud(np.swapaxes(img, 0, 1))
 
         with hold_canvas(self.canvas_bg):

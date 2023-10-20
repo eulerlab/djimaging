@@ -5,6 +5,7 @@ from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
+from djimaging.tables.misc.highresolution import load_high_res_stack
 
 from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 from djimaging.autorois.corr_roi_mask_utils import CorrRoiMask
@@ -59,6 +60,11 @@ class RoiMaskTemplate(dj.Manual):
     @property
     @abstractmethod
     def field_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def experiment_table(self):
         pass
 
     @property
@@ -126,6 +132,9 @@ class RoiMaskTemplate(dj.Manual):
             ch1_stacks.append(ch_stacks[alt_name])
             output_files.append(to_roi_mask_file(input_file))
 
+        # Load high resolution data is possible
+        high_res_bg_dict = self.load_high_res_bg_dict(field_key)
+
         # Load initial ROI masks
         igor_roi_masks = (self.raw_params_table & field_key).fetch1('igor_roi_masks')
         initial_roi_mask, src_file = self.load_initial_roi_mask(field_key=field_key, igor_roi_masks=igor_roi_masks)
@@ -158,7 +167,7 @@ class RoiMaskTemplate(dj.Manual):
 
         roi_canvas = InteractiveRoiCanvas(
             stim_names=[f"{stim_name}({condition})" for stim_name, condition in zip(stim_names, conditions)],
-            ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, n_artifact=n_artifact,
+            ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
             main_stim_idx=0, initial_roi_mask=initial_roi_mask, shifts=shifts,
             canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
             pixel_size_um=(pixel_size_um, pixel_size_um),  # TODO: add pixel_size if xz recording
@@ -339,6 +348,27 @@ class RoiMaskTemplate(dj.Manual):
         alt_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
         roi_mask = (self.RoiMaskPresentation & key).fetch1('roi_mask')
         plot_field(main_ch_average, alt_ch_average, roi_mask=roi_mask, title=key, npixartifact=npixartifact)
+
+    def load_high_res_bg_dict(self, key):
+        field = (self.field_table() & key).fetch1("field")
+        field_loc = (self.userinfo_table() & key).fetch1("field_loc")
+        highres_alias = (self.userinfo_table() & key).fetch1("highres_alias")
+        header_path = (self.experiment_table() & key).fetch1('header_path')
+        pre_data_path = os.path.join(header_path, (self.userinfo_table() & key).fetch1("pre_data_dir"))
+        raw_data_path = os.path.join(header_path, (self.userinfo_table() & key).fetch1("raw_data_dir"))
+
+        filepath, ch_stacks, wparams = load_high_res_stack(
+            pre_data_path=pre_data_path, raw_data_path=raw_data_path,
+            highres_alias=highres_alias, field=field, field_loc=field_loc)
+
+        if ch_stacks is None:
+            return dict()
+
+        bg_dict = dict()
+        for name, stack in ch_stacks.items():
+            bg_dict[f'HR[{name}]'] = np.nanmedian(stack, 2)
+
+        return bg_dict
 
 
 def load_default_autorois_models(kind='default_rgc'):

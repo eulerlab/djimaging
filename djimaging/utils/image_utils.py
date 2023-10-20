@@ -32,7 +32,12 @@ def rotate_image(image, angle, order=1, cval=None):
 
 
 def rescale_image(image, scale, order=0):
-    output_shape = np.ceil(np.asarray(image.shape) * scale).astype('int')
+    if not hasattr(scale, '__iter__'):
+        scale = (scale, scale, 1)
+    elif len(scale) == 2:
+        scale = (scale[0], scale[1], 1)
+
+    output_shape = np.ceil(np.asarray(image.shape) * np.asarray(scale)).astype('int')
     resized_image = resize_image(image, output_shape=output_shape, order=order)
     return resized_image
 
@@ -47,4 +52,7 @@ def color_image(data_img, cmap='viridis', gamma=1.0, alpha=255):
 
 
 def upscale_image(data_img, upscale):
-    return np.repeat(np.repeat(data_img, upscale, axis=0), upscale, axis=1)
+    if not hasattr(upscale, '__iter__'):
+        upscale = [upscale, upscale]
+
+    return np.repeat(np.repeat(data_img, upscale[0], axis=0), upscale[1], axis=1)

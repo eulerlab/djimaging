@@ -66,6 +66,7 @@ class Presentation(core_autorois.PresentationTemplate):
 class RoiMask(core_autorois.RoiMaskTemplate):
     field_table = Field
     presentation_table = Presentation
+    experiment_table = Experiment
     userinfo_table = UserInfo
     raw_params_table = RawDataParams
 
