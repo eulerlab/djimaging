@@ -9,7 +9,7 @@ import numpy as np
 from djimaging.utils.alias_utils import match_file, get_field_files
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm_utils import load_stacks_from_h5, load_ch0_ch1_stacks_from_smp, get_pixel_size_xy_um
+from djimaging.utils.scanm_utils import load_stacks_from_h5, load_stacks_from_smp, get_pixel_size_xy_um
 
 
 def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
@@ -35,13 +35,13 @@ def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
 
         if filepath is not None:
             try:
-                ch0_stack, ch1_stack, wparams = load_ch0_ch1_stacks_from_smp(filepath)
-                return filepath, ch0_stack, ch1_stack, wparams
+                ch_stacks, wparams = load_stacks_from_smp(filepath)
+                return filepath, ch_stacks, wparams
             except OSError:
                 warnings.warn(f'OSError when reading file: {filepath}')
                 pass
 
-    return None, None, None, None
+    return None, None, None
 
 
 def scan_for_highres_filepath(folder, field, field_loc, highres_alias, condition=None, condition_loc=None, ftype='h5'):
@@ -86,6 +86,13 @@ class HighResTemplate(dj.Computed):
         return definition
 
     @property
+    def key_source(self):
+        try:
+            return self.field_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
+    @property
     @abstractmethod
     def field_table(self):
         pass
@@ -122,7 +129,7 @@ class HighResTemplate(dj.Computed):
         raw_data_path = os.path.join(header_path, (self.userinfo_table() & key).fetch1("raw_data_dir"))
         assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
         setupid = (self.experiment_table().ExpInfo() & key).fetch1("setupid")
-        data_name, alt_name = (self.userinfo_table & key).fetch('data_stack_name', 'alt_stack_name')
+        data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
 
         filepath, ch_stacks, wparams = load_high_res_stack(
             pre_data_path=pre_data_path, raw_data_path=raw_data_path,
