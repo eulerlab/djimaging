@@ -132,6 +132,8 @@ class UNet(pl.LightningModule):
             n_artifact=data_dict.get("meta", {}).get("n_artifact", 0))
 
     def create_mask_from_data(self, ch0_stack: np.ndarray, ch1_stack: np.ndarray, n_artifact: int = 0, **kwargs):
+
+        kwargs.pop("pixel_size_um", None)
         if len(kwargs) > 0:
             warnings.warn(f'ignoring kwargs: {kwargs}')
 

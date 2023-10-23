@@ -1,3 +1,4 @@
+import logging
 import os.path
 import pickle
 import warnings
@@ -88,9 +89,11 @@ class RoiCanvas:
         self.bg_img = np.zeros((self.nx, self.ny, 4), dtype=int)
 
         self.current_mask = np.zeros((self.nx, self.ny), dtype=bool)
+        self.current_delete_mask = np.zeros((self.nx, self.ny), dtype=bool)
         self.current_mask_img = np.zeros((self.nx, self.ny, 4), dtype=int)
 
         self.roi_masks = np.zeros((self.nx, self.ny), dtype=int)
+        self.roi_masks_backup = self.roi_masks.copy()
         self.roi_mask_img = np.zeros((self.nx, self.ny, 4), dtype=int)
 
         # Selection
@@ -148,6 +151,10 @@ class RoiCanvas:
         self.current_mask[:] = False
         self.current_mask_img[:] = 0
 
+    def reset_current_delete_mask(self):
+        """Set current delete mask to zero"""
+        self.current_delete_mask[:] = False
+
     def reset_roi_masks(self):
         """Set all masks and the respective image to zero"""
         self.roi_masks[:] = 0
@@ -160,11 +167,27 @@ class RoiCanvas:
             self.reset_current_mask()
             self.add_to_current_mask(np.asarray(roi_mask == roi_idx))
             self.add_current_mask_to_roi_masks()
-        self.roi_masks = mask_utils.relabel_mask(self.roi_masks, connectivity=2)
+
+        self.set_roi_masks(roi_masks=mask_utils.relabel_mask(self.roi_masks, connectivity=2))
+
+    def set_roi_masks(self, roi_masks):
+        if np.any(roi_masks != self.roi_masks):
+            self.update_roi_masks_backup()
+            self.roi_masks = roi_masks
+
+    def update_roi_masks_backup(self):
+        self.roi_masks_backup = self.roi_masks.copy()
+
+    def restore_roi_masks_backup(self):
+        self.roi_masks = self.roi_masks_backup.copy()
 
     def add_to_current_mask(self, mask):
         """Add a mask to the current mask"""
         self.current_mask |= mask.astype(bool)
+
+    def add_to_current_delete_mask(self, mask):
+        """Add a mask to the current delete mask"""
+        self.current_delete_mask |= mask.astype(bool)
 
     def load_current_mask(self):
         """Load current mask from all masks"""
@@ -196,24 +219,38 @@ class RoiCanvas:
         self.current_mask_img[:] = 0
         if self._selected_view == 'none':
             return
+
         ys, xs = np.where(self.current_mask)
         self.current_mask_img[ys, xs, :] = self._get_roi_rgba255(self._selected_roi)
+
+        r_xs, r_ys = np.where(self.current_delete_mask)
+        self.current_mask_img[r_xs, r_ys, :] = np.array([0, 0, 0, 255])
 
     def update_bg_img(self):
         self.bg_img = image_utils.color_image(
             self.backgrounds[self._selected_bg],
             cmap=self._selected_cmap, gamma=self._selected_gamma, alpha=int(self.alpha_bg * 255))
 
-    def erase_from_masks(self, x, y):
+    def erase_from_masks(self, x, y, mask):
         """Remove pixels from current mask and all masks"""
-        mask = mask_utils.create_circular_mask(w=self.nx, h=self.ny, center=(x, y), radius=self._selected_size - 1)
-        self.current_mask[mask] = 0
-        self.roi_masks[mask] = 0  # TODO: allow to undo erase
+
+        roi_masks = self.roi_masks.copy()
+        roi_masks[mask] = 0
+        self.set_roi_masks(roi_masks)
 
     def add_current_mask_to_roi_masks(self):
         """Add the current mask to all masks and reset current mask"""
-        self.roi_masks[self.current_mask] = self._selected_roi
+        roi_masks = self.roi_masks.copy()
+        roi_masks[self.current_mask] = self._selected_roi
+        self.set_roi_masks(roi_masks)
         self.reset_current_mask()
+
+    def remove_current_delete_mask_from_roi_masks(self):
+        """Remove the current delete mask from all masks and reset current delete mask"""
+        roi_masks = self.roi_masks.copy()
+        roi_masks[self.current_delete_mask] = 0
+        self.set_roi_masks(roi_masks)
+        self.reset_current_delete_mask()
 
     def get_selected_stack(self):
         """Get selected stack"""
@@ -293,7 +330,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             initial_roi_mask=None,
             shifts=None,
             n_artifact=0,
-            upscale=5,
+            upscale=4,
             canvas_width=50,
             autorois_models: Optional[Dict] = None,
             output_files=None,
@@ -305,6 +342,9 @@ class InteractiveRoiCanvas(RoiCanvas):
                          initial_roi_mask=initial_roi_mask, shifts=shifts, main_stim_idx=main_stim_idx,
                          upscale=upscale, autorois_models=autorois_models,
                          output_files=output_files, pixel_size_um=pixel_size_um)
+        # Save size
+        self.canvas_width = canvas_width
+
         # Create menu elements
         self.current_traces = np.array([])
         self.current_cc = np.array([])
@@ -333,6 +373,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_auto_shift = self.create_widget_auto_shift()
 
         self.widget_sel_stim = self.create_widget_sel_stim()
+        self.widget_stim_next = self.create_widget_stim_next()
+        self.widget_stim_prev = self.create_widget_stim_prev()
 
         self.widget_sel_autorois = self.create_widget_sel_autorois()
         self.widget_exec_autorois = self.create_widget_exec_autorois()
@@ -340,6 +382,7 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         self.widget_save_and_new = self.create_widget_save_and_new()
         self.widget_undo = self.create_widget_undo()
+
         self.widget_save = self.create_widget_save()
         self.widget_info = self.create_widget_info()
         self.widget_clean = self.create_widget_clean()
@@ -357,10 +400,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         # ToDo: Add AutoROIs to keep existing ROI masks.
 
         # Create canvas
-        self.img = MultiCanvas(n_canvases=4, width=self.npx, height=self.npy)
-        self.img.layout.width = f'{canvas_width}%'
-        self.img.layout.height = 'auto'
-        self.img.sync_image_data = True
+        self.img = self.create_widget_canvas()
 
         self.canvas_k = self.img[0]
         self.canvas_k.fill_rect(x=0, y=0, width=self.npx, height=self.npy)
@@ -381,28 +421,41 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.update_all()
         self.draw_all(update=True)
 
+    def create_widget_canvas(self):
+        widget = MultiCanvas(n_canvases=4, width=self.npx, height=self.npy)
+        widget.layout.width = '100%'
+        widget.layout.height = 'auto'
+        widget.sync_image_data = True
+        return widget
+
     def start_gui(self):
-        data_lines = [self.img, self.widget_diagnostics] if self.widget_diagnostics is not None else [self.img]
-        control_lines = [
-            self.widget_progress,
+        w_outputs = VBox((self.img, self.widget_info), layout=Layout(width=f'{self.canvas_width}%'))
+
+        w_tools = VBox((
             HBox((self.widget_read_only, self.widget_dangerzone,)),
-            self.widget_sel_stim,
-            HBox((self.widget_roi, self.widget_roi_prev, self.widget_roi_next)),
-            HBox((self.widget_save_and_new, self.widget_save, self.widget_undo)),
+            HBox((self.widget_exec_autorois, self.widget_exec_autorois_missing, self.widget_sel_autorois)),
+            HBox((self.widget_stim_prev, self.widget_stim_next, self.widget_sel_stim)),
+            HBox((self.widget_roi_prev, self.widget_roi_next, self.widget_roi)),
+            HBox((self.widget_save_and_new, self.widget_save, self.widget_undo, self.widget_kill_roi)),
             HBox((self.widget_tool, self.widget_size, self.widget_thresh)),
             HBox((self.widget_view, self.widget_alpha_bg, self.widget_alpha_hl, self.widget_alpha_ft)),
             HBox((self.widget_bg, self.widget_gamma, self.widget_cmap)),
-            HBox((self.widget_shift_dx, self.widget_shift_dy, self.widget_auto_shift)),
-            HBox(
-                (self.widget_sel_autorois, self.widget_exec_autorois, self.widget_exec_autorois_missing)),
-            self.widget_info,
-            HBox((self.widget_clean, self.widget_kill_roi, self.widget_kill_all, self.widget_reset_all)),
-            HBox((self.widget_save_to_file, self.widget_save_all_to_file, self.widget_save_info)),
-        ]
+            HBox((self.widget_auto_shift, self.widget_shift_dx, self.widget_shift_dy)),
+            self.widget_progress,
+        ), layout=Layout(width=f'{100 - self.canvas_width}%'))
 
-        # concatenate the two line tuple
-        vbox = VBox(data_lines + control_lines)
-        return vbox
+        w_other_tools = VBox((
+            HBox((self.widget_clean, self.widget_save_all_to_file, self.widget_save_to_file)),
+            self.widget_save_info,
+            HBox((self.widget_kill_all, self.widget_reset_all)),
+        ))
+
+        if self.widget_diagnostics is None:
+            w_main = VBox((HBox((w_outputs, w_tools)), w_other_tools))
+        else:
+            w_main = VBox((HBox((w_outputs, w_tools)), self.widget_diagnostics, w_other_tools))
+
+        return w_main
 
     def set_selected_cmap(self, value):
         self.widget_cmap.value = value
@@ -494,7 +547,12 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def set_dangerzone(self, dangerzone):
+        if dangerzone:
+            self.set_read_only(False)
+
         self.widget_dangerzone.value = dangerzone
+        self.widget_exec_autorois.disabled = not dangerzone
+        self.widget_exec_autorois_missing.disabled = not dangerzone
         self.widget_kill_all.disabled = not dangerzone
         self.widget_reset_all.disabled = not dangerzone
 
@@ -507,26 +565,30 @@ class InteractiveRoiCanvas(RoiCanvas):
         widget.observe(change, names='value')
         return widget
 
-    def set_read_only(self, read_only, force=False):
+    def set_read_only(self, read_only):
         self.widget_read_only.value = read_only
         self.widget_save.disabled = read_only
         self.widget_save_and_new.disabled = read_only
         self.widget_undo.disabled = read_only
-        self.widget_dangerzone.disabled = read_only
         self.widget_kill_roi.disabled = read_only
         self.widget_tool.disabled = read_only
         self.widget_clean.disabled = read_only
-        self.widget_exec_autorois.disabled = read_only
-        self.widget_exec_autorois_missing.disabled = read_only
 
         if read_only:
             self.set_selected_tool('select')
             self.set_dangerzone(False)
 
-            if force:
-                self.widget_read_only.disabled = True
-
         self.update_shift_widget()
+
+    def set_busy(self):
+        self.set_read_only(read_only=True)
+        self.widget_read_only.disabled = True
+        self.widget_dangerzone.disabled = True
+
+    def set_idle(self):
+        self.set_read_only(read_only=False)
+        self.widget_read_only.disabled = False
+        self.widget_dangerzone.disabled = False
 
     def create_widget_progress(self):
         widget = FloatProgress(
@@ -552,6 +614,8 @@ class InteractiveRoiCanvas(RoiCanvas):
     def set_selected_stim(self, value):
         self.widget_sel_stim.value = value
         self._selected_stim_idx = np.argmax([stim_name == value for stim_name in self.stim_names])
+
+        self.update_roi_masks_backup()
         self.output_file = self.output_files[self._selected_stim_idx]
         self.widget_save_info.value = f'{self.output_file}'
         self.update_backgrounds()
@@ -596,7 +660,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         model = self.autorois_models[current_model]
         if model is not None:
             self.update_progress(0)
-            self.set_read_only(True, force=True)
+            self.set_busy()
 
             roi_mask_new = model.create_mask_from_data(
                 ch0_stack=self.ch0_stacks[self._selected_stim_idx],
@@ -620,7 +684,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.set_selected_tool('select')
 
             self.update_progress(100)
-            self.set_read_only(False)
+            self.set_idle()
 
     def create_widget_exec_autorois_missing(self):
         widget = Button(description='Add missing ROIs', disabled=False, button_style='success')
@@ -637,12 +701,14 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.draw_current_mask_img(update=True)
         self.draw_roi_masks_img(update=True)
 
-    def set_selected_roi(self, value):
-        if value == self._selected_roi:
+    def set_selected_roi(self, value, update_if_same=False):
+        if value == self._selected_roi and not update_if_same:
             return
 
         self._selected_roi = value
         self.widget_roi.value = value
+        self.update_roi_masks_backup()
+
         self.load_current_mask()
         self.update_info()
         self.draw_current_mask_img(update=True)
@@ -678,6 +744,10 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def set_selected_tool(self, value):
         self._selected_tool = value
+
+        if self.widget_tool.value != value:
+            self.widget_tool.value = value
+
         if self._selected_tool == 'select':
             self.widget_thresh.disabled = True
             self.widget_size.disabled = True
@@ -767,11 +837,11 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_progress.value = percent
 
     def exec_auto_shift(self, button=None):
-        self.set_read_only(True, force=True)
+        self.set_busy()
         shift_x, shift_y = self.compute_autoshift(fun_progress=self.update_progress)
         self.set_shift(value=shift_x, axis='x', update=False)
         self.set_shift(value=shift_y, axis='y', update=True)
-        self.set_read_only(False)
+        self.set_idle()
 
     def set_selected_thresh(self, value):
         self._selected_thresh = value
@@ -808,7 +878,11 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def exec_undo(self, button=None):
         self.reset_current_mask()
+        self.reset_current_delete_mask()
+        self.restore_roi_masks_backup()
+        self.set_selected_roi(self._selected_roi, update_if_same=True)
         self.draw_current_mask_img(update=True)
+        self.draw_roi_masks_img(update=True)
         self.update_info()
 
     def create_widget_undo(self):
@@ -816,20 +890,22 @@ class InteractiveRoiCanvas(RoiCanvas):
         widget_undo.on_click(self.exec_undo)
         return widget_undo
 
-    def exec_save(self, button=None):
+    def exec_save_current_roi(self, button=None):
         self.add_current_mask_to_roi_masks()
+        self.update_roi_masks_backup()
         self.draw_current_mask_img(update=True)
         self.draw_roi_masks_img(update=True)
 
     def create_widget_save(self):
-        widget_save = Button(description='Save', disabled=False, button_style='success')
-        widget_save.on_click(self.exec_save)
+        widget_save = Button(description='Save ROI', disabled=False, button_style='success')
+        widget_save.on_click(self.exec_save_current_roi)
         return widget_save
 
     def exec_save_and_new(self, button=None):
         self.add_current_mask_to_roi_masks()
+        self.update_roi_masks_backup()
         self.update_roi_options()
-        self.set_selected_roi(self.widget_roi.options[-1])
+        self.set_selected_roi(self.widget_roi.options[-1], update_if_same=True)
         self.load_current_mask()
         self.draw_current_mask_img(update=True)
         self.draw_roi_masks_img(update=True)
@@ -840,22 +916,24 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget_save_and_new
 
     def exec_clean(self, button=None):
-        self.set_read_only(True, force=True)
+        self.set_busy()
         self.exec_save_and_new()
-        self.set_selected_roi(value=1)
-        self.roi_masks = mask_utils.clean_rois(
-            self.roi_masks, self.n_artifact, min_size=3, connectivity=2, verbose=False)
+        self.set_selected_roi(value=1, update_if_same=True)
+        self.set_roi_masks(mask_utils.clean_rois(
+            self.roi_masks, self.n_artifact, min_size=3, connectivity=2, verbose=False))
         self.draw_all(update=True)
-        self.set_read_only(False)
+        self.set_idle()
 
     def create_widget_clean(self):
-        widget = Button(description='Clean mask', disabled=False, button_style='warning')
+        widget = Button(description='Clean mask', disabled=False, button_style='success')
         widget.on_click(self.exec_clean)
         return widget
 
     def exec_kill_roi(self, button=None):
         self.reset_current_mask()
-        self.roi_masks[self.roi_masks == self._selected_roi] = 0
+        roi_masks = self.roi_masks.copy()
+        roi_masks[roi_masks == self._selected_roi] = 0
+        self.set_roi_masks(roi_masks)
         self.draw_current_mask_img(update=True)
         self.draw_roi_masks_img(update=True)
 
@@ -885,7 +963,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.set_dangerzone(False)
 
     def create_widget_save_to_file(self):
-        widget = Button(description='Save to file', disabled=False, button_style='success')
+        widget = Button(description='Save to file', disabled=False, button_style='warning')
         widget.on_click(self.exec_save_to_file)
         return widget
 
@@ -954,18 +1032,23 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         with self.widget_diagnostics:
             clear_output(wait=True)
-            fig, axs = plt.subplots(1, 3, figsize=(7, 1.5), width_ratios=(2, 1, 1))
+            fig, axs = plt.subplots(1, 4, figsize=(10, 1.5), width_ratios=(4, 1, 1, 1))
             if np.any(self.current_mask):
                 traces = self._compute_traces() if update else self.current_traces
 
-                axs[0].plot(traces.T, c='dimgray', lw=0.2)
-                axs[0].plot(np.mean(traces, axis=0), c='k', lw=1)
+                ax = axs[0]
+                ax.set(title='corr')
+                ax.plot(traces.T, c='dimgray', lw=0.2)
+                ax.plot(np.mean(traces, axis=0), c='k', lw=1)
 
                 if np.sum(self.current_mask) > 1:
                     cc = self._compute_cc(traces) if update else self.current_cc
-                    axs[1].hist(cc[np.triu_indices_from(cc, k=1)])
                     vabsmax = np.maximum(0.1, np.max(np.abs(cc[np.triu_indices_from(cc, k=1)])))
-                    axs[1].set(xlim=(-vabsmax * 1.05, vabsmax * 1.05))
+
+                    ax = axs[1]
+                    ax.set(title='corr')
+                    ax.hist(cc[np.triu_indices_from(cc, k=1)])
+                    ax.set(xlim=(-vabsmax * 1.05, vabsmax * 1.05))
 
                     mask = self.current_mask
                     xs, ys = np.where(mask)
@@ -978,11 +1061,24 @@ class InteractiveRoiCanvas(RoiCanvas):
                     cc_mask[xs, ys] = np.nanmean(cc, axis=0)
 
                     vabsmax = np.maximum(0.1, np.nanmax(np.abs(cc_mask)))
-                    im = axs[2].imshow(cc_mask.T, origin='lower', cmap='coolwarm', vmin=-vabsmax, vmax=vabsmax)
-                    plt.colorbar(im, ax=axs[2])
-                    axs[2].set(xlim=(np.min(xs) - 3, np.max(xs) + 3), ylim=(np.min(ys) - 3, np.max(ys) + 3))
 
-                plt.tight_layout()
+                    ax = axs[2]
+                    ax.set(title='corr')
+                    im = ax.imshow(cc_mask.T, origin='lower', cmap='coolwarm', vmin=-vabsmax, vmax=vabsmax)
+                    plt.colorbar(im, ax=ax)
+                    ax.set(xlim=(np.min(xs) - 3, np.max(xs) + 3), ylim=(np.min(ys) - 3, np.max(ys) + 3))
+
+                    # Plot mean values of pixels
+                    mean_mask = np.full(mask.shape, np.nan, dtype=np.float32)
+                    mean_mask[xs, ys] = np.nanmean(traces, axis=1)
+
+                    ax = axs[3]
+                    ax.set(title='mean')
+                    im = ax.imshow(mean_mask.T, origin='lower', cmap='viridis')
+                    plt.colorbar(im, ax=ax)
+                    ax.set(xlim=(np.min(xs) - 3, np.max(xs) + 3), ylim=(np.min(ys) - 3, np.max(ys) + 3))
+
+                plt.tight_layout(pad=0.1, w_pad=0.5, h_pad=0.5)
             else:
                 for ax in axs.flat:
                     ax.axis('off')
@@ -1009,7 +1105,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_roi.options = tuple(np.unique(self.roi_masks)[1:]) + (max_roi,)
         new_roi = self._selected_roi if self._selected_roi in self.widget_roi.options else self.widget_roi.options[0]
         self.widget_roi.disabled = False
-        self.set_selected_roi(new_roi)
+        self.set_selected_roi(new_roi, update_if_same=True)
 
     def _apply_tool(self, x, y, down):
         """Apply tool. Down means mouse down event"""
@@ -1017,14 +1113,18 @@ class InteractiveRoiCanvas(RoiCanvas):
         ix = int(x / self.upscale)
         iy = self.ny - int(y / self.upscale) - 1  # Flip ud
 
-        print(f'Apply tool={self._selected_tool} at x={x}, y={y}, ix={ix}, iy={iy}')
+        logging.debug(f'Apply tool={self._selected_tool} at x={x}, y={y}, ix={ix}, iy={iy}')
 
         if self._selected_tool == 'draw':
             mask = mask_utils.create_circular_mask(
                 w=self.nx, h=self.ny, center=(ix, iy), radius=self._selected_size - 1)
             self.add_to_current_mask(mask=mask)
         elif self._selected_tool == 'erase':
-            self.erase_from_masks(x=ix, y=iy)
+            logging.debug(f'Erasing from mask at x={x}, y={y}, ix={ix}, iy={iy}')
+            mask = mask_utils.create_circular_mask(
+                w=self.nx, h=self.ny, center=(ix, iy), radius=self._selected_size - 1)
+            self.current_mask[mask] = False
+            self.add_to_current_delete_mask(mask=mask)
         elif self._selected_tool == 'cc':
             mask = mask_utils.get_mask_by_cc(
                 seed_ix=ix, seed_iy=iy, data=self.ch0_stacks[self._selected_stim_idx],
@@ -1051,8 +1151,6 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.last_mouse_pos_xy = (int(x / self.upscale), int(y / self.upscale))
 
         self.draw_current_mask_img(update=True)
-        if self._selected_tool == 'erase':
-            self.draw_roi_masks_img(update=True)
 
     def on_mouse_move(self, x, y):
         if not self.drawing:
@@ -1065,15 +1163,17 @@ class InteractiveRoiCanvas(RoiCanvas):
         self._apply_tool(x, y, down=False)
 
         self.draw_current_mask_img(update=True)
-        if self._selected_tool == 'erase':
-            self.draw_roi_masks_img(update=True)
 
     def on_mouse_up(self, x, y):
         self.last_mouse_pos_xy = (-1, -1)
         self.drawing = False
         if self._selected_tool != 'select':
             self.update_info()
-        self.draw_roi_masks_img()
+        if self._selected_tool == 'erase':
+            self.remove_current_delete_mask_from_roi_masks()
+
+        self.draw_current_mask_img(update=True)
+        self.draw_roi_masks_img(update=True)
 
     # Draw functions
     def draw_current_mask_img(self, update=True):
@@ -1106,16 +1206,16 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.update_bg_img()
 
         if self.bg_img.shape[:2] == (self.nx, self.ny):
-            print('Upscaling background image')
+            logging.debug('Upscaling background image')
             img = image_utils.upscale_image(self.bg_img, self.upscale)
         elif self.bg_img.shape[:2] == (self.nx * self.upscale, self.ny * self.upscale):
-            print('Not upscaling background image')
+            logging.debug('Not upscaling background image')
             img = self.bg_img
         else:
             x_upscale = (self.nx * self.upscale) / self.bg_img.shape[0]
             y_upscale = (self.ny * self.upscale) / self.bg_img.shape[1]
             bg_rescale = np.mean([x_upscale, y_upscale])
-            print(f'Resizing background image by factor {bg_rescale}')
+            logging.debug(f'Resizing background image by factor {bg_rescale}')
 
             if (bg_rescale >= 1) and (int(bg_rescale) == bg_rescale):
                 img = image_utils.upscale_image(self.bg_img, bg_rescale)
@@ -1192,4 +1292,25 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.set_selected_roi(prev_roi)
 
     def create_widget_diagnostics(self):
-        return Output()
+        widget = Output()
+        widget.layout.width = '80%'
+        widget.layout.height = 'auto'
+        return widget
+
+    def create_widget_stim_next(self):
+        widget = Button(description='>>', disabled=False, button_style='success',
+                        layout=Layout(width='50px'))
+        widget.on_click(self.exec_stim_next)
+        return widget
+
+    def exec_stim_next(self, button=None):
+        self.set_selected_stim(self.stim_names[(self._selected_stim_idx + 1) % len(self.stim_names)])
+
+    def create_widget_stim_prev(self):
+        widget = Button(description='<<', disabled=False, button_style='success',
+                        layout=Layout(width='50px'))
+        widget.on_click(self.exec_stim_prev)
+        return widget
+
+    def exec_stim_prev(self, button=None):
+        self.set_selected_stim(self.stim_names[(self._selected_stim_idx - 1) % len(self.stim_names)])

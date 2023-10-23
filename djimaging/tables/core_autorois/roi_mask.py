@@ -88,8 +88,11 @@ class RoiMaskTemplate(dj.Manual):
         missing_keys = (self.field_table.proj() & (self.presentation_table.proj() - self.proj())).fetch(as_dict=True)
         return missing_keys
 
-    def draw_roi_mask(self, field_key=None, pres_key=None, canvas_width=30, autorois_models='default_rgc',
-                      **kwargs):
+    def draw_roi_mask(self, field_key=None, pres_key=None, canvas_width=20, autorois_models='default_rgc',
+                      show_diagnostics=True, **kwargs):
+        if canvas_width <= 0 or canvas_width >= 100:
+            raise ValueError(f'canvas_width={canvas_width} must be in (0, 100)%')
+
         if pres_key is not None:
             field_key = (self.field_table & pres_key).proj().fetch1()
         elif field_key is None:
@@ -171,6 +174,7 @@ class RoiMaskTemplate(dj.Manual):
             main_stim_idx=0, initial_roi_mask=initial_roi_mask, shifts=shifts,
             canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
             pixel_size_um=(pixel_size_um, pixel_size_um),  # TODO: add pixel_size if xz recording
+            show_diagnostics=show_diagnostics,
             **kwargs,
         )
         print(f"""
