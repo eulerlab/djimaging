@@ -98,7 +98,7 @@ class RoiCanvas:
 
         # Selection
         self._selected_stim_idx = 0
-        self._selected_bg = 'ch0_mean'
+        self._selected_bg = 'stack: ch0[mean]'
         self._selected_cmap = 'gray'
         self._selected_gamma = 0.33
         self._selected_roi = 1
@@ -126,20 +126,27 @@ class RoiCanvas:
     def __repr__(self):
         return f"RoiCanvas({self.nx}x{self.ny})"
 
+    def compute_bg(self, stack, shift, proj_fun):
+        background = proj_fun(stack, axis=2).astype(np.float32)
+        background[:self.n_artifact, :] = np.nan
+        background = mask_utils.shift_array(background, shift)
+        return background
+
     def compute_backgrounds(self):
-        shift = self.shifts[self._selected_stim_idx]
-        shift = np.array([shift[0], shift[1]])
+        stim_idx = self._selected_stim_idx
+        shift = self.shifts[stim_idx]
+
         backgrounds = {
-            'ch0_mean': mask_utils.shift_array(np.mean(self.ch0_stacks[self._selected_stim_idx], axis=2), shift),
-            'ch0_std': mask_utils.shift_array(np.std(self.ch0_stacks[self._selected_stim_idx], axis=2), shift),
-            'ch1_mean': mask_utils.shift_array(np.mean(self.ch1_stacks[self._selected_stim_idx], axis=2), shift),
-            'ch1_std': mask_utils.shift_array(np.std(self.ch1_stacks[self._selected_stim_idx], axis=2), shift),
-            'none': np.full((self.nx, self.ny), 255)
+            'stack: ch0[mean]': self.compute_bg(self.ch0_stacks[stim_idx], shift, proj_fun=np.mean),
+            'stack: ch0[std]': self.compute_bg(self.ch0_stacks[stim_idx], shift, proj_fun=np.std),
+            'stack: ch1[mean]': self.compute_bg(self.ch1_stacks[stim_idx], shift, proj_fun=np.mean),
+            'stack: ch1[std]': self.compute_bg(self.ch1_stacks[stim_idx], shift, proj_fun=np.std),
+            'other: none': np.full((self.nx, self.ny), 255)
         }
 
         if self.other_bgs_dict is not None:
             for key, bg in self.other_bgs_dict.items():
-                backgrounds[key] = bg
+                backgrounds[f"other: {key}"] = bg
 
         return backgrounds
 
@@ -227,9 +234,9 @@ class RoiCanvas:
         self.current_mask_img[r_xs, r_ys, :] = np.array([0, 0, 0, 255])
 
     def update_bg_img(self):
+        bg = self.backgrounds[self._selected_bg]
         self.bg_img = image_utils.color_image(
-            self.backgrounds[self._selected_bg],
-            cmap=self._selected_cmap, gamma=self._selected_gamma, alpha=int(self.alpha_bg * 255))
+            bg, cmap=self._selected_cmap, gamma=self._selected_gamma, alpha=int(self.alpha_bg * 255))
 
     def erase_from_masks(self, x, y, mask):
         """Remove pixels from current mask and all masks"""
@@ -865,10 +872,10 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def create_widget_gamma(self):
         """Create and return button"""
-        widget = FloatSlider(min=0.1, max=3.0, step=0.1, value=self._selected_gamma,
+        widget = FloatSlider(min=0.1, max=1.0, step=0.01, value=self._selected_gamma,
                              description='Gamma:',
                              continuous_update=False, orientation='horizontal',
-                             readout=True, readout_format='.1f')
+                             readout=True, readout_format='.2f')
 
         def change(value):
             self.set_selected_gamma(value['new'])
@@ -1043,7 +1050,7 @@ class InteractiveRoiCanvas(RoiCanvas):
 
                 if np.sum(self.current_mask) > 1:
                     cc = self._compute_cc(traces) if update else self.current_cc
-                    vabsmax = np.maximum(0.1, np.max(np.abs(cc[np.triu_indices_from(cc, k=1)])))
+                    vabsmax = np.maximum(0.1, np.nanmax(np.abs(cc[np.triu_indices_from(cc, k=1)])))
 
                     ax = axs[1]
                     ax.set(title='corr')
@@ -1090,7 +1097,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         if np.sum(self.current_mask) >= 2:
             cc = self._compute_cc(self._compute_traces()) if update else self.current_cc
             cc = cc[np.triu_indices_from(cc, k=1)]
-            self.widget_info.value = f"n_px={n_px}, min_cc={np.min(cc):.2f}, mean_cc={np.mean(cc):.2f}"
+            self.widget_info.value = f"n_px={n_px}, min_cc={np.nanmin(cc):.2f}, mean_cc={np.nanmean(cc):.2f}"
         else:
             self.widget_info.value = f"n_px={n_px}"
 

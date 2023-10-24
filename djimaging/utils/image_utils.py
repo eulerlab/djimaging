@@ -46,6 +46,10 @@ def color_image(data_img, cmap='viridis', gamma=1.0, alpha=255):
     assert data_img.ndim == 2
     assert isinstance(alpha, int)
 
+    # convert to float if data_img is not a float
+    if not np.issubdtype(data_img.dtype, np.floating):
+        data_img = data_img.astype(np.float32)
+
     color_img = (plt.get_cmap(cmap)(normalize_zero_one(data_img) ** gamma) * 255).astype(int)
     color_img[:, :, -1] = alpha
     return color_img
