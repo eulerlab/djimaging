@@ -24,9 +24,16 @@ def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
         try:
             ch_stacks, wparams = load_stacks_from_h5(filepath)
             return filepath, ch_stacks, wparams
-        except OSError:
-            warnings.warn(f'OSError when reading file: {filepath}')
+        except OSError as e:
+            warnings.warn(f'OSError when reading file: {filepath}\n{e}')
             pass
+
+    if allow_raw:
+        try:
+            from scanmsupport.scanm.scanm_smp import SMP
+        except ImportError:
+            warnings.warn('Custom package `scanmsupport is not installed. Cannot load SMP files.')
+            allow_raw = False
 
     if allow_raw:
         filepath = scan_for_highres_filepath(
@@ -37,8 +44,8 @@ def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
             try:
                 ch_stacks, wparams = load_stacks_from_smp(filepath)
                 return filepath, ch_stacks, wparams
-            except OSError:
-                warnings.warn(f'OSError when reading file: {filepath}')
+            except OSError as e:
+                warnings.warn(f'OSError when reading file: {filepath}\n{e}')
                 pass
 
     return None, None, None

@@ -283,7 +283,7 @@ def load_smp_file(raw_file_path):
     try:
         from scanmsupport.scanm.scanm_smp import SMP
     except ImportError:
-        raise ImportError('Failed to load custom package`scanmsupport`: Cannot load raw files.')
+        raise ImportError('Custom package `scanmsupport is not installed. Cannot load SMP files.')
 
     raw_file = SMP()
 
@@ -300,7 +300,7 @@ def load_wparams_from_smp(raw_file, return_file=True):
     try:
         from scanmsupport.scanm.scanm_smp import SMP
     except ImportError:
-        raise ImportError('Failed to load custom package`scanmsupport`: Cannot load raw files.')
+        raise ImportError('Custom package `scanmsupport is not installed. Cannot load SMP files.')
 
     if not isinstance(raw_file, SMP):
         raw_file = load_smp_file(raw_file)
