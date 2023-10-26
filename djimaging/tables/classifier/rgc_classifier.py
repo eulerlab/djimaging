@@ -222,7 +222,11 @@ class CelltypeAssignmentTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.classifier_table.proj() * self.baden_trace_table.roi_table.field_or_pres_table.proj()
+            try:
+                field_or_pres_table = self.baden_trace_table.roi_table.field_or_pres_table
+            except (AttributeError, TypeError):
+                field_or_pres_table = self.baden_trace_table.roi_table.field_table
+            return self.classifier_table.proj() * field_or_pres_table.proj()
         except (AttributeError, TypeError):
             pass
 

@@ -58,7 +58,11 @@ class RoiIplDepthTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.roi_table.field_or_pres_table.proj()
+            try:
+                field_or_pres_table = self.roi_table.field_or_pres_table
+            except (AttributeError, TypeError):
+                field_or_pres_table = self.roi_table.field_table
+            return field_or_pres_table.proj()
         except (AttributeError, TypeError):
             pass
 
