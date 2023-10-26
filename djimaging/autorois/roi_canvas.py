@@ -358,6 +358,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_progress = self.create_widget_progress()
 
         self.widget_diagnostics = self.create_widget_diagnostics() if show_diagnostics else None
+        self.diagnostics_fig = None
 
         self.widget_bg = self.create_widget_bg()
         self.widget_cmap = self.create_widget_cmap()
@@ -825,7 +826,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             value=value, min=-5, max=5, step=1,
             description=f'shift_d{axis}:', disabled=False,
             continuous_update=False,
-            layout=Layout(width='150px', description_width='50px'),
+            layout=Layout(width='150px'),
         )
 
         def change(value):
@@ -1039,7 +1040,10 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         with self.widget_diagnostics:
             clear_output(wait=True)
-            fig, axs = plt.subplots(1, 4, figsize=(10, 1.5), width_ratios=(4, 1, 1, 1))
+            if self.diagnostics_fig is not None:
+                plt.close(self.diagnostics_fig)
+
+            self.diagnostics_fig, axs = plt.subplots(1, 4, figsize=(10, 1.5), width_ratios=(4, 1, 1, 1))
             if np.any(self.current_mask):
                 traces = self._compute_traces() if update else self.current_traces
 
@@ -1191,7 +1195,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         img = image_utils.upscale_image(self.current_mask_img, upscale=self.upscale)
         img = np.flipud(np.swapaxes(img, 0, 1))
 
-        with hold_canvas(self.canvas):
+        with hold_canvas():
             self.canvas.clear()
             self.canvas.put_image_data(img, 0, 0)
 
@@ -1203,7 +1207,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         img = image_utils.upscale_image(self.roi_mask_img, upscale=self.upscale)
         img = np.flipud(np.swapaxes(img, 0, 1))
 
-        with hold_canvas(self.canvas_masks):
+        with hold_canvas():
             self.canvas_masks.clear()
             self.canvas_masks.put_image_data(img, 0, 0)
 
@@ -1231,7 +1235,7 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         img = np.flipud(np.swapaxes(img, 0, 1))
 
-        with hold_canvas(self.canvas_bg):
+        with hold_canvas():
             self.canvas_bg.clear()
             self.canvas_bg.put_image_data(img, 0, 0)
 

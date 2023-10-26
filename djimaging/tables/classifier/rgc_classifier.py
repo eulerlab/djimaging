@@ -57,8 +57,38 @@ class ClassifierMethodTemplate(dj.Lookup):
     def classifier_training_data_table(self):
         pass
 
+    def add_default(self, skip_duplicates=False):
+        classifier_fn = "sklearn.ensemble.RandomForestClassifier"
+        classifier_config = {
+            'class_weight': 'balanced',
+            'random_state': 2001,
+            'oob_score': True,
+            'ccp_alpha': 0.00021870687842726034,
+            'max_depth': 50,
+            'max_leaf_nodes': None,
+            'min_impurity_decrease': 0,
+            'n_estimators': 1000,
+            'n_jobs': 20,
+        }
+
+        self.add_classifier(classifier_fn, classifier_config, comment="Default classifier",
+                            skip_duplicates=skip_duplicates)
+
     def add_classifier(self, classifier_fn: str, classifier_config: Mapping,
                        comment: str = "", skip_duplicates: bool = False, classifier_seed: int = 42) -> None:
+        if classifier_config is None:
+            classifier_config = {
+                'class_weight': 'balanced',
+                'random_state': 2001,
+                'oob_score': True,
+                'ccp_alpha': 0.00021870687842726034,
+                'max_depth': 50,
+                'max_leaf_nodes': None,
+                'min_impurity_decrease': 0,
+                'n_estimators': 1000,
+                'n_jobs': 20,
+            }
+
         self.insert1(
             dict(
                 classifier_fn=classifier_fn,
@@ -99,6 +129,20 @@ class ClassifierTrainingDataTemplate(dj.Manual):
         training_data_file     :   filepath@{store}
         """.format(store=self.store)
         return definition
+
+    def add_default(self, skip_duplicates=False):
+        ipath = dj.config['stores']["classifier_input"]["location"] + '/'
+        opath = dj.config['stores']["classifier_output"]["location"] + '/'
+
+        self.add_trainingdata(
+            project="False",
+            output_path=opath,
+            chirp_feats_file=ipath + 'chirp_feats.npz',
+            bar_feats_file=ipath + 'bar_feats.npz',
+            baden_data_file=ipath + 'RGCData_postprocessed.mat',
+            training_data_file=ipath + 'training_all.pkl',
+            skip_duplicates=skip_duplicates,
+        )
 
     def add_trainingdata(self, project: str, output_path: str, chirp_feats_file: str, bar_feats_file: str,
                          baden_data_file: str, training_data_file: str, skip_duplicates: bool = False) -> None:
