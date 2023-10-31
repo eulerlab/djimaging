@@ -266,6 +266,14 @@ def split_trace_by_group_reps(
     return group_snippets, group_snippets_times, group_snippets_triggertimes, droppedlastrep_flag
 
 
+def load_stacks(filepath, from_raw_data, ch_names=('wDataCh0', 'wDataCh1')) -> (dict, dict):
+    if from_raw_data:
+        ch_stacks, wparams = load_stacks_from_smp(filepath, ch_names=ch_names)
+    else:
+        ch_stacks, wparams = load_stacks_from_h5(filepath, ch_names=ch_names)
+    return ch_stacks, wparams
+
+
 def load_stacks_from_h5(filepath, ch_names=('wDataCh0', 'wDataCh1')) -> (dict, dict):
     """Load high resolution stack channel 0 and 1 from h5 file"""
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:

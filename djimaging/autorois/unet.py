@@ -20,7 +20,10 @@ from djimaging.autorois.autorois_utils import create_mask
 def _normalize_image(x: np.array, n_artifact: int = 0) -> np.array:
     x_min = x[n_artifact:, :].min()
     x_max = x[n_artifact:, :].max()
-    x_normalized = (x - x_min) / (x_max - x_min)
+    x_rng = x_max - x_min
+    x_normalized = x - x_min
+    if x_rng > 0.:
+        x_normalized /= x_rng
     x_normalized[:n_artifact, :] = 0.0
     return x_normalized
 

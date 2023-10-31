@@ -107,8 +107,8 @@ class PresentationTemplate(dj.Computed):
             """
             return definition
 
-    def make(self, key):
-        self.add_field_presentations(key, only_new=False, verboselvl=0, suppress_errors=False)
+    def make(self, key, verboselvl: int = 0):
+        self.add_field_presentations(key, only_new=False, verboselvl=verboselvl, suppress_errors=False)
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False):
         """Scan filesystem for new fields and add them to the database."""
@@ -139,15 +139,16 @@ class PresentationTemplate(dj.Computed):
 
         pres_files = []
         for data_file in field_files:
-            stim = get_stim(data_file, loc=stim_loc - 1 if from_raw_data else stim_loc, fill_value='nostim')
+            stim = get_stim(data_file, loc=stim_loc - 1 if from_raw_data else stim_loc, fill_value='nostim').lower()
             condition = get_condition(data_file, loc=condition_loc)
+
             if (stim == 'nostim') or (len(stim) == 0) or (stim.lower() not in stim_alias):
                 if verboselvl > 3:
-                    print(f"\tSkipping `{data_file}`, which has stim={stim} not matching the key")
+                    print(f"\tSkipping `{data_file}`, which has stim=`{stim}` not in stim_alias={stim_alias}")
                 continue
             if ("condition" in key) and (key['condition'] != condition):
                 if verboselvl > 3:
-                    print(f"\tSkipping `{data_file}`, which has condition={condition} not matching the key")
+                    print(f"\tSkipping `{data_file}`, which has condition=`{condition}` not matching the key")
                 continue
             pres_files.append(data_file)
 
@@ -182,10 +183,8 @@ class PresentationTemplate(dj.Computed):
         setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
         from_raw_data, trigger_precision = (self.raw_params_table & key).fetch1('from_raw_data', 'trigger_precision')
 
-        if from_raw_data:
-            ch_stacks, wparams = scanm_utils.load_stacks_from_smp(filepath, ('wDataCh0', 'wDataCh1', 'wDataCh2'))
-        else:
-            ch_stacks, wparams = scanm_utils.load_stacks_from_h5(filepath, ('wDataCh0', 'wDataCh1', 'wDataCh2'))
+        ch_stacks, wparams = scanm_utils.load_stacks(
+            filepath, from_raw_data=from_raw_data, ch_names=('wDataCh0', 'wDataCh1', 'wDataCh2'))
 
         if compute_from_stack:
             stimulator_delay = get_stimulator_delay(date=key['date'], setupid=setupid)

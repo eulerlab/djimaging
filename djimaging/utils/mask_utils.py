@@ -448,22 +448,28 @@ def to_python_format(roi_mask):
     return roi_mask
 
 
-def to_roi_mask_file(data_file):
-    return data_file.replace('.h5', '') + '_ROIs.pkl'
+def to_roi_mask_file(data_file, suffix='auto'):
+    if suffix == 'auto':
+        suffix = data_file.split('.')[-1]
+
+    if not suffix.endswith('.'):
+        suffix = '.' + suffix
+
+    return data_file.replace(suffix, '') + '_ROIs.pkl'
 
 
-def sort_roi_mask_files(files, mask_alias='', highres_alias='', as_index=False):
+def sort_roi_mask_files(files, mask_alias='', highres_alias='', suffix='.h5', as_index=False):
     """Sort files by their relevance for the ROI masks given by the user"""
     files = np.array(files)
     penalties = np.full(files.size, len(mask_alias.split('_')))
 
     for i, file in enumerate(files):
-        if check_shared_alias_str(highres_alias, file.lower().replace('.h5', '')):
+        if check_shared_alias_str(highres_alias, file.lower().replace(suffix, '')):
             penalties[i] = len(mask_alias.split('_')) + 1
 
         else:
             for penalty, alias in enumerate(mask_alias.split('_')):
-                if alias.lower() in file.lower().replace('.h5', '').split('_'):
+                if alias.lower() in file.lower().replace(suffix, '').split('_'):
                     penalties[i] = penalty
 
     sort_idxs = np.argsort(penalties)
@@ -473,9 +479,9 @@ def sort_roi_mask_files(files, mask_alias='', highres_alias='', as_index=False):
         return files[sort_idxs]
 
 
-def load_preferred_roi_mask_igor(files, mask_alias='', highres_alias=''):
+def load_preferred_roi_mask_igor(files, mask_alias='', highres_alias='', suffix='.h5'):
     """Load ROI mask for field"""
-    sorted_files = sort_roi_mask_files(files=files, mask_alias=mask_alias, highres_alias=highres_alias)
+    sorted_files = sort_roi_mask_files(files=files, mask_alias=mask_alias, highres_alias=highres_alias, suffix=suffix)
     for file in sorted_files:
         roi_mask = scanm_utils.load_roi_mask_from_h5(filepath=file, ignore_not_found=True)
         if roi_mask is not None:

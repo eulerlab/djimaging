@@ -64,15 +64,23 @@ def find_folders_with_file_of_type(data_dir: str, ending: str = '.ini', ignore_h
     return os_walk_output
 
 
-def get_condition(data_file, loc, fill_value='control'):
+def get_info_from_loc(data_file, loc, fill_value, suffix='auto'):
     data_file = os.path.split(data_file)[1]
-    split_string = data_file[:data_file.find(".h5")].split("_")
-    condition = split_string[loc] if loc < len(split_string) else fill_value
-    return condition
+
+    if suffix == 'auto':
+        suffix = data_file.split('.')[-1]
+
+    if not suffix.startswith('.'):
+        suffix = '.' + suffix
+
+    split_string = data_file[:data_file.find(suffix)].split("_")
+    info = split_string[loc] if loc < len(split_string) else fill_value
+    return info
 
 
-def get_stim(data_file, loc, fill_value='nostim'):
-    data_file = os.path.split(data_file)[1]
-    split_string = data_file[:data_file.find(".h5")].split("_")
-    condition = split_string[loc] if loc < len(split_string) else fill_value
-    return condition
+def get_condition(data_file, loc, fill_value='control', suffix='auto'):
+    return get_info_from_loc(data_file, loc, fill_value, suffix)
+
+
+def get_stim(data_file, loc, fill_value='nostim', suffix='auto'):
+    return get_info_from_loc(data_file, loc, fill_value, suffix)

@@ -89,7 +89,7 @@ class RoiMaskTemplate(dj.Manual):
         return missing_keys
 
     def draw_roi_mask(self, field_key=None, pres_key=None, canvas_width=20, autorois_models='default_rgc',
-                      show_diagnostics=True, **kwargs):
+                      show_diagnostics=True, load_high_res=True, **kwargs):
         if canvas_width <= 0 or canvas_width >= 100:
             raise ValueError(f'canvas_width={canvas_width} must be in (0, 100)%')
 
@@ -104,6 +104,8 @@ class RoiMaskTemplate(dj.Manual):
                              dtype='object')
 
         n_artifacts, pixel_size_ums = (self.presentation_table() & pres_keys).fetch('npixartifact', 'pixel_size_um')
+
+        from_raw_data = (self.raw_params_table & field_key).fetch1("from_raw_data")
 
         if np.unique(n_artifacts).size > 1:
             raise ValueError(f'Inconsistent n_artifacts={n_artifacts} for pres_keys=\n{pres_keys}')
@@ -130,13 +132,15 @@ class RoiMaskTemplate(dj.Manual):
         ch0_stacks, ch1_stacks, output_files = [], [], []
         for input_file in files:
             data_name, alt_name = (self.userinfo_table & field_key).fetch1('data_stack_name', 'alt_stack_name')
-            ch_stacks, wparams = scanm_utils.load_stacks_from_h5(input_file, ch_names=(data_name, alt_name))
+
+            ch_stacks, wparams = scanm_utils.load_stacks(
+                input_file, from_raw_data=from_raw_data, ch_names=(data_name, alt_name))
             ch0_stacks.append(ch_stacks[data_name])
             ch1_stacks.append(ch_stacks[alt_name])
             output_files.append(to_roi_mask_file(input_file))
 
         # Load high resolution data is possible
-        high_res_bg_dict = self.load_high_res_bg_dict(field_key)
+        high_res_bg_dict = self.load_high_res_bg_dict(field_key) if load_high_res else dict()
 
         # Load initial ROI masks
         igor_roi_masks = (self.raw_params_table & field_key).fetch1('igor_roi_masks')
@@ -244,7 +248,7 @@ class RoiMaskTemplate(dj.Manual):
         return roi_mask, src_file
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
-                          only_new_fields: bool = True):
+                          only_new_fields: bool = True, roi_mask_dir=None, prefix_if_raw='SMP_'):
         """Scan filesystem for new ROI masks and add them to the database."""
         if restrictions is None:
             restrictions = dict()
@@ -256,7 +260,8 @@ class RoiMaskTemplate(dj.Manual):
 
         for key in (self.key_source & restrictions):
             try:
-                self.add_field_roi_masks(key, verboselvl=verboselvl)
+                self.add_field_roi_masks(
+                    key, roi_mask_dir=roi_mask_dir, prefix_if_raw=prefix_if_raw, verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
                     warnings.warn(f'Error for key={key}:\n{e}')
@@ -266,12 +271,12 @@ class RoiMaskTemplate(dj.Manual):
 
         return err_list
 
-    def add_field_roi_masks(self, field_key, verboselvl=0):
+    def add_field_roi_masks(self, field_key, roi_mask_dir, prefix_if_raw, verboselvl=0):
         if verboselvl > 2:
             print('\nfield_key:', field_key)
 
         pres_keys = (self.presentation_table.proj() & field_key)
-        roi_masks = [self.load_presentation_roi_mask(key=key) for key in pres_keys]
+        roi_masks = [self.load_presentation_roi_mask(key, roi_mask_dir, prefix_if_raw) for key in pres_keys]
 
         data_pairs = zip(pres_keys, roi_masks)
 
@@ -313,7 +318,7 @@ class RoiMaskTemplate(dj.Manual):
                  "shift_dx": shift_dx, "shift_dy": shift_dy},
                 skip_duplicates=True)
 
-    def load_presentation_roi_mask(self, key):
+    def load_presentation_roi_mask(self, key, roi_mask_dir=None, prefix_if_raw='SMP_'):
         igor_roi_masks, from_raw_data = (self.raw_params_table & key).fetch1('igor_roi_masks', 'from_raw_data')
         input_file = (self.presentation_table & key).fetch1("pres_data_file")
 
@@ -325,7 +330,9 @@ class RoiMaskTemplate(dj.Manual):
                 roimask_file = to_roi_mask_file(input_file)
             else:
                 raw_data_dir, pre_data_dir = (self.userinfo_table() & key).fetch1("raw_data_dir", "pre_data_dir")
-                input_file = input_file.replace(f'/{raw_data_dir}/', f'/{pre_data_dir}/SMP_')
+
+                src_dir = pre_data_dir if roi_mask_dir is None else roi_mask_dir
+                input_file = input_file.replace(f'/{raw_data_dir}/', f'/{src_dir}/{prefix_if_raw}')
                 roimask_file = to_roi_mask_file(input_file)
 
             if os.path.isfile(roimask_file):
@@ -361,9 +368,13 @@ class RoiMaskTemplate(dj.Manual):
         pre_data_path = os.path.join(header_path, (self.userinfo_table() & key).fetch1("pre_data_dir"))
         raw_data_path = os.path.join(header_path, (self.userinfo_table() & key).fetch1("raw_data_dir"))
 
-        filepath, ch_stacks, wparams = load_high_res_stack(
-            pre_data_path=pre_data_path, raw_data_path=raw_data_path,
-            highres_alias=highres_alias, field=field, field_loc=field_loc)
+        try:
+            filepath, ch_stacks, wparams = load_high_res_stack(
+                pre_data_path=pre_data_path, raw_data_path=raw_data_path,
+                highres_alias=highres_alias, field=field, field_loc=field_loc)
+        except Exception as e:
+            warnings.warn(f'Failed to load high resolution data because of error:\n{e}')
+            return dict()
 
         if ch_stacks is None:
             return dict()

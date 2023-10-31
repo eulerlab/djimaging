@@ -76,8 +76,9 @@ class FieldTemplate(dj.Computed):
             """
             return definition
 
-    def make(self, key):
-        self.add_experiment_fields(key, only_new=False, verboselvl=0, suppress_errors=False, restr_headers=None)
+    def make(self, key, verboselvl=0):
+        self.add_experiment_fields(key, only_new=False, verboselvl=verboselvl, suppress_errors=False,
+                                   restr_headers=None)
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
                           restr_headers: Optional[list] = None):
@@ -116,7 +117,7 @@ class FieldTemplate(dj.Computed):
 
     def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool,
                               restr_headers: Optional[list] = None):
-        
+
         if restr_headers is not None:
             header_path = (self.experiment_table & key).fetch1('header_path')
             if header_path not in restr_headers:
@@ -213,12 +214,23 @@ def scan_fields_and_files(folder: str, from_raw_data: bool, user_dict: dict, ver
 
 
 def load_scan_info(key, field, files, from_raw_data, ch_names, mask_alias, highres_alias, setupid) -> (dict, list):
-    filepath = sort_roi_mask_files(files=files, mask_alias=mask_alias, highres_alias=highres_alias)[0]
+    filepaths = sort_roi_mask_files(
+        files=files, mask_alias=mask_alias, highres_alias=highres_alias, suffix='.smp' if from_raw_data else '.h5')
 
-    if from_raw_data:
-        ch_stacks, wparams = scanm_utils.load_stacks_from_smp(filepath, ch_names=ch_names)
+    for i, filepath in enumerate(filepaths):
+        try:
+            ch_stacks, wparams = scanm_utils.load_stacks(filepath, from_raw_data=from_raw_data, ch_names=ch_names)
+            break
+        except Exception as e:
+            error_msg = f"Failed to load file with error {e}:\n{filepath}"
+            if filepath == filepaths[-1]:
+                raise OSError(error_msg)
+            if input(f"{error_msg}\nTry again for {filepaths[i + 1]}? (y/n)') != 'y'") == 'y':
+                continue
+            else:
+                raise OSError(error_msg)
     else:
-        ch_stacks, wparams = scanm_utils.load_stacks_from_h5(filepath, ch_names=ch_names)
+        raise OSError(f"Failed to load any of the files:\n{filepaths}")
 
     nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
     nypix = wparams["user_dypix"]

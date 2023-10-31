@@ -15,3 +15,4 @@ astropy
 
 ipython
 numba
+IPython
