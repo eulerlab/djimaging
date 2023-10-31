@@ -5,7 +5,7 @@ import warnings
 from typing import Optional, Dict
 
 import numpy as np
-from IPython.core.display_functions import clear_output
+from IPython.display import clear_output
 from matplotlib import pyplot as plt
 from matplotlib.colors import rgb2hex, hex2color
 
