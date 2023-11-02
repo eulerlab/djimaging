@@ -1,11 +1,11 @@
 from abc import abstractmethod
 
 import datajoint as dj
-import h5py
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.utils import scanm_utils, plot_utils, math_utils, trace_utils
+from djimaging.utils.scanm_utils import roi2trace_from_h5_file, roi2trace_from_stack, get_trigger_flag
+from djimaging.utils import plot_utils, math_utils, trace_utils
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 
@@ -77,11 +77,11 @@ class TracesTemplate(dj.Computed):
                 raise ValueError(f'Tried to populate traces with inconsistent roi mask for key=\n{key}\n' +
                                  'Compare ROI mask of Field and Presentation.')
 
-            roi2trace = self._roi2trace_from_stack(
+            roi2trace = roi2trace_from_stack(
                 filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
                 data_stack_name=data_stack_name, precision=trace_precision)
         else:
-            roi2trace = self._roi2trace_from_h5_file(filepath, roi_ids)
+            roi2trace = roi2trace_from_h5_file(filepath, roi_ids)
 
         for roi_id, roi_data in roi2trace.items():
             if not include_artifacts:
@@ -93,42 +93,10 @@ class TracesTemplate(dj.Computed):
             trace_key['trace'] = roi_data['trace']
             trace_key['trace_times'] = roi_data['trace_times']
             trace_key['trace_flag'] = roi_data['valid_flag']
-            trace_key['trigger_flag'] = self.get_trigger_flag(
+            trace_key['trigger_flag'] = get_trigger_flag(
                 trace_flag=trace_key['trace_flag'], trace_times=trace_key['trace_times'], triggertimes=triggertimes)
 
             self.insert1(trace_key)
-
-    @staticmethod
-    def _roi2trace_from_h5_file(filepath: str, roi_ids: np.ndarray):
-        with h5py.File(filepath, "r", driver="stdio") as h5_file:
-            traces, traces_times = scanm_utils.extract_traces(h5_file)
-        roi2trace = scanm_utils.get_roi2trace(traces=traces, traces_times=traces_times, roi_ids=roi_ids)
-        return roi2trace
-
-    @staticmethod
-    def _roi2trace_from_stack(filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray,
-                              data_stack_name: str, precision: str):
-
-        with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-            wparams = scanm_utils.extract_wparams_from_h5(h5_file)
-            stack = np.copy(h5_file[data_stack_name])
-
-        traces, traces_times = scanm_utils.compute_traces(
-            stack=stack, roi_mask=roi_mask, wparams=wparams, precision=precision)
-        roi2trace = scanm_utils.get_roi2trace(traces=traces, traces_times=traces_times, roi_ids=roi_ids)
-        return roi2trace
-
-    @staticmethod
-    def get_trigger_flag(trace_flag, trace_times, triggertimes):
-        if trace_flag:
-            if triggertimes[0] < trace_times[0]:
-                return 0
-            elif triggertimes[-1] > trace_times[-1]:
-                return 0
-            else:
-                return 1
-        else:
-            return 0
 
     def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(table=self, key=key)

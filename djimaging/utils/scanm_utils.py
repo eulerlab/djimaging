@@ -709,3 +709,34 @@ def get_rel_roi_pos(roi_id, roi_mask, pixel_size_um, ang_deg=0.):
         dx_um = dx_um_rot
 
     return dx_um, dy_um
+
+
+def roi2trace_from_h5_file(filepath: str, roi_ids: np.ndarray):
+    with h5py.File(filepath, "r", driver="stdio") as h5_file:
+        traces, traces_times = extract_traces(h5_file)
+    roi2trace = get_roi2trace(traces=traces, traces_times=traces_times, roi_ids=roi_ids)
+    return roi2trace
+
+
+def roi2trace_from_stack(filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray,
+                         data_stack_name: str, precision: str):
+    with h5py.File(filepath, 'r', driver="stdio") as h5_file:
+        wparams = extract_wparams_from_h5(h5_file)
+        stack = np.copy(h5_file[data_stack_name])
+
+    traces, traces_times = compute_traces(
+        stack=stack, roi_mask=roi_mask, wparams=wparams, precision=precision)
+    roi2trace = get_roi2trace(traces=traces, traces_times=traces_times, roi_ids=roi_ids)
+    return roi2trace
+
+
+def get_trigger_flag(trace_flag, trace_times, triggertimes):
+    if trace_flag:
+        if triggertimes[0] < trace_times[0]:
+            return 0
+        elif triggertimes[-1] > trace_times[-1]:
+            return 0
+        else:
+            return 1
+    else:
+        return 0
