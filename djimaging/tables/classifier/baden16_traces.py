@@ -27,11 +27,11 @@ def preprocess_chirp(chirp_average, dt, shift=2, n_int=249):
         raise ValueError(f"chirp_trace must be 1D, but has shape {chirp_average.shape}")
 
     # extract original baseline before shifting
-    baden16_baseline = np.mean(chirp_average[:8]) 
-    
+    baden16_baseline = np.mean(chirp_average[:8])
+
     # Shift
     baden16_average = np.roll(chirp_average, shift)
-    
+
     time_avg = np.arange(baden16_average.size) * dt  # Allow different frequencies
     baden16_time = np.arange(249) * (32. / (n_int - 1))
 
@@ -86,7 +86,7 @@ class Baden16TracesTemplate(dj.Computed):
 
     _stim_name_chirp = 'gChirp'
     _stim_name_bar = 'movingbar'
-    _restr = dict()  # e.g. dict(condition='control')
+    _restr = [dict(condition='Control'), dict(condition='control'), dict(condition='C1'), dict(condition='c1')]
 
     @property
     def key_source(self):

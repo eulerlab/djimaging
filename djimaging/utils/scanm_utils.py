@@ -719,14 +719,16 @@ def roi2trace_from_h5_file(filepath: str, roi_ids: np.ndarray):
 
 
 def roi2trace_from_stack(filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray,
-                         data_stack_name: str, precision: str):
-    with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        wparams = extract_wparams_from_h5(h5_file)
-        stack = np.copy(h5_file[data_stack_name])
+                         data_stack_name: str, precision: str, from_raw_data: bool = False):
+    if not from_raw_data:
+        ch_stacks, wparams = load_stacks_from_h5(filepath, ch_names=(data_stack_name,))
+    else:
+        ch_stacks, wparams = load_stacks_from_smp(filepath, ch_names=(data_stack_name,))
 
     traces, traces_times = compute_traces(
-        stack=stack, roi_mask=roi_mask, wparams=wparams, precision=precision)
+        stack=ch_stacks[data_stack_name], roi_mask=roi_mask, wparams=wparams, precision=precision)
     roi2trace = get_roi2trace(traces=traces, traces_times=traces_times, roi_ids=roi_ids)
+
     return roi2trace
 
 

@@ -1,3 +1,5 @@
+import time
+
 import datajoint as dj
 import pytest
 
@@ -11,8 +13,11 @@ def database_fixture():
     from djimaging.schemas.full_rgc_schema import schema as test_schema
 
     try:
-        connection = _connect_test_schema(use_rgc_classifier=True)
+        time.sleep(0.5)
+        connection = _connect_test_schema(use_rgc_classifier=False)
+        time.sleep(0.5)
         _activate_test_schema(test_schema)
+        time.sleep(0.5)
     except (FileNotFoundError, dj.DataJointError):
         connection = None
 

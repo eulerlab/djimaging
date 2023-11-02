@@ -9,7 +9,7 @@ import numpy as np
 from djimaging.utils.mask_utils import sort_roi_mask_files
 from djimaging.utils import scanm_utils
 
-from djimaging.utils.datafile_utils import get_filename_info
+from djimaging.utils.datafile_utils import scan_field_file_dicts, clean_field_file_dicts
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 
@@ -90,30 +90,21 @@ class FieldTemplate(dj.Computed):
             self.add_experiment_fields(
                 key, restr_headers=restr_headers, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def compute_field2info(self, key, from_raw_data, verboselvl=0):
-        data_folder = os.path.join(
+    def compute_field_dicts(self, key, from_raw_data, verboselvl=0):
+        data_path = os.path.join(
             (self.experiment_table() & key).fetch1('header_path'),
             (self.userinfo_table() & key).fetch1("raw_data_dir" if from_raw_data else "pre_data_dir"))
-
-        assert os.path.exists(data_folder), f"Data folder does not exist: {data_folder}"
-
-        if verboselvl > 0:
-            print("Processing fields in:", data_folder)
-
         user_dict = (self.userinfo_table() & key).fetch1()
 
-        # Collect all files belonging to this experiment
-        field2info = scan_fields_and_files(data_folder, from_raw_data, user_dict=user_dict, verbose=verboselvl > 0)
+        assert os.path.exists(data_path), f"Error: Data folder does not exist: {data_path}"
 
-        # Remove opticdisk and outline recordings
-        remove_fields = []
-        for field in field2info.keys():
-            if field.lower() in user_dict['opticdisk_alias'].split('_') + user_dict['outline_alias'].split('_'):
-                remove_fields.append(field)
-        for remove_field in remove_fields:
-            field2info.pop(remove_field)
+        if verboselvl > 0:
+            print("Processing fields in:", data_path)
 
-        return field2info
+        field_dicts = scan_field_file_dicts(data_path, user_dict=user_dict, verbose=verboselvl > 0,
+                                            from_raw_data=from_raw_data)
+        field_dicts = clean_field_file_dicts(field_dicts, user_dict=user_dict)
+        return field_dicts
 
     def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool,
                               restr_headers: Optional[list] = None):
@@ -127,9 +118,13 @@ class FieldTemplate(dj.Computed):
 
         from_raw_data = (self.raw_params_table & key).fetch1('from_raw_data')
 
-        field2info = self.compute_field2info(key=key, from_raw_data=from_raw_data, verboselvl=verboselvl)
+        field_dicts = self.compute_field_dicts(key=key, from_raw_data=from_raw_data, verboselvl=verboselvl)
+
+        if verboselvl > 2:
+            print('key=\n', key, '\nfield_dicts=\n', field_dicts)
+
         # Go through remaining fields and add them
-        for field, info in field2info.items():
+        for field, info in field_dicts.items():
             exists = len((self & key & dict(field=field)).fetch()) > 0
             if only_new and exists:
                 if verboselvl > 1:
@@ -181,36 +176,6 @@ class FieldTemplate(dj.Computed):
         npixartifact = (self & key).fetch1('npixartifact')
 
         plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4))
-
-
-def scan_fields_and_files(folder: str, from_raw_data: bool, user_dict: dict, verbose: bool = False) -> dict:
-    """Return a dictionary that maps fields to their respective files"""
-
-    loc_mapper = {k: v for k, v in user_dict.items() if k.endswith('loc')}
-
-    field2info = dict()
-
-    for file in sorted(os.listdir(folder)):
-        if file.startswith('.') or not file.endswith('.smp' if from_raw_data else '.h5'):
-            continue
-
-        datatype, animal, region, field, stimulus, condition = get_filename_info(
-            filename=file, from_raw_data=from_raw_data, **loc_mapper)
-
-        if field is None:
-            if verbose:
-                print(f"\tSkipping file with unrecognized field: {file}")
-            continue
-
-        # Create new or check for inconsistencies
-        if field not in field2info:
-            field2info[field] = dict(files=[], region=region)
-        else:
-            assert field2info[field]['region'] == region, f"{field2info[field]['region']} vs. {region}"
-
-        # Add file
-        field2info[field]['files'].append(file)
-    return field2info
 
 
 def load_scan_info(key, field, files, from_raw_data, ch_names, mask_alias, highres_alias, setupid) -> (dict, list):

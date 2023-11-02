@@ -3,6 +3,9 @@ from pathlib import Path
 
 import numpy as np
 
+from djimaging.utils import scanm_utils
+from djimaging.utils.alias_utils import check_shared_alias_str
+
 
 def get_filename_info(filename, datatype_loc, animal_loc, region_loc, field_loc, stimulus_loc, condition_loc,
                       from_raw_data=False):
@@ -84,3 +87,149 @@ def get_condition(data_file, loc, fill_value='control', suffix='auto'):
 
 def get_stim(data_file, loc, fill_value='nostim', suffix='auto'):
     return get_info_from_loc(data_file, loc, fill_value, suffix)
+
+
+def is_alias_number_match(name: str, alias: str):
+    if name == alias:
+        return True
+    elif name.startswith(alias):
+        try:
+            # is a number? e.g. outline3
+            int(name[len(alias):])
+            is_number = True
+        except ValueError:
+            is_number = False
+        if is_number:
+            return True
+    return False
+
+
+def load_field_roi_mask_from_h5(pre_data_path, files, mask_alias='', highres_alias=''):
+    """Load ROI mask for field"""
+    files = np.array(files)
+    penalties = np.full(files.size, len(mask_alias.split('_')))
+
+    for i, file in enumerate(files):
+        if check_shared_alias_str(highres_alias, file.lower().replace('.h5', '')):
+            penalties[i] = len(mask_alias.split('_')) + 1
+
+        else:
+            for penalty, alias in enumerate(mask_alias.split('_')):
+                if alias.lower() in file.lower().replace('.h5', '').split('_'):
+                    penalties[i] = penalty
+
+    sorted_files = files[np.argsort(penalties)]
+
+    for file in sorted_files:
+        roi_mask = scanm_utils.load_roi_mask_from_h5(filepath=os.path.join(pre_data_path, file), ignore_not_found=True)
+        if roi_mask is not None:
+            return roi_mask, file
+    else:
+        raise ValueError(f'No ROI mask found in any file in {pre_data_path}: {files}')
+
+
+def scan_region_field_file_dicts(folder: str, user_dict: dict, verbose: bool = False, suffix='.h5') -> dict:
+    """Return a dictionary that maps (region, field) to their respective files"""
+
+    loc_mapper = {k: v for k, v in user_dict.items() if k.endswith('loc')}
+
+    file_dicts = dict()
+
+    files = sorted(os.listdir(folder))
+
+    for file in files:
+        if file.startswith('.') or not file.endswith(suffix):
+            continue
+
+        datatype, animal, region, field, stimulus, condition = get_filename_info(
+            file if suffix == '.h5' else 'SMP_' + file, **loc_mapper)  # locs refer to h5 files, which start with SMP
+
+        if field is None:
+            if verbose:
+                print(f"\tSkipping file with unrecognized field: {file}")
+            continue
+
+        # Add file to list
+        if (region, field) not in file_dicts:
+            file_dicts[(region, field)] = dict(files=[])
+        file_dicts[(region, field)]['files'].append(file)
+
+    return file_dicts
+
+
+def scan_field_file_dicts(folder: str, from_raw_data: bool, user_dict: dict, verbose: bool = False) -> dict:
+    """Return a dictionary that maps fields to their respective files"""
+
+    loc_mapper = {k: v for k, v in user_dict.items() if k.endswith('loc')}
+
+    file_dicts = dict()
+
+    for file in sorted(os.listdir(folder)):
+        if file.startswith('.') or not file.endswith('.smp' if from_raw_data else '.h5'):
+            continue
+
+        datatype, animal, region, field, stimulus, condition = get_filename_info(
+            filename=file, from_raw_data=from_raw_data, **loc_mapper)
+
+        if field is None:
+            if verbose:
+                print(f"\tSkipping file with unrecognized field: {file}")
+            continue
+
+        # Create new or check for inconsistencies
+        if field not in file_dicts:
+            file_dicts[field] = dict(files=[], region=region)
+        else:
+            assert file_dicts[field]['region'] == region, f"{file_dicts[field]['region']} vs. {region}"
+
+        # Add file
+        file_dicts[field]['files'].append(file)
+    return file_dicts
+
+
+def clean_field_file_dicts(field_dicts, user_dict):
+    """Remove optic-disk and outline recordings from dict with fields."""
+    remove_fields = []
+    remove_aliases = user_dict['opticdisk_alias'].split('_') + user_dict['outline_alias'].split('_')
+    for field in field_dicts.keys():
+        removed = False
+        i = 0
+        while not removed and i < len(remove_aliases):
+            if is_alias_number_match(name=field.lower(), alias=remove_aliases[i]):
+                remove_fields.append(field)
+                removed = True
+            i += 1
+
+    for remove_field in remove_fields:
+        field_dicts.pop(remove_field)
+
+    return field_dicts
+
+
+def clean_region_field_file_dicts(field_dicts, user_dict):
+    """Remove optic-disk and outline recordings"""
+    remove_fields = []
+    remove_aliases = user_dict['opticdisk_alias'].split('_') + user_dict['outline_alias'].split('_')
+    for region, field in field_dicts.keys():
+        removed = False
+        i = 0
+        while not removed and i < len(remove_aliases):
+            if is_alias_number_match(name=field.lower(), alias=remove_aliases[i]):
+                remove_fields.append((region, field))
+                removed = True
+            i += 1
+
+    for remove_field in remove_fields:
+        field_dicts.pop(remove_field)
+
+    fields, field_counts = np.unique([field for region, field in field_dicts.keys()], return_counts=True)
+
+    for m_field in fields[field_counts > 1]:
+        regions = [region for region, field in field_dicts.keys() if m_field == field]
+
+        raise ValueError(f"Field `{m_field}` occurs multiple times\n" +
+                         f"You have the same field name for different regions={regions}\n"
+                         "This is currently not supported." +
+                         "Please rename the fields to unique names per experiment.")
+
+    return field_dicts

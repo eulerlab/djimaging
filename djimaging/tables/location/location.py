@@ -7,7 +7,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
 
-from djimaging.tables.core.field import scan_fields_and_files
+from djimaging.utils.datafile_utils import scan_region_field_file_dicts
 from djimaging.utils.data_utils import load_h5_table
 from djimaging.utils.scanm_utils import get_retinal_position, load_wparams_from_smp
 
@@ -108,7 +108,7 @@ def extract_od_file(field_dicts, user_dict):
 
 
 def load_od_pos_from_h5_file(pre_data_path, user_dict):
-    field_dicts = scan_fields_and_files(pre_data_path, user_dict=user_dict, suffix='.h5')
+    field_dicts = scan_region_field_file_dicts(pre_data_path, user_dict=user_dict, suffix='.h5')
     file = extract_od_file(field_dicts, user_dict)
 
     # Try to get OD information, either from file or from header
@@ -127,7 +127,7 @@ def load_od_pos_from_h5_file(pre_data_path, user_dict):
 
 
 def load_od_pos_from_smp_file(raw_data_path, user_dict):
-    field_dicts = scan_fields_and_files(raw_data_path, user_dict=user_dict, suffix='.smp')
+    field_dicts = scan_region_field_file_dicts(raw_data_path, user_dict=user_dict, suffix='.smp')
     file = extract_od_file(field_dicts, user_dict)
 
     # Try to get OD information, either from file or from header

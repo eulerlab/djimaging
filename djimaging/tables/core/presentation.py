@@ -194,7 +194,7 @@ class PresentationTemplate(dj.Computed):
         for key in (self.key_source & restrictions):
             self.add_field_presentations(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def make(self, key):
+    def make(self, key, verboselvl=0):
         self.add_field_presentations(key, only_new=False, verboselvl=0, suppress_errors=False)
 
     def add_field_presentations(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):

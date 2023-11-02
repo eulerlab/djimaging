@@ -483,9 +483,10 @@ def load_preferred_roi_mask_igor(files, mask_alias='', highres_alias='', suffix=
     """Load ROI mask for field"""
     sorted_files = sort_roi_mask_files(files=files, mask_alias=mask_alias, highres_alias=highres_alias, suffix=suffix)
     for file in sorted_files:
-        roi_mask = scanm_utils.load_roi_mask_from_h5(filepath=file, ignore_not_found=True)
-        if roi_mask is not None:
-            return roi_mask, file
+        if os.path.isfile(file) and file.endswith('.h5'):
+            roi_mask = scanm_utils.load_roi_mask_from_h5(filepath=file, ignore_not_found=True)
+            if roi_mask is not None:
+                return roi_mask, file
     else:
         return None, None
 

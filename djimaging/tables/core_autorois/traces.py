@@ -63,8 +63,9 @@ class TracesTemplate(dj.Computed):
             pass
 
     def make(self, key):
-        include_artifacts, compute_from_stack, trace_precision = (self.raw_params_table & key).fetch1(
-            "include_artifacts", "compute_from_stack", "trace_precision")
+        include_artifacts, compute_from_stack, trace_precision, from_raw_data = (self.raw_params_table & key).fetch1(
+            "include_artifacts", "compute_from_stack", "trace_precision", "from_raw_data")
+
         filepath = (self.presentation_table & key).fetch1("pres_data_file")
         triggertimes = (self.presentation_table & key).fetch1("triggertimes")
         roi_ids = (self.roi_table & key).fetch("roi_id")
@@ -79,8 +80,9 @@ class TracesTemplate(dj.Computed):
 
             roi2trace = roi2trace_from_stack(
                 filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
-                data_stack_name=data_stack_name, precision=trace_precision)
+                data_stack_name=data_stack_name, precision=trace_precision, from_raw_data=from_raw_data)
         else:
+            assert not from_raw_data, "from_raw_data=True only supported for compute_from_stack=True"
             roi2trace = roi2trace_from_h5_file(filepath, roi_ids)
 
         for roi_id, roi_data in roi2trace.items():

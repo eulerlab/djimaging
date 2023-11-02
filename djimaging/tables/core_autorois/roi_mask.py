@@ -240,8 +240,7 @@ class RoiMaskTemplate(dj.Manual):
         mask_alias, highres_alias = (self.userinfo_table() & field_key).fetch1("mask_alias", "highres_alias")
         files = (self.presentation_table() & field_key).fetch("pres_data_file")
 
-        roi_mask, src_file = load_preferred_roi_mask_igor(
-            files, mask_alias=mask_alias, highres_alias=highres_alias)
+        roi_mask, src_file = load_preferred_roi_mask_igor(files, mask_alias=mask_alias, highres_alias=highres_alias)
         if roi_mask is not None:
             print(f'Loaded ROI mask from file={src_file} for files=\n{files}\nfor mask_alias={mask_alias}')
 

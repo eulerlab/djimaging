@@ -139,8 +139,8 @@ class PresentationTemplate(dj.Computed):
 
         pres_files = []
         for data_file in field_files:
-            stim = get_stim(data_file, loc=stim_loc - 1 if from_raw_data else stim_loc, fill_value='nostim').lower()
-            condition = get_condition(data_file, loc=condition_loc)
+            stim = get_stim(data_file, loc=stim_loc - 1 if from_raw_data else stim_loc)
+            condition = get_condition(data_file, loc=condition_loc - 1 if from_raw_data else condition_loc)
 
             if (stim == 'nostim') or (len(stim) == 0) or (stim.lower() not in stim_alias):
                 if verboselvl > 3:
@@ -157,7 +157,7 @@ class PresentationTemplate(dj.Computed):
 
         for data_file in pres_files:
             new_key = deepcopy(key)
-            new_key["condition"] = get_condition(data_file, loc=condition_loc)
+            new_key["condition"] = get_condition(data_file, loc=condition_loc - 1 if from_raw_data else condition_loc)
 
             for k in self.primary_key:
                 assert k in new_key, f'Did not find k={k} in new_key.'

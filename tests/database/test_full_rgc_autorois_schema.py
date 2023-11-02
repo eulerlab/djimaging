@@ -1,3 +1,5 @@
+import time
+
 import datajoint as dj
 import pytest
 
@@ -11,8 +13,11 @@ def database_fixture():
     from djimaging.schemas.full_rgc_autorois_schema import schema as test_schema
 
     try:
+        time.sleep(0.5)
         connection = _connect_test_schema(use_rgc_classifier=True)
+        time.sleep(0.5)
         _activate_test_schema(test_schema)
+        time.sleep(0.5)
     except (FileNotFoundError, dj.DataJointError):
         connection = None
 
@@ -117,8 +122,11 @@ def test_populate_roi_mask(database_fixture):
 
     missing_keys = RoiMask().list_missing_field()
 
+    from djimaging.tables.core_autorois.roi_mask import load_default_autorois_models
+    autorois_models = load_default_autorois_models()
+
     for missing_key in missing_keys:
-        roi_mask_gui = RoiMask().draw_roi_mask(field_key=missing_key)
+        roi_mask_gui = RoiMask().draw_roi_mask(field_key=missing_key, autorois_models=autorois_models)
         roi_mask_gui.exec_autorois_all()
         roi_mask_gui.insert_database(RoiMask, missing_key)
 

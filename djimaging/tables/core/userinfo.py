@@ -23,7 +23,7 @@ class UserInfoTemplate(dj.Manual):
         field_loc                       :tinyint       # string location for field
         stimulus_loc                    :tinyint       # string location for stimulus
         condition_loc                   :tinyint       # string location for (pharmacological) condition
-        opticdisk_alias='od_opticdisk'  :varchar(255)  # alias(es) for optic disk recordings (separated by _)
+        opticdisk_alias='od_opticdisk_opticdisc'  :varchar(255)  # alias(es) for optic disk recordings (separated by _)
         outline_alias='outline_edge'    :varchar(255)  # alias(es) for retinal outline / edge recordings (separated by _)
         highres_alias='hq_hr_highresolution_512' :varchar(255)  # alias(es) for high resolution stack
         mask_alias='chirp_mb_movingbar' :varchar(255)  # Ordered alias(es) for field roi mask (separated by _)
