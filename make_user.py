@@ -7,7 +7,7 @@ parser.add_argument("user")
 args = parser.parse_args()
 
 
-def run():
+def main():
     user = args.user
     assert len(user) > 0, 'Enter valid username'
     djimaging_dir = os.path.split(os.path.abspath(__file__))[0]
@@ -34,40 +34,41 @@ def create_user_dir(djimaging_dir, user):
     return user_dir
 
 
-def replace_schema_name(filepath, username):
-    # Read in the file
-    with open(filepath, 'r') as file:
-        filedata = file.read()
-
-    # Replace the target string
-    filedata = filedata.replace('djimaging.schemas.tutorial_schema', f'djimaging.user.{username}.schemas.my_schema')
-
-    # Write the file out again
-    with open(filepath, 'w') as file:
-        file.write(filedata)
-
-
 def copy_notebooks(djimaging_dir, user_dir, username):
     files = os.listdir(os.path.join(djimaging_dir, 'djimaging/notebooks'))
     notebooks = [nb for nb in files
                  if os.path.isfile(os.path.join(djimaging_dir, 'djimaging/notebooks', nb)) and nb.endswith('.ipynb')]
     for nb in notebooks:
         src = os.path.join(djimaging_dir, 'djimaging/notebooks', nb)
-        dst = os.path.join(user_dir, 'notebooks', nb)
+        dst = os.path.join(user_dir, 'notebooks', nb.replace('my_schema', f'{username}_schema'))
 
         if not os.path.isfile(dst):
             shutil.copy(src, dst)
             replace_schema_name(dst, username)
 
 
+def replace_schema_name(filepath, username):
+    # Read in the file
+    with open(filepath, 'r') as file:
+        filedata = file.read()
+
+    # Replace the target string
+    filedata = filedata.replace('djimaging.schemas.tutorial_schema',
+                                f'djimaging.user.{username}.schemas.{username}_schema')
+
+    # Write the file out again
+    with open(filepath, 'w') as file:
+        file.write(filedata)
+
+
 def copy_schema(djimaging_dir, user_dir, username):
     src = os.path.join(djimaging_dir, 'djimaging/schemas/tutorial_schema.py')
-    dst = os.path.join(user_dir, 'schemas/my_schema.py')
+    dst = os.path.join(user_dir, f'schemas/{username}_schema.py')
 
     if not os.path.isfile(dst):
         shutil.copy(src, dst)
 
-        with open(os.path.join(user_dir, 'schemas/my_schema.py'), "r+") as f:
+        with open(os.path.join(user_dir, f'schemas/{username}_schema.py'), "r+") as f:
             text = f.read()
             f.seek(0)
 
@@ -102,4 +103,4 @@ def make_dir_if_new(path):
 
 
 if __name__ == '__main__':
-    run()
+    main()
