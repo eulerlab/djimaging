@@ -472,6 +472,12 @@ def sort_roi_mask_files(files, mask_alias='', highres_alias='', suffix='.h5', as
                 if alias.lower() in file.lower().replace(suffix, '').split('_'):
                     penalties[i] = penalty
 
+    # Penalize non control conditions
+    for i, file in enumerate(files):
+        is_control = ('_control' in file.lower()) or ('_ctrl' in file.lower()) or ('_c1' in file.lower())
+        if not is_control:
+            penalties[i] += 100
+
     sort_idxs = np.argsort(penalties)
     if as_index:
         return sort_idxs
