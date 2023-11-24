@@ -247,7 +247,7 @@ class RoiMaskTemplate(dj.Manual):
         return roi_mask, src_file
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
-                          only_new_fields: bool = True, roi_mask_dir=None, prefix_if_raw='SMP_'):
+                          only_new_fields: bool = True, roi_mask_dir=None, prefix_if_raw='SMP_', drop_smp_prefix=False):
         """Scan filesystem for new ROI masks and add them to the database."""
         if restrictions is None:
             restrictions = dict()
@@ -260,7 +260,8 @@ class RoiMaskTemplate(dj.Manual):
         for key in (self.key_source & restrictions):
             try:
                 self.add_field_roi_masks(
-                    key, roi_mask_dir=roi_mask_dir, prefix_if_raw=prefix_if_raw, verboselvl=verboselvl)
+                    key, roi_mask_dir=roi_mask_dir, prefix_if_raw=prefix_if_raw, drop_smp_prefix=drop_smp_prefix,
+                    verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
                     warnings.warn(f'Error for key={key}:\n{e}')
@@ -270,12 +271,14 @@ class RoiMaskTemplate(dj.Manual):
 
         return err_list
 
-    def add_field_roi_masks(self, field_key, roi_mask_dir, prefix_if_raw, verboselvl=0):
+    def add_field_roi_masks(self, field_key, roi_mask_dir, prefix_if_raw, drop_smp_prefix=False, verboselvl=0):
         if verboselvl > 2:
             print('\nfield_key:', field_key)
 
         pres_keys = (self.presentation_table.proj() & field_key)
-        roi_masks = [self.load_presentation_roi_mask(key, roi_mask_dir, prefix_if_raw) for key in pres_keys]
+        roi_masks = [self.load_presentation_roi_mask(
+            key, roi_mask_dir, prefix_if_raw=prefix_if_raw, drop_smp_prefix=drop_smp_prefix)
+            for key in pres_keys]
 
         data_pairs = zip(pres_keys, roi_masks)
 
@@ -317,7 +320,7 @@ class RoiMaskTemplate(dj.Manual):
                  "shift_dx": shift_dx, "shift_dy": shift_dy},
                 skip_duplicates=True)
 
-    def load_presentation_roi_mask(self, key, roi_mask_dir=None, prefix_if_raw='SMP_'):
+    def load_presentation_roi_mask(self, key, roi_mask_dir=None, prefix_if_raw='SMP_', drop_smp_prefix=False):
         igor_roi_masks, from_raw_data = (self.raw_params_table & key).fetch1('igor_roi_masks', 'from_raw_data')
         input_file = (self.presentation_table & key).fetch1("pres_data_file")
 
@@ -326,6 +329,9 @@ class RoiMaskTemplate(dj.Manual):
             filesystem_roi_mask = scanm_utils.load_roi_mask_from_h5(filepath=input_file, ignore_not_found=True)
         else:
             if not from_raw_data:
+                if drop_smp_prefix:
+                    f_dir, f_name = os.path.split(input_file)
+                    input_file = os.path.join(f_dir, f_name.replace('SMP_', ''))
                 roimask_file = to_roi_mask_file(input_file)
             else:
                 raw_data_dir, pre_data_dir = (self.userinfo_table() & key).fetch1("raw_data_dir", "pre_data_dir")
