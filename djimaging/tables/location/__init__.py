@@ -1,4 +1,4 @@
 from .location import RetinalFieldLocationTemplate, RelativeFieldLocationTemplate, \
     RetinalFieldLocationCatTemplate, OpticDiskTemplate
 from .location_from_table import RetinalFieldLocationFromTableTemplate, RetinalFieldLocationTableParamsTemplate
-from .roi_location import RelativeRoiLocationTemplate, RetinalRoiLocationTemplate
+from .roi_location import RelativeRoiLocationWrtFieldTemplate, RelativeRoiLocationTemplate, RetinalRoiLocationTemplate

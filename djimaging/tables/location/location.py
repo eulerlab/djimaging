@@ -12,6 +12,74 @@ from djimaging.utils.data_utils import load_h5_table
 from djimaging.utils.scanm_utils import get_retinal_position, load_wparams_from_smp
 
 
+def extract_od_file(field_dicts, user_dict):
+    # Get file with OD information
+    for (region, field), info in field_dicts.items():
+        if field.lower() in user_dict['opticdisk_alias'].split('_'):
+            files = info['files']
+            if len(files) > 1:
+                if input(f'More than one file for optic disk found for {region}, {field}: {files}\n'
+                         + f'Accept first file? [y/n]') != 'y':
+                    raise ValueError('More than one file for optic disk found')
+
+            file = files[0]
+            break
+    else:
+        file = None
+
+    return file
+
+
+def load_od_pos_from_h5_file(pre_data_path, user_dict):
+    field_dicts = scan_region_field_file_dicts(pre_data_path, user_dict=user_dict, suffix='.h5')
+    file = extract_od_file(field_dicts, user_dict)
+
+    # Try to get OD information, either from file or from header
+    if file is not None:
+        fromfile = os.path.join(pre_data_path, file)
+        wparamsnum = load_h5_table('wParamsNum', filename=fromfile)
+
+        # Refers to center of fields
+        odx = wparamsnum['XCoord_um']
+        ody = wparamsnum['YCoord_um']
+        odz = wparamsnum['ZCoord_um']
+
+        return odx, ody, odz, fromfile
+    else:
+        return None, None, None, None
+
+
+def plot_rel_xy_pos(relx, rely, view='igor_local'):
+    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+    ax.scatter(rely, relx, label='all', s=1, alpha=0.5)
+    ax.set(xlabel="rely", ylabel="relx")
+
+    if view == 'igor_local':
+        pass
+    elif view == 'igor_setup':
+        ax.invert_xaxis()
+    else:
+        raise NotImplementedError(view)
+
+    ax.set_aspect(aspect="equal", adjustable="datalim")
+
+    plt.show()
+
+
+def load_od_pos_from_smp_file(raw_data_path, user_dict):
+    field_dicts = scan_region_field_file_dicts(raw_data_path, user_dict=user_dict, suffix='.smp')
+    file = extract_od_file(field_dicts, user_dict)
+
+    # Try to get OD information, either from file or from header
+    if file is not None:
+        fromfile = os.path.join(raw_data_path, file)
+        wparams = load_wparams_from_smp(fromfile, return_file=False)
+        odx, ody, odz = wparams['xcoord_um'], wparams['ycoord_um'], wparams['zcoord_um']
+        return odx, ody, odz, fromfile
+    else:
+        return None, None, None, None
+
+
 class OpticDiskTemplate(dj.Computed):
     database = ""
 
@@ -89,57 +157,6 @@ class OpticDiskTemplate(dj.Computed):
         self.insert1(loc_key)
 
 
-def extract_od_file(field_dicts, user_dict):
-    # Get file with OD information
-    for (region, field), info in field_dicts.items():
-        if field.lower() in user_dict['opticdisk_alias'].split('_'):
-            files = info['files']
-            if len(files) > 1:
-                if input(f'More than one file for optic disk found for {region}, {field}: {files}\n'
-                         + f'Accept first file? [y/n]') != 'y':
-                    raise ValueError('More than one file for optic disk found')
-
-            file = files[0]
-            break
-    else:
-        file = None
-
-    return file
-
-
-def load_od_pos_from_h5_file(pre_data_path, user_dict):
-    field_dicts = scan_region_field_file_dicts(pre_data_path, user_dict=user_dict, suffix='.h5')
-    file = extract_od_file(field_dicts, user_dict)
-
-    # Try to get OD information, either from file or from header
-    if file is not None:
-        fromfile = os.path.join(pre_data_path, file)
-        wparamsnum = load_h5_table('wParamsNum', filename=fromfile)
-
-        # Refers to center of fields
-        odx = wparamsnum['XCoord_um']
-        ody = wparamsnum['YCoord_um']
-        odz = wparamsnum['ZCoord_um']
-
-        return odx, ody, odz, fromfile
-    else:
-        return None, None, None, None
-
-
-def load_od_pos_from_smp_file(raw_data_path, user_dict):
-    field_dicts = scan_region_field_file_dicts(raw_data_path, user_dict=user_dict, suffix='.smp')
-    file = extract_od_file(field_dicts, user_dict)
-
-    # Try to get OD information, either from file or from header
-    if file is not None:
-        fromfile = os.path.join(raw_data_path, file)
-        wparams = load_wparams_from_smp(fromfile, return_file=False)
-        odx, ody, odz = wparams['xcoord_um'], wparams['ycoord_um'], wparams['zcoord_um']
-        return odx, ody, odz, fromfile
-    else:
-        return None, None, None, None
-
-
 class RelativeFieldLocationTemplate(dj.Computed):
     database = ""
 
@@ -190,26 +207,9 @@ class RelativeFieldLocationTemplate(dj.Computed):
 
         self.insert1(loc_key)
 
-    def plot(self, key=None, view='igor_local'):
+    def plot(self, view='igor_local'):
         relx, rely = self.fetch("relx", "rely")
-        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-        ax.scatter(rely, relx, label='all')
-        if key is not None:
-            krelx, krely = (self & key).fetch1("relx", "rely")
-            ax.scatter(krely, krelx, label='key')
-            ax.legend()
-        ax.set(xlabel="rely", ylabel="relx")
-        ax.set_aspect(aspect="equal", adjustable="datalim")
-
-        if view == 'igor_local':
-            ax.invert_xaxis()
-            ax.invert_yaxis()
-        elif view == 'igor_setup':
-            ax.invert_yaxis()
-        else:
-            raise NotImplementedError(view)
-
-        plt.show()
+        plot_rel_xy_pos(relx, rely, view=view)
 
 
 class RetinalFieldLocationTemplate(dj.Computed):
