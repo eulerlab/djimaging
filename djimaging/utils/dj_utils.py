@@ -119,3 +119,16 @@ def is_equal(v1, v2):
     except:
         pass
     return False
+
+
+def check_unique_one(values, name='values'):
+    values = np.asarray(values)
+    if 'float' in str(type(values[0])):
+        all_equal = np.allclose(values, values[0])
+    else:
+        all_equal = np.all(values == values[0])
+
+    if not all_equal:
+        raise ValueError(f'{name} are not unique: {values}')
+
+    return values[0]

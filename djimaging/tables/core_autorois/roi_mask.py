@@ -12,7 +12,7 @@ from djimaging.autorois.corr_roi_mask_utils import CorrRoiMask
 
 from djimaging.utils import scanm_utils
 from djimaging.utils.datafile_utils import as_pre_filepath
-from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.dj_utils import get_primary_key, check_unique_one
 from djimaging.utils.mask_utils import to_igor_format, to_python_format, to_roi_mask_file, sort_roi_mask_files, \
     load_preferred_roi_mask_igor, load_preferred_roi_mask_pickle, compare_roi_masks
 from djimaging.utils.plot_utils import plot_field
@@ -104,17 +104,22 @@ class RoiMaskTemplate(dj.Manual):
         pres_keys = np.array(list((self.presentation_table & field_key).proj()),
                              dtype='object')
 
-        n_artifacts, pixel_size_ums = (self.presentation_table() & pres_keys).fetch('npixartifact', 'pixel_size_um')
-
         from_raw_data = (self.raw_params_table & field_key).fetch1("from_raw_data")
 
-        if np.unique(n_artifacts).size > 1:
-            raise ValueError(f'Inconsistent n_artifacts={n_artifacts} for pres_keys=\n{pres_keys}')
-        n_artifact = n_artifacts[0]
+        n_artifact, pixel_size_um, scan_type = (self.presentation_table() & pres_keys).fetch(
+            'npixartifact', 'pixel_size_um', 'scan_type')
+        n_artifact = check_unique_one(n_artifact, name='n_artifact')
+        pixel_size_um = check_unique_one(pixel_size_um, name='pixel_size_um')
+        scan_type = check_unique_one(scan_type, name='scan_type')
 
-        if not np.allclose(pixel_size_ums, pixel_size_ums[0]):
-            raise ValueError(f'Inconsistent pixel_size_ums={pixel_size_ums} for pres_keys=\n{pres_keys}')
-        pixel_size_um = pixel_size_ums[0]
+        if scan_type == 'xy':
+            pixel_size_d1_d2 = (pixel_size_um, pixel_size_um)
+        elif scan_type == 'xz':
+            z_step_um = (self.presentation_table() & pres_keys).fetch1('z_step_um')
+            z_step_um = check_unique_one(z_step_um, name='z_step_um')
+            pixel_size_d1_d2 = (pixel_size_um, z_step_um)
+        else:
+            raise NotImplementedError(scan_type)
 
         # Sort by relevance
         mask_alias, highres_alias = (self.userinfo_table() & field_key).fetch1("mask_alias", "highres_alias")
@@ -178,7 +183,7 @@ class RoiMaskTemplate(dj.Manual):
             ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
             main_stim_idx=0, initial_roi_mask=initial_roi_mask, shifts=shifts,
             canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
-            pixel_size_um=(pixel_size_um, pixel_size_um),  # TODO: add pixel_size if xz recording
+            pixel_size_um=pixel_size_d1_d2,
             show_diagnostics=show_diagnostics,
             **kwargs,
         )
