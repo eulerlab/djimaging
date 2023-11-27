@@ -90,22 +90,6 @@ class FieldTemplate(dj.Computed):
             self.add_experiment_fields(
                 key, restr_headers=restr_headers, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def compute_field_dicts(self, key, from_raw_data, verboselvl=0):
-        data_path = os.path.join(
-            (self.experiment_table() & key).fetch1('header_path'),
-            (self.userinfo_table() & key).fetch1("raw_data_dir" if from_raw_data else "pre_data_dir"))
-        user_dict = (self.userinfo_table() & key).fetch1()
-
-        assert os.path.exists(data_path), f"Error: Data folder does not exist: {data_path}"
-
-        if verboselvl > 0:
-            print("Processing fields in:", data_path)
-
-        field_dicts = scan_field_file_dicts(data_path, user_dict=user_dict, verbose=verboselvl > 0,
-                                            from_raw_data=from_raw_data)
-        field_dicts = clean_field_file_dicts(field_dicts, user_dict=user_dict)
-        return field_dicts
-
     def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool,
                               restr_headers: Optional[list] = None):
 
@@ -142,6 +126,22 @@ class FieldTemplate(dj.Computed):
                     print("Suppressed Error:", e, '\n\tfor key:\n', key, '\n\t', field, '\n\t', info['files'])
                 else:
                     raise e
+
+    def compute_field_dicts(self, key, from_raw_data, verboselvl=0):
+        data_path = os.path.join(
+            (self.experiment_table() & key).fetch1('header_path'),
+            (self.userinfo_table() & key).fetch1("raw_data_dir" if from_raw_data else "pre_data_dir"))
+        user_dict = (self.userinfo_table() & key).fetch1()
+
+        assert os.path.exists(data_path), f"Error: Data folder does not exist: {data_path}"
+
+        if verboselvl > 0:
+            print("Processing fields in:", data_path)
+
+        field_dicts = scan_field_file_dicts(
+            data_path, user_dict=user_dict, from_raw_data=from_raw_data, verbose=verboselvl > 0)
+        field_dicts = clean_field_file_dicts(field_dicts, user_dict=user_dict)
+        return field_dicts
 
     def add_field(self, key, field, files, from_raw_data, verboselvl):
         data_folder = os.path.join(

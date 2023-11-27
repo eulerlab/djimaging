@@ -233,3 +233,20 @@ def clean_region_field_file_dicts(field_dicts, user_dict):
                          "Please rename the fields to unique names per experiment.")
 
     return field_dicts
+
+
+def as_pre_filepath(filepath, raw_data_dir='Raw', pre_data_dir='Pre',
+                    raw_suffix='.smp', pre_suffix='.h5', pre_prefix='SMP_'):
+    fpath, fname = os.path.split(filepath)
+    froot, fdir = os.path.split(fpath)
+
+    if fname.endswith(pre_suffix):
+        if fdir != pre_data_dir:
+            raise ValueError(f"Pre file {filepath} is not in pre dir {pre_data_dir} but in {fdir}")
+        return filepath
+    elif fname.endswith(raw_suffix):
+        if fdir != raw_data_dir:
+            raise ValueError(f"Raw file {filepath} is not in raw dir {raw_data_dir} but in {fdir}")
+        return os.path.join(froot, pre_data_dir, f"{pre_prefix}{fname.replace(raw_suffix, pre_suffix)}")
+    else:
+        raise ValueError(f"File {filepath} does not end with {raw_suffix} or {pre_suffix}")

@@ -11,6 +11,7 @@ from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 from djimaging.autorois.corr_roi_mask_utils import CorrRoiMask
 
 from djimaging.utils import scanm_utils
+from djimaging.utils.datafile_utils import as_pre_filepath
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.mask_utils import to_igor_format, to_python_format, to_roi_mask_file, sort_roi_mask_files, \
     load_preferred_roi_mask_igor, load_preferred_roi_mask_pickle, compare_roi_masks
@@ -144,7 +145,7 @@ class RoiMaskTemplate(dj.Manual):
 
         # Load initial ROI masks
         igor_roi_masks = (self.raw_params_table & field_key).fetch1('igor_roi_masks')
-        initial_roi_mask, src_file = self.load_initial_roi_mask(field_key=field_key, igor_roi_masks=igor_roi_masks)
+        initial_roi_mask, _ = self.load_initial_roi_mask(field_key=field_key, igor_roi_masks=igor_roi_masks)
 
         if initial_roi_mask is not None:
             initial_roi_mask = to_python_format(initial_roi_mask)
@@ -237,8 +238,11 @@ class RoiMaskTemplate(dj.Manual):
         return roi_mask, src_file
 
     def load_field_roi_mask_igor(self, field_key) -> (np.ndarray, str):
-        mask_alias, highres_alias = (self.userinfo_table() & field_key).fetch1("mask_alias", "highres_alias")
+        mask_alias, highres_alias, raw_data_dir, pre_data_dir = (self.userinfo_table() & field_key).fetch1(
+            "mask_alias", "highres_alias", "raw_data_dir", "pre_data_dir")
         files = (self.presentation_table() & field_key).fetch("pres_data_file")
+
+        files = [as_pre_filepath(f, raw_data_dir=raw_data_dir, pre_data_dir=pre_data_dir) for f in files]
 
         roi_mask, src_file = load_preferred_roi_mask_igor(files, mask_alias=mask_alias, highres_alias=highres_alias)
         if roi_mask is not None:
