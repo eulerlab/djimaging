@@ -3,9 +3,10 @@ from abc import abstractmethod
 import datajoint as dj
 import numpy as np
 
-from djimaging.user.rd10.tables.dead_cell_utils import plot_roi_mask_boundaries
 from djimaging.utils.dj_utils import get_primary_key
 from matplotlib import pyplot as plt
+
+from djimaging.utils.plot_utils import plot_roi_mask_boundaries
 
 try:
     import ipywidgets as widgets
@@ -55,6 +56,9 @@ class IplBordersTemplate(dj.Manual):
         title = ' '
 
         add_or_update = self.add_or_update
+
+        if len((self & key).proj()) == 1:
+            left0, right0, thick0 = (self & key).fetch1('left', 'right', 'thick')
 
         w_bot = widgets.IntSlider(left0, min=1, max=ch_avg.shape[0] - 1, step=1)
         w_top = widgets.IntSlider(right0, min=1, max=ch_avg.shape[0] - 1, step=1)

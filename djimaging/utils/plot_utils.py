@@ -240,3 +240,21 @@ def plot_clusters(traces_list, stim_names, clusters, kind='averages', title=None
 
     plt.tight_layout()
     plt.show()
+
+
+def plot_roi_mask_boundaries(ax, roi_mask, extent=None, zorder=1000):
+    rois = roi_mask.copy().astype(float).T
+
+    if np.any(roi_mask < 0):
+        rois = -rois
+
+    rois_us = np.repeat(np.repeat(rois, 10, axis=0), 10, axis=1)
+    vmin, vmax = np.min(rois), np.max(rois)
+
+    roi_idxs = np.unique(rois)
+    roi_idxs = roi_idxs[roi_idxs > 0]
+
+    for roi in roi_idxs:
+        _rois_us = (rois_us == roi).astype(int) * roi
+        ax.contour(_rois_us, extent=extent, vmin=vmin, vmax=vmax, levels=[roi - 1e-3], alpha=0.8, cmap='jet',
+                   zorder=zorder)
