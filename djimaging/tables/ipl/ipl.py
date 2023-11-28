@@ -55,6 +55,8 @@ class IplBordersTemplate(dj.Manual):
         extent = (0, ch_avg.shape[0], 0, ch_avg.shape[1])
         title = ' '
 
+        ch1_avg = (IplBorders().field_or_pres_table.StackAverages & key).fetch('ch_average')[1]
+
         add_or_update = self.add_or_update
 
         if len((self & key).proj()) == 1:
@@ -69,7 +71,7 @@ class IplBordersTemplate(dj.Manual):
         def plot_fit(left=left0, right=right0, thick=thick0, save=False):
             nonlocal title, key, add_or_update
 
-            plot_field_and_fit(left, right, thick, ch_avg, figsize=figsize, extent=extent, title=title)
+            plot_field_and_fit(left, right, thick, ch_avg, ch1_avg, figsize=figsize, extent=extent, title=title)
 
             if save:
                 add_or_update(key=key, left=left, right=right, thick=thick)
@@ -175,7 +177,7 @@ def get_line(points):
     return m, c
 
 
-def plot_field_and_fit(left, right, thick, ch_avg, figsize=(6, 6), extent=None, title=''):
+def plot_field_and_fit(left, right, thick, ch_avg, ch1_avg, figsize=(6, 6), extent=None, title=''):
     if extent is None:
         extent = (0, ch_avg.shape[0], 0, ch_avg.shape[1])
 
@@ -193,11 +195,17 @@ def plot_field_and_fit(left, right, thick, ch_avg, figsize=(6, 6), extent=None, 
     inl_line[:, 0] = np.arange(ch_avg.shape[0])
     inl_line[:, 1] = m2 * inl_line[:, 0] + b2
 
-    ax.imshow(ch_avg.T, cmap='gray', origin='lower', extent=extent)
-    ax.plot(gcl_line[:, 0], gcl_line[:, 1], alpha=0.8)
-    ax.plot(inl_line[:, 0], inl_line[:, 1], alpha=0.8)
+    ax[0].imshow(ch_avg.T, cmap='gray', origin='lower', extent=extent)
+    ax[0].plot(gcl_line[:, 0], gcl_line[:, 1], alpha=0.8)
+    ax[0].plot(inl_line[:, 0], inl_line[:, 1], alpha=0.8)
+    ax[0].set_title('Channel 0')
 
-    ax.set(xlim=extent[:2], ylim=extent[2:], title=title)
-    plt.tight_layout(pad=3)
+    ax[1].imshow(ch1_avg.T, cmap='gray', origin='lower')  # aspect=aspect)
+    ax[1].set_title('Sulforhodamine 101')
+    ax[1].plot(gcl_line[:, 0], gcl_line[:, 1], alpha=0.8)
+    ax[1].plot(inl_line[:, 0], inl_line[:, 1], alpha=0.8)
+
+    fig.suptitle(f'{key}', fontsize=25)
+    plt.tight_layout()
 
     return fig, ax
