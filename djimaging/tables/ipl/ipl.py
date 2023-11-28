@@ -55,7 +55,7 @@ class IplBordersTemplate(dj.Manual):
         extent = (0, ch_avg.shape[0], 0, ch_avg.shape[1])
         title = ' '
 
-        ch1_avg = (IplBorders().field_or_pres_table.StackAverages & key).fetch('ch_average')[1]
+        ch1_avg = (self.field_or_pres_table.StackAverages & key).fetch('ch_average')[1]
 
         add_or_update = self.add_or_update
 
