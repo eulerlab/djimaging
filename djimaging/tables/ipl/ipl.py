@@ -6,7 +6,7 @@ import numpy as np
 from djimaging.utils.dj_utils import get_primary_key
 from matplotlib import pyplot as plt
 
-from djimaging.utils.plot_utils import plot_roi_mask_boundaries
+from djimaging.utils.plot_utils import plot_roi_mask_boundaries, prep_long_title
 
 try:
     import ipywidgets as widgets
@@ -37,6 +37,11 @@ class IplBordersTemplate(dj.Manual):
         pass
 
     @property
+    @abstractmethod
+    def userinfo_table(self):
+        pass
+
+    @property
     def key_source(self):
         try:
             return self.field_or_pres_table.proj()
@@ -47,35 +52,42 @@ class IplBordersTemplate(dj.Manual):
         missing_keys = (self.key_source - self.proj()).fetch(as_dict=True)
         return missing_keys
 
-    def gui(self, key, figsize=(6, 6), left0=12, right0=12, thick0=30, q_clip=2.5):
+    def fetch1_and_norm_ch_avgs(self, key, q_clip0=0.0, q_clip1=0.0):
+        data_stack_name, alt_stack_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
 
-        ch_avg = (self.field_or_pres_table.StackAverages & key).fetch('ch_average')[0]
-        ch_avg = normalize_soft_zero_one(ch_avg, dq=q_clip)
+        ch0_avg = (self.field_or_pres_table.StackAverages & key & dict(ch_name=data_stack_name)).fetch1('ch_average')
+        ch0_avg = normalize_soft_zero_one(ch0_avg, dq=q_clip0)
 
-        extent = (0, ch_avg.shape[0], 0, ch_avg.shape[1])
-        title = ' '
+        ch1_avg = (self.field_or_pres_table.StackAverages & key & dict(ch_name=alt_stack_name)).fetch1('ch_average')
+        ch1_avg = normalize_soft_zero_one(ch1_avg, dq=q_clip1)
 
-        ch1_avg = (self.field_or_pres_table.StackAverages & key).fetch('ch_average')[1]
+        return ch0_avg, ch1_avg
+
+    def gui(self, key, figsize=(8, 5), left0=12, right0=12, thick0=30, q_clip0=0.0, q_clip1=0.0):
+
+        ch0_avg, ch1_avg = self.fetch1_and_norm_ch_avgs(key, q_clip0=q_clip0, q_clip1=q_clip1)
+        extent = (0, ch0_avg.shape[0], 0, ch0_avg.shape[1])
+        title = str(key)
 
         add_or_update = self.add_or_update
 
         if len((self & key).proj()) == 1:
             left0, right0, thick0 = (self & key).fetch1('left', 'right', 'thick')
 
-        w_bot = widgets.IntSlider(left0, min=1, max=ch_avg.shape[0] - 1, step=1)
-        w_top = widgets.IntSlider(right0, min=1, max=ch_avg.shape[0] - 1, step=1)
-        w_thick = widgets.IntSlider(thick0, min=1, max=ch_avg.shape[0] - 1, step=1)
+        w_bot = widgets.IntSlider(left0, min=1, max=ch0_avg.shape[0] - 1, step=1)
+        w_top = widgets.IntSlider(right0, min=1, max=ch0_avg.shape[0] - 1, step=1)
+        w_thick = widgets.IntSlider(thick0, min=1, max=ch0_avg.shape[0] - 1, step=1)
         w_save = widgets.Checkbox(False)
 
         @widgets.interact(bot=w_bot, top=w_top, thick=w_thick, save=w_save)
         def plot_fit(left=left0, right=right0, thick=thick0, save=False):
             nonlocal title, key, add_or_update
 
-            plot_field_and_fit(left, right, thick, ch_avg, ch1_avg, figsize=figsize, extent=extent, title=title)
+            plot_field_and_fit(left, right, thick, ch0_avg, ch1_avg, figsize=figsize, extent=extent, title=title)
 
             if save:
-                add_or_update(key=key, left=left, right=right, thick=thick)
-                title = f'saved: left={left}, right={right}, thick={thick}'
+                add_or_update(left=left, right=right, thick=thick, key=key)
+                title = f'SAVED: left={left}, right={right}, thick={thick} ### {str(key)}'
                 w_save.value = False
 
     def add_or_update(self, key, left, right, thick):
@@ -108,25 +120,22 @@ class RoiIplDepthTemplate(dj.Computed):
         pass
 
     @property
-    def _field_or_pres_table(self):
-        try:
-            field_or_pres_table = self.roi_table.field_or_pres_table
-        except (AttributeError, TypeError):
-            field_or_pres_table = self.roi_table.field_table
-        return field_or_pres_table
+    @abstractmethod
+    def roimask_table(self):
+        pass
 
     @property
     def key_source(self):
         try:
-            return self._field_or_pres_table.proj() * self.ipl_border_table.proj()
+            return self.roimask_table.proj() * self.ipl_border_table.proj()
         except (AttributeError, TypeError):
             pass
 
     def make(self, key):
         left, right, thick = (self.ipl_border_table & key).fetch1('left', 'right', 'thick')
 
+        roi_mask = (self.roimask_table & key).fetch1('roi_mask')
         roi_ids = (self.roi_table & key).fetch("roi_id")
-        roi_mask = (self.roi_table.field_or_pres_table.RoiMask & key).fetch1('roi_mask')
 
         roi_centers = get_roi_centers(roi_mask, roi_ids)
 
@@ -139,35 +148,42 @@ class RoiIplDepthTemplate(dj.Computed):
 
             self.insert1(dict(**key, roi_id=roi_id, ipl_depth=ipl_depth))
 
-    def plot_field(self, key=None, figsize=(6, 6), q_clip=2.5):
+    def plot_field(self, key=None, figsize=(8, 5), q_clip0=0.0, q_clip1=0.0):
         if key is None:
-            key = get_primary_key(self.key_source)
+            key = get_primary_key(self.key_source & self)
 
         left, right, thick = (self.ipl_border_table & key).fetch1('left', 'right', 'thick')
-        ch_avg = (self._field_or_pres_table.StackAverages & key).fetch('ch_average')[0]
-        ch_avg = normalize_soft_zero_one(ch_avg, dq=q_clip)
-        roi_mask = (self.roi_table.field_or_pres_table.RoiMask & key).fetch1('roi_mask')
+        roi_mask = (self.roimask_table & key).fetch1('roi_mask')
 
-        extent = (0, ch_avg.shape[0], 0, ch_avg.shape[1])
+        ch0_avg, ch1_avg = self.ipl_border_table().fetch1_and_norm_ch_avgs(key, q_clip0=q_clip0, q_clip1=q_clip1)
 
-        fig, ax = plot_field_and_fit(left=left, right=right, thick=thick, ch_avg=ch_avg, figsize=figsize)
-        plot_roi_mask_boundaries(ax=ax, roi_mask=roi_mask, extent=extent)
+        extent = (0, ch0_avg.shape[0], 0, ch0_avg.shape[1])
+
+        fig, axs = plot_field_and_fit(
+            left=left, right=right, thick=thick, ch0_avg=ch0_avg, ch1_avg=ch1_avg, figsize=figsize, title=str(key))
 
         roi_idxs, ipl_depths = (self & key).fetch('roi_id', 'ipl_depth')
 
         # get colormap for ipl depths
         cmap = plt.cm.get_cmap('viridis')
-        norm = plt.Normalize(vmin=np.min(ipl_depths), vmax=np.max(ipl_depths))
+
+        vmin = np.minimum(0., np.min(ipl_depths))
+        vmax = np.maximum(1., np.max(ipl_depths))
+
+        norm = plt.Normalize(vmin=vmin, vmax=vmax)
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
 
         roi_centers = get_roi_centers(roi_mask, roi_idxs)
 
-        for roi_id, ipl_depth, roi_center in zip(roi_idxs, ipl_depths, roi_centers):
-            c = sm.to_rgba(ipl_depth)
-            ax.plot(roi_center[0], roi_center[1], 'o', color=c, zorder=200000, ms=8, mec='k')
+        for ax in axs:
+            plot_roi_mask_boundaries(ax=ax, roi_mask=roi_mask, extent=extent)
 
-        cbar = fig.colorbar(sm, ax=ax)
-        cbar.set_label('IPL depth')
+            for roi_id, ipl_depth, roi_center in zip(roi_idxs, ipl_depths, roi_centers):
+                c = sm.to_rgba(ipl_depth)
+                ax.plot(roi_center[0], roi_center[1], 'o', color=c, zorder=200000, ms=8, mec='k')
+
+            cbar = fig.colorbar(sm, ax=ax)
+            cbar.set_label('IPL depth')
 
 
 def get_line(points):
@@ -177,35 +193,36 @@ def get_line(points):
     return m, c
 
 
-def plot_field_and_fit(left, right, thick, ch_avg, ch1_avg, figsize=(6, 6), extent=None, title=''):
+def plot_field_and_fit(left, right, thick, ch0_avg, ch1_avg, figsize=(8, 5), extent=None, title=''):
     if extent is None:
-        extent = (0, ch_avg.shape[0], 0, ch_avg.shape[1])
+        extent = (0, ch0_avg.shape[0], 0, ch0_avg.shape[1])
 
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
+    fig, axs = plt.subplots(1, 2, figsize=figsize)
+
+    fig.suptitle(prep_long_title(title=title))
 
     m1, b1 = get_line([(0, left), (63, right)])
     m2, b2 = get_line([(0, left + thick), (63, right + thick)])
 
-    gcl_line = np.zeros((ch_avg.shape[0], 2))
-    inl_line = np.zeros((ch_avg.shape[0], 2))
+    gcl_line = np.zeros((ch0_avg.shape[0], 2))
+    inl_line = np.zeros((ch0_avg.shape[0], 2))
 
-    gcl_line[:, 0] = np.arange(ch_avg.shape[0])
+    gcl_line[:, 0] = np.arange(ch0_avg.shape[0])
     gcl_line[:, 1] = m1 * gcl_line[:, 0] + b1
 
-    inl_line[:, 0] = np.arange(ch_avg.shape[0])
+    inl_line[:, 0] = np.arange(ch0_avg.shape[0])
     inl_line[:, 1] = m2 * inl_line[:, 0] + b2
 
-    ax[0].imshow(ch_avg.T, cmap='gray', origin='lower', extent=extent)
-    ax[0].plot(gcl_line[:, 0], gcl_line[:, 1], alpha=0.8)
-    ax[0].plot(inl_line[:, 0], inl_line[:, 1], alpha=0.8)
-    ax[0].set_title('Channel 0')
+    axs[0].imshow(ch0_avg.T, cmap='gray', origin='lower', extent=extent)
+    axs[0].plot(gcl_line[:, 0], gcl_line[:, 1], alpha=0.8)
+    axs[0].plot(inl_line[:, 0], inl_line[:, 1], alpha=0.8)
+    axs[0].set_title('Data Channel')
 
-    ax[1].imshow(ch1_avg.T, cmap='gray', origin='lower')  # aspect=aspect)
-    ax[1].set_title('Sulforhodamine 101')
-    ax[1].plot(gcl_line[:, 0], gcl_line[:, 1], alpha=0.8)
-    ax[1].plot(inl_line[:, 0], inl_line[:, 1], alpha=0.8)
+    axs[1].imshow(ch1_avg.T, cmap='gray', origin='lower', extent=extent)
+    axs[1].set_title('2nd Channel (e.g. SR101)')
+    axs[1].plot(gcl_line[:, 0], gcl_line[:, 1], alpha=0.8)
+    axs[1].plot(inl_line[:, 0], inl_line[:, 1], alpha=0.8)
 
-    fig.suptitle(f'{key}', fontsize=25)
     plt.tight_layout()
 
-    return fig, ax
+    return fig, axs
