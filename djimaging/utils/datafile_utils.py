@@ -1,4 +1,5 @@
 import os
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -57,7 +58,8 @@ def find_folders_with_file_of_type(data_dir: str, ending: str = '.ini', ignore_h
     """
     Search for header files in folder in given path.
     :param data_dir: Root folder.
-    :param ending. File ending to search.
+    :param ending: File ending to search.
+    :param ignore_hidden: Ignore hidden files?
     :return: List of header files.
     """
     os_walk_output = []
@@ -146,7 +148,7 @@ def scan_region_field_file_dicts(folder: str, user_dict: dict, verbose: bool = F
 
         if field is None:
             if verbose:
-                print(f"\tSkipping file with unrecognized field: {file}")
+                print(f"\tSkipping file with unrecognized field={field}: {file}")
             continue
 
         # Add file to list
@@ -157,7 +159,8 @@ def scan_region_field_file_dicts(folder: str, user_dict: dict, verbose: bool = F
     return file_dicts
 
 
-def scan_field_file_dicts(folder: str, from_raw_data: bool, user_dict: dict, verbose: bool = False) -> dict:
+def scan_field_file_dicts(folder: str, from_raw_data: bool, user_dict: dict, incl_condition=False,
+                          verbose: bool = False) -> dict:
     """Return a dictionary that maps fields to their respective files"""
 
     loc_mapper = {k: v for k, v in user_dict.items() if k.endswith('loc')}
@@ -171,36 +174,44 @@ def scan_field_file_dicts(folder: str, from_raw_data: bool, user_dict: dict, ver
         datatype, animal, region, field, stimulus, condition = get_filename_info(
             filename=file, from_raw_data=from_raw_data, **loc_mapper)
 
+        if condition is None and incl_condition:
+            condition = 'control'
+            warnings.warn(f"File {file} does not have a condition incl_condition=True. Set to `{condition}`.")
+
         if field is None:
             if verbose:
-                print(f"\tSkipping file with unrecognized field: {file}")
+                print(f"\tSkipping file with unrecognized field={field}: {file}")
             continue
 
+        key = field if not incl_condition else (field, condition)
+
         # Create new or check for inconsistencies
-        if field not in file_dicts:
-            file_dicts[field] = dict(files=[], region=region)
+        if key not in file_dicts:
+            file_dicts[key] = dict(files=[], region=region)
         else:
-            assert file_dicts[field]['region'] == region, f"{file_dicts[field]['region']} vs. {region}"
+            assert file_dicts[key]['region'] == region, \
+                f"Found multiple regions for single field: {file_dicts[key]['region']} vs. {region}"
 
         # Add file
-        file_dicts[field]['files'].append(file)
+        file_dicts[key]['files'].append(file)
     return file_dicts
 
 
 def clean_field_file_dicts(field_dicts, user_dict):
     """Remove optic-disk and outline recordings from dict with fields."""
-    remove_fields = []
+    remove_field_keys = []
     remove_aliases = user_dict['opticdisk_alias'].split('_') + user_dict['outline_alias'].split('_')
-    for field in field_dicts.keys():
+    for field_key in field_dicts.keys():
+        field = field_key[0] if isinstance(field_key, tuple) else field_key
         removed = False
         i = 0
         while not removed and i < len(remove_aliases):
             if is_alias_number_match(name=field.lower(), alias=remove_aliases[i]):
-                remove_fields.append(field)
+                remove_field_keys.append(field_key)
                 removed = True
             i += 1
 
-    for remove_field in remove_fields:
+    for remove_field in remove_field_keys:
         field_dicts.pop(remove_field)
 
     return field_dicts

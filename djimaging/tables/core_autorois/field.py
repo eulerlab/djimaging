@@ -16,14 +16,21 @@ from djimaging.utils.plot_utils import plot_field
 
 class FieldTemplate(dj.Computed):
     database = ""
+    _include_conditions = False
 
     @property
     def definition(self):
-        definition = """
+        definition_head = """
         # Recording fields
         -> self.experiment_table
         -> self.raw_params_table
         field   :varchar(255)          # string identifying files corresponding to field
+        """
+
+        if self._include_conditions:
+            definition_head += "        condition    :varchar(255)    # condition (pharmacological or other)\n"
+
+        definition_body = """
         ---
         fromfile: varchar(255)  # info extracted from which file?
         absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
@@ -40,6 +47,8 @@ class FieldTemplate(dj.Computed):
         z_step_um :float  # z-step in um
         z_stack_flag : tinyint unsigned  # Is z-stack?
         """
+        definition = definition_head + definition_body
+
         return definition
 
     @property
@@ -108,19 +117,27 @@ class FieldTemplate(dj.Computed):
             print('key=\n', key, '\nfield_dicts=\n', field_dicts)
 
         # Go through remaining fields and add them
-        for field, info in field_dicts.items():
-            exists = len((self & key & dict(field=field)).fetch()) > 0
+        for field_id, info in field_dicts.items():
+            field = field_id[0] if isinstance(field_id, tuple) else field_id
+
+            if not self._include_conditions:
+                condition = None
+                exists = len((self & key & dict(field=field)).fetch()) > 0
+            else:
+                condition = field_id[1]
+                exists = len((self & key & dict(field=field, condition=condition)).fetch()) > 0
+
             if only_new and exists:
                 if verboselvl > 1:
-                    print(f"\tSkipping field `{field}` with files: {info['files']}")
+                    print(f"\tSkipping field `{field_id}` with files: {info['files']}")
                 continue
 
             if verboselvl > 0:
-                print(f"\tAdding field: `{field}` with files: {info['files']}")
+                print(f"\tAdding field: `{field_id}` with files: {info['files']}")
 
             try:
                 self.add_field(key=key, field=field, files=info['files'],
-                               from_raw_data=from_raw_data, verboselvl=verboselvl)
+                               from_raw_data=from_raw_data, condition=condition, verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
                     print("Suppressed Error:", e, '\n\tfor key:\n', key, '\n\t', field, '\n\t', info['files'])
@@ -139,11 +156,12 @@ class FieldTemplate(dj.Computed):
             print("Processing fields in:", data_path)
 
         field_dicts = scan_field_file_dicts(
-            data_path, user_dict=user_dict, from_raw_data=from_raw_data, verbose=verboselvl > 0)
+            data_path, user_dict=user_dict, from_raw_data=from_raw_data, incl_condition=self._include_conditions,
+            verbose=verboselvl > 0)
         field_dicts = clean_field_file_dicts(field_dicts, user_dict=user_dict)
         return field_dicts
 
-    def add_field(self, key, field, files, from_raw_data, verboselvl):
+    def add_field(self, key, field, files, from_raw_data, verboselvl, condition=None):
         data_folder = os.path.join(
             (self.experiment_table() & key).fetch1('header_path'),
             (self.userinfo_table() & key).fetch1("raw_data_dir" if from_raw_data else "pre_data_dir"))
@@ -159,6 +177,11 @@ class FieldTemplate(dj.Computed):
             key=key, field=field, files=file_paths, from_raw_data=from_raw_data,
             ch_names=(data_stack_name, alt_stack_name),
             mask_alias=mask_alias, highres_alias=highres_alias, setupid=setupid)
+
+        if self._include_conditions:
+            field_key['condition'] = condition
+            for avg_key in avg_keys:
+                avg_key['condition'] = condition
 
         if verboselvl > 2:
             print(f"For key=\n{key} add \nfield_key=\n{field_key}")
