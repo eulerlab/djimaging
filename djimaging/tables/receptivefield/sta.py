@@ -29,7 +29,7 @@ class STAParamsTemplate(dj.Lookup):
 
     def add_default(
             self, sta_params_id=1, rf_method="sta", filter_dur_s_past=1., filter_dur_s_future=0.,
-            frac_train=0.8, frac_dev=0., frac_test=0.2, store_x='data', store_y='data',
+            frac_train=0.8, frac_dev=0., frac_test=0.2, store_x='shape', store_y='data',
             skip_duplicates=False):
         """Add default preprocess parameter to table"""
 
