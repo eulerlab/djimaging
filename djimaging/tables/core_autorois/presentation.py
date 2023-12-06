@@ -182,18 +182,23 @@ class PresentationTemplate(dj.Computed):
     def add_presentation(self, key, filepath: str, compute_from_stack: bool = True):
         setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
         from_raw_data, trigger_precision = (self.raw_params_table & key).fetch1('from_raw_data', 'trigger_precision')
+        isrepeated, ntrigger_rep = (self.stimulus_table & key).fetch1("isrepeated", "ntrigger_rep")
 
         ch_stacks, wparams = scanm_utils.load_stacks(
-            filepath, from_raw_data=from_raw_data, ch_names=('wDataCh0', 'wDataCh1', 'wDataCh2'))
+            filepath, from_raw_data=from_raw_data,
+            ch_names=('wDataCh0', 'wDataCh1', 'wDataCh2') if ntrigger_rep > 0 else ('wDataCh0', 'wDataCh1'))
 
-        if compute_from_stack:
-            stimulator_delay = get_stimulator_delay(date=key['date'], setupid=setupid)
-            triggertimes, triggervalues = scanm_utils.compute_triggers_from_wparams(
-                ch_stacks['wDataCh2'], wparams=wparams, precision=trigger_precision, stimulator_delay=stimulator_delay)
+        if ntrigger_rep > 0:
+            if compute_from_stack:
+                stimulator_delay = get_stimulator_delay(date=key['date'], setupid=setupid)
+                triggertimes, triggervalues = scanm_utils.compute_triggers_from_wparams(
+                    ch_stacks['wDataCh2'], wparams=wparams, precision=trigger_precision,
+                    stimulator_delay=stimulator_delay)
+            else:
+                triggertimes, triggervalues = scanm_utils.load_triggers_from_h5(filepath)
         else:
-            triggertimes, triggervalues = scanm_utils.load_triggers_from_h5(filepath)
-
-        isrepeated, ntrigger_rep = (self.stimulus_table & key).fetch1("isrepeated", "ntrigger_rep")
+            triggertimes = np.array([])
+            triggervalues = np.array([])
 
         if isrepeated == 0:
             trigger_flag = triggertimes.size == ntrigger_rep

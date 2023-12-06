@@ -4,7 +4,8 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.utils.scanm_utils import roi2trace_from_h5_file, roi2trace_from_stack, get_trigger_flag
+from djimaging.utils.scanm_utils import roi2trace_from_h5_file, roi2trace_from_stack, \
+    check_valid_triggers_rel_to_tracetime
 from djimaging.utils import plot_utils, math_utils, trace_utils
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
@@ -95,7 +96,7 @@ class TracesTemplate(dj.Computed):
             trace_key['trace'] = roi_data['trace']
             trace_key['trace_times'] = roi_data['trace_times']
             trace_key['trace_flag'] = roi_data['valid_flag']
-            trace_key['trigger_flag'] = get_trigger_flag(
+            trace_key['trigger_flag'] = check_valid_triggers_rel_to_tracetime(
                 trace_flag=trace_key['trace_flag'], trace_times=trace_key['trace_times'], triggertimes=triggertimes)
 
             self.insert1(trace_key)

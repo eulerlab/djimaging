@@ -732,7 +732,10 @@ def roi2trace_from_stack(filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarra
     return roi2trace
 
 
-def get_trigger_flag(trace_flag, trace_times, triggertimes):
+def check_valid_triggers_rel_to_tracetime(trace_flag, trace_times, triggertimes):
+    if len(triggertimes) == 0:
+        return 1
+
     if trace_flag:
         if triggertimes[0] < trace_times[0]:
             return 0
