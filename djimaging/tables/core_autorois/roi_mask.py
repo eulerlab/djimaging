@@ -20,6 +20,7 @@ from djimaging.utils.plot_utils import plot_field
 
 class RoiMaskTemplate(dj.Manual):
     database = ""
+    _max_shift = 5
 
     @property
     def definition(self):
@@ -189,6 +190,7 @@ class RoiMaskTemplate(dj.Manual):
             canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
             pixel_size_um=pixel_size_d1_d2,
             show_diagnostics=show_diagnostics,
+            max_shift=self._max_shift,
             **kwargs,
         )
         print(f"""
@@ -329,7 +331,7 @@ class RoiMaskTemplate(dj.Manual):
 
         self.insert1({**field_key, **main_pres_key, "roi_mask": main_roi_mask}, skip_duplicates=True)
         for pres_key, roi_mask in data_pairs:
-            as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(roi_mask, main_roi_mask)
+            as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(roi_mask, main_roi_mask, max_shift=self._max_shift)
             self.RoiMaskPresentation().insert1(
                 {**pres_key, "roi_mask": roi_mask, "as_field_mask": as_field_mask,
                  "shift_dx": shift_dx, "shift_dy": shift_dy},

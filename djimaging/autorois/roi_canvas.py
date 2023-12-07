@@ -342,6 +342,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             autorois_models: Optional[Dict] = None,
             output_files=None,
             pixel_size_um=(1., 1.),
+            max_shift=5,
             show_diagnostics=False,
     ):
         super().__init__(ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, stim_names=stim_names,
@@ -350,6 +351,7 @@ class InteractiveRoiCanvas(RoiCanvas):
                          upscale=upscale, autorois_models=autorois_models,
                          output_files=output_files, pixel_size_um=pixel_size_um)
         # Save size
+        self.max_shift = max_shift
         self.canvas_width = canvas_width
 
         # Create menu elements
@@ -823,7 +825,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         value = self.get_shift(axis=axis)
 
         widget = BoundedIntText(
-            value=value, min=-5, max=5, step=1,
+            value=value, min=-self.max_shift, max=self.max_shift, step=1,
             description=f'shift_d{axis}:', disabled=False,
             continuous_update=False,
             layout=Layout(width='150px'),
@@ -993,7 +995,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             raise FileNotFoundError(f'Could not find directory {f_root}')
 
         if not os.path.isdir(os.path.join(f_root, f_dir)):
-            os.makedir(os.path.join(f_root, f_dir))
+            os.mkdir(os.path.join(f_root, f_dir))
 
         with open(self.output_file, 'wb') as f:
             pickle.dump(roi_mask, f)
@@ -1285,7 +1287,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             stim, condition = self.split_name(stim_condition)
             new_key = {**field_key, "stim_name": stim, "roi_mask": roi_mask, "condition": condition}
 
-            as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(roi_mask, main_roi_mask)
+            as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(roi_mask, main_roi_mask, max_shift=self.max_shift)
             new_key['as_field_mask'] = as_field_mask
             new_key['shift_dx'] = shift_dx
             new_key['shift_dy'] = shift_dy
