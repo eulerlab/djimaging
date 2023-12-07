@@ -263,7 +263,7 @@ class RoiMaskTemplate(dj.Manual):
         return roi_mask, src_file
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
-                          only_new_fields: bool = True, roi_mask_dir=None, prefix_if_raw='SMP_', drop_smp_prefix=False):
+                          only_new_fields: bool = True, roi_mask_dir=None, old_prefix=None, new_prefix=None):
         """Scan filesystem for new ROI masks and add them to the database."""
         if restrictions is None:
             restrictions = dict()
@@ -276,7 +276,7 @@ class RoiMaskTemplate(dj.Manual):
         for key in (self.key_source & restrictions):
             try:
                 self.add_field_roi_masks(
-                    key, roi_mask_dir=roi_mask_dir, prefix_if_raw=prefix_if_raw, drop_smp_prefix=drop_smp_prefix,
+                    key, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
                     verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
@@ -292,9 +292,8 @@ class RoiMaskTemplate(dj.Manual):
             print('\nfield_key:', field_key)
 
         pres_keys = (self.presentation_table.proj() & field_key)
-        roi_masks = [self.load_presentation_roi_mask(
-            key, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
-            for key in pres_keys]
+        roi_masks = [self.load_presentation_roi_mask(key, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+                     for key in pres_keys]
 
         data_pairs = zip(pres_keys, roi_masks)
 
