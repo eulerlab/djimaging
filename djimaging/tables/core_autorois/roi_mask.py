@@ -90,7 +90,8 @@ class RoiMaskTemplate(dj.Manual):
         return missing_keys
 
     def draw_roi_mask(self, field_key=None, pres_key=None, canvas_width=20, autorois_models='default_rgc',
-                      show_diagnostics=True, load_high_res=True, **kwargs):
+                      show_diagnostics=True, load_high_res=True,
+                      roi_mask_dir=None, old_prefix=None, new_prefix=None, **kwargs):
         if canvas_width <= 0 or canvas_width >= 100:
             raise ValueError(f'canvas_width={canvas_width} must be in (0, 100)%')
 
@@ -136,21 +137,24 @@ class RoiMaskTemplate(dj.Manual):
 
         # Load stack data
         ch0_stacks, ch1_stacks, output_files = [], [], []
-        for input_file in files:
+        for data_file in files:
             data_name, alt_name = (self.userinfo_table & field_key).fetch1('data_stack_name', 'alt_stack_name')
 
             ch_stacks, wparams = scanm_utils.load_stacks(
-                input_file, from_raw_data=from_raw_data, ch_names=(data_name, alt_name))
+                data_file, from_raw_data=from_raw_data, ch_names=(data_name, alt_name))
             ch0_stacks.append(ch_stacks[data_name])
             ch1_stacks.append(ch_stacks[alt_name])
-            output_files.append(to_roi_mask_file(input_file))
+            output_files.append(to_roi_mask_file(
+                data_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix))
 
         # Load high resolution data is possible
         high_res_bg_dict = self.load_high_res_bg_dict(field_key) if load_high_res else dict()
 
         # Load initial ROI masks
         igor_roi_masks = (self.raw_params_table & field_key).fetch1('igor_roi_masks')
-        initial_roi_mask, _ = self.load_initial_roi_mask(field_key=field_key, igor_roi_masks=igor_roi_masks)
+        initial_roi_mask, _ = self.load_initial_roi_mask(
+            field_key=field_key, igor_roi_masks=igor_roi_masks,
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
 
         if initial_roi_mask is not None:
             initial_roi_mask = to_python_format(initial_roi_mask)
@@ -193,7 +197,7 @@ class RoiMaskTemplate(dj.Manual):
         """)
         return roi_canvas
 
-    def load_initial_roi_mask(self, field_key, igor_roi_masks=str):
+    def load_initial_roi_mask(self, field_key, igor_roi_masks=str, roi_mask_dir=None, old_prefix=None, new_prefix=None):
         """
         Load initial ROI mask for field.
         First try to load from database.
@@ -207,7 +211,8 @@ class RoiMaskTemplate(dj.Manual):
             return roi_mask, 'database'
 
         if igor_roi_masks != 'yes':
-            roi_mask, src_file = self.load_field_roi_mask_pickle(field_key=field_key)
+            roi_mask, src_file = self.load_field_roi_mask_pickle(
+                field_key=field_key, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
             if roi_mask is not None:
                 return roi_mask, src_file
 
@@ -231,12 +236,14 @@ class RoiMaskTemplate(dj.Manual):
 
         return database_roi_mask
 
-    def load_field_roi_mask_pickle(self, field_key) -> (np.ndarray, str):
+    def load_field_roi_mask_pickle(self, field_key, roi_mask_dir=None, old_prefix=None, new_prefix=None) -> (
+            np.ndarray, str):
         mask_alias, highres_alias = (self.userinfo_table() & field_key).fetch1("mask_alias", "highres_alias")
         files = (self.presentation_table() & field_key).fetch("pres_data_file")
 
         roi_mask, src_file = load_preferred_roi_mask_pickle(
-            files, mask_alias=mask_alias, highres_alias=highres_alias)
+            files, mask_alias=mask_alias, highres_alias=highres_alias,
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
         if roi_mask is not None:
             print(f'Loaded ROI mask from file={src_file} for files=\n{files}\nfor mask_alias={mask_alias}')
 
@@ -280,13 +287,13 @@ class RoiMaskTemplate(dj.Manual):
 
         return err_list
 
-    def add_field_roi_masks(self, field_key, roi_mask_dir, prefix_if_raw, drop_smp_prefix=False, verboselvl=0):
+    def add_field_roi_masks(self, field_key, roi_mask_dir=None, old_prefix=None, new_prefix=None, verboselvl=0):
         if verboselvl > 2:
             print('\nfield_key:', field_key)
 
         pres_keys = (self.presentation_table.proj() & field_key)
         roi_masks = [self.load_presentation_roi_mask(
-            key, roi_mask_dir, prefix_if_raw=prefix_if_raw, drop_smp_prefix=drop_smp_prefix)
+            key, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
             for key in pres_keys]
 
         data_pairs = zip(pres_keys, roi_masks)
@@ -329,7 +336,7 @@ class RoiMaskTemplate(dj.Manual):
                  "shift_dx": shift_dx, "shift_dy": shift_dy},
                 skip_duplicates=True)
 
-    def load_presentation_roi_mask(self, key, roi_mask_dir=None, prefix_if_raw='SMP_', drop_smp_prefix=False):
+    def load_presentation_roi_mask(self, key, roi_mask_dir=None, old_prefix=None, new_prefix=None):
         igor_roi_masks, from_raw_data = (self.raw_params_table & key).fetch1('igor_roi_masks', 'from_raw_data')
         input_file = (self.presentation_table & key).fetch1("pres_data_file")
 
@@ -337,17 +344,8 @@ class RoiMaskTemplate(dj.Manual):
             assert not from_raw_data, 'Inconsistent parameters'
             filesystem_roi_mask = scanm_utils.load_roi_mask_from_h5(filepath=input_file, ignore_not_found=True)
         else:
-            if not from_raw_data:
-                if drop_smp_prefix:
-                    f_dir, f_name = os.path.split(input_file)
-                    input_file = os.path.join(f_dir, f_name.replace('SMP_', ''))
-                roimask_file = to_roi_mask_file(input_file)
-            else:
-                raw_data_dir, pre_data_dir = (self.userinfo_table() & key).fetch1("raw_data_dir", "pre_data_dir")
-
-                src_dir = pre_data_dir if roi_mask_dir is None else roi_mask_dir
-                input_file = input_file.replace(f'/{raw_data_dir}/', f'/{src_dir}/{prefix_if_raw}')
-                roimask_file = to_roi_mask_file(input_file)
+            roimask_file = to_roi_mask_file(
+                input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
 
             if os.path.isfile(roimask_file):
                 with open(roimask_file, 'rb') as f:

@@ -448,14 +448,39 @@ def to_python_format(roi_mask):
     return roi_mask
 
 
-def to_roi_mask_file(data_file, suffix='auto'):
-    if suffix == 'auto':
-        suffix = data_file.split('.')[-1]
+def to_roi_mask_file(data_file, old_suffix=None, new_suffix='_ROIs.pkl',
+                     roi_mask_dir=None, old_prefix=None, new_prefix=None):
+    """Get ROI mask file path from data file path"""
 
-    if not suffix.endswith('.'):
-        suffix = '.' + suffix
+    f_path, f_name = os.path.split(data_file)
+    f_root, f_dir = os.path.split(f_path)
 
-    return data_file.replace(suffix, '') + '_ROIs.pkl'
+    # Change suffix?
+    if old_suffix is None:
+        old_suffix = f_name.split('.')[-1]
+
+    if not old_suffix.endswith('.'):
+        old_suffix = '.' + old_suffix
+
+    f_name = f_name.replace(old_suffix, '') + new_suffix
+
+    # Change prefix?
+    if old_prefix is not None:
+        if f_name.startswith(old_prefix):
+            f_name = f_name[len(old_prefix):]
+
+    if new_prefix is not None:
+        if not f_name.startswith(new_prefix):
+            f_name = new_prefix + f_name
+
+    # Change dir?
+    if roi_mask_dir is None:
+        roi_mask_dir = f_dir
+
+    # Combine, use same root
+    roi_mask_file = os.path.join(f_root, roi_mask_dir, f_name)
+
+    return roi_mask_file
 
 
 def sort_roi_mask_files(files, mask_alias='', highres_alias='', suffix='.h5', as_index=False):
@@ -497,11 +522,12 @@ def load_preferred_roi_mask_igor(files, mask_alias='', highres_alias='', suffix=
         return None, None
 
 
-def load_preferred_roi_mask_pickle(files, mask_alias='', highres_alias=''):
+def load_preferred_roi_mask_pickle(files, mask_alias='', highres_alias='',
+                                   roi_mask_dir=None, old_prefix=None, new_prefix=None):
     """Load ROI mask for field"""
     sorted_files = sort_roi_mask_files(files=files, mask_alias=mask_alias, highres_alias=highres_alias)
     for file in sorted_files:
-        roimask_file = to_roi_mask_file(file)
+        roimask_file = to_roi_mask_file(file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
         if os.path.isfile(roimask_file):
             with open(roimask_file, 'rb') as f:
                 roi_mask = pickle.load(f).copy()

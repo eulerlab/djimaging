@@ -985,6 +985,16 @@ class InteractiveRoiCanvas(RoiCanvas):
     def exec_save_to_file(self, botton=None):
         roi_mask = self.prep_roi_mask_for_file()
 
+        # Never create root dir, but create sub dir if necessary
+        f_path, f_name = os.path.split(self.output_file)
+        f_root, f_dir = os.path.split(f_path)
+
+        if not os.path.isdir(f_root):
+            raise FileNotFoundError(f'Could not find directory {f_root}')
+
+        if not os.path.isdir(os.path.join(f_root, f_dir)):
+            os.makedir(os.path.join(f_root, f_dir))
+
         with open(self.output_file, 'wb') as f:
             pickle.dump(roi_mask, f)
 
