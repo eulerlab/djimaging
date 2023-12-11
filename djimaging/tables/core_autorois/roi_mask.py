@@ -164,24 +164,8 @@ class RoiMaskTemplate(dj.Manual):
         if isinstance(autorois_models, str):
             autorois_models = load_default_autorois_models(autorois_models)
 
-        if len(self & field_key) == 0:
-            shifts = None
-        else:
-            shifts = []
-            for pres_key in pres_keys:
-                if len(self.RoiMaskPresentation & pres_key) > 0:
-                    as_field_mask, shift_dx, shift_dy = \
-                        (self.RoiMaskPresentation & pres_key).fetch1("as_field_mask", "shift_dx", "shift_dy")
-                    if as_field_mask in ["shifted", "same"]:
-                        shifts.append((shift_dx, shift_dy))
-                    elif as_field_mask in ["different"]:
-                        warnings.warn(f"""
-                        Inconsistent ROI mask for field_key=\n{field_key}\nand pres_key=\n{pres_key}\n.
-                        This is not supported; GUI will be initialized with Field ROI mask instead.
-                        If you really want to define different (i.e. not simply shifted) ROI masks for a field
-                        open the GUI for a single Presentation key and save the ROI mask.
-                        """)
-                        shifts.append((0, 0))
+        # Load shifts if available
+        shifts = self.init_shifts(field_key, pres_keys)
 
         roi_canvas = InteractiveRoiCanvas(
             stim_names=[f"{stim_name}({condition})" for stim_name, condition in zip(stim_names, conditions)],
@@ -193,11 +177,39 @@ class RoiMaskTemplate(dj.Manual):
             max_shift=self._max_shift,
             **kwargs,
         )
-        print(f"""
-        This function returns an InteractiveRoiCanvas object, roi_canvas. 
-        To start the GUI, call roi_canvas.start_gui() in a Jupyter Lab cell.
-        """)
+        print(f"Returned InteractiveRoiCanvas object. To start GUI, call <enter_object_name>.start_gui().")
         return roi_canvas
+
+    def init_shifts(self, field_key, pres_keys):
+        if len(self & field_key) == 0:
+            return None
+        shifts = []
+        for pres_key in pres_keys:
+            if len(self.RoiMaskPresentation & pres_key) > 0:
+                as_field_mask, shift_dx, shift_dy = \
+                    (self.RoiMaskPresentation & pres_key).fetch1("as_field_mask", "shift_dx", "shift_dy")
+
+                if as_field_mask == "same":
+                    assert shift_dx == 0 and shift_dy == 0, 'Shifts are non-zero but should be'
+                    shifts.append((0, 0))
+                elif as_field_mask == "shifted":
+                    shifts.append((shift_dx, shift_dy))
+                elif as_field_mask == "different":
+                    warnings.warn(f"""
+                    Inconsistent ROI mask for field_key=\n{field_key}\nand pres_key=\n{pres_key}\n.
+                    This is not supported; Presentation will be initialized with Field ROI mask instead.
+                    If you really want to define different (i.e. not simply shifted) ROI masks for a field
+                    open the GUI for a single Presentation key and save the ROI mask.
+                    """)
+                    shifts.append((0, 0))
+                else:
+                    warnings.warn(f"as_field_mask=\n{as_field_mask}\n is not a valid value. Default to zero shift.")
+                    shifts.append((0, 0))
+            else:
+                warnings.warn(f"Pres_key=\n{pres_key}\n was not in RoiMask, but at least one other field_key was. " +
+                              f"Default to zero shift.")
+                shifts.append((0, 0))
+        return shifts
 
     def load_initial_roi_mask(self, field_key, igor_roi_masks=str, roi_mask_dir=None, old_prefix=None, new_prefix=None):
         """
