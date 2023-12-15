@@ -1,9 +1,10 @@
 import warnings
 
 import numpy as np
-import itertools
 from collections import deque
 from matplotlib import pyplot as plt
+
+from djimaging.autorois.autoshift_utils import compute_corr_map
 
 
 class CorrRoiMask:
@@ -65,21 +66,11 @@ class CorrRoiMask:
 
 
 def stack_corr_image(stack, cut_x=(1, 1), cut_z=(1, 1)):
-    """Zhijian Zhao 2020: First, we estimated a correlation image by correlating the trace of every pixel with the
-    trace of its eight neighbouring pixels and calculating the mean local correlation (ρ_local)"""
-    nx, nz, nt = stack.shape
-
-    counts = np.zeros((nx, nz), dtype=int)
-    corr_map = np.zeros((nx, nz), dtype=float)
-
-    for ix, iz, dx, dz in itertools.product(range(0, nx), range(0, nz), [-1, 0, 1], [-1, 0, 1]):
-        if cut_x[0] <= ix < (nx - cut_x[1]) and cut_z[0] <= iz < (nz - cut_z[1]):
-            if 0 <= (ix + dx) < nx and 0 <= (iz + dz) < nz and (dx != 0 or dz != 0):
-                counts[ix, iz] += 1
-                corr_map[ix, iz] += np.corrcoef(stack[ix, iz, :], stack[ix + dx, iz + dz, :])[0, 1]
-
-    corr_map[counts > 0] = corr_map[counts > 0] / counts[counts > 0]
-
+    corr_map = compute_corr_map(stack)
+    corr_map[:cut_x[0], :] = 0
+    corr_map[stack.shape[0] - cut_x[1]:, :] = 0
+    corr_map[:, cut_z[0]] = 0
+    corr_map[:, stack.shape[2] - cut_z[1]:] = 0
     return corr_map
 
 
@@ -99,12 +90,14 @@ def stack_corr_line_threshold(corr_map, cut_x=(1, 1), cut_z=(1, 1), q=70, line_t
 def corr_map_rois(stack, cut_x, cut_z, n_pix_max_x=5, n_pix_max_z=5, n_pix_max=25, n_pix_min=3.,
                   only_local_thresh_pixels=False, corr_map=None, grow_use_corr_map=False,
                   line_threshold=None, line_threshold_q=70, line_threshold_min=0.1, grow_threshold=None, plot=False):
-    """For every pixel with ρ_local>ρ_threshold (“seed pixel”), we grouped neighbouring pixels with ρ_local>ρ_threshold
+    """Zhijian Zhao 2020: First, we estimated a correlation image by correlating the trace of every pixel with the
+    trace of its eight neighbouring pixels and calculating the mean local correlation (ρ_local).
+    For every pixel with ρ_local>ρ_threshold (“seed pixel”), we grouped neighbouring pixels with ρ_local>ρ_threshold
     into one ROI. To match ROI sizes with the sizes of BC axon terminals, we restricted ROI diameters
     (estimated as effective diameter of area-equivalent circle) to range between 1 and 4 μm."""
 
     if corr_map is None:
-        corr_map = stack_corr_image(stack, cut_x=cut_x, cut_z=cut_z)
+        corr_map = compute_corr_map(stack)
 
     if line_threshold is None:
         line_threshold = stack_corr_line_threshold(

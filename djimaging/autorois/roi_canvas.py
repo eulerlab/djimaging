@@ -268,9 +268,9 @@ class RoiCanvas:
         return self.ch0_stacks[self.main_stim_idx]
 
     def compute_autoshift(self, shift_max=5, fun_progress=None):
-        self.ref_corr_map = self.ref_corr_map if self.ref_corr_map is not None else compute_corr_map(
-            self.get_ref_stack(), fun_progress=fun_progress)
-        corr_map = compute_corr_map(self.get_selected_stack(), fun_progress=fun_progress)
+        self.ref_corr_map = self.ref_corr_map if self.ref_corr_map is not None \
+            else compute_corr_map(self.get_ref_stack())
+        corr_map = compute_corr_map(self.get_selected_stack())
         match_indexes = compute_corr_map_match_indexes(
             corr_map, self.ref_corr_map, shift_max=shift_max, fun_progress=fun_progress)
         shift_x, shift_y = extract_best_shift(match_indexes)

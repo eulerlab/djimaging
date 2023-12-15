@@ -3,7 +3,12 @@ import itertools
 import numpy as np
 
 
-def compute_corr_map(stack, fun_progress=None):
+def correlation_on_centered(x_centered, y_centered, axis=2):
+    return np.sum(x_centered * y_centered, axis=axis) / (
+            np.sqrt(np.sum(x_centered ** 2, axis=axis)) * np.sqrt(np.sum(y_centered ** 2, axis=axis)))
+
+
+def compute_corr_map(stack):
     """
     Calculate the local neighboring pixel correlation matrix for a 3D stack (x, y, t).
 
@@ -15,31 +20,37 @@ def compute_corr_map(stack, fun_progress=None):
     corr_map (numpy.ndarray): 2D array with normalized cross-correlations for each pixel in the spatial domain.
     The values represent the local similarity of each pixel to its neighbors within predefined shifts.
     """
-    nx, ny, _ = stack.shape
-    corr_map = np.zeros((nx, ny))
-    counts = np.zeros((nx, ny))
+    stack_centered = (stack.T - np.mean(stack, axis=2).T).T
 
-    ixs = np.arange(nx)
-    iys = np.arange(ny)
+    # Compute neighbor correlations
+    x_neighbor_corr = correlation_on_centered(stack_centered[1:, :, :], stack_centered[:-1, :, :])
+    y_neighbor_corr = correlation_on_centered(stack_centered[:, 1:], stack_centered[:, :-1, :])
+    diag_1_neighbor_corr = correlation_on_centered(stack_centered[1:, 1:], stack_centered[:-1, :-1, :])
+    diag_2_neighbor_corr = correlation_on_centered(stack_centered[1:, :-1], stack_centered[:-1, 1:, :])
 
-    ix_iy_pairs = list(itertools.product(ixs, iys))
+    # Sum up to corr_map
+    neighbor_corr = np.zeros(stack_centered.shape[:2])
+    neighbor_corr[1:, :] += x_neighbor_corr
+    neighbor_corr[:-1, :] += x_neighbor_corr
+    neighbor_corr[:, 1:] += y_neighbor_corr
+    neighbor_corr[:, :-1] += y_neighbor_corr
+    neighbor_corr[1:, 1:] += diag_1_neighbor_corr
+    neighbor_corr[:-1, :-1] += diag_1_neighbor_corr
+    neighbor_corr[:-1, 1:] += diag_2_neighbor_corr
+    neighbor_corr[1:, :-1] += diag_2_neighbor_corr
 
-    if fun_progress is not None:
-        fun_progress(percent=0)
+    # Count neighbor pixels
+    neighbor_count = np.zeros(stack_centered.shape[:2])
+    neighbor_count[1:, :] += 1
+    neighbor_count[:-1, :] += 1
+    neighbor_count[:, 1:] += 1
+    neighbor_count[:, :-1] += 1
+    neighbor_count[1:, 1:] += 1
+    neighbor_count[:-1, :-1] += 1
+    neighbor_count[:-1, 1:] += 1
+    neighbor_count[1:, :-1] += 1
 
-    for i, (ix, iy) in enumerate(ix_iy_pairs, start=1):
-        for idx, idy in [(0, 1), (1, 0), (1, 1), (0, -1), (-1, 0), (-1, -1), (-1, 1), (1, -1)]:
-            if ix + idx >= nx or iy + idy >= ny or ix + idx < 0 or iy + idy < 0:
-                continue
-            else:
-                counts[ix, iy] += 1
-                corr_map[ix, iy] += np.corrcoef(stack[ix + idx, iy + idy, :], stack[ix, iy, :])[0, 1]
-
-        if fun_progress is not None:
-            fun_progress(percent=100 * i / len(ix_iy_pairs))
-
-    # Normalize by the number of neighbors
-    corr_map /= counts
+    corr_map = neighbor_corr / neighbor_count
 
     return corr_map
 

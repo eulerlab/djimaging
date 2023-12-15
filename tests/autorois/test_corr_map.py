@@ -21,17 +21,20 @@ def create_stack_with_corr_map_1():
 
 
 def create_stack_with_corr_map_2():
-    nx, ny, nt = 2, 2, 100
+    nx, ny, nt = 3, 4, 100
     stack = np.zeros((nx, ny, nt))
 
     ts = np.linspace(0, 2 * np.pi, nt)
 
-    stack[0, 1, :] = np.sin(ts)
-    stack[1, 0, :] = np.sin(ts)
-    stack[1, 1, :] = - np.sin(ts)
+    stack[:, :, :] = np.sin(ts)
     stack[0, 0, :] = - np.sin(ts)
+    stack[-1, 0, :] = - np.sin(ts)
 
-    corr_map = np.full((nx, ny), -1 / 3)
+    corr_map = np.array([
+        [-1., 3 / 5, 1, 1],
+        [1 / 5, 0.5, 1, 1],
+        [-1, 3 / 5, 1, 1]
+    ])
 
     return stack, corr_map
 
