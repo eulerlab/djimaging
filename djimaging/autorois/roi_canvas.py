@@ -123,13 +123,15 @@ class RoiCanvas:
         else:
             self._initial_roi_mask = None
 
+        self.clean_min_size = 3
+        self.clean_connectivity = 2
+
     def __repr__(self):
         return f"RoiCanvas({self.nx}x{self.ny})"
 
     def compute_bg(self, stack, shift, proj_fun):
         background = proj_fun(stack, axis=2).astype(np.float32)
-        background[:self.n_artifact, :] = np.nan
-        background = mask_utils.shift_array(background, shift)
+        background = mask_utils.shift_array(background, shift, n_artifact=self.n_artifact, cval=np.nan)
         return background
 
     def compute_backgrounds(self):
@@ -930,7 +932,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.exec_save_and_new()
         self.set_selected_roi(value=1, update_if_same=True)
         self.set_roi_masks(mask_utils.clean_rois(
-            self.roi_masks, self.n_artifact, min_size=3, connectivity=2, verbose=False))
+            self.roi_masks, self.n_artifact, min_size=self.clean_min_size, connectivity=self.clean_connectivity,
+            verbose=False))
         self.draw_all(update=True)
         self.set_idle()
 
@@ -1029,8 +1032,10 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def get_current_stack(self):
-        current_stack = mask_utils.shift_array(
-            self.ch0_stacks[self._selected_stim_idx], (self.get_shift('x'), self.get_shift('y')))
+        dx, dy = self.get_shift('x'), self.get_shift('y')
+        current_stack = mask_utils.shift_array(self.ch0_stacks[self._selected_stim_idx].astype(np.float32), (dx, dy),
+                                               n_artifact=self.n_artifact, cval=np.nan)
+
         return current_stack
 
     def update_info(self):
@@ -1052,60 +1057,20 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         with self.widget_diagnostics:
             clear_output(wait=True)
+
             if self.diagnostics_fig is not None:
                 plt.close(self.diagnostics_fig)
 
-            self.diagnostics_fig, axs = plt.subplots(1, 4, figsize=(10, 1.5), width_ratios=(4, 1, 1, 1))
+            mask = self.current_mask
+
             if np.any(self.current_mask):
                 traces = self._compute_traces() if update else self.current_traces
-
-                ax = axs[0]
-                ax.set(title='corr')
-                ax.plot(traces.T, c='dimgray', lw=0.2)
-                ax.plot(np.mean(traces, axis=0), c='k', lw=1)
-
-                if np.sum(self.current_mask) > 1:
-                    cc = self._compute_cc(traces) if update else self.current_cc
-                    vabsmax = np.maximum(0.1, np.nanmax(np.abs(cc[np.triu_indices_from(cc, k=1)])))
-
-                    ax = axs[1]
-                    ax.set(title='corr')
-                    ax.hist(cc[np.triu_indices_from(cc, k=1)])
-                    ax.set(xlim=(-vabsmax * 1.05, vabsmax * 1.05))
-
-                    mask = self.current_mask
-                    xs, ys = np.where(mask)
-
-                    # map cc values onto mask
-                    cc_mask = np.full(mask.shape, np.nan, dtype=np.float32)
-
-                    cc = cc.copy()
-                    cc[np.diag_indices_from(cc)] = np.nan
-                    cc_mask[xs, ys] = np.nanmean(cc, axis=0)
-
-                    vabsmax = np.maximum(0.1, np.nanmax(np.abs(cc_mask)))
-
-                    ax = axs[2]
-                    ax.set(title='corr')
-                    im = ax.imshow(cc_mask.T, origin='lower', cmap='coolwarm', vmin=-vabsmax, vmax=vabsmax)
-                    plt.colorbar(im, ax=ax)
-                    ax.set(xlim=(np.min(xs) - 3, np.max(xs) + 3), ylim=(np.min(ys) - 3, np.max(ys) + 3))
-
-                    # Plot mean values of pixels
-                    mean_mask = np.full(mask.shape, np.nan, dtype=np.float32)
-                    mean_mask[xs, ys] = np.nanmean(traces, axis=1)
-
-                    ax = axs[3]
-                    ax.set(title='mean')
-                    im = ax.imshow(mean_mask.T, origin='lower', cmap='viridis')
-                    plt.colorbar(im, ax=ax)
-                    ax.set(xlim=(np.min(xs) - 3, np.max(xs) + 3), ylim=(np.min(ys) - 3, np.max(ys) + 3))
-
-                plt.tight_layout(pad=0.1, w_pad=0.5, h_pad=0.5)
+                cc = self._compute_cc(traces) if update else self.current_cc
+                mask_xs, mask_ys = np.where(mask)
             else:
-                for ax in axs.flat:
-                    ax.axis('off')
+                traces, cc, mask_xs, mask_ys = None, None, None, None
 
+            self.diagnostics_fig, axs = plot_diagnostics(mask, traces, cc, mask_xs, mask_ys)
             plt.show()
 
     def update_cc(self, update=True):
@@ -1113,7 +1078,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         if np.sum(self.current_mask) >= 2:
             cc = self._compute_cc(self._compute_traces()) if update else self.current_cc
             cc = cc[np.triu_indices_from(cc, k=1)]
-            self.widget_info.value = f"n_px={n_px}, min_cc={np.nanmin(cc):.2f}, mean_cc={np.nanmean(cc):.2f}"
+            self.widget_info.value = f"n_px={n_px}, min_cc={np.nanmin(cc):.2f}, mean_cc={np.nanmean(cc):.2f}" \
+                if len(cc) > 0 and np.any(np.isfinite(cc)) else ""
         else:
             self.widget_info.value = f"n_px={n_px}"
 
@@ -1337,3 +1303,65 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def exec_stim_prev(self, button=None):
         self.set_selected_stim(self.stim_names[(self._selected_stim_idx - 1) % len(self.stim_names)])
+
+
+def plot_diagnostics(mask, traces, cc, mask_xs, mask_ys):
+    fig, axs = plt.subplots(1, 4, figsize=(10, 1.5), width_ratios=(4, 1, 1, 1))
+
+    ax = axs[0]
+    if traces is not None:
+        ax.set(title='traces')
+        ax.plot(traces.T, c='dimgray', lw=0.2)
+        ax.plot(np.mean(traces, axis=0), c='k', lw=1)
+    else:
+        ax.axis('off')
+
+    ax = axs[1]
+    if traces is not None:
+        # Plot mean values of pixels
+        mean_mask = np.full(mask.shape, np.nan, dtype=np.float32)
+        mean_mask[mask_xs, mask_ys] = np.nanmean(traces, axis=1)
+
+        ax.set(title='mean')
+        im = ax.imshow(mean_mask.T, origin='lower', cmap='viridis', interpolation='none')
+        plt.colorbar(im, ax=ax)
+        ax.set(xlim=(np.min(mask_xs) - 3, np.max(mask_xs) + 3),
+               ylim=(np.min(mask_ys) - 3, np.max(mask_ys) + 3))
+    else:
+        ax.axis('off')
+
+    if cc is not None and cc.shape[0] > 1:
+        cc_off_diag = cc[np.triu_indices_from(cc, k=1)]
+    else:
+        cc_off_diag = None
+
+    if cc_off_diag is not None and np.any(np.isfinite(cc_off_diag)):
+        vabsmax = np.nanmax([0.1, np.nanmax(np.abs(cc_off_diag))])
+
+        ax = axs[2]
+        ax.set(title='corr')
+        ax.hist(cc_off_diag)
+        ax.set(xlim=(-vabsmax * 1.05, vabsmax * 1.05))
+
+        # map cc values onto mask
+        cc_mask = np.full(mask.shape, np.nan, dtype=np.float32)
+
+        cc = cc.copy()
+        cc[np.diag_indices_from(cc)] = np.nan
+        cc_mask[mask_xs, mask_ys] = np.nanmean(cc, axis=0)
+
+        vabsmax = np.maximum(0.1, np.nanmax(np.abs(cc_mask)))
+
+        ax = axs[3]
+        ax.set(title='corr')
+        im = ax.imshow(cc_mask.T, origin='lower', cmap='coolwarm', vmin=-vabsmax, vmax=vabsmax,
+                       interpolation='none')
+        plt.colorbar(im, ax=ax)
+        ax.set(xlim=(np.min(mask_xs) - 3, np.max(mask_xs) + 3),
+               ylim=(np.min(mask_ys) - 3, np.max(mask_ys) + 3))
+    else:
+        for ax in axs[2:]:
+            ax.axis('off')
+
+    plt.tight_layout(pad=0.1, w_pad=0.5, h_pad=0.5)
+    return fig, axs

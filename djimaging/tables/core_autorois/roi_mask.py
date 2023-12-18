@@ -18,6 +18,20 @@ from djimaging.utils.mask_utils import to_igor_format, to_python_format, to_roi_
 from djimaging.utils.plot_utils import plot_field
 
 
+def load_stack_data(files, data_name, alt_name, from_raw_data,
+                    roi_mask_dir=None, old_prefix=None, new_prefix=None):
+    ch0_stacks, ch1_stacks, output_files = [], [], []
+    for data_file in files:
+        ch_stacks, wparams = scanm_utils.load_stacks(
+            data_file, from_raw_data=from_raw_data, ch_names=(data_name, alt_name))
+        ch0_stacks.append(ch_stacks[data_name])
+        ch1_stacks.append(ch_stacks[alt_name])
+        output_files.append(to_roi_mask_file(
+            data_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix))
+
+    return ch0_stacks, ch1_stacks, output_files
+
+
 class RoiMaskTemplate(dj.Manual):
     database = ""
     _max_shift = 5
@@ -92,7 +106,7 @@ class RoiMaskTemplate(dj.Manual):
 
     def draw_roi_mask(self, field_key=None, pres_key=None, canvas_width=20, autorois_models='default_rgc',
                       show_diagnostics=True, load_high_res=True,
-                      roi_mask_dir=None, old_prefix=None, new_prefix=None, **kwargs):
+                      roi_mask_dir=None, old_prefix=None, new_prefix=None, use_stim_onset=True, **kwargs):
         if canvas_width <= 0 or canvas_width >= 100:
             raise ValueError(f'canvas_width={canvas_width} must be in (0, 100)%')
 
@@ -117,17 +131,20 @@ class RoiMaskTemplate(dj.Manual):
         if scan_type == 'xy':
             pixel_size_d1_d2 = (pixel_size_um, pixel_size_um)
         elif scan_type == 'xz':
-            z_step_um = (self.presentation_table() & pres_keys).fetch1('z_step_um')
+            z_step_um = (self.presentation_table() & pres_keys).fetch('z_step_um')
             z_step_um = check_unique_one(z_step_um, name='z_step_um')
             pixel_size_d1_d2 = (pixel_size_um, z_step_um)
         else:
             raise NotImplementedError(scan_type)
 
-        # Sort by relevance
-        mask_alias, highres_alias = (self.userinfo_table() & field_key).fetch1("mask_alias", "highres_alias")
-        pres_info = np.array([(self.presentation_table & pres_key).fetch1('pres_data_file', 'stim_name', 'condition')
-                              for pres_key in pres_keys])
-        files, stim_names, conditions = pres_info.T
+        # Get pres data
+        mask_alias, highres_alias = (self.userinfo_table() & field_key).fetch1(
+            "mask_alias", "highres_alias")
+        files, stim_names, conditions, triggertimes = (self.presentation_table & pres_keys).fetch(
+            'pres_data_file', 'stim_name', 'condition', 'triggertimes')
+        assert len(pres_keys) == len(files)
+        scan_frequencies = (self.presentation_table.ScanInfo() & pres_keys).fetch('scan_frequency')
+        assert len(pres_keys) == len(scan_frequencies)
 
         # Sort data by relevance
         sort_idxs = sort_roi_mask_files(files, mask_alias=mask_alias, highres_alias=highres_alias, as_index=True)
@@ -135,18 +152,20 @@ class RoiMaskTemplate(dj.Manual):
         files = files[sort_idxs]
         stim_names = stim_names[sort_idxs]
         conditions = conditions[sort_idxs]
+        triggertimes = triggertimes[sort_idxs]
+        scan_frequencies = scan_frequencies[sort_idxs]
 
         # Load stack data
-        ch0_stacks, ch1_stacks, output_files = [], [], []
-        for data_file in files:
-            data_name, alt_name = (self.userinfo_table & field_key).fetch1('data_stack_name', 'alt_stack_name')
+        data_name, alt_name = (self.userinfo_table & field_key).fetch1('data_stack_name', 'alt_stack_name')
+        ch0_stacks, ch1_stacks, output_files = load_stack_data(
+            files, data_name=data_name, alt_name=alt_name, from_raw_data=from_raw_data,
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
 
-            ch_stacks, wparams = scanm_utils.load_stacks(
-                data_file, from_raw_data=from_raw_data, ch_names=(data_name, alt_name))
-            ch0_stacks.append(ch_stacks[data_name])
-            ch1_stacks.append(ch_stacks[alt_name])
-            output_files.append(to_roi_mask_file(
-                data_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix))
+        if use_stim_onset:
+            stim_onset_idxs = [int(np.floor(tt[0] * fs)) if len(tt) > 0 else 0
+                               for tt, fs in zip(triggertimes, scan_frequencies)]
+            ch0_stacks = [stack[:, :, stim_onset_idx:] for stack, stim_onset_idx in zip(ch0_stacks, stim_onset_idxs)]
+            ch1_stacks = [stack[:, :, stim_onset_idx:] for stack, stim_onset_idx in zip(ch1_stacks, stim_onset_idxs)]
 
         # Load high resolution data is possible
         high_res_bg_dict = self.load_high_res_bg_dict(field_key) if load_high_res else dict()
@@ -172,9 +191,7 @@ class RoiMaskTemplate(dj.Manual):
             ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
             main_stim_idx=0, initial_roi_mask=initial_roi_mask, shifts=shifts,
             canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
-            pixel_size_um=pixel_size_d1_d2,
-            show_diagnostics=show_diagnostics,
-            max_shift=self._max_shift,
+            pixel_size_um=pixel_size_d1_d2, show_diagnostics=show_diagnostics, max_shift=self._max_shift,
             **kwargs,
         )
         print(f"Returned InteractiveRoiCanvas object. To start GUI, call <enter_object_name>.start_gui().")
@@ -413,16 +430,15 @@ class RoiMaskTemplate(dj.Manual):
 
 def load_default_autorois_models(kind='default_rgc'):
     autorois_models = dict()
-    _add_autorois_unet(autorois_models, kind=kind)
+    if kind == 'default_rgc':
+        _add_autorois_unet(autorois_models)
     _add_autorois_corr(autorois_models, kind=kind)
     return autorois_models if len(autorois_models) > 0 else None
 
 
-def _add_autorois_unet(autorois_models: dict, kind: str):
+def _add_autorois_unet(autorois_models: dict):
     try:
-        assert kind in ['default_rgc'], f"Only implemented for RGCs, but kind={kind}"
         from djimaging.autorois.unet import UNet
-
         config_path = "/gpfs01/euler/data/Resources/AutoROIs/models/UNET_v0.1.0/sd_images.yaml"
         checkpoint_path = "/gpfs01/euler/data/Resources/AutoROIs/models/UNET_v0.1.0/dropout_and_aug_regul.ckpt"
         unet_model = UNet.from_checkpoint(config_path, checkpoint_path)

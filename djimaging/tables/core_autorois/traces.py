@@ -70,6 +70,7 @@ class TracesTemplate(dj.Computed):
         filepath = (self.presentation_table & key).fetch1("pres_data_file")
         triggertimes = (self.presentation_table & key).fetch1("triggertimes")
         roi_ids = (self.roi_table & key).fetch("roi_id")
+        n_artifact = (self.presentation_table & key).fetch1("npixartifact")
 
         if compute_from_stack:
             data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
@@ -82,14 +83,19 @@ class TracesTemplate(dj.Computed):
             roi2trace = roi2trace_from_stack(
                 filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
                 data_stack_name=data_stack_name, precision=trace_precision, from_raw_data=from_raw_data)
+
+            for roi_id, roi_data in roi2trace.items():
+                if np.any(-roi_mask[:n_artifact, :] == roi_id):
+                    print(key, roi_id)
+                roi2trace[roi_id]['incl_artifact'] = np.any(-roi_mask[:n_artifact, :] == roi_id)
+
         else:
             assert not from_raw_data, "from_raw_data=True only supported for compute_from_stack=True"
             roi2trace = roi2trace_from_h5_file(filepath, roi_ids)
 
         for roi_id, roi_data in roi2trace.items():
-            if not include_artifacts:
-                if (self.roi_table() & key & dict(roi_id=roi_id)).fetch1("artifact_flag") == 1:
-                    continue
+            if not include_artifacts and roi_data.get('incl_artifact', False):
+                continue
 
             trace_key = key.copy()
             trace_key['roi_id'] = roi_id

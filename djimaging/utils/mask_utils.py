@@ -537,22 +537,24 @@ def load_preferred_roi_mask_pickle(files, mask_alias='', highres_alias='',
         return None, None
 
 
-def shift_array(img, shift, inplace=False, cval=np.min):
+def shift_array(img, shift, inplace=False, cval=np.min, n_artifact=0):
     """Shift >2d array in x and/or y. Fill borders with cval."""
     if not inplace:
         img = img.copy()
     img = np.asarray(img)
-
-    shift_ax0, shift_ax1 = shift
-    img = np.roll(np.roll(img, shift_ax0, axis=0), shift_ax1, axis=1)
 
     if callable(cval):
         _cval = cval(img)
     else:
         _cval = cval
 
+    img[:n_artifact, :] = _cval  # set light artifact region to background before shifting
+
+    shift_ax0, shift_ax1 = shift
+    img = np.roll(np.roll(img, shift_ax0, axis=0), shift_ax1, axis=1)
+
     if shift_ax0 > 0:
-        img[:shift_ax0, :] = _cval
+        img[:shift_ax0 + n_artifact, :] = _cval
     elif shift_ax0 < 0:
         img[shift_ax0:, :] = _cval
     if shift_ax1 > 0:

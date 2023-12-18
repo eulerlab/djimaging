@@ -245,7 +245,8 @@ class PresentationTemplate(dj.Computed):
 
         try:
             scaninfo_key["line_duration"] = (wparams['user_dxpix'] * wparams['realpixdur']) * 1e-6
-            scaninfo_key["scan_period"] = (scaninfo_key["line_duration"] * wparams['user_dypix'])
+            n_lines = wparams['user_dzpix'] if scan_type == 'xz' else wparams['user_dypix']
+            scaninfo_key["scan_period"] = scaninfo_key["line_duration"] * n_lines
             scaninfo_key["scan_frequency"] = 1. / scaninfo_key["scan_period"]
 
             scaninfo_key["user_dxpix"] = wparams.pop("user_dxpix")

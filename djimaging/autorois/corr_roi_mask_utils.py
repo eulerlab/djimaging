@@ -8,12 +8,12 @@ from djimaging.autorois.autoshift_utils import compute_corr_map
 
 
 class CorrRoiMask:
-    """12.6 um² ~= pi * ((4 um) / 2)² """
-
     def __init__(
             self, cut_x=(1, 1), cut_z=(1, 1), min_area_um2=0.8, max_area_um2=12.6,
             n_pix_min=None, n_pix_max=None, line_threshold_q=70, line_threshold_min=0.1,
             grow_only_local_thresh_pixels=True, use_ch0_stack=True, grow_use_corr_map=False, grow_threshold=None):
+        """12.6 um² ~= pi * ((4 um) / 2)² """
+
         self.cut_x = cut_x
         self.cut_z = cut_z
 
@@ -69,8 +69,8 @@ def stack_corr_image(stack, cut_x=(1, 1), cut_z=(1, 1)):
     corr_map = compute_corr_map(stack)
     corr_map[:cut_x[0], :] = 0
     corr_map[stack.shape[0] - cut_x[1]:, :] = 0
-    corr_map[:, cut_z[0]] = 0
-    corr_map[:, stack.shape[2] - cut_z[1]:] = 0
+    corr_map[:, :cut_z[0]] = 0
+    corr_map[:, stack.shape[1] - cut_z[1]:] = 0
     return corr_map
 
 
@@ -97,7 +97,7 @@ def corr_map_rois(stack, cut_x, cut_z, n_pix_max_x=5, n_pix_max_z=5, n_pix_max=2
     (estimated as effective diameter of area-equivalent circle) to range between 1 and 4 μm."""
 
     if corr_map is None:
-        corr_map = compute_corr_map(stack)
+        corr_map = stack_corr_image(stack, cut_x=cut_x, cut_z=cut_z)
 
     if line_threshold is None:
         line_threshold = stack_corr_line_threshold(
@@ -138,13 +138,50 @@ def corr_map_rois(stack, cut_x, cut_z, n_pix_max_x=5, n_pix_max_z=5, n_pix_max=2
             roi_id += 1
 
     if plot:
-        fig, axs = plt.subplots(1, 5, figsize=(15, 2.2))
-        axs[0].imshow(np.mean(stack, axis=2).T, cmap='gray', origin='lower')
-        axs[1].imshow(corr_map.T, cmap='viridis', origin='lower')
-        axs[2].plot(line_threshold, np.arange(line_threshold.size))
-        axs[2].set_xlim(0, 1)
-        axs[3].imshow((corr_map >= line_threshold).T, cmap='viridis', origin='lower')
-        axs[4].imshow(roi_mask.T, cmap='jet', origin='lower')
+        fig, axs = plt.subplots(2, 6, figsize=(15, 3), height_ratios=(8, 1))
+
+        mean = np.mean(stack, axis=2)
+        mean[:cut_x[0], :] = np.nan
+
+        seed_pixels = (corr_map >= line_threshold)
+
+        corr_map_nan = corr_map.copy()
+        corr_map_nan[~seed_pixels] = np.nan
+
+        corr_min = np.minimum(0., np.nanmin(corr_map))
+        corr_max = np.nanmax(corr_map)
+
+        im = axs[0, 0].imshow(mean.T, cmap='gray', origin='lower')
+        axs[0, 0].set_title('Mean projection')
+        plt.colorbar(im, ax=axs[0, 0], cax=axs[1, 0], orientation='horizontal')
+
+        axs[0, 1].imshow(mean.T, cmap='gray', origin='lower')
+        im = axs[0, 1].imshow(corr_map_nan.T, interpolation='none',
+                              cmap='Reds', origin='lower', alpha=0.7, vmin=corr_min, vmax=corr_max, zorder=100)
+        axs[0, 1].set_title('< Overlay >')
+        plt.colorbar(im, ax=axs[0, 1], cax=axs[1, 1], orientation='horizontal')
+
+        im = axs[0, 2].imshow(corr_map.T, cmap='Reds', origin='lower', vmin=corr_min, vmax=corr_max,
+                              interpolation='none')
+        axs[0, 2].set_title('Correlation map')
+        plt.colorbar(im, ax=axs[0, 2], cax=axs[1, 2], orientation='horizontal')
+
+        axs[0, 3].plot(line_threshold, np.arange(line_threshold.size), '.-')
+        axs[0, 3].axvline(line_threshold_min, c='k', ls='--')
+        axs[0, 3].set_title('Line threshold')
+        axs[0, 3].set_xlim(-0.03, 1.03)
+        axs[0, 3].set_ylim(0, line_threshold.size - 1)
+        axs[1, 3].axis('off')
+
+        im = axs[0, 4].imshow(seed_pixels.T, cmap='viridis', origin='lower', interpolation='none')
+        axs[0, 4].set_title('Seed pixels')
+        plt.colorbar(im, ax=axs[0, 4], cax=axs[1, 4], orientation='horizontal')
+
+        im = axs[0, 5].imshow(roi_mask.T, cmap='jet', origin='lower', interpolation='none')
+        axs[0, 5].set_title('ROI mask')
+        plt.colorbar(im, ax=axs[0, 5], cax=axs[1, 5], orientation='horizontal')
+
+        plt.tight_layout()
         plt.show()
 
     return roi_mask

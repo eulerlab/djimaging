@@ -109,7 +109,7 @@ def plot_trace_and_trigger(time, trace, triggertimes, trace_norm=None, title=Non
     set_long_title(ax, title=title)
     ax.plot(time, trace, label=label)
     ax.set(xlabel='time', ylabel='trace')
-    if triggertimes:
+    if len(triggertimes) > 0:
         ax.vlines(triggertimes, np.min(trace), np.max(trace), color='r', label='trigger', zorder=-2)
     ax.legend(loc='upper right')
 
