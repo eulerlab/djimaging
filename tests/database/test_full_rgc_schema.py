@@ -10,15 +10,16 @@ from tests.database.database_test_utils import _connect_test_schema, _drop_test_
 @pytest.fixture(autouse=True, scope='module')
 def database_fixture():
     # Run before
-    from djimaging.schemas.full_rgc_schema import schema as test_schema
+    from djimaging.schemas.full_rgc_autorois_schema import schema as test_schema
 
     try:
-        time.sleep(0.5)
-        connection = _connect_test_schema(use_rgc_classifier=False)
-        time.sleep(0.5)
+        time.sleep(2)
+        connection = _connect_test_schema(use_rgc_classifier=True)
+        time.sleep(2)
         _activate_test_schema(test_schema)
-        time.sleep(0.5)
-    except (FileNotFoundError, dj.DataJointError):
+        time.sleep(2)
+    except (FileNotFoundError, dj.DataJointError) as e:
+        print(e)
         connection = None
 
     # Run tests

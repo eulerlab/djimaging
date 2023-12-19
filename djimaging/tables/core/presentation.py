@@ -16,17 +16,18 @@ from djimaging.utils.scanm_utils import get_stimulator_delay, load_roi_mask_from
 
 class PresentationTemplate(dj.Computed):
     database = ""
+    __filepath = 'h5_header'
 
     @property
     def definition(self):
-        definition = """
+        definition = f"""
         # information about each stimulus presentation
         -> self.field_table
         -> self.stimulus_table
         -> self.params_table
         condition             :varchar(255)     # condition (pharmacological or other)
         ---
-        h5_header             :varchar(255)     # path to h5 file
+        {self.filepath}     :varchar(255)     # path to h5 file
         trigger_flag          :tinyint unsigned # Are triggers as expected (1) or not (0)?
         triggertimes          :longblob         # triggertimes in each presentation
         triggervalues         :longblob         # values of the recorded triggers
@@ -36,6 +37,10 @@ class PresentationTemplate(dj.Computed):
         z_step_um :float  # z-step in um
         """
         return definition
+
+    @property
+    def filepath(self):
+        return self.__filepath
 
     @property
     @abstractmethod
@@ -295,7 +300,7 @@ class PresentationTemplate(dj.Computed):
                 This can result in unexpected problems.""")
 
         pres_key = deepcopy(key)
-        pres_key["h5_header"] = filepath
+        pres_key[self.filepath] = filepath
         pres_key["trigger_flag"] = int(trigger_flag)
         pres_key["triggertimes"] = triggertimes
         pres_key["triggervalues"] = triggervalues

@@ -24,7 +24,7 @@ def get_stimulator_delay(date, setupid, file=None) -> float:
     df.loc[np.max(df.index) + 1] = {'date': eval_time}
     df.set_index('date', inplace=True)
     df.sort_index(ascending=True, inplace=True)
-    df.fillna(method='ffill', inplace=True)
+    df.ffill(inplace=True)
     stimulator_delay_ms = df.loc[eval_time, f"setup{setupid}"] / 1000.
     return stimulator_delay_ms
 

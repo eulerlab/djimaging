@@ -13,12 +13,13 @@ def database_fixture():
     from djimaging.schemas.full_rgc_autorois_schema import schema as test_schema
 
     try:
-        time.sleep(0.5)
+        time.sleep(2)
         connection = _connect_test_schema(use_rgc_classifier=True)
-        time.sleep(0.5)
+        time.sleep(2)
         _activate_test_schema(test_schema)
-        time.sleep(0.5)
-    except (FileNotFoundError, dj.DataJointError):
+        time.sleep(2)
+    except (FileNotFoundError, dj.DataJointError) as e:
+        print(e)
         connection = None
 
     # Run tests

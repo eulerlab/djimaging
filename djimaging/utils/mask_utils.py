@@ -426,9 +426,28 @@ def generate_roi_suggestions(mask_pred, mask_true, n_artifact, threshold=0.1, ve
     return rois_to_add
 
 
+def is_igor_format(roi_mask):
+    """This method can fail if the igor format is not used consistently."""
+    vmin = np.min(roi_mask)
+    vmax = np.max(roi_mask)
+
+    if vmax in [0, 1] and vmin < 0:
+        return True
+    else:
+        return False
+
+
+def as_igor_format(roi_mask):
+    """Convert from python format to igor format"""
+    if is_igor_format(roi_mask):
+        return roi_mask
+    else:
+        return to_igor_format(roi_mask)
+
+
 def to_igor_format(roi_mask):
-    if np.any(roi_mask < 0):
-        raise ValueError
+    if not is_python_format(roi_mask):
+        raise ValueError('ROI mask is not in python format.')
 
     roi_mask = roi_mask.copy()
     roi_mask[roi_mask == 0] = -1
@@ -437,12 +456,32 @@ def to_igor_format(roi_mask):
     return roi_mask
 
 
+def is_python_format(roi_mask):
+    vmin = np.min(roi_mask)
+    vmax = np.max(roi_mask)
+
+    if vmin == 0 and vmax > 0:
+        return True
+    else:
+        return False
+
+
+def as_python_format(roi_mask):
+    """Convert from igor format to python format if necessary"""
+    if is_python_format(roi_mask):
+        return roi_mask
+    else:
+        return to_python_format(roi_mask)
+
+
 def to_python_format(roi_mask):
-    if np.any(roi_mask == 0):
-        warnings.warn('0 is used as background label. Should be +1 for igor roi_mask.')
+    if not is_igor_format(roi_mask):
+        raise ValueError('ROI mask is not in IGOR format.')
+
+    vmax = np.max(roi_mask)
 
     roi_mask = roi_mask.copy()
-    roi_mask[roi_mask == 1] = 0
+    roi_mask[roi_mask == vmax] = 0
     roi_mask = np.abs(roi_mask)
 
     return roi_mask

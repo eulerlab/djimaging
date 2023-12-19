@@ -8,7 +8,7 @@ def _connect_test_schema(use_rgc_classifier=True):
     home = os.path.expanduser("~")
     user = os.path.split(home)[1]
     config_file = f'{home}/datajoint/dj_{user}_conf.json'
-    schema_name = f"ageuler_{user}_pytest_{random.randint(0, 999):03}"
+    schema_name = f"ageuler_{user}_pytest_{random.randint(0, 9999):04}"
 
     dj.config.load(config_file)
     dj.config['schema_name'] = schema_name
