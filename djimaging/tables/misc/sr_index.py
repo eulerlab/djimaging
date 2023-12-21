@@ -1,3 +1,4 @@
+import warnings
 from abc import abstractmethod
 
 import datajoint as dj
@@ -12,17 +13,17 @@ class SrIndexTemplate(dj.Computed):
     database = ""
 
     _stim_name = 'gChirp'  # Must have a light artifact, developed for global chirp
-    _restriction_dict = None  # Can be None or set to a specific restriction
 
     @property
     def definition(self):
         definition = """
         # SR index, can be used to estimate how strongly a cell has be labeled by SR101
+        # Defaults to NaN for ROIs with no pixels on the stack
         -> self.presentation_table
         -> self.roimask_table
         -> self.roi_table
         ---
-        sr_idx  : float  # SR index >= 0 of ROI normalized to min of stack average and light_artifact = 1
+        sr_idx = NULL  : float  # SR index >= 0 of ROI normalized to min of stack average and light_artifact = 1.
         """
         return definition
 
@@ -117,7 +118,10 @@ def compute_sr_idxs(ch1_stack, roi_ids, roi_mask, npixartifact):
     ch1_avg = np.mean(ch1_stack, axis=2)
 
     roi_avgs = [ch1_avg[roi_mask == roi_id] for roi_id in roi_ids]
-    roi_avgs_means = np.array([np.mean(roi_avg) for roi_avg in roi_avgs])
+    roi_avgs_means = np.array([np.mean(roi_avg) if len(roi_avg) > 0 else np.nan for roi_avg in roi_avgs])
+
+    if np.any(np.isnan(roi_avgs_means)):
+        warnings.warn(f'SR-index=NaN: Some ROIs have no pixels on the stack. Shifted presentation ROI mask?')
 
     lb = np.nanmin(ch1_avg[npixartifact:, :])
     light_artifact = np.nanmedian(ch1_stack[0, :, :], axis=0)
