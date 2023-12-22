@@ -27,6 +27,7 @@ def get_aligned_snippets_times(snippets_times, raise_error=True, tol=1e-4):
 
 class SnippetsTemplate(dj.Computed):
     database = ""
+    _pad_trace = False  # If True, chose snippet times always contain the trigger times
 
     @property
     def definition(self):
@@ -74,7 +75,7 @@ class SnippetsTemplate(dj.Computed):
         trace_times, traces = (self.preprocesstraces_table() & key).fetch1('preprocess_trace_times', 'preprocess_trace')
 
         snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_reps(
-            traces, trace_times, triggertimes, ntrigger_rep, allow_drop_last=True)
+            traces, trace_times, triggertimes, ntrigger_rep, allow_drop_last=True, pad_trace=self._pad_trace)
 
         self.insert1(dict(
             **key,
@@ -84,20 +85,26 @@ class SnippetsTemplate(dj.Computed):
             droppedlastrep_flag=int(droppedlastrep_flag),
         ))
 
-    def plot1(self, key=None, xlim=None):
+    def plot1(self, key=None, xlim=None, xlim_aligned=None):
         key = get_primary_key(table=self, key=key)
         snippets, snippets_times, triggertimes_snippets = (self & key).fetch1(
             "snippets", "snippets_times", "triggertimes_snippets")
 
-        fig, axs = plt.subplots(2, 1, figsize=(10, 4))
+        fig, axs = plt.subplots(3, 1, figsize=(10, 6))
 
         plot_utils.plot_trace_and_trigger(
             ax=axs[0], time=snippets_times, trace=snippets, triggertimes=triggertimes_snippets, title=str(key))
         axs[0].set(xlim=xlim)
 
+        axs[1].plot(snippets_times - triggertimes_snippets[0], snippets, alpha=0.5)
+        axs[1].set(ylabel='trace', xlabel='rel. to trigger', xlim=xlim_aligned)
+
         aligned_times = get_aligned_snippets_times(snippets_times=snippets_times)
         plot_utils.plot_traces(
-            ax=axs[1], time=aligned_times, traces=snippets.T)
+            ax=axs[2], time=aligned_times, traces=snippets.T)
+        axs[2].set(ylabel='trace', xlabel='aligned time', xlim=xlim_aligned)
+
+        plt.tight_layout()
 
 
 class GroupSnippetsTemplate(dj.Computed):

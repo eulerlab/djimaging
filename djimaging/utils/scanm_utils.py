@@ -8,7 +8,7 @@ from djimaging.utils.math_utils import truncated_vstack, padded_vstack
 
 from djimaging.utils.data_utils import extract_h5_table
 from djimaging.utils.misc_utils import CapturePrints
-from djimaging.utils.trace_utils import find_closest
+from djimaging.utils.trace_utils import find_closest, find_closest_before
 
 
 def get_stimulator_delay(date, setupid, file=None) -> float:
@@ -136,12 +136,34 @@ def get_roi2trace(traces, traces_times, roi_ids):
     return roi2trace
 
 
-def compute_t_idxs(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.1, allow_drop_last=True):
-    t_idxs = [find_closest(target=tt + delay, data=times, atol=atol, as_index=True)
-              for tt in triggertimes[::ntrigger_rep]]
+def compute_t_idxs(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.128, allow_drop_last=True,
+                   pad_trace=False):
+    """
+
+    Compute t_idxs, n_frames_per_rep, and dropped_last_rep_flag based on the given parameters.
+
+    :param trace: ndarray, input trace data
+    :param times: ndarray, time data corresponding to the trace
+    :param triggertimes: ndarray, time data corresponding to the triggers
+    :param ntrigger_rep: int, number of triggers per repetition
+    :param delay: float, delay in seconds to apply to the trigger times
+    :param atol: float, absolute tolerance used for finding closest index
+    :param allow_drop_last: bool, flag to allow dropping last repetition if data is incomplete
+    :param pad_trace: bool, if True crop trace such that the triggers fall within the trace
+    :return: tuple (t_idxs, n_frames_per_rep, dropped_last_rep_flag)
+
+    """
+    if not pad_trace:
+        t_idxs = [find_closest(target=tt + delay, data=times, atol=atol, as_index=True)
+                  for tt in triggertimes[::ntrigger_rep]]
+    else:
+        t_idxs = [find_closest_before(target=tt + delay, data=times, atol=np.inf, as_index=True)
+                  for tt in triggertimes[::ntrigger_rep]]
 
     if len(t_idxs) > 1:
         n_frames_per_rep = int(np.median(np.diff(t_idxs)))  # Use median rep length to ignore outliers
+        if pad_trace:
+            n_frames_per_rep += 1  # Heuristic to include frame from next repetition
 
         assert trace.shape == times.shape, 'Shapes do not match'
 
@@ -149,37 +171,53 @@ def compute_t_idxs(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.1,
             assert allow_drop_last, 'Data incomplete, allow to drop last repetition or fix data'
             # if there are not enough data points after the last trigger,
             # remove the last trigger (e.g. if a chirp was cancelled)
-            droppedlastrep_flag = True
+            dropped_last_rep_flag = True
             t_idxs.pop(-1)
         else:
-            droppedlastrep_flag = False
+            dropped_last_rep_flag = False
     else:
         n_frames_per_rep = times.size - t_idxs[0]
-        droppedlastrep_flag = False
+        dropped_last_rep_flag = False
 
-    return t_idxs, n_frames_per_rep, droppedlastrep_flag
+    return t_idxs, n_frames_per_rep, dropped_last_rep_flag
 
 
-def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.1, allow_drop_last=True):
+def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.128, allow_drop_last=True,
+                        pad_trace=False):
     """Split trace in snippets, using triggertimes."""
 
     t_idxs, n_frames_per_rep, droppedlastrep_flag = compute_t_idxs(
-        trace, times, triggertimes, ntrigger_rep, delay=delay, atol=atol, allow_drop_last=allow_drop_last)
+        trace, times, triggertimes, ntrigger_rep,
+        delay=delay, atol=atol, allow_drop_last=allow_drop_last, pad_trace=pad_trace)
 
     snippets = np.zeros((n_frames_per_rep, len(t_idxs)))
     snippets_times = np.zeros((n_frames_per_rep, len(t_idxs)))
     snippets_triggertimes = np.zeros((ntrigger_rep, len(t_idxs)))
 
     # Frames may be reused, this is not a standard reshaping
-    for i, idx in enumerate(t_idxs):
-        snippets[:, i] = trace[idx:idx + n_frames_per_rep]
-        snippets_times[:, i] = times[idx:idx + n_frames_per_rep]
-        snippets_triggertimes[:, i] = triggertimes[i * ntrigger_rep:(i + 1) * ntrigger_rep]
+    for rep_idx, t_idx in enumerate(t_idxs):
+        snippets[:, rep_idx] = trace[t_idx:t_idx + n_frames_per_rep]
+        snippets_times[:, rep_idx] = times[t_idx:t_idx + n_frames_per_rep]
+        snippets_triggertimes[:, rep_idx] = triggertimes[rep_idx * ntrigger_rep:(rep_idx + 1) * ntrigger_rep]
 
     return snippets, snippets_times, snippets_triggertimes, droppedlastrep_flag
 
 
 def group_reps_to_list(data, truncate_last_rep=True):
+    """
+    Group Reps to List
+
+    This method takes in a nested list of data and converts it into a flat list of repetitions.
+    Each repetition is represented by a sub-sub-representation.
+
+    Parameters:
+        - data (list of list of ndarray): The nested list of data containing repetitions.
+        - truncate_last_rep (bool): Specifies whether to truncate the last repetition to match the length of the longest repetition. Default is True.
+
+    Returns:
+        - rep_list (list): The flat list of sub-sub-representations.
+
+    """
     rep_list = [sub_sub_rep for rep in data for sub_rep in rep for sub_sub_rep in sub_rep.T]
     if len(rep_list) > 1 and truncate_last_rep:
         rep_lens = [len(rep) for rep in rep_list]
@@ -190,7 +228,7 @@ def group_reps_to_list(data, truncate_last_rep=True):
 
 
 def split_trace_by_group_reps(
-        trace, times, triggertimes, trial_info, delay=0., atol=0.1, rtol_trunc=0.1,
+        trace, times, triggertimes, trial_info, delay=0., atol=0.128, rtol_trunc=0.1,
         allow_drop_last=True, squeeze_single_reps=False, stack_kind=None):
     """Split trace in snippets, using triggertimes. allow to have different stimulus groups"""
 

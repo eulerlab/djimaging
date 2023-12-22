@@ -71,13 +71,14 @@ def detrend_trace(trace, window_len_seconds, fs, poly_order):
     return detrended_trace, smoothed_trace
 
 
-def extract_baseline(trace, trace_times, stim_start: float):
+def extract_baseline(trace, trace_times, stim_start: float, max_dt=np.inf):
     """Compute baseline for trace"""
     if not np.any(trace_times < stim_start):
         raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
 
     baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
-    baseline = trace[:baseline_end]
+    baseline_start = np.nonzero(trace_times >= trace_times[baseline_end] - max_dt)[0][0]
+    baseline = trace[baseline_start:baseline_end]
     return baseline
 
 
@@ -93,12 +94,12 @@ def non_negative_trace(trace, inplace: bool = False):
     return trace
 
 
-def subtract_baseline_trace(trace, trace_times, stim_start: float, inplace: bool = False):
+def subtract_baseline_trace(trace, trace_times, stim_start: float, inplace: bool = False, max_dt=np.inf):
     """Subtract baseline of trace (and standardize by STD of baseline)"""
     if not inplace:
         trace = trace.copy()
 
-    baseline = extract_baseline(trace, trace_times, stim_start)
+    baseline = extract_baseline(trace, trace_times, stim_start, max_dt=max_dt)
     trace -= np.median(baseline)
 
     return trace
@@ -107,7 +108,7 @@ def subtract_baseline_trace(trace, trace_times, stim_start: float, inplace: bool
 def process_trace(trace_times, trace, poly_order, window_len_seconds,
                   subtract_baseline: bool, standardize: int, non_negative: bool, stim_start: float = None,
                   f_cutoff: float = None, fs_resample: float = None, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3),
-                  dt_rtol=0.1):
+                  dt_rtol=0.1, baseline_max_dt=np.inf):
     """Detrend and preprocess trace"""
     assert standardize in [0, 1, 2], standardize
 
@@ -131,7 +132,7 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds,
             raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
 
     if subtract_baseline:
-        trace = subtract_baseline_trace(trace, trace_times, stim_start, inplace=True)
+        trace = subtract_baseline_trace(trace, trace_times, stim_start, max_dt=baseline_max_dt, inplace=True)
 
     if non_negative:
         trace = non_negative_trace(trace, inplace=True)
@@ -189,6 +190,7 @@ class PreprocessParamsTemplate(dj.Lookup):
 
 class PreprocessTracesTemplate(dj.Computed):
     database = ""
+    _baseline_max_dt = np.inf
 
     @property
     def definition(self):
@@ -238,7 +240,7 @@ class PreprocessTracesTemplate(dj.Computed):
             trace_times=trace_times, trace=trace, stim_start=stim_start,
             poly_order=poly_order, window_len_seconds=window_len_seconds,
             subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative,
-            f_cutoff=f_cutoff, fs_resample=fs_resample)
+            f_cutoff=f_cutoff, fs_resample=fs_resample, baseline_max_dt=self._baseline_max_dt)
 
         self.insert1(dict(key, preprocess_trace_times=preprocess_trace_times,
                           preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))

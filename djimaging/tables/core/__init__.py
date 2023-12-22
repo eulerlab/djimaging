@@ -1,4 +1,4 @@
-from .averages import AveragesTemplate
+from .averages import AveragesTemplate, ResampledAveragesTemplate
 from .experiment import ExperimentTemplate
 from .field import FieldTemplate, FieldWithConditionTemplate
 from .preprocesstraces import PreprocessTracesTemplate, PreprocessParamsTemplate
