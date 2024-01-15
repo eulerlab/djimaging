@@ -10,7 +10,7 @@ from tests.database.database_test_utils import _connect_test_schema, _drop_test_
 @pytest.fixture(autouse=True, scope='module')
 def database_fixture():
     # Run before
-    from djimaging.schemas.full_rgc_autorois_schema import schema as test_schema
+    from djimaging.schemas.full_rgc_schema import schema as test_schema
 
     try:
         time.sleep(2)
@@ -45,7 +45,6 @@ def test_populate_user(database_fixture):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-
     from djimaging.schemas.full_rgc_schema import UserInfo
     userinfo = {
         'experimenter': 'DataJointTestData',
@@ -66,7 +65,6 @@ def test_populate_raw_data_params(database_fixture):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-
     from djimaging.schemas.full_rgc_schema import RawDataParams
     RawDataParams().add_default()
     assert len(RawDataParams()) == 1
@@ -77,7 +75,6 @@ def test_populate_experiment(database_fixture):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-
     from djimaging.schemas.full_rgc_schema import Experiment
     Experiment().rescan_filesystem(verboselvl=0)
     assert len(Experiment()) > 0
@@ -88,7 +85,6 @@ def test_populate_field(database_fixture):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-
     from djimaging.schemas.full_rgc_schema import Field
     Field().rescan_filesystem(verboselvl=0)
     assert len(Field()) > 0
@@ -109,22 +105,40 @@ def test_populate_stimulus(database_fixture):
 
 
 @pytest.mark.dependency(depends=['test_populate_stimulus'])
-def test_populate_presentation(database_fixture, processes=20):
+def test_populate_presentation(database_fixture):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-
     from djimaging.schemas.full_rgc_schema import Presentation
-    Presentation().populate(processes=processes)
+    Presentation().populate()
     assert len(Presentation()) > 0
 
 
 @pytest.mark.dependency(depends=['test_populate_presentation'])
+def test_populate_roi_mask(database_fixture):
+    connection = database_fixture
+    if not is_connected(connection):
+        pytest.skip("Not connected to database")
+    from djimaging.schemas.full_rgc_schema import RoiMask
+
+    missing_keys = RoiMask().list_missing_field()
+
+    from djimaging.tables.core.roi_mask import load_default_autorois_models
+    autorois_models = load_default_autorois_models()
+
+    for missing_key in missing_keys:
+        roi_mask_gui = RoiMask().draw_roi_mask(field_key=missing_key, autorois_models=autorois_models)
+        roi_mask_gui.exec_autorois_all()
+        roi_mask_gui.insert_database(RoiMask, missing_key)
+
+    assert len(RoiMask()) > 0
+
+
+@pytest.mark.dependency(depends=['test_populate_roi_mask'])
 def test_populate_roi(database_fixture, processes=20):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-
     from djimaging.schemas.full_rgc_schema import Roi
     Roi().populate(processes=processes)
     assert len(Roi()) > 0
@@ -135,7 +149,6 @@ def test_populate_traces(database_fixture, processes=20):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-
     from djimaging.schemas.full_rgc_schema import Traces
     Traces().populate(processes=processes)
     assert len(Traces()) > 0
@@ -146,7 +159,6 @@ def test_populate_preprocessparams(database_fixture):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-
     from djimaging.schemas.full_rgc_schema import PreprocessParams
     PreprocessParams().add_default(skip_duplicates=True)
     assert len(PreprocessParams()) == 1
@@ -157,7 +169,6 @@ def test_populate_preprocesstraces(database_fixture, processes=20):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-
     from djimaging.schemas.full_rgc_schema import PreprocessTraces
     PreprocessTraces().populate(processes=processes)
     assert len(PreprocessTraces()) > 0
@@ -168,7 +179,6 @@ def test_populate_snippets(database_fixture, processes=20):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-
     from djimaging.schemas.full_rgc_schema import Snippets
     Snippets().populate(processes=processes)
     assert len(Snippets()) > 0
@@ -179,7 +189,6 @@ def test_populate_averages(database_fixture, processes=20):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-
     from djimaging.schemas.full_rgc_schema import Averages
     Averages().populate(processes=processes)
     assert len(Averages()) > 0

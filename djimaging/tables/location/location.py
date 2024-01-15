@@ -7,46 +7,21 @@ import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
 
-from djimaging.utils.datafile_utils import scan_region_field_file_dicts
+from djimaging.utils.datafile_utils import get_file_info_df
 from djimaging.utils.data_utils import load_h5_table
 from djimaging.utils.scanm_utils import get_retinal_position, load_wparams_from_smp
 
 
-def extract_od_file(field_dicts, user_dict):
-    # Get file with OD information
-    for (region, field), info in field_dicts.items():
-        if field.lower() in user_dict['opticdisk_alias'].split('_'):
-            files = info['files']
-            if len(files) > 1:
-                if input(f'More than one file for optic disk found for {region}, {field}: {files}\n'
-                         + f'Accept first file? [y/n]') != 'y':
-                    raise ValueError('More than one file for optic disk found')
-
-            file = files[0]
-            break
-    else:
-        file = None
-
-    return file
+def load_od_pos_from_h5_file(filepath):
+    wparams = load_h5_table('wParamsNum', filename=filepath, lower_keys=True)
+    odx, ody, odz = wparams['xcoord_um'], wparams['ycoord_um'], wparams['zcoord_um']
+    return odx, ody, odz
 
 
-def load_od_pos_from_h5_file(pre_data_path, user_dict):
-    field_dicts = scan_region_field_file_dicts(pre_data_path, user_dict=user_dict, suffix='.h5')
-    file = extract_od_file(field_dicts, user_dict)
-
-    # Try to get OD information, either from file or from header
-    if file is not None:
-        fromfile = os.path.join(pre_data_path, file)
-        wparamsnum = load_h5_table('wParamsNum', filename=fromfile)
-
-        # Refers to center of fields
-        odx = wparamsnum['XCoord_um']
-        ody = wparamsnum['YCoord_um']
-        odz = wparamsnum['ZCoord_um']
-
-        return odx, ody, odz, fromfile
-    else:
-        return None, None, None, None
+def load_od_pos_from_smp_file(filepath):
+    wparams = load_wparams_from_smp(filepath, return_file=False)
+    odx, ody, odz = wparams['xcoord_um'], wparams['ycoord_um'], wparams['zcoord_um']
+    return odx, ody, odz
 
 
 def plot_rel_xy_pos(relx, rely, view='igor_local'):
@@ -66,20 +41,6 @@ def plot_rel_xy_pos(relx, rely, view='igor_local'):
     plt.show()
 
 
-def load_od_pos_from_smp_file(raw_data_path, user_dict):
-    field_dicts = scan_region_field_file_dicts(raw_data_path, user_dict=user_dict, suffix='.smp')
-    file = extract_od_file(field_dicts, user_dict)
-
-    # Try to get OD information, either from file or from header
-    if file is not None:
-        fromfile = os.path.join(raw_data_path, file)
-        wparams = load_wparams_from_smp(fromfile, return_file=False)
-        odx, ody, odz = wparams['xcoord_um'], wparams['ycoord_um'], wparams['zcoord_um']
-        return odx, ody, odz, fromfile
-    else:
-        return None, None, None, None
-
-
 class OpticDiskTemplate(dj.Computed):
     database = ""
 
@@ -90,18 +51,19 @@ class OpticDiskTemplate(dj.Computed):
         # XCoord_um is the relative position from back towards curtain, i.e. larger XCoord_um means closer to curtain
         # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
         -> self.experiment_table
+        -> self.raw_params_table
         ---
         od_fromfile :varchar(255)  # File from which optic disc data was extracted
-        odx      :float         # XCoord_um relative to the optic disk
-        ody      :float         # YCoord_um relative to the optic disk
-        odz      :float         # ZCoord_um relative to the optic disk
+        odx      :float            # XCoord_um relative to the optic disk
+        ody      :float            # YCoord_um relative to the optic disk
+        odz      :float            # ZCoord_um relative to the optic disk
         """
         return definition
 
     @property
     def key_source(self):
         try:
-            return self.experiment_table.proj()
+            return self.experiment_table.proj() * self.raw_params_table.proj()
         except (AttributeError, TypeError):
             pass
 
@@ -112,37 +74,41 @@ class OpticDiskTemplate(dj.Computed):
 
     @property
     @abstractmethod
+    def raw_params_table(self):
+        pass
+
+    @property
+    @abstractmethod
     def userinfo_table(self):
         pass
 
+    def load_exp_file_info_df(self, exp_key):
+        from_raw_data = (self.raw_params_table & exp_key).fetch1('from_raw_data')
+        header_path = (self.experiment_table & exp_key).fetch1('header_path')
+        data_folder = (self.userinfo_table & exp_key).fetch1("raw_data_dir" if from_raw_data else "pre_data_dir")
+        user_dict = (self.userinfo_table & exp_key).fetch1()
+
+        file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
+        file_info_df = file_info_df[file_info_df['kind'] == 'od']
+
+        return file_info_df, from_raw_data
+
     def make(self, key):
-        user_dict = (self.userinfo_table() & key).fetch1()
+        fromfile, odx, ody, odz = None, None, None, None
 
-        fromfile = None
+        file_info_df, from_raw_data = self.load_exp_file_info_df(key)
+        if len(file_info_df) > 0:
+            fromfile = file_info_df['file'].iloc[0]
 
-        if fromfile is None:
-            pre_data_path = os.path.join(
-                (self.experiment_table() & key).fetch1('header_path'),
-                (self.userinfo_table() & key).fetch1("pre_data_dir"))
-
-            if os.path.exists(pre_data_path):
-                odx, ody, odz, fromfile = load_od_pos_from_h5_file(pre_data_path, user_dict)
+        if fromfile is not None:
+            if from_raw_data:
+                odx, ody, odz = load_od_pos_from_h5_file(fromfile)
             else:
-                warnings.warn(f"pre_data_path does not exist: {pre_data_path}")
-
-        if fromfile is None:
-            raw_data_path = os.path.join(
-                (self.experiment_table() & key).fetch1('header_path'),
-                (self.userinfo_table() & key).fetch1("raw_data_dir"))
-
-            if os.path.exists(raw_data_path):
-                odx, ody, odz, fromfile = load_od_pos_from_smp_file(raw_data_path, user_dict)
-            else:
-                warnings.warn(f"raw_data_path does not exist: {raw_data_path}")
-
-        if (fromfile is None) and (self.experiment_table().ExpInfo() & key).fetch1("od_ini_flag") == 1:
-            odx, ody, odz = (self.experiment_table().ExpInfo() & key).fetch1("odx", "ody", "odz")
-            fromfile = os.path.join(*(self.experiment_table() & key).fetch1("header_path", "header_name"))
+                odx, ody, odz = load_od_pos_from_smp_file(fromfile)
+        else:
+            if (self.experiment_table().ExpInfo & key).fetch1("od_ini_flag") == 1:
+                odx, ody, odz = (self.experiment_table().ExpInfo & key).fetch1("odx", "ody", "odz")
+                fromfile = os.path.join(*(self.experiment_table & key).fetch1("header_path", "header_name"))
 
         if fromfile is None:
             warnings.warn(f'No optic disk information found for {key}')
@@ -279,6 +245,10 @@ class RetinalFieldLocationTemplate(dj.Computed):
 class RetinalFieldLocationCatTemplate(dj.Computed):
     database = ""
 
+    _ventral_dorsal_key = 'ventral_dorsal_pos_um'
+    _temporal_nasal_key = 'temporal_nasal_pos_um'
+    _center_dist = 0.
+
     @property
     def definition(self):
         definition = """
@@ -303,10 +273,6 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
     @abstractmethod
     def retinalfieldlocation_table(self):
         pass
-
-    _ventral_dorsal_key = 'ventral_dorsal_pos_um'
-    _temporal_nasal_key = 'temporal_nasal_pos_um'
-    _center_dist = 0.
 
     def make(self, key):
         ventral_dorsal, temporal_nasal = (self.retinalfieldlocation_table() & key).fetch1(

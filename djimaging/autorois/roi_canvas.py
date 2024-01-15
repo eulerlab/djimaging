@@ -333,7 +333,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             self,
             ch0_stacks,
             ch1_stacks,
-            stim_names=None,
+            pres_names=None,
             bg_dict=None,
             main_stim_idx=0,
             initial_roi_mask=None,
@@ -347,7 +347,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             max_shift=5,
             show_diagnostics=False,
     ):
-        super().__init__(ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, stim_names=stim_names,
+        super().__init__(ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, stim_names=pres_names,
                          bg_dict=bg_dict, n_artifact=n_artifact,
                          initial_roi_mask=initial_roi_mask, shifts=shifts, main_stim_idx=main_stim_idx,
                          upscale=upscale, autorois_models=autorois_models,

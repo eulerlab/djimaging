@@ -10,7 +10,7 @@ from tests.database.database_test_utils import _connect_test_schema, _drop_test_
 @pytest.fixture(autouse=True, scope='module')
 def database_fixture():
     # Run before
-    from djimaging.schemas.core_autorois_schema import schema as test_schema
+    from djimaging.schemas.core_schema import schema as test_schema
 
     try:
         time.sleep(2)
@@ -35,7 +35,7 @@ def test_create_schema(database_fixture):
     if not is_connected(connection):
         pytest.skip("Not connected to database")
 
-    from djimaging.schemas.core_autorois_schema import schema as test_schema
+    from djimaging.schemas.core_schema import schema as test_schema
     assert test_schema.database in dj.list_schemas()
 
 
@@ -44,7 +44,7 @@ def test_populate_user(database_fixture):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-    from djimaging.schemas.core_autorois_schema import UserInfo
+    from djimaging.schemas.core_schema import UserInfo
     userinfo = {
         'experimenter': 'DataJointTestData',
         'data_dir': '/gpfs01/euler/data/Data/DataJointTestData/xy-RGCs-minimal/',
@@ -65,7 +65,7 @@ def test_populate_raw_data_params(database_fixture):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-    from djimaging.schemas.core_autorois_schema import RawDataParams
+    from djimaging.schemas.core_schema import RawDataParams
     RawDataParams().add_default(
         from_raw_data=True,
     )
@@ -77,7 +77,7 @@ def test_populate_experiment(database_fixture):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-    from djimaging.schemas.core_autorois_schema import Experiment
+    from djimaging.schemas.core_schema import Experiment
     Experiment().rescan_filesystem(verboselvl=0)
     assert len(Experiment()) > 0
 
@@ -87,7 +87,7 @@ def test_populate_field(database_fixture):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-    from djimaging.schemas.core_autorois_schema import Field
+    from djimaging.schemas.core_schema import Field
     Field().rescan_filesystem(verboselvl=0)
     assert len(Field()) > 0
 
@@ -98,7 +98,7 @@ def test_populate_stimulus(database_fixture):
     if not is_connected(connection):
         pytest.skip("Not connected to database")
 
-    from djimaging.schemas.core_autorois_schema import Stimulus
+    from djimaging.schemas.core_schema import Stimulus
     Stimulus().add_nostim(skip_duplicates=True)
     Stimulus().add_chirp(spatialextent=1000, stim_name='gChirp', alias="chirp_gchirp_globalchirp", skip_duplicates=True)
     Stimulus().add_chirp(spatialextent=300, stim_name='lChirp', alias="lchirp_localchirp", skip_duplicates=True)
@@ -111,7 +111,7 @@ def test_populate_presentation(database_fixture):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-    from djimaging.schemas.core_autorois_schema import Presentation
+    from djimaging.schemas.core_schema import Presentation
     Presentation().populate()
     assert len(Presentation()) > 0
 
@@ -121,11 +121,11 @@ def test_populate_roi_mask(database_fixture):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-    from djimaging.schemas.core_autorois_schema import RoiMask
+    from djimaging.schemas.core_schema import RoiMask
 
     missing_keys = RoiMask().list_missing_field()
 
-    from djimaging.tables.core_autorois.roi_mask import load_default_autorois_models
+    from djimaging.tables.core.roi_mask import load_default_autorois_models
     autorois_models = load_default_autorois_models()
 
     for missing_key in missing_keys:
@@ -141,7 +141,7 @@ def test_populate_roi(database_fixture, processes=20):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-    from djimaging.schemas.core_autorois_schema import Roi
+    from djimaging.schemas.core_schema import Roi
     Roi().populate(processes=processes)
     assert len(Roi()) > 0
 
@@ -151,6 +151,6 @@ def test_populate_traces(database_fixture, processes=20):
     connection = database_fixture
     if not is_connected(connection):
         pytest.skip("Not connected to database")
-    from djimaging.schemas.core_autorois_schema import Traces
+    from djimaging.schemas.core_schema import Traces
     Traces().populate(processes=processes)
     assert len(Traces()) > 0

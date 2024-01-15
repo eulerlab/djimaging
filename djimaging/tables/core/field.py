@@ -1,27 +1,44 @@
 import os
 from abc import abstractmethod
 from copy import deepcopy
+from typing import Optional
 
 import datajoint as dj
 import numpy as np
+
 from djimaging.utils import scanm_utils
 
-from djimaging.utils.datafile_utils import get_condition, scan_region_field_file_dicts, \
-    clean_region_field_file_dicts, load_field_roi_mask_from_h5
+from djimaging.utils.datafile_utils import get_file_info_df
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 
 
 class FieldTemplate(dj.Computed):
     database = ""
-    _load_field_roi_masks = True  # Set to False if all roi masks and roi ids should be based on presentation
+    incl_region = True  # Include region as primary key?
+    incl_cond1 = False  # Include condition 1 as primary key?
+    incl_cond2 = False  # Include condition 2 as primary key?
+    incl_cond3 = False  # Include condition 3 as primary key?
 
     @property
     def definition(self):
         definition = """
         # Recording fields
         -> self.experiment_table
+        -> self.raw_params_table
         field   :varchar(255)          # string identifying files corresponding to field
+        """
+
+        if self.incl_region:
+            definition += "    region   :varchar(255)    # region (e.g. LR or RR)\n"
+        if self.incl_cond1:
+            definition += "    cond1    :varchar(255)    # condition (pharmacological or other)\n"
+        if self.incl_cond2:
+            definition += "    cond2    :varchar(255)    # condition (pharmacological or other)\n"
+        if self.incl_cond3:
+            definition += "    cond3    :varchar(255)    # condition (pharmacological or other)\n"
+
+        definition += """
         ---
         fromfile: varchar(255)  # info extracted from which file?
         absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
@@ -38,23 +55,29 @@ class FieldTemplate(dj.Computed):
         z_step_um :float  # z-step in um
         z_stack_flag : tinyint unsigned  # Is z-stack?
         """
+
         return definition
 
     @property
     def key_source(self):
         try:
-            return self.experiment_table.proj()
+            return self.experiment_table.proj() * self.raw_params_table.proj()
         except (AttributeError, TypeError):
             pass
 
     @property
     @abstractmethod
-    def experiment_table(self):
+    def userinfo_table(self):
         pass
 
     @property
     @abstractmethod
-    def userinfo_table(self):
+    def raw_params_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def experiment_table(self):
         pass
 
     class StackAverages(dj.Part):
@@ -69,217 +92,120 @@ class FieldTemplate(dj.Computed):
             """
             return definition
 
-    class RoiMask(dj.Part):
-        @property
-        def definition(self):
-            definition = """
-            # ROI Mask
-            -> master
-            ---
-            roi_mask    :longblob       # roi mask for the recording field
-            """
-            return definition
-
     def make(self, key, verboselvl=0):
-        self.add_experiment_fields(key, only_new=False, verboselvl=0, suppress_errors=False)
+        self.add_experiment_fields(
+            key, only_new=False, verboselvl=verboselvl, suppress_errors=False, restr_headers=None)
 
-    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False):
+    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
+                          restr_headers: Optional[list] = None):
         """Scan filesystem for new fields and add them to the database."""
         if restrictions is None:
             restrictions = dict()
 
         for key in (self.key_source & restrictions):
-            self.add_experiment_fields(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
+            self.add_experiment_fields(
+                key, restr_headers=restr_headers, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def compute_field_dicts(self, key, verboselvl=0):
-        data_path = os.path.join((self.experiment_table() & key).fetch1('header_path'),
-                                 (self.userinfo_table() & key).fetch1("pre_data_dir"))
-        user_dict = (self.userinfo_table() & key).fetch1()
+    @property
+    def new_primary_keys(self):
+        new_primary_keys = ['field']
+        if self.incl_region:
+            new_primary_keys.append('region')
+        if self.incl_cond1:
+            new_primary_keys.append('cond1')
+        if self.incl_cond2:
+            new_primary_keys.append('cond2')
+        if self.incl_cond3:
+            new_primary_keys.append('cond3')
+        return new_primary_keys
 
-        assert os.path.exists(data_path), f"Error: Data folder does not exist: {data_path}"
+    def load_exp_file_info_df(self, exp_key):
+        from_raw_data = (self.raw_params_table & exp_key).fetch1('from_raw_data')
+        header_path = (self.experiment_table & exp_key).fetch1('header_path')
+        data_folder = (self.userinfo_table & exp_key).fetch1("raw_data_dir" if from_raw_data else "pre_data_dir")
+        user_dict = (self.userinfo_table & exp_key).fetch1()
+
+        file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
+        file_info_df = file_info_df[file_info_df['field'].notnull() & (file_info_df['kind'] == 'response')]
+        file_info_df.sort_values('mask_order', inplace=True, ascending=True)
+
+        # Set defaults
+        if self.incl_cond1:
+            file_info_df['cond1'].fillna('control', inplace=True)
+        if self.incl_cond2:
+            file_info_df['cond2'].fillna('control', inplace=True)
+        if self.incl_cond3:
+            file_info_df['cond3'].fillna('control', inplace=True)
+
+        return file_info_df
+
+    def add_experiment_fields(
+            self, exp_key, only_new: bool, verboselvl: int, suppress_errors: bool,
+            restr_headers: Optional[list] = None):
+
+        if restr_headers is not None:
+            header_path = (self.experiment_table & exp_key).fetch1('header_path')
+            if header_path not in restr_headers:
+                if verboselvl > 1:
+                    print(f"\tSkipping header_path `{header_path}` because of restriction")
+                return
+
+        file_info_df = self.load_exp_file_info_df(exp_key)
+        field_dfs = file_info_df.groupby(self.new_primary_keys)
 
         if verboselvl > 0:
-            print("Processing fields in:", data_path)
+            print(f"Found {len(file_info_df)} files in {len(field_dfs)} for key={exp_key}")
 
-        field_dicts = scan_region_field_file_dicts(data_path, user_dict=user_dict, verbose=verboselvl > 0)
-        field_dicts = clean_region_field_file_dicts(field_dicts, user_dict=user_dict)
-        return field_dicts
+        for field_info, field_df in field_dfs:
+            field_key = {**dict(zip(self.new_primary_keys, field_info)), **exp_key}
 
-    def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
-        field_dicts = self.compute_field_dicts(key=key, verboselvl=verboselvl)
-        # Go through remaining fields and add them
-        for (region, field), info in field_dicts.items():
-            files = info['files']
-            exists = len((self & key & dict(field=field)).fetch()) > 0
-            if only_new and exists:
+            if only_new and (len((self & field_key).proj()) > 0):
                 if verboselvl > 1:
-                    print(f"\tSkipping field `{field}` with files: {files}")
+                    print(f"\tSkipping field `{field_key}` because it already exists")
                 continue
 
             if verboselvl > 0:
-                print(f"\tAdding field: `{field}` with files: {files}")
+                print(f"\tAdding field: `{field_key}`")
 
             try:
-                self.add_field(key=key, field=field, files=files, verboselvl=verboselvl)
+                self.add_field(
+                    field_key=field_key, filepaths=field_df['filepath'].values, verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
-                    print("Suppressed Error:", e, '\n\tfor key:', key)
+                    print("Suppressed Error:", e, '\n\tfor key:\n', field_key, '\n\t', field_df['filepath'])
                 else:
                     raise e
 
-    def add_field(self, key, field, files, verboselvl):
-        pre_data_path = os.path.join((self.experiment_table() & key).fetch1('header_path'),
-                                     (self.userinfo_table() & key).fetch1("pre_data_dir"))
-        assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
+    def add_field(self, field_key, filepaths, verboselvl=0):
 
-        mask_alias = (self.userinfo_table() & key).fetch1("mask_alias")
-        highres_alias = (self.userinfo_table() & key).fetch1("highres_alias")
-        setupid = (self.experiment_table().ExpInfo() & key).fetch1("setupid")
+        if verboselvl > 4:
+            print('\t\tAdd field with files:', filepaths)
 
-        field_key, roimask_key, avg_keys = self.load_new_keys(
-            key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl)
+        from_raw_data = (self.raw_params_table & field_key).fetch1('from_raw_data')
+        data_stack_name, alt_stack_name = (self.userinfo_table & field_key).fetch1(
+            "data_stack_name", "alt_stack_name")
+        setupid = (self.experiment_table().ExpInfo & field_key).fetch1("setupid")
 
-        if verboselvl > 2:
-            print(f"For key=\n{key} add \nfield_key=\n{field_key}")
+        field_entry, avg_entries = load_field_key_data(
+            field_key=field_key, filepaths=filepaths, ch_names=(data_stack_name, alt_stack_name),
+            setupid=setupid, from_raw_data=from_raw_data)
 
-        self.insert1(field_key, allow_direct_insert=True)
-
-        if self._load_field_roi_masks:
-            if roimask_key is not None:
-                (self.RoiMask & field_key).insert1(roimask_key, allow_direct_insert=True)
-        for avg_key in avg_keys:
-            (self.StackAverages & field_key).insert1(avg_key, allow_direct_insert=True)
-
-    def load_new_keys(self, key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl):
-        field_key, roimask_key, avg_keys = load_scan_info(
-            key=key, field=field, pre_data_path=pre_data_path, files=files,
-            mask_alias=mask_alias, highres_alias=highres_alias, setupid=setupid, verboselvl=verboselvl)
-        return field_key, roimask_key, avg_keys
+        self.insert1(field_entry, allow_direct_insert=True)
+        for avg_entry in avg_entries:
+            self.StackAverages().insert1(avg_entry, allow_direct_insert=True)
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
-
-        roi_masks = (self.RoiMask() & key).fetch("roi_mask")
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
         main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
         alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
         npixartifact = (self & key).fetch1('npixartifact')
 
-        plot_field(main_ch_average, alt_ch_average,
-                   roi_masks[0] if len(roi_masks) == 1 else None,
-                   roi_ch_average=main_ch_average, title=key, npixartifact=npixartifact)
+        plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4))
 
 
-class FieldWithConditionTemplate(FieldTemplate):
-    @property
-    def definition(self):
-        new_line = 'condition    :varchar(255)    # condition (pharmacological or other)\n        '
-        d = super().definition
-        i_primary = d.find('---')
-        assert i_primary > 0
-        definition = d[:i_primary] + new_line + d[i_primary:]
-        return definition
-
-    @property
-    @abstractmethod
-    def experiment_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def userinfo_table(self):
-        pass
-
-    class StackAverages(dj.Part):
-        @property
-        def definition(self):
-            definition = """
-                # Stack median (over time of the available channels)
-                -> master
-                ch_name : varchar(255)  # name of the channel
-                ---
-                ch_average :longblob  # Stack median over time
-                """
-            return definition
-
-    class RoiMask(dj.Part):
-        @property
-        def definition(self):
-            definition = """
-                # ROI Mask
-                -> master
-                ---
-                roi_mask    :longblob       # roi mask for the recording field
-                """
-            return definition
-
-    def load_new_keys(self, key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl):
-        field_key, roimask_key, avg_keys = load_scan_info(
-            key=key, field=field, pre_data_path=pre_data_path, files=files,
-            mask_alias=mask_alias, highres_alias=highres_alias, setupid=setupid, verboselvl=verboselvl)
-
-        condition_loc = (self.userinfo_table() & key).fetch1('condition_loc')
-
-        condition = get_condition(data_file=field_key["fromfile"], loc=condition_loc)
-        for file in files:
-            if get_condition(data_file=file, loc=condition_loc) != condition:
-                ValueError(f"{get_condition(data_file=file, loc=condition_loc)} != {condition}, {files}")
-
-        field_key["condition"] = condition
-        roimask_key["condition"] = condition
-        for avg_key in avg_keys:
-            avg_key["condition"] = condition
-
-        return field_key, roimask_key, avg_keys
-
-    def add_experiment_fields(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
-        field_dicts = self.compute_field_dicts(key=key, verboselvl=verboselvl)
-
-        condition_loc = (self.userinfo_table() & key).fetch1('condition_loc')
-        for (region, field), info in field_dicts.items():
-            conditions = []
-            for data_file in info['files']:
-                condition = get_condition(data_file, loc=condition_loc)
-                conditions.append(condition)
-            field_dicts[field]['conditions'] = conditions
-
-        # Go through remaining fields and add them
-        for (region, field), info in field_dicts.items():
-            files = np.asarray(info['files'])
-            conditions = np.asarray(info['conditions'])
-
-            for condition in np.unique(conditions):
-                condition_files = files[conditions == condition]
-                exists = len((self & key & dict(field=field, condition=condition)).fetch()) > 0
-                if only_new and exists:
-                    if verboselvl > 1:
-                        print(f"\tSkipping field '{field}' '{condition}' with files: {condition_files}")
-                    continue
-
-                if verboselvl > 0:
-                    print(f"\tAdding field: '{field}' '{condition}' with files: {condition_files}")
-
-                try:
-                    self.add_field(key=key, field=field, files=condition_files, verboselvl=verboselvl)
-                except Exception as e:
-                    if suppress_errors:
-                        print("Suppressed Error:", e, '\n\tfor key:', key)
-                    else:
-                        raise e
-
-
-def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, setupid, verboselvl=0):
-    try:
-        roi_mask, file = load_field_roi_mask_from_h5(
-            pre_data_path, files, mask_alias=mask_alias, highres_alias=highres_alias)
-        if verboselvl > 1:
-            print(f"\t\tUsing roi_mask from {file}")
-    except ValueError:
-        roi_mask = None
-        file = files[0]
-
-    filepath = os.path.join(pre_data_path, file)
-    ch_stacks, wparams = scanm_utils.load_stacks_from_h5(filepath, ch_names=('wDataCh0', 'wDataCh1'))
+def load_field_key_data(field_key, filepaths, from_raw_data, ch_names, setupid) -> (dict, list):
+    ch_stacks, wparams, filepath = load_first_file_wo_error(filepaths, from_raw_data, ch_names)
 
     nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
     nypix = wparams["user_dypix"]
@@ -292,37 +218,47 @@ def load_scan_info(key, field, pre_data_path, files, mask_alias, highres_alias, 
     scan_type = scanm_utils.get_scan_type_from_wparams(wparams)
 
     # keys
-    base_key = deepcopy(key)
-    base_key["field"] = field
-
-    field_key = deepcopy(base_key)
-    field_key["fromfile"] = filepath
-    field_key["absx"] = wparams['xcoord_um']
-    field_key["absy"] = wparams['ycoord_um']
-    field_key["absz"] = wparams['zcoord_um']
-    field_key["scan_type"] = scan_type
-    field_key["npixartifact"] = npixartifact
-    field_key["nxpix"] = nxpix
-    field_key["nypix"] = nypix
-    field_key["nzpix"] = nzpix
-    field_key["nxpix_offset"] = wparams["user_nxpixlineoffs"]
-    field_key["nxpix_retrace"] = wparams["user_npixretrace"]
-    field_key["pixel_size_um"] = pixel_size_um
-    field_key["z_step_um"] = z_step_um
-    field_key["z_stack_flag"] = z_stack_flag
-
-    if roi_mask is not None:
-        roimask_key = deepcopy(base_key)
-        roimask_key["roi_mask"] = roi_mask
-    else:
-        roimask_key = None
+    field_entry = deepcopy(field_key)
+    field_entry["fromfile"] = filepath
+    field_entry["absx"] = wparams['xcoord_um']
+    field_entry["absy"] = wparams['ycoord_um']
+    field_entry["absz"] = wparams['zcoord_um']
+    field_entry["scan_type"] = scan_type
+    field_entry["npixartifact"] = npixartifact
+    field_entry["nxpix"] = nxpix
+    field_entry["nypix"] = nypix
+    field_entry["nzpix"] = nzpix
+    field_entry["nxpix_offset"] = wparams["user_nxpixlineoffs"]
+    field_entry["nxpix_retrace"] = wparams["user_npixretrace"]
+    field_entry["pixel_size_um"] = pixel_size_um
+    field_entry["z_step_um"] = z_step_um
+    field_entry["z_stack_flag"] = z_stack_flag
 
     # get stack avgs
-    avg_keys = []
+    avg_entries = []
     for name, stack in ch_stacks.items():
-        avg_key = deepcopy(base_key)
-        avg_key["ch_name"] = name
-        avg_key["ch_average"] = np.median(stack, 2)
-        avg_keys.append(avg_key)
+        avg_entry = deepcopy(field_key)
+        avg_entry["ch_name"] = name
+        avg_entry["ch_average"] = np.median(stack, 2)
+        avg_entries.append(avg_entry)
 
-    return field_key, roimask_key, avg_keys
+    return field_entry, avg_entries
+
+
+def load_first_file_wo_error(filepaths, from_raw_data, ch_names):
+    for i, filepath in enumerate(filepaths):
+        try:
+            ch_stacks, wparams = scanm_utils.load_stacks(filepath, from_raw_data=from_raw_data, ch_names=ch_names)
+            break
+        except Exception as e:
+            error_msg = f"Failed to load file with error {e}:\n{filepath}"
+            if filepath == filepaths[-1]:
+                raise OSError(error_msg)
+            if input(f"{error_msg}\nTry again for {filepaths[i + 1]}? (y/n)') != 'y'") == 'y':
+                continue
+            else:
+                raise OSError(error_msg)
+    else:
+        raise OSError(f"Failed to load any of the files:\n{filepaths}")
+
+    return ch_stacks, wparams, filepath

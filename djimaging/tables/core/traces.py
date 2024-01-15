@@ -4,16 +4,15 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.utils.scanm_utils import roi2trace_from_h5_file, roi2trace_from_stack, \
+    check_valid_triggers_rel_to_tracetime
 from djimaging.utils import plot_utils, math_utils, trace_utils
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
-from djimaging.utils.scanm_utils import roi2trace_from_stack, roi2trace_from_h5_file, \
-    check_valid_triggers_rel_to_tracetime
 
 
 class TracesTemplate(dj.Computed):
     database = ""
-    _ignore_incompatible_roi_masks = False
 
     @property
     def definition(self):
@@ -21,7 +20,7 @@ class TracesTemplate(dj.Computed):
         # Raw Traces for each roi under a specific presentation
         -> self.presentation_table
         -> self.roi_table
-        -> self.params_table
+        -> self.raw_params_table
         ---
         trace          :longblob              # array of raw trace
         trace_times    :longblob              # numerical array of trace times
@@ -32,12 +31,17 @@ class TracesTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def params_table(self):
+    def raw_params_table(self):
         pass
 
     @property
     @abstractmethod
     def presentation_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def roi_mask_table(self):
         pass
 
     @property
@@ -53,39 +57,45 @@ class TracesTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.presentation_table().proj()
+            return self.presentation_table.proj() \
+                * self.raw_params_table.proj() \
+                * self.roi_mask_table.RoiMaskPresentation.proj()
         except (AttributeError, TypeError):
             pass
 
     def make(self, key):
-        include_artifacts, compute_from_stack, trace_precision = (self.params_table() & key).fetch1(
-            "include_artifacts", "compute_from_stack", "trace_precision")
-        filepath = (self.presentation_table() & key).fetch1("h5_header")
-        triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
-        roi_ids = (self.roi_table() & key).fetch("roi_id")
+        include_artifacts, compute_from_stack, trace_precision, from_raw_data = (self.raw_params_table & key).fetch1(
+            "include_artifacts", "compute_from_stack", "trace_precision", "from_raw_data")
 
-        if not self._ignore_incompatible_roi_masks:
-            if (self.presentation_table.RoiMask & key).fetch1('pres_and_field_mask') == 'different':
-                raise ValueError(f'Tried to populate traces with inconsistent roi mask for key=\n{key}\n' +
-                                 'Compare ROI mask of Field and Presentation.' +
-                                 'To ignore this error set self._ignore_incompatible_roi_masks=True')
+        filepath = (self.presentation_table & key).fetch1("pres_data_file")
+        triggertimes = (self.presentation_table & key).fetch1("triggertimes")
+        roi_ids = (self.roi_table & key).fetch("roi_id")
+        n_artifact = (self.presentation_table & key).fetch1("npixartifact")
 
         if compute_from_stack:
-            data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
-            roi_mask = (self.presentation_table.RoiMask() & key).fetch1("roi_mask")
+            data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
+            roi_mask = (self.roi_mask_table.RoiMaskPresentation & key).fetch1("roi_mask")
+
+            if (self.roi_mask_table.RoiMaskPresentation & key).fetch1('as_field_mask') == 'different':
+                raise ValueError(f'Tried to populate traces with inconsistent roi mask for key=\n{key}\n' +
+                                 'Compare ROI mask of Field and Presentation.')
 
             roi2trace = roi2trace_from_stack(
                 filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
-                data_stack_name=data_stack_name, precision=trace_precision)
+                data_stack_name=data_stack_name, precision=trace_precision, from_raw_data=from_raw_data)
+
+            for roi_id, roi_data in roi2trace.items():
+                if np.any(-roi_mask[:n_artifact, :] == roi_id):
+                    print(key, roi_id)
+                roi2trace[roi_id]['incl_artifact'] = np.any(-roi_mask[:n_artifact, :] == roi_id)
+
         else:
+            assert not from_raw_data, "from_raw_data=True only supported for compute_from_stack=True"
             roi2trace = roi2trace_from_h5_file(filepath, roi_ids)
 
-        for roi_id in roi_ids:
-            if not include_artifacts:
-                if (self.roi_table() & key & dict(roi_id=roi_id)).fetch1("artifact_flag") == 1:
-                    continue
-
-            roi_data = roi2trace[roi_id]
+        for roi_id, roi_data in roi2trace.items():
+            if not include_artifacts and roi_data.get('incl_artifact', False):
+                continue
 
             trace_key = key.copy()
             trace_key['roi_id'] = roi_id

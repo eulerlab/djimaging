@@ -107,6 +107,7 @@ class FitDoG2DRF(receptivefield.FitDoG2DRFTemplate):
 # Retinal field location
 @schema
 class OpticDisk(location.OpticDiskTemplate):
+    raw_params_table = RawDataParams
     userinfo_table = UserInfo
     experiment_table = Experiment
 

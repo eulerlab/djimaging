@@ -11,6 +11,11 @@ class UserInfo(core.UserInfoTemplate):
 
 
 @schema
+class RawDataParams(core.RawDataParamsTemplate):
+    userinfo_table = UserInfo
+
+
+@schema
 class Experiment(core.ExperimentTemplate):
     userinfo_table = UserInfo
 
@@ -29,12 +34,14 @@ class Experiment(core.ExperimentTemplate):
 
 @schema
 class Field(core.FieldTemplate):
-    _load_field_roi_masks = True  # Set to False if you don't want to use Field level Roi masks!
-    userinfo_table = UserInfo
-    experiment_table = Experiment
+    incl_region = True  # Include region as primary key?
+    incl_cond1 = True  # Include condition 1 as primary key?
+    incl_cond2 = False  # Include condition 2 as primary key?
+    incl_cond3 = False  # Include condition 3 as primary key?
 
-    class RoiMask(core.FieldTemplate.RoiMask):
-        pass
+    userinfo_table = UserInfo
+    raw_params_table = RawDataParams
+    experiment_table = Experiment
 
     class StackAverages(core.FieldTemplate.StackAverages):
         pass
@@ -46,17 +53,17 @@ class Stimulus(core.StimulusTemplate):
 
 
 @schema
-class RawDataParams(core.RawDataParamsTemplate):
-    pass
-
-
-@schema
 class Presentation(core.PresentationTemplate):
+    incl_region = True  # Include region as primary key?
+    incl_cond1 = True  # Include condition 1 as primary key?
+    incl_cond2 = True  # Include condition 2 as primary key?
+    incl_cond3 = False  # Include condition 3 as primary key?
+
     userinfo_table = UserInfo
     experiment_table = Experiment
     field_table = Field
     stimulus_table = Stimulus
-    params_table = RawDataParams
+    raw_params_table = RawDataParams
 
     class ScanInfo(core.PresentationTemplate.ScanInfo):
         pass
@@ -64,23 +71,35 @@ class Presentation(core.PresentationTemplate):
     class StackAverages(core.PresentationTemplate.StackAverages):
         pass
 
-    class RoiMask(core.PresentationTemplate.RoiMask):
-        pass
+
+@schema
+class RoiMask(core.RoiMaskTemplate):
+    _max_shift = 5  # Maximum shift of ROI mask in pixels
+
+    field_table = Field
+    presentation_table = Presentation
+    experiment_table = Experiment
+    userinfo_table = UserInfo
+    raw_params_table = RawDataParams
+
+    class RoiMaskPresentation(core.RoiMaskTemplate.RoiMaskPresentation):
+        presentation_table = Presentation
 
 
 @schema
 class Roi(core.RoiTemplate):
+    roi_mask_table = RoiMask
     userinfo_table = UserInfo
-    field_or_pres_table = Field  # Can also be set to Presentation
+    field_table = Field
 
 
 @schema
 class Traces(core.TracesTemplate):
     userinfo_table = UserInfo
-    params_table = RawDataParams
+    raw_params_table = RawDataParams
     presentation_table = Presentation
-    roi_mask_table = Field.RoiMask  # Can also be set to Presentation.RoiMask
     roi_table = Roi
+    roi_mask_table = RoiMask
 
 
 @schema
@@ -90,6 +109,8 @@ class PreprocessParams(core.PreprocessParamsTemplate):
 
 @schema
 class PreprocessTraces(core.PreprocessTracesTemplate):
+    _baseline_max_dt = 2.  # seconds before stimulus used for baseline calculation
+
     presentation_table = Presentation
     preprocessparams_table = PreprocessParams
     traces_table = Traces
@@ -105,5 +126,6 @@ class Snippets(core.SnippetsTemplate):
 
 @schema
 class Averages(core.AveragesTemplate):
-    _norm_kind = 'amp_one'
+    _norm_kind = 'amp_one'  # How to normalize averages
+
     snippets_table = Snippets

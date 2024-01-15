@@ -104,6 +104,13 @@ class RoiMaskTemplate(dj.Manual):
         missing_keys = (self.field_table.proj() & (self.presentation_table.proj() - self.proj())).fetch(as_dict=True)
         return missing_keys
 
+    def load_field_file_info_df(self, field_key):
+        file_info_df = self.field_table().load_exp_file_info_df(field_key)
+        file_info_df = file_info_df[(file_info_df['kind'] == 'response') | (file_info_df['kind'] == 'hr')]
+        for new_key in self.field_table().new_primary_keys:
+            file_info_df = file_info_df[file_info_df[new_key] == field_key[new_key]]
+        return file_info_df
+
     def draw_roi_mask(self, field_key=None, pres_key=None, canvas_width=20, autorois_models='default_rgc',
                       show_diagnostics=True, load_high_res=True,
                       roi_mask_dir=None, old_prefix=None, new_prefix=None, use_stim_onset=True, **kwargs):
@@ -117,10 +124,29 @@ class RoiMaskTemplate(dj.Manual):
 
         assert field_key is not None, 'No field_key provided and no missing field found.'
 
-        pres_keys = np.array(list((self.presentation_table & field_key).proj()),
-                             dtype='object')
+        field_key = (self.field_table & field_key).proj().fetch1()  # Make sure it's a dict
 
         from_raw_data = (self.raw_params_table & field_key).fetch1("from_raw_data")
+
+        field_file_info_df = self.load_field_file_info_df(field_key)
+        filepaths = field_file_info_df[field_file_info_df['kind'] == 'response']['filepath'].values
+
+        pres_keys = []
+        for f in filepaths:
+            pres_key_list = ((self.presentation_table & field_key) & dict(pres_data_file=f)).proj().fetch(as_dict=True)
+            if len(pres_key_list) == 1:
+                pres_keys.append(pres_key_list[0])
+            elif len(pres_key_list) > 1:
+                raise ValueError(f'Found multiple presentation keys for filepath={f}:\n{pres_key_list}')
+
+        pres_names = [{k: v for k, v in pres_key.items() if k not in field_key.keys()}
+                      for pres_key in pres_keys]
+
+        # Load stack data
+        data_name, alt_name = (self.userinfo_table & field_key).fetch1('data_stack_name', 'alt_stack_name')
+        ch0_stacks, ch1_stacks, output_files = load_stack_data(
+            files=filepaths, data_name=data_name, alt_name=alt_name, from_raw_data=from_raw_data,
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
 
         n_artifact, pixel_size_um, scan_type = (self.presentation_table() & pres_keys).fetch(
             'npixartifact', 'pixel_size_um', 'scan_type')
@@ -137,29 +163,8 @@ class RoiMaskTemplate(dj.Manual):
         else:
             raise NotImplementedError(scan_type)
 
-        # Get pres data
-        mask_alias, highres_alias = (self.userinfo_table() & field_key).fetch1(
-            "mask_alias", "highres_alias")
-        files, stim_names, conditions, triggertimes = (self.presentation_table & pres_keys).fetch(
-            'pres_data_file', 'stim_name', 'condition', 'triggertimes')
-        assert len(pres_keys) == len(files)
+        triggertimes = (self.presentation_table & pres_keys).fetch('triggertimes')
         scan_frequencies = (self.presentation_table.ScanInfo() & pres_keys).fetch('scan_frequency')
-        assert len(pres_keys) == len(scan_frequencies)
-
-        # Sort data by relevance
-        sort_idxs = sort_roi_mask_files(files, mask_alias=mask_alias, highres_alias=highres_alias, as_index=True)
-        pres_keys = pres_keys[sort_idxs]
-        files = files[sort_idxs]
-        stim_names = stim_names[sort_idxs]
-        conditions = conditions[sort_idxs]
-        triggertimes = triggertimes[sort_idxs]
-        scan_frequencies = scan_frequencies[sort_idxs]
-
-        # Load stack data
-        data_name, alt_name = (self.userinfo_table & field_key).fetch1('data_stack_name', 'alt_stack_name')
-        ch0_stacks, ch1_stacks, output_files = load_stack_data(
-            files, data_name=data_name, alt_name=alt_name, from_raw_data=from_raw_data,
-            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
 
         if use_stim_onset:
             stim_onset_idxs = [int(np.floor(tt[0] * fs)) if len(tt) > 0 else 0
@@ -187,7 +192,7 @@ class RoiMaskTemplate(dj.Manual):
         shifts = self.init_shifts(field_key, pres_keys)
 
         roi_canvas = InteractiveRoiCanvas(
-            stim_names=[f"{stim_name}({condition})" for stim_name, condition in zip(stim_names, conditions)],
+            pres_names=pres_names,
             ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
             main_stim_idx=0, initial_roi_mask=initial_roi_mask, shifts=shifts,
             canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
@@ -319,10 +324,11 @@ class RoiMaskTemplate(dj.Manual):
         return err_list
 
     def add_field_roi_masks(self, field_key, roi_mask_dir=None, old_prefix=None, new_prefix=None, verboselvl=0):
-        if verboselvl > 2:
-            print('\nfield_key:', field_key)
+        pres_keys = (self.presentation_table.proj() & field_key).fetch(as_dict=True)
 
-        pres_keys = (self.presentation_table.proj() & field_key)
+        if verboselvl > 2:
+            print('\nfield_key:', field_key, '\npres_keys:', pres_keys)
+
         roi_masks = [self.load_presentation_roi_mask(key, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
                      for key in pres_keys]
 
