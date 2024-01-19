@@ -355,26 +355,3 @@ class OsDsIndexesTemplate(dj.Computed):
         plt.tight_layout()
         plt.show()
         return fig, axs
-
-
-class MovingBarQITemplate(RepeatQITemplate):
-    _stim_family = "movingbar"
-    _stim_name = "movingbar"
-
-    @property
-    @abstractmethod
-    def stimulus_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def snippets_table(self):
-        pass
-
-    def make(self, key):
-        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
-        snippets = (self.snippets_table() & key).fetch1('snippets')
-
-        qidx = compute_mb_qi(snippets, dir_order)
-        min_qidx = 1 / (snippets.shape[1] / np.unique(dir_order).size)
-        self.insert1(dict(key, qidx=qidx, min_qidx=min_qidx))

@@ -5,10 +5,9 @@ from matplotlib import pyplot as plt
 
 from djimaging.utils.trace_utils import get_mean_dt
 
-from djimaging.utils.dj_utils import get_secondary_keys, get_primary_key
+from djimaging.utils.dj_utils import get_primary_key
 from scipy import interpolate
 import datajoint as dj
-from cached_property import cached_property
 
 
 def preprocess_chirp(chirp_average, dt, shift=2, n_int=249):
@@ -68,43 +67,32 @@ def preprocess_bar(bar_average, dt, shift=-3):
 class Baden16TracesTemplate(dj.Computed):
     database = ""
 
-    @property
-    def definition(self):
-        definition = """
-        # Process traces to match Baden 2016 format, e.g. for RGC classifier.
-        -> self.roi_table
-        -> self.preprocessparams_table
-        ---
-        preproc_chirp:   blob  # preprocessed chirp trace (averaged, downsampled and normalized)
-        preproc_bar:     blob  # preprocessed bar
-        """
-        return definition
-
     _shift_chirp = 2
     _shift_bar = -3
     _chirp_n_int = 249
 
     _stim_name_chirp = 'gChirp'
     _stim_name_bar = 'movingbar'
-    _restr = [dict(condition='Control'), dict(condition='control'), dict(condition='C1'), dict(condition='c1')]
+
+    @property
+    def definition(self):
+        definition = """
+        # Process traces to match Baden 2016 format, e.g. for RGC classifier.
+        -> self.averages_table().proj(avg_stim_name='stim_name')
+        -> self.os_ds_table().proj(os_ds_stim_name='stim_name')
+        ---
+        preproc_chirp:   blob  # preprocessed chirp trace (averaged, downsampled and normalized)
+        preproc_bar:     blob  # preprocessed bar (time component in pref. dir., averaged and rolled)
+        """
+        return definition
 
     @property
     def key_source(self):
         try:
-            return self.roi_table.proj() * self.preprocessparams_table.proj() \
-                & (self.chirp_tab.proj() * self.bar_tab.proj() & self._restr)
+            return ((self.averages_table & dict(stim_name=self._stim_name_chirp)).proj(avg_stim_name='stim_name') *
+                    (self.os_ds_table & dict(stim_name=self._stim_name_bar)).proj(os_ds_stim_name='stim_name'))
         except (AttributeError, TypeError):
             pass
-
-    @property
-    @abstractmethod
-    def roi_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def preprocessparams_table(self):
-        pass
 
     @property
     @abstractmethod
@@ -116,23 +104,13 @@ class Baden16TracesTemplate(dj.Computed):
     def os_ds_table(self):
         pass
 
-    @cached_property
-    def chirp_tab(self):
-        secondary_keys = get_secondary_keys(self.averages_table)
-        return (self.averages_table() & f"stim_name = '{self._stim_name_chirp}'" & self._restr).proj(
-            **{f"chirp_{k}": k for k in secondary_keys + ['stim_name']})
-
-    @cached_property
-    def bar_tab(self):
-        secondary_keys = get_secondary_keys(self.os_ds_table)
-        return (self.os_ds_table() & f"stim_name = '{self._stim_name_bar}'" & self._restr).proj(
-            **{f"bar_{k}": k for k in secondary_keys + ['stim_name']})
-
     def make(self, key):
-        chirp_average, chirp_average_times = (self.chirp_tab & key).fetch1('chirp_average', 'chirp_average_times')
+        chirp_average, chirp_average_times = (self.averages_table & dict(stim_name=self._stim_name_chirp) & key).fetch1(
+            'average', 'average_times')
         chirp_dt = get_mean_dt(chirp_average_times)[0]
 
-        bar_time_component, bar_dt = (self.bar_tab & key).fetch1('bar_time_component', 'bar_time_component_dt')
+        bar_time_component, bar_dt = (self.os_ds_table & dict(stim_name=self._stim_name_bar) & key).fetch1(
+            'time_component', 'time_component_dt')
 
         preproc_chirp = preprocess_chirp(chirp_average, dt=chirp_dt, shift=self._shift_chirp, n_int=self._chirp_n_int)
         preproc_bar = preprocess_bar(bar_time_component, dt=bar_dt, shift=self._shift_bar)

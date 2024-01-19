@@ -30,7 +30,7 @@ class RoiCanvas:
             self,
             ch0_stacks,
             ch1_stacks,
-            stim_names=None,
+            pres_names=None,
             bg_dict=None,
             shifts=None,
             initial_roi_mask=None,
@@ -60,9 +60,9 @@ class RoiCanvas:
         if self.shifts.shape[0] != len(self.ch0_stacks):
             raise ValueError('Incompatible shapes between shifts and stacks')
 
-        if stim_names is None:
-            stim_names = [f"stim{i + 1}" for i in range(len(self.ch0_stacks))]
-        self.stim_names = stim_names
+        if pres_names is None:
+            pres_names = [f"stim{i + 1}" for i in range(len(self.ch0_stacks))]
+        self.stim_names = pres_names
         self.main_stim_idx = main_stim_idx
         self.output_files = output_files
 
@@ -347,7 +347,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             max_shift=5,
             show_diagnostics=False,
     ):
-        super().__init__(ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, stim_names=pres_names,
+        super().__init__(ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, pres_names=pres_names,
                          bg_dict=bg_dict, n_artifact=n_artifact,
                          initial_roi_mask=initial_roi_mask, shifts=shifts, main_stim_idx=main_stim_idx,
                          upscale=upscale, autorois_models=autorois_models,
