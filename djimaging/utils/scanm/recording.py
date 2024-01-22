@@ -133,6 +133,12 @@ class ScanMRecording:
         self.trigger_times = trigger_times
         self.trigger_values = trigger_values
 
+        if self.ntrigger_rep is not None:
+            if self.repeated_stim:
+                self.trigger_valid = self.trigger_times.size % self.ntrigger_rep == 0
+            else:
+                self.trigger_valid = self.trigger_times.size == self.ntrigger_rep
+
     def __load_from_smp_file(self):
         ch_stacks, wparams = read_smp_utils.load_all_stacks_and_wparams(self.filepath)
 
@@ -221,7 +227,7 @@ class ScanMRecording:
         if self.frame_times is None or (time_precision != self.time_precision):
             self.compute_frame_times(time_precision=time_precision)
 
-        if ntrigger_rep is None or ntrigger_rep > 0:
+        if self.ntrigger_rep is None or self.ntrigger_rep > 0:
             self.trigger_times, self.trigger_values = traces_and_triggers_utils.compute_triggers(
                 stack=self.ch_stacks[self.trigger_ch_name],
                 frame_times=self.frame_times,
@@ -231,8 +237,8 @@ class ScanMRecording:
         else:
             self.trigger_times, self.trigger_values = np.array([]), np.array([])
 
-        if ntrigger_rep is not None:
-            if self.repeated_stim == 0:
-                self.trigger_valid = self.trigger_times.size == ntrigger_rep
+        if self.ntrigger_rep is not None:
+            if self.repeated_stim:
+                self.trigger_valid = self.trigger_times.size % self.ntrigger_rep == 0
             else:
-                self.trigger_valid = self.trigger_times.size % ntrigger_rep == 0
+                self.trigger_valid = self.trigger_times.size == self.ntrigger_rep

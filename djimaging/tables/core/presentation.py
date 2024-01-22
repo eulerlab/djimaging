@@ -231,7 +231,8 @@ class PresentationTemplate(dj.Computed):
         if pres_entry["trigger_valid"] == 0:
             warnings.warn(
                 f"Warning for key={pres_key}.\n"
-                f'Found {pres_entry["triggertimes"].size} triggers, expected {ntrigger_rep} (per rep): {filepath}.')
+                f'Found {pres_entry["triggertimes"].size} triggers, expected {ntrigger_rep} '
+                f'{"(per rep)" if isrepeated else ""}: {filepath}.')
 
         self.insert1(pres_entry, allow_direct_insert=True)
         self.ScanInfo().insert1(scaninfo_entry, allow_direct_insert=True)
@@ -252,7 +253,7 @@ class PresentationTemplate(dj.Computed):
         pres_entry = deepcopy(base_key)
         pres_entry["pres_data_file"] = rec.filepath
 
-        pres_entry["trigger_valid"] = rec.trigger_valid
+        pres_entry["trigger_valid"] = int(rec.trigger_valid)
         pres_entry["triggertimes"] = rec.trigger_times
         pres_entry["triggervalues"] = rec.trigger_values
 

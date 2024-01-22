@@ -62,12 +62,8 @@ def detrend_trace(trace, window_len_seconds, fs, poly_order):
         window_len_frames -= 1
 
     window_len_frames = int(window_len_frames)
-    smoothed_trace = signal.savgol_filter(
-        trace, window_length=window_len_frames, polyorder=poly_order,
-        mode='interp' if len(trace) >= window_len_frames else 'nearest')
-
+    smoothed_trace = signal.savgol_filter(trace, window_length=window_len_frames, polyorder=poly_order, mode='nearest')
     detrended_trace = trace - smoothed_trace
-
     return detrended_trace, smoothed_trace
 
 

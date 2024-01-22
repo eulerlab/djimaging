@@ -95,7 +95,7 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, preci
 
 def roi2trace_from_stack(filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray,
                          data_stack_name: str, precision: str, from_raw_data: bool = False):
-    if not from_raw_data:
+    if from_raw_data:
         ch_stacks, wparams = read_smp_utils.load_stacks_and_wparams(filepath, ch_names=(data_stack_name,))
     else:
         ch_stacks, wparams = read_h5_utils.load_stacks_and_wparams(filepath, ch_names=(data_stack_name,))

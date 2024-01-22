@@ -128,8 +128,32 @@ class PreprocessTraces(core.PreprocessTracesTemplate):
     traces_table = Traces
 
 
+# use this if you want to upsample averages
 @schema
 class Snippets(core.SnippetsTemplate):
+    _pad_trace = True
+
+    stimulus_table = Stimulus
+    presentation_table = Presentation
+    traces_table = Traces
+    preprocesstraces_table = PreprocessTraces
+
+
+@schema
+class Averages(core.ResampledAveragesTemplate):
+    _f_resample = 500  # Frequency in Hz to resample averages
+    _norm_kind = 'amp_one'  # How to normalize averages?
+
+    snippets_table = Snippets
+
+
+"""
+# Replace Snippet and Averages above if you want to use the old way of defining snippets and averages
+
+@schema
+class Snippets(core.SnippetsTemplate):
+    _pad_trace = False
+
     stimulus_table = Stimulus
     presentation_table = Presentation
     traces_table = Traces
@@ -141,3 +165,4 @@ class Averages(core.AveragesTemplate):
     _norm_kind = 'amp_one'  # How to normalize averages
 
     snippets_table = Snippets
+"""

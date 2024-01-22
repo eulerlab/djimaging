@@ -4,6 +4,7 @@ from copy import deepcopy
 import datajoint as dj
 
 from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.filesystem_utils import print_tree
 
 
 class UserInfoTemplate(dj.Manual):
@@ -87,4 +88,4 @@ class UserInfoTemplate(dj.Manual):
         if show_header:
             include_types.append('ini')
 
-        datafile_utils.print_tree(data_dir, include_types=include_types)
+        print_tree(data_dir, include_types=include_types)
