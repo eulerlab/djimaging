@@ -51,6 +51,9 @@ class CelltypeAssignment(classifier.CelltypeAssignmentTemplate):
     classifier_training_data_table = ClassifierTrainingData
     classifier_table = Classifier
     baden_trace_table = Baden16Traces
+    field_table = Field
+    roi_table = Roi
+    os_ds_table = OsDsIndexes
 
 
 # Receptive fields

@@ -266,11 +266,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            try:
-                field_or_pres_table = self.baden_trace_table.roi_table.field_or_pres_table
-            except (AttributeError, TypeError):
-                field_or_pres_table = self.baden_trace_table.roi_table.field_table
-            return self.classifier_table.proj() * field_or_pres_table.proj()
+            return self.classifier_table.proj() * self.field_table.proj()
         except (AttributeError, TypeError):
             pass
 
@@ -286,7 +282,22 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
     @property
     @abstractmethod
+    def os_ds_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def roi_table(self):
+        pass
+
+    @property
+    @abstractmethod
     def baden_trace_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def field_table(self):
         pass
 
     @property
@@ -346,26 +357,44 @@ class CelltypeAssignmentTemplate(dj.Computed):
             display_progress=display_progress, processes=1, make_kwargs=make_kwargs)
 
     def make(self, key):
+        roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = self._fetch_data(key)
+
+        if roi_keys is None:
+            return
+
+        celltypes, confidence_scores = self._classify_cells(
+            preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s)
+
+        for roi_key, celltype, confidence_scores_i in zip(roi_keys, celltypes, confidence_scores):
+            self.insert1(dict(**merge_keys(key, roi_key), celltype=celltype,
+                              confidence=confidence_scores_i, max_confidence=np.max(confidence_scores_i)))
+
+    def _fetch_data(self, key, restriction=None):
+        if restriction is None:
+            restriction = dict()
+
         self.current_model_key = dict(
             classifier_params_hash=key["classifier_params_hash"],
             training_data_hash=key["training_data_hash"])
 
-        roi_tab = self.baden_trace_table * self.baden_trace_table().bar_tab * self.baden_trace_table.roi_table
-        roi_keys = (self.baden_trace_table & key).proj()
-
+        roi_keys = (self.baden_trace_table & key & restriction).fetch('KEY')
         if len(roi_keys) == 0:
-            return
+            return None, None, None, None, None
 
-        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = (roi_tab & roi_keys).fetch(
-            'preproc_chirp', 'preproc_bar', 'bar_ds_pvalue', 'roi_size_um2')
+        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = (
+                self.baden_trace_table * self.os_ds_table * self.roi_table & key & restriction).fetch(
+            'preproc_chirp', 'preproc_bar', 'ds_pvalue', 'roi_size_um2')
 
-        celltype, confidence_scores = classify_cells(
-            np.vstack(preproc_chirps), np.vstack(preproc_bars), bar_ds_pvalues, roi_size_um2s,
+        preproc_chirps = np.vstack(preproc_chirps)
+        preproc_bars = np.vstack(preproc_bars)
+
+        return roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s
+
+    def _classify_cells(self, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s):
+        celltypes, confidence_scores = classify_cells(
+            preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s,
             self.chirp_features, self.bar_features, self.classifier)
-
-        for roi_key, celltype, confidence_scores_i in zip(roi_keys, celltype, confidence_scores):
-            self.insert1(dict(**merge_keys(key, roi_key), celltype=celltype,
-                              confidence=confidence_scores_i, max_confidence=np.max(confidence_scores_i)))
+        return celltypes, confidence_scores
 
     def plot(self, threshold_confidence: float):
         df = self.fetch(format='frame')
@@ -379,34 +408,28 @@ class CelltypeAssignmentTemplate(dj.Computed):
                 lambda row: row["celltype"] if row["max_confidence"] > threshold_confidence else -1, axis=1)
 
             ax.hist(celltypes[celltypes > 0], bins=np.arange(1, 47, 0.5), align='left')
-            ax.hist(celltypes[celltypes < 0], bins=(-1, -0.5, 0), align='left', color='red', alpha=0.5)
-            ax.set_xticks(np.append(-1, np.arange(1, 47)))
-            ax.set_xticklabels(np.append("NA", np.arange(1, 47)), rotation=90)
+            ax.set_xticks(np.arange(1, 47))
+            ax.set_xticklabels(np.arange(1, 47), rotation=90)
             ax.set(ylabel='Count', xlabel='celltype')
             ax.set_title(
-                f"training_data_hash={tdh}\nclassifier_params_hash={cph}\npreprocess_id={pid}", loc='left')
+                f"training_data_hash={tdh}\n"
+                f"classifier_params_hash={cph}\n"
+                f"preprocess_id={pid}\n"
+                f"{np.sum(celltypes == -1)} were not classified", loc='left')
 
         plt.tight_layout()
         plt.show()
 
-    def plot_features(self, threshold_confidence: float, key=None, celltypes=None, n_celltypes_max=3,
-                      features=None, n_features_max=5):
+    def plot_features(self, threshold_confidence: float,
+                      key=None, celltypes=None, n_celltypes_max=3, features=None, n_features_max=5):
         key = get_primary_key(self.classifier_table, key)
 
-        # Get new data
-        self.current_model_key = dict(
-            classifier_params_hash=key["classifier_params_hash"],
-            training_data_hash=key["training_data_hash"])
-
-        roi_tab = self * self.baden_trace_table * self.baden_trace_table().bar_tab * self.baden_trace_table.roi_table
-        roi_keys = (self.baden_trace_table & key).proj()
-        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, data_celltypes = \
-            (roi_tab & roi_keys & f'max_confidence>="{threshold_confidence}"').fetch(
-                'preproc_chirp', 'preproc_bar', 'bar_ds_pvalue', 'roi_size_um2', 'celltype')
+        roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = self._fetch_data(
+            key, restriction=(self & f'max_confidence>={threshold_confidence}'))
+        data_celltypes = (self & roi_keys).fetch('celltype')
 
         data_features = extract_features(
-            np.vstack(preproc_chirps), np.vstack(preproc_bars), bar_ds_pvalues, roi_size_um2s,
-            self.chirp_features, self.bar_features)
+            preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, self.chirp_features, self.bar_features)
 
         # Get training data
         training_data = self.classifier_training_data_table().get_training_data(key)
@@ -416,8 +439,10 @@ class CelltypeAssignmentTemplate(dj.Computed):
         if features is None:
             features = np.arange(0, training_data['X'].shape[1])
 
+        celltypes = sorted(set(celltypes).intersection(set(data_celltypes)))
+
         if n_celltypes_max is not None and len(celltypes) > n_celltypes_max:
-            celltypes = np.sort(np.random.choice(celltypes, n_celltypes_max, replace=False))
+            celltypes = sorted(np.random.choice(celltypes, n_celltypes_max, replace=False))
         if n_features_max is not None and len(features) > n_features_max:
             features = np.sort(np.random.choice(features, n_features_max, replace=False))
 
@@ -427,7 +452,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
         # Plot
         fig, axs = plt.subplots(n_celltypes, n_features,
                                 figsize=(np.minimum(3 * n_features, 20), np.minimum(2 * n_celltypes, 20)),
-                                sharex='col', sharey='col', squeeze=False)
+                                squeeze=False)
 
         for ax_row, celltype in zip(axs, celltypes):
             ax_row[0].set_ylabel(f"celltype={celltype}")
@@ -452,24 +477,17 @@ class CelltypeAssignmentTemplate(dj.Computed):
         key = get_primary_key(self.classifier_table, key)
 
         # Get new data
-        self.current_model_key = dict(
-            classifier_params_hash=key["classifier_params_hash"],
-            training_data_hash=key["training_data_hash"])
-
-        roi_tab = self * self.baden_trace_table * self.baden_trace_table().bar_tab * self.baden_trace_table.roi_table
-        roi_keys = (self.baden_trace_table & key).proj()
-        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, data_celltypes = \
-            (roi_tab & roi_keys & f'max_confidence>="{threshold_confidence}"').fetch(
-                'preproc_chirp', 'preproc_bar', 'bar_ds_pvalue', 'roi_size_um2', 'celltype')
-
-        preproc_chirps = np.vstack(preproc_chirps)
-        preproc_bars = np.vstack(preproc_bars)
+        roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = self._fetch_data(
+            key, restriction=(self & f'max_confidence>={threshold_confidence}'))
+        data_celltypes = (self & roi_keys).fetch('celltype')
 
         if celltypes is None:
-            celltypes = np.arange(0, 32) + 1
+            celltypes = np.arange(0, 46) + 1
+
+        celltypes = sorted(set(celltypes).intersection(set(data_celltypes)))
 
         if n_celltypes_max is not None and len(celltypes) > n_celltypes_max:
-            celltypes = np.sort(np.random.choice(celltypes, n_celltypes_max, replace=False))
+            celltypes = sorted(np.random.choice(celltypes, n_celltypes_max, replace=False))
 
         fig, axs = plt.subplots(len(celltypes), 4,
                                 figsize=(12, np.minimum(2 * len(celltypes), 20)),
@@ -598,6 +616,20 @@ def celltype2merged_celltype(celltype):
         41: 30,
         42: 31, 43: 31, 44: 31, 45: 31, 46: 31,
         47: 32, 48: 32, 49: 32,
-    }  # Add uncertain RGCs and ACs
+        50: 33,
+        51: 34, 52: 34,
+        53: 35, 54: 35,
+        55: 36,
+        56: 37, 57: 37,
+        58: 38, 59: 38, 60: 38,
+        61: 39,
+        62: 40, 63: 40,
+        64: 41,
+        65: 42, 66: 42, 67: 42, 68: 42, 69: 42, 70: 42,
+        71: 43,
+        72: 44,
+        73: 45,
+        74: 46, 75: 46,
+    }  # Add ACs
 
     return _celltype2merged_celltype.get(celltype, -1)

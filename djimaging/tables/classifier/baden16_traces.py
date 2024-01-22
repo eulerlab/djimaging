@@ -25,11 +25,13 @@ def preprocess_chirp(chirp_average, dt, shift=2, n_int=249):
     if chirp_average.ndim > 1:
         raise ValueError(f"chirp_trace must be 1D, but has shape {chirp_average.shape}")
 
+    baden_dt = 0.128
+
     # extract original baseline before shifting
-    baden16_baseline = np.mean(chirp_average[:8])
+    baden16_baseline = np.mean(chirp_average[:int(np.round(8 * baden_dt / dt))])
 
     # Shift
-    baden16_average = np.roll(chirp_average, shift)
+    baden16_average = np.roll(chirp_average, int(np.round(shift * baden_dt / dt)))
 
     time_avg = np.arange(baden16_average.size) * dt  # Allow different frequencies
     baden16_time = np.arange(249) * (32. / (n_int - 1))
@@ -55,8 +57,11 @@ def preprocess_bar(bar_average, dt, shift=-3):
     """
     if bar_average.ndim > 1:
         raise ValueError(f"time_component must be 1D, but has shape {bar_average.shape}")
+
+    baden_dt = 0.128
+
     time = np.arange(bar_average.size) * dt
-    baden16_time = np.arange(32) * 0.128
+    baden16_time = np.arange(32) * baden_dt
     baden16_average = interpolate.interp1d(
         time, bar_average, assume_sorted=True, bounds_error=False, fill_value='extrapolate')(baden16_time)
     # Shift
