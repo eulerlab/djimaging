@@ -7,9 +7,9 @@ import numpy as np
 from matplotlib import pyplot as plt
 from skimage.measure import label
 
-from djimaging.utils import scanm_utils
 from djimaging.utils.alias_utils import check_shared_alias_str
-from djimaging.utils.scanm_utils import check_if_scanm_roi_mask
+from djimaging.utils.scanm import read_h5_utils
+from djimaging.utils.scanm.roi_utils import check_if_scanm_roi_mask
 
 
 def create_circular_mask(h, w, center, radius):
@@ -554,7 +554,7 @@ def load_preferred_roi_mask_igor(files, mask_alias='', highres_alias='', suffix=
     sorted_files = sort_roi_mask_files(files=files, mask_alias=mask_alias, highres_alias=highres_alias, suffix=suffix)
     for file in sorted_files:
         if os.path.isfile(file) and file.endswith('.h5'):
-            roi_mask = scanm_utils.load_roi_mask_from_h5(filepath=file, ignore_not_found=True)
+            roi_mask = read_h5_utils.load_roi_mask(filepath=file, ignore_not_found=True)
             if roi_mask is not None:
                 return roi_mask, file
     else:

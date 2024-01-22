@@ -2,10 +2,10 @@ import os.path
 
 import numpy as np
 import pytest
-from djimaging.utils import scanm_utils
 
 from djimaging.autorois.autoshift_utils import compute_corr_map, compute_corr_map_match_indexes, \
     shift_img, extract_best_shift
+from djimaging.utils.scanm import read_h5_utils
 
 params_test_shit_img = [
     (0, 0),
@@ -55,7 +55,7 @@ def test_shit_img(shift_x, shift_y):
 filename_stack1 = '/gpfs01/euler/data/Data/DataJointTestData/xy-RGCs/20220125/2/Pre/SMP_M1_RR_GCL0_chirp_C1.h5'
 
 if os.path.isfile(filename_stack1):
-    ch_stacks, wparams = scanm_utils.load_stacks_from_h5(filename_stack1, ch_names=('wDataCh0',))
+    ch_stacks, wparams = read_h5_utils.load_stacks_and_wparams(filename_stack1, ch_names=('wDataCh0',))
     stack1 = ch_stacks['wDataCh0']
 else:
     stack1 = None

@@ -140,7 +140,7 @@ class SineSpotFeaturesTemplate(dj.Computed):
 
 def compute_sinespot_response_matrix(trace, times, triggertimes, ntrigger_rep, delay=0.1, rep_dt=0.8):
     """Split data into responses to different reps and summarize as mean response"""
-    from djimaging.utils.scanm_utils import split_trace_by_reps
+    from djimaging.utils.snippet_utils import split_trace_by_reps
 
     dt = get_mean_dt(times)[0]
     n_frames = int(np.ceil(rep_dt / dt))

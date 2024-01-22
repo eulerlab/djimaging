@@ -9,7 +9,9 @@ import numpy as np
 from djimaging.utils.alias_utils import match_file, get_field_files
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm_utils import load_stacks_from_h5, load_stacks_from_smp, get_pixel_size_xy_um
+from djimaging.utils.scanm.read_smp_utils import load_stacks_and_wparams
+from djimaging.utils.scanm.setup_utils import get_pixel_size_xy_um
+from djimaging.utils.scanm.read_h5_utils import load_stacks_and_wparams
 
 
 def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
@@ -22,7 +24,7 @@ def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
 
     if filepath is not None:
         try:
-            ch_stacks, wparams = load_stacks_from_h5(filepath)
+            ch_stacks, wparams = load_stacks_and_wparams(filepath)
             return filepath, ch_stacks, wparams
         except OSError as e:
             warnings.warn(f'OSError when reading file: {filepath}\n{e}')
@@ -42,7 +44,7 @@ def load_high_res_stack(pre_data_path, raw_data_path, highres_alias,
 
         if filepath is not None:
             try:
-                ch_stacks, wparams = load_stacks_from_smp(filepath)
+                ch_stacks, wparams = load_stacks_and_wparams(filepath)
                 return filepath, ch_stacks, wparams
             except OSError as e:
                 warnings.warn(f'OSError when reading file: {filepath}\n{e}')

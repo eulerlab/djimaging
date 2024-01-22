@@ -13,7 +13,7 @@ try:
 except ImportError:
     raise ImportError("Please install ipywidgets to use this module")
 
-from djimaging.utils.scanm_utils import get_roi_centers
+from djimaging.utils.scanm.roi_utils import get_roi_centers
 from djimaging.utils.math_utils import normalize_soft_zero_one
 
 

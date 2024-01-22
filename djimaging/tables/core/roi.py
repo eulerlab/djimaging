@@ -5,7 +5,7 @@ import numpy as np
 
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm_utils import extract_roi_idxs
+from djimaging.utils.scanm.roi_utils import extract_roi_idxs
 
 
 class RoiTemplate(dj.Computed):

@@ -9,7 +9,8 @@ from matplotlib import pyplot as plt
 
 from djimaging.utils.datafile_utils import get_file_info_df
 from djimaging.utils.data_utils import load_h5_table
-from djimaging.utils.scanm_utils import get_retinal_position, load_wparams_from_smp
+from djimaging.utils.scanm.setup_utils import get_retinal_position
+from djimaging.utils.scanm.read_smp_utils import load_wparams
 
 
 def load_od_pos_from_h5_file(filepath):
@@ -19,7 +20,7 @@ def load_od_pos_from_h5_file(filepath):
 
 
 def load_od_pos_from_smp_file(filepath):
-    wparams = load_wparams_from_smp(filepath, return_file=False)
+    wparams = load_wparams(filepath, return_file=False)
     odx, ody, odz = wparams['xcoord_um'], wparams['ycoord_um'], wparams['zcoord_um']
     return odx, ody, odz
 

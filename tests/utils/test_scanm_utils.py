@@ -5,7 +5,7 @@ import h5py
 import numpy as np
 from numpy.testing import assert_almost_equal
 
-from djimaging.utils import scanm_utils
+from djimaging.utils.scanm import read_h5_utils, setup_utils, traces_and_triggers_utils, wparams_utils
 
 __RAW_DATA_PATH = "/gpfs01/euler/data/Data/DataJointTestData/"
 
@@ -15,7 +15,7 @@ def test_get_pixel_size_um_64_default_scan1():
     nypix = 64
     zoom = 0.87
     exp = 2.0114942528735633
-    obs = scanm_utils.get_pixel_size_xy_um(setupid=setupid, npix=nypix, zoom=zoom)
+    obs = setup_utils.get_pixel_size_xy_um(setupid=setupid, npix=nypix, zoom=zoom)
     assert_almost_equal(obs, exp, decimal=4)
 
 
@@ -24,7 +24,7 @@ def test_get_pixel_size_um_64_default_scan3():
     nypix = 64
     zoom = 0.65
     exp = 1.71875
-    obs = scanm_utils.get_pixel_size_xy_um(setupid=setupid, npix=nypix, zoom=zoom)
+    obs = setup_utils.get_pixel_size_xy_um(setupid=setupid, npix=nypix, zoom=zoom)
     assert_almost_equal(obs, exp, decimal=4)
 
 
@@ -33,7 +33,7 @@ def test_get_pixel_size_um_128_default_scan1():
     nypix = 128
     zoom = 0.87
     exp = 1.0057471264367817
-    obs = scanm_utils.get_pixel_size_xy_um(setupid=setupid, npix=nypix, zoom=zoom)
+    obs = setup_utils.get_pixel_size_xy_um(setupid=setupid, npix=nypix, zoom=zoom)
     assert_almost_equal(obs, exp, decimal=4)
 
 
@@ -42,7 +42,7 @@ def test_get_pixel_size_um_512_default_scan1():
     nypix = 512
     zoom = 0.87
     exp = 0.2514367816091954
-    obs = scanm_utils.get_pixel_size_xy_um(setupid=setupid, npix=nypix, zoom=zoom)
+    obs = setup_utils.get_pixel_size_xy_um(setupid=setupid, npix=nypix, zoom=zoom)
     assert_almost_equal(obs, exp, decimal=4)
 
 
@@ -51,7 +51,7 @@ def test_get_pixel_size_um_128_wide_scan1():
     nypix = 128
     zoom = 0.15
     exp = 5.833333333333334
-    obs = scanm_utils.get_pixel_size_xy_um(setupid=setupid, npix=nypix, zoom=zoom)
+    obs = setup_utils.get_pixel_size_xy_um(setupid=setupid, npix=nypix, zoom=zoom)
     assert_almost_equal(obs, exp, decimal=4)
 
 
@@ -68,7 +68,7 @@ def test_get_retinal_position_right_dn():
     exp_ventral_dorsal_pos = 1000.
     exp_temporal_nasal_pos = 100.
 
-    obs_ventral_dorsal_pos, obs_temporal_nasal_pos = scanm_utils.get_retinal_position(
+    obs_ventral_dorsal_pos, obs_temporal_nasal_pos = setup_utils.get_retinal_position(
         rel_xcoord_um=rel_xcoord_um, rel_ycoord_um=rel_ycoord_um, rotation=rotation, eye=eye)
 
     assert exp_ventral_dorsal_pos == obs_ventral_dorsal_pos
@@ -84,7 +84,7 @@ def test_get_retinal_position_left_vn():
     exp_ventral_dorsal_pos = -1000.
     exp_temporal_nasal_pos = 100.
 
-    obs_ventral_dorsal_pos, obs_temporal_nasal_pos = scanm_utils.get_retinal_position(
+    obs_ventral_dorsal_pos, obs_temporal_nasal_pos = setup_utils.get_retinal_position(
         rel_xcoord_um=rel_xcoord_um, rel_ycoord_um=rel_ycoord_um, rotation=rotation, eye=eye)
 
     assert exp_ventral_dorsal_pos == obs_ventral_dorsal_pos
@@ -96,16 +96,16 @@ def _test_compute_tracetimes(filepath, stack_name, precision, atol):
         pytest.skip(f"File not found {filepath}")
 
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        wparams = scanm_utils.extract_wparams_from_h5(h5_file)
-        os_params = scanm_utils.extract_os_params(h5_file)
-        _, igor_traces_times = scanm_utils.extract_traces(h5_file)
+        wparams = read_h5_utils.extract_wparams(h5_file)
+        os_params = read_h5_utils.extract_os_params(h5_file)
+        _, igor_traces_times = read_h5_utils.extract_traces(h5_file)
         stack = np.copy(h5_file[stack_name])
-        roi_mask = scanm_utils.extract_roi_mask(h5_file)
+        roi_mask = read_h5_utils.extract_roi_mask(h5_file)
 
         # In Igor this was wrongly added, so remove it again
         igor_traces_times -= os_params['stimulatordelay'] / 1000
 
-    _, traces_times = scanm_utils.compute_traces(
+    _, traces_times = traces_and_triggers_utils.compute_traces(
         stack=stack, roi_mask=roi_mask, wparams=wparams, precision=precision)
 
     assert igor_traces_times.shape == traces_times.shape
@@ -120,12 +120,12 @@ def test_compute_traces(
         pytest.skip(f"File not found {filepath}")
 
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        wparams = scanm_utils.extract_wparams_from_h5(h5_file)
-        igor_traces, _ = scanm_utils.extract_traces(h5_file)
+        wparams = read_h5_utils.extract_wparams(h5_file)
+        igor_traces, _ = read_h5_utils.extract_traces(h5_file)
         stack = np.copy(h5_file[stack_name])
-        roi_mask = scanm_utils.extract_roi_mask(h5_file)
+        roi_mask = read_h5_utils.extract_roi_mask(h5_file)
 
-    traces, _ = scanm_utils.compute_traces(
+    traces, _ = traces_and_triggers_utils.compute_traces(
         stack=stack, roi_mask=roi_mask, wparams=wparams)
 
     assert igor_traces.shape == traces.shape
@@ -141,12 +141,12 @@ def _test_compute_triggertimes(filepath, precision, atol):
         pytest.skip(f"File not found {filepath}")
 
     with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        wparams = scanm_utils.extract_wparams_from_h5(h5_file)
-        igor_triggertimes, _ = scanm_utils.extract_triggers(h5_file, check_triggervalues=False)
+        wparams = read_h5_utils.extract_wparams(h5_file)
+        igor_triggertimes, _ = read_h5_utils.extract_triggers(h5_file, check_triggervalues=False)
         ch2_stack = np.copy(h5_file['wDataCh2'])
 
     # Ignore 'stimulator_delay' here, because in Igor it's added to tracetimes instead
-    triggertimes, triggervalues = scanm_utils.compute_triggers_from_wparams(
+    triggertimes, triggervalues = wparams_utils.compute_triggers_from_wparams(
         stack=ch2_stack, wparams=wparams, precision=precision, stimulator_delay=0.)
 
     assert igor_triggertimes.shape == triggertimes.shape

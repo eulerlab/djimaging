@@ -4,8 +4,8 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.utils.scanm_utils import roi2trace_from_h5_file, roi2trace_from_stack, \
-    check_valid_triggers_rel_to_tracetime
+from djimaging.utils.scanm.traces_and_triggers_utils import roi2trace_from_stack, check_valid_triggers_rel_to_tracetime
+from djimaging.utils.scanm.read_h5_utils import load_roi2trace
 from djimaging.utils import plot_utils, math_utils, trace_utils
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
@@ -91,7 +91,7 @@ class TracesTemplate(dj.Computed):
 
         else:
             assert not from_raw_data, "from_raw_data=True only supported for compute_from_stack=True"
-            roi2trace = roi2trace_from_h5_file(filepath, roi_ids)
+            roi2trace = load_roi2trace(filepath, roi_ids)
 
         for roi_id, roi_data in roi2trace.items():
             if not include_artifacts and roi_data.get('incl_artifact', False):

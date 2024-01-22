@@ -5,7 +5,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.location.location import plot_rel_xy_pos
-from djimaging.utils.scanm_utils import get_retinal_position, get_rel_roi_pos
+from djimaging.utils.scanm.setup_utils import get_retinal_position
+from djimaging.utils.scanm.roi_utils import get_rel_roi_pos
 
 
 class RelativeRoiLocationWrtFieldTemplate(dj.Computed):

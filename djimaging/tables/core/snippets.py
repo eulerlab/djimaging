@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 from djimaging.tables.core.stimulus import reformat_numerical_trial_info
 from djimaging.utils import plot_utils
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.scanm_utils import split_trace_by_reps, split_trace_by_group_reps
+from djimaging.utils.snippet_utils import split_trace_by_reps, split_trace_by_group_reps
 
 
 def get_aligned_snippets_times(snippets_times, raise_error=True, tol=1e-4):

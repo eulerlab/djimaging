@@ -5,12 +5,13 @@ from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
+
+from djimaging.utils.scanm import read_h5_utils, read_utils
 from djimaging.tables.misc.highresolution import load_high_res_stack
 
 from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 from djimaging.autorois.corr_roi_mask_utils import CorrRoiMask
 
-from djimaging.utils import scanm_utils
 from djimaging.utils.datafile_utils import as_pre_filepath
 from djimaging.utils.dj_utils import get_primary_key, check_unique_one
 from djimaging.utils.mask_utils import to_igor_format, to_python_format, to_roi_mask_file, sort_roi_mask_files, \
@@ -22,7 +23,7 @@ def load_stack_data(files, data_name, alt_name, from_raw_data,
                     roi_mask_dir=None, old_prefix=None, new_prefix=None):
     ch0_stacks, ch1_stacks, output_files = [], [], []
     for data_file in files:
-        ch_stacks, wparams = scanm_utils.load_stacks(
+        ch_stacks, wparams = read_utils.load_stacks(
             data_file, from_raw_data=from_raw_data, ch_names=(data_name, alt_name))
         ch0_stacks.append(ch_stacks[data_name])
         ch1_stacks.append(ch_stacks[alt_name])
@@ -378,7 +379,7 @@ class RoiMaskTemplate(dj.Manual):
 
         if igor_roi_masks == 'yes':
             assert not from_raw_data, 'Inconsistent parameters'
-            filesystem_roi_mask = scanm_utils.load_roi_mask_from_h5(filepath=input_file, ignore_not_found=True)
+            filesystem_roi_mask = read_h5_utils.load_roi_mask(filepath=input_file, ignore_not_found=True)
         else:
             roimask_file = to_roi_mask_file(
                 input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)

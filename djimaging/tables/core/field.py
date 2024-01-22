@@ -6,7 +6,7 @@ from typing import Optional
 import datajoint as dj
 import numpy as np
 
-from djimaging.utils import scanm_utils
+from djimaging.utils.scanm import read_utils, setup_utils, wparams_utils
 
 from djimaging.utils.datafile_utils import get_file_info_df
 from djimaging.utils.dj_utils import get_primary_key
@@ -211,11 +211,12 @@ def load_field_key_data(field_key, filepaths, from_raw_data, ch_names, setupid) 
     nypix = wparams["user_dypix"]
     nzpix = wparams["user_dzpix"]
 
-    pixel_size_um = scanm_utils.get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nxpix)
+    pixel_size_um = setup_utils.get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid,
+                                                     npix=nxpix)
     z_step_um = wparams.get('zstep_um', 0.)
     z_stack_flag = int(wparams['user_scantype'] == 11)
-    npixartifact = scanm_utils.get_npixartifact(setupid=setupid)
-    scan_type = scanm_utils.get_scan_type_from_wparams(wparams)
+    npixartifact = setup_utils.get_npixartifact(setupid=setupid)
+    scan_type = wparams_utils.get_scan_type(wparams)
 
     # keys
     field_entry = deepcopy(field_key)
@@ -248,7 +249,7 @@ def load_field_key_data(field_key, filepaths, from_raw_data, ch_names, setupid) 
 def load_first_file_wo_error(filepaths, from_raw_data, ch_names):
     for i, filepath in enumerate(filepaths):
         try:
-            ch_stacks, wparams = scanm_utils.load_stacks(filepath, from_raw_data=from_raw_data, ch_names=ch_names)
+            ch_stacks, wparams = read_utils.load_stacks(filepath, from_raw_data=from_raw_data, ch_names=ch_names)
             break
         except Exception as e:
             error_msg = f"Failed to load file with error {e}:\n{filepath}"

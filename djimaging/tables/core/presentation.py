@@ -5,10 +5,9 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 
-from djimaging.utils import scanm_utils
+from djimaging.utils.scanm import read_h5_utils, read_utils, setup_utils, wparams_utils
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm_utils import get_stimulator_delay
 
 
 class PresentationTemplate(dj.Computed):
@@ -100,7 +99,7 @@ class PresentationTemplate(dj.Computed):
             # Data read from wParamsNum and wParamsStr tables in h5 file
             -> master
             ---
-            scan_period=0              :float # Scanning frequency in Hz
+            scan_period=0              :float # Scanning duration per frame in seconds
             scan_frequency=0           :float # Scanning frequency in Hz
             line_duration=0            :float # Line duration from OS_Parameters
             user_dxpix                 :int        
@@ -238,18 +237,18 @@ class PresentationTemplate(dj.Computed):
 
 def load_pres_key_data(pres_key, filepath, from_raw_data, compute_from_stack, setupid, ntrigger_rep, isrepeated,
                        field_pixel_size_um=None, trigger_precision='line'):
-    ch_stacks, wparams = scanm_utils.load_stacks(
+    ch_stacks, wparams = read_utils.load_stacks(
         filepath, from_raw_data=from_raw_data,
         ch_names=('wDataCh0', 'wDataCh1', 'wDataCh2') if ntrigger_rep > 0 else ('wDataCh0', 'wDataCh1'))
 
     if ntrigger_rep > 0:
         if compute_from_stack:
-            stimulator_delay = get_stimulator_delay(date=pres_key['date'], setupid=setupid)
-            triggertimes, triggervalues = scanm_utils.compute_triggers_from_wparams(
+            stimulator_delay = setup_utils.get_stimulator_delay(date=pres_key['date'], setupid=setupid)
+            triggertimes, triggervalues = wparams_utils.compute_triggers_from_wparams(
                 ch_stacks['wDataCh2'], wparams=wparams, precision=trigger_precision,
                 stimulator_delay=stimulator_delay)
         else:
-            triggertimes, triggervalues = scanm_utils.load_triggers_from_h5(filepath)
+            triggertimes, triggervalues = read_h5_utils.load_triggers(filepath)
     else:
         triggertimes = np.array([])
         triggervalues = np.array([])
@@ -263,10 +262,10 @@ def load_pres_key_data(pres_key, filepath, from_raw_data, compute_from_stack, se
         warnings.warn(f'Found {triggertimes.size} triggers, expected {ntrigger_rep} (per rep): {filepath}.')
 
     nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
-    pixel_size_um = scanm_utils.get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nxpix)
+    pixel_size_um = setup_utils.get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nxpix)
     z_step_um = wparams.get('zstep_um', 0.)
-    npixartifact = scanm_utils.get_npixartifact(setupid=setupid)
-    scan_type = scanm_utils.get_scan_type_from_wparams(wparams)
+    npixartifact = setup_utils.get_npixartifact(setupid=setupid)
+    scan_type = wparams_utils.get_scan_type(wparams)
 
     if not np.isclose(pixel_size_um, field_pixel_size_um):
         warnings.warn(
