@@ -74,7 +74,7 @@ class UserInfoTemplate(dj.Manual):
         """
         key = get_primary_key(table=self, key=key)
 
-        from djimaging.utils import datafile_utils
+        from djimaging.utils import filesystem_utils
         data_dir = (self & key).fetch1('data_dir')
 
         assert os.path.isdir(data_dir), f"data_dir={data_dir} is not a directory"

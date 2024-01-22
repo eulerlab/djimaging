@@ -7,12 +7,11 @@ import datajoint as dj
 import numpy as np
 
 from djimaging.utils.scanm import read_h5_utils, read_utils
-from djimaging.tables.misc.highresolution import load_high_res_stack
 
 from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 from djimaging.autorois.corr_roi_mask_utils import CorrRoiMask
 
-from djimaging.utils.datafile_utils import as_pre_filepath
+from djimaging.utils.filesystem_utils import as_pre_filepath
 from djimaging.utils.dj_utils import get_primary_key, check_unique_one
 from djimaging.utils.mask_utils import to_igor_format, to_python_format, to_roi_mask_file, sort_roi_mask_files, \
     load_preferred_roi_mask_igor, load_preferred_roi_mask_pickle, compare_roi_masks
@@ -92,6 +91,11 @@ class RoiMaskTemplate(dj.Manual):
     @property
     @abstractmethod
     def raw_params_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def highres_table(self):
         pass
 
     @property
@@ -410,27 +414,15 @@ class RoiMaskTemplate(dj.Manual):
         plot_field(main_ch_average, alt_ch_average, roi_mask=roi_mask, title=key, npixartifact=npixartifact)
 
     def load_high_res_bg_dict(self, key):
-        field = (self.field_table() & key).fetch1("field")
-        field_loc = (self.userinfo_table() & key).fetch1("field_loc")
-        highres_alias = (self.userinfo_table() & key).fetch1("highres_alias")
-        header_path = (self.experiment_table() & key).fetch1('header_path')
-        pre_data_path = os.path.join(header_path, (self.userinfo_table() & key).fetch1("pre_data_dir"))
-        raw_data_path = os.path.join(header_path, (self.userinfo_table() & key).fetch1("raw_data_dir"))
-
         try:
-            filepath, ch_stacks, wparams = load_high_res_stack(
-                pre_data_path=pre_data_path, raw_data_path=raw_data_path,
-                highres_alias=highres_alias, field=field, field_loc=field_loc)
+            ch_names, ch_averages = (self.highres_table().StackAverages & key).fetch1('ch_name', 'ch_average')
+            bg_dict = dict()
+            for name, avg in zip(ch_names, ch_averages):
+                bg_dict[f'HR[{name}]'] = avg
+
         except Exception as e:
             warnings.warn(f'Failed to load high resolution data because of error:\n{e}')
             return dict()
-
-        if ch_stacks is None:
-            return dict()
-
-        bg_dict = dict()
-        for name, stack in ch_stacks.items():
-            bg_dict[f'HR[{name}]'] = np.nanmedian(stack, 2)
 
         return bg_dict
 

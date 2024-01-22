@@ -1,5 +1,5 @@
 from djimaging.schemas.core_schema import *
-from djimaging.tables import response, classifier, receptivefield, location, misc
+from djimaging.tables import response, classifier, receptivefield, location
 
 
 # Classifier
@@ -122,14 +122,3 @@ class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
 class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
     relativefieldlocation_table = RelativeFieldLocation
     expinfo_table = Experiment.ExpInfo
-
-
-# Misc
-@schema
-class HighRes(misc.HighResTemplate):
-    field_table = Field
-    experiment_table = Experiment
-    userinfo_table = UserInfo
-
-    class StackAverages(misc.HighResTemplate.StackAverages):
-        pass

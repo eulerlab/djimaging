@@ -5,9 +5,9 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 
-from djimaging.utils.scanm import read_h5_utils, read_utils, setup_utils, wparams_utils
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
+from djimaging.utils.scanm.recording import ScanMRecording
 
 
 class PresentationTemplate(dj.Computed):
@@ -37,14 +37,23 @@ class PresentationTemplate(dj.Computed):
 
         definition += """
         ---
-        pres_data_file        :varchar(255)     # path to file (e.g. h5 file)
-        trigger_flag          :tinyint unsigned # Are triggers as expected (1) or not (0)?
-        triggertimes          :longblob         # triggertimes in each presentation
-        triggervalues         :longblob         # values of the recorded triggers
+        pres_data_file :varchar(255)        # path to file (e.g. h5 file)
+        triggertimes :longblob              # triggertimes in each presentation
+        triggervalues :longblob             # values of the recorded triggers
+        trigger_valid :tinyint unsigned     # Are triggers as expected (1) or not (0)?
+        absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
+        absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
+        absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
         scan_type: enum("xy", "xz", "xyz")  # Type of scan
-        npixartifact : int unsigned # Number of pixel with light artifact
-        pixel_size_um :float  # width / height of a pixel in um
-        z_step_um :float  # z-step in um
+        npixartifact : int unsigned         # number of pixel with light artifact
+        nxpix: int unsigned                 # number of pixels in x
+        nypix: int unsigned                 # number of pixels in y
+        nzpix: int unsigned                 # number of pixels in z
+        nxpix_offset: int unsigned          # number of offset pixels in x
+        nxpix_retrace: int unsigned         # number of retrace pixels in x
+        pixel_size_um :float                # width of a pixel in um (also height if y is second dimension)
+        z_step_um = NULL :float             # z-step in um
+        nframes: int unsigned               # number of pixels in time
         """
         return definition
 
@@ -99,22 +108,13 @@ class PresentationTemplate(dj.Computed):
             # Data read from wParamsNum and wParamsStr tables in h5 file
             -> master
             ---
-            scan_period=0              :float # Scanning duration per frame in seconds
-            scan_frequency=0           :float # Scanning frequency in Hz
-            line_duration=0            :float # Line duration from OS_Parameters
-            user_dxpix                 :int        
-            user_dypix                 :int
-            user_dzpix=0               :float        
-            user_npixretrace           :int        
-            user_nxpixlineoffs         :int
-            xcoord_um                  :float        
-            ycoord_um                  :float        
-            zcoord_um                  :float
-            zstep_um=0                 :float        
-            zoom                       :float        
-            angle_deg                  :float
-            realpixdur                 :float 
-            scan_params_dict           :longblob     
+            scan_frequency=-1 :float             # Scanning frequency in Hz
+            scan_period=-1 :float                # Scanning duration per frame in seconds
+            line_duration=-1 :float              # Line duration from OS_Parameters
+            real_pixel_duration=-1 :float        # Duration of a pixel (un-cropped)
+            zoom :float                          # Zoom of objective, changes pixel size
+            angle_deg :float                     # Angle of objective, changes rotation of image
+            scan_params_dict :longblob           # Other ScanM parameters less frequently used
             """
             return definition
 
@@ -213,13 +213,25 @@ class PresentationTemplate(dj.Computed):
         from_raw_data, trigger_precision, compute_from_stack = (self.raw_params_table & pres_key).fetch1(
             'from_raw_data', 'trigger_precision', 'compute_from_stack')
         isrepeated, ntrigger_rep = (self.stimulus_table & pres_key).fetch1("isrepeated", "ntrigger_rep")
-        field_pixel_size_um = (self.field_table & pres_key).fetch1("pixel_size_um")
 
-        pres_entry, scaninfo_entry, avg_entries = load_pres_key_data(
-            pres_key=pres_key, filepath=filepath,
-            from_raw_data=from_raw_data, compute_from_stack=compute_from_stack, setupid=setupid,
-            ntrigger_rep=ntrigger_rep, isrepeated=isrepeated,
-            field_pixel_size_um=field_pixel_size_um, trigger_precision=trigger_precision)
+        rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=pres_key['date'],
+                             repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep, time_precision=trigger_precision)
+        if compute_from_stack or from_raw_data:
+            rec.compute_triggers()
+        pres_entry, scaninfo_entry, avg_entries = self.complete_keys(pres_key, rec)
+
+        # Sanity checks
+        field_pixel_size_um = (self.field_table & pres_key).fetch1("pixel_size_um")
+        if not np.isclose(pres_entry['pixel_size_um'], field_pixel_size_um):
+            warnings.warn(
+                f"Warning for key={pres_key}.\n"
+                f"pixel_size_um {pres_entry['pixel_size_um']:.3g} is different in field {field_pixel_size_um}. "
+                f"Did you use a different zoom? This can result in unexpected problems.")
+
+        if pres_entry["trigger_valid"] == 0:
+            warnings.warn(
+                f"Warning for key={pres_key}.\n"
+                f'Found {pres_entry["triggertimes"].size} triggers, expected {ntrigger_rep} (per rep): {filepath}.')
 
         self.insert1(pres_entry, allow_direct_insert=True)
         self.ScanInfo().insert1(scaninfo_entry, allow_direct_insert=True)
@@ -234,87 +246,47 @@ class PresentationTemplate(dj.Computed):
         alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
         plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4))
 
+    @staticmethod
+    def complete_keys(base_key, rec) -> (dict, dict, list):
 
-def load_pres_key_data(pres_key, filepath, from_raw_data, compute_from_stack, setupid, ntrigger_rep, isrepeated,
-                       field_pixel_size_um=None, trigger_precision='line'):
-    ch_stacks, wparams = read_utils.load_stacks(
-        filepath, from_raw_data=from_raw_data,
-        ch_names=('wDataCh0', 'wDataCh1', 'wDataCh2') if ntrigger_rep > 0 else ('wDataCh0', 'wDataCh1'))
+        pres_entry = deepcopy(base_key)
+        pres_entry["pres_data_file"] = rec.filepath
 
-    if ntrigger_rep > 0:
-        if compute_from_stack:
-            stimulator_delay = setup_utils.get_stimulator_delay(date=pres_key['date'], setupid=setupid)
-            triggertimes, triggervalues = wparams_utils.compute_triggers_from_wparams(
-                ch_stacks['wDataCh2'], wparams=wparams, precision=trigger_precision,
-                stimulator_delay=stimulator_delay)
-        else:
-            triggertimes, triggervalues = read_h5_utils.load_triggers(filepath)
-    else:
-        triggertimes = np.array([])
-        triggervalues = np.array([])
+        pres_entry["trigger_valid"] = rec.trigger_valid
+        pres_entry["triggertimes"] = rec.trigger_times
+        pres_entry["triggervalues"] = rec.trigger_values
 
-    if isrepeated == 0:
-        trigger_flag = triggertimes.size == ntrigger_rep
-    else:
-        trigger_flag = triggertimes.size % ntrigger_rep == 0
+        pres_entry["absx"] = rec.pos_x_um
+        pres_entry["absy"] = rec.pos_y_um
+        pres_entry["absz"] = rec.pos_z_um
+        pres_entry["scan_type"] = rec.scan_type
+        pres_entry["npixartifact"] = rec.pix_n_artifact
+        pres_entry["nxpix"] = rec.pix_nx
+        pres_entry["nypix"] = rec.pix_ny
+        pres_entry["nzpix"] = rec.pix_nz
+        pres_entry["nxpix_offset"] = rec.pix_n_line_offset
+        pres_entry["nxpix_retrace"] = rec.pix_n_retrace
+        pres_entry["pixel_size_um"] = rec.pix_dx_um
+        pres_entry["z_step_um"] = rec.pix_dz_um
+        pres_entry["nframes"] = rec.ch_n_frames
 
-    if trigger_flag == 0:
-        warnings.warn(f'Found {triggertimes.size} triggers, expected {ntrigger_rep} (per rep): {filepath}.')
+        # get stack avgs
+        avg_entries = []
+        for name, stack in rec.ch_stacks.items():
+            avg_entry = deepcopy(base_key)
+            avg_entry["ch_name"] = name
+            avg_entry["ch_average"] = np.median(stack, 2)
+            avg_entries.append(avg_entry)
 
-    nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
-    pixel_size_um = setup_utils.get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nxpix)
-    z_step_um = wparams.get('zstep_um', 0.)
-    npixartifact = setup_utils.get_npixartifact(setupid=setupid)
-    scan_type = wparams_utils.get_scan_type(wparams)
+        # extract params for scaninfo
+        scaninfo_entry = deepcopy(base_key)
 
-    if not np.isclose(pixel_size_um, field_pixel_size_um):
-        warnings.warn(
-            f"pixel_size_um {pixel_size_um:.3g} is different in field {field_pixel_size_um}. "
-            f"Did you use a different zoom? This can result in unexpected problems.")
+        scaninfo_entry["scan_frequency"] = rec.scan_frequency
+        scaninfo_entry["scan_period"] = rec.scan_period
+        scaninfo_entry["line_duration"] = rec.scan_line_duration
+        scaninfo_entry["real_pixel_duration"] = rec.real_pixel_duration
+        scaninfo_entry["zoom"] = rec.obj_zoom
+        scaninfo_entry["angle_deg"] = rec.obj_angle_deg
+        scaninfo_entry["scan_params_dict"] = rec.wparams_other
 
-    pres_entry = deepcopy(pres_key)
-    pres_entry["pres_data_file"] = filepath
-    pres_entry["trigger_flag"] = int(trigger_flag)
-    pres_entry["triggertimes"] = triggertimes
-    pres_entry["triggervalues"] = triggervalues
-    pres_entry["scan_type"] = scan_type
-    pres_entry["npixartifact"] = npixartifact
-    pres_entry["pixel_size_um"] = pixel_size_um
-    pres_entry["z_step_um"] = z_step_um
-
-    # get stack avgs
-    avg_keys = []
-    for name, stack in ch_stacks.items():
-        avg_entry = deepcopy(pres_key)
-        avg_entry["ch_name"] = name
-        avg_entry["ch_average"] = np.median(stack, 2)
-        avg_keys.append(avg_entry)
-
-    # extract params for scaninfo
-    scaninfo_key = deepcopy(pres_key)
-    wparams = deepcopy(wparams)
-
-    try:
-        scaninfo_key["line_duration"] = (wparams['user_dxpix'] * wparams['realpixdur']) * 1e-6
-        n_lines = wparams['user_dzpix'] if scan_type == 'xz' else wparams['user_dypix']
-        scaninfo_key["scan_period"] = scaninfo_key["line_duration"] * n_lines
-        scaninfo_key["scan_frequency"] = 1. / scaninfo_key["scan_period"]
-
-        scaninfo_key["user_dxpix"] = wparams.pop("user_dxpix")
-        scaninfo_key["user_dypix"] = wparams.pop("user_dypix")
-        scaninfo_key["user_dzpix"] = wparams.pop("user_dzpix")
-        scaninfo_key["user_npixretrace"] = wparams.pop("user_npixretrace")
-        scaninfo_key["user_nxpixlineoffs"] = wparams.pop("user_nxpixlineoffs")
-        scaninfo_key["xcoord_um"] = wparams.pop("xcoord_um")
-        scaninfo_key["ycoord_um"] = wparams.pop("ycoord_um")
-        scaninfo_key["zcoord_um"] = wparams.pop("zcoord_um")
-        scaninfo_key["zstep_um"] = wparams.pop("zstep_um")
-        scaninfo_key["zoom"] = wparams.pop("zoom")
-        scaninfo_key["angle_deg"] = wparams.pop("angle_deg")
-        scaninfo_key["realpixdur"] = wparams.pop("realpixdur")
-    except KeyError as e:
-        print(f'Could not find ScanInfo key in wparams with keys\n\t{wparams.keys()}')
-        raise e
-    scaninfo_key["scan_params_dict"] = wparams
-
-    return pres_entry, scaninfo_key, avg_keys
+        return pres_entry, scaninfo_entry, avg_entries

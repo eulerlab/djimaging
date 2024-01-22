@@ -7,8 +7,8 @@ from typing import Optional
 
 import datajoint as dj
 
-from djimaging.utils.data_utils import read_config_dict
-from djimaging.utils.datafile_utils import find_folders_with_file_of_type
+from djimaging.utils.scanm.read_h5_utils import read_config_dict
+from djimaging.utils.filesystem_utils import find_folders_with_file_of_type
 
 
 class ExperimentTemplate(dj.Computed):

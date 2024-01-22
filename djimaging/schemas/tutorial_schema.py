@@ -6,6 +6,7 @@ from djimaging.tables import misc, response, location
 class OpticDisk(location.OpticDiskTemplate):
     userinfo_table = UserInfo
     experiment_table = Experiment
+    raw_params_table = RawDataParams
 
 
 @schema

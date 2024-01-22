@@ -1,6 +1,6 @@
 import datajoint as dj
 
-from djimaging.tables import core
+from djimaging.tables import core, misc
 
 schema = dj.Schema()
 
@@ -72,6 +72,17 @@ class Presentation(core.PresentationTemplate):
         pass
 
 
+# Misc
+@schema
+class HighRes(misc.HighResTemplate):
+    field_table = Field
+    experiment_table = Experiment
+    userinfo_table = UserInfo
+
+    class StackAverages(misc.HighResTemplate.StackAverages):
+        pass
+
+
 @schema
 class RoiMask(core.RoiMaskTemplate):
     _max_shift = 5  # Maximum shift of ROI mask in pixels
@@ -81,6 +92,7 @@ class RoiMask(core.RoiMaskTemplate):
     experiment_table = Experiment
     userinfo_table = UserInfo
     raw_params_table = RawDataParams
+    highres_table = HighRes
 
     class RoiMaskPresentation(core.RoiMaskTemplate.RoiMaskPresentation):
         presentation_table = Presentation

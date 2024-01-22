@@ -6,11 +6,10 @@ from typing import Optional
 import datajoint as dj
 import numpy as np
 
-from djimaging.utils.scanm import read_utils, setup_utils, wparams_utils
-
-from djimaging.utils.datafile_utils import get_file_info_df
+from djimaging.utils.filesystem_utils import get_file_info_df
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
+from djimaging.utils.scanm.recording import ScanMRecording
 
 
 class FieldTemplate(dj.Computed):
@@ -40,22 +39,20 @@ class FieldTemplate(dj.Computed):
 
         definition += """
         ---
-        fromfile: varchar(255)  # info extracted from which file?
+        field_data_file: varchar(255)  # info extracted from which file?
         absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
         absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
         absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
         scan_type: enum("xy", "xz", "xyz")  # Type of scan
-        npixartifact : int unsigned # Number of pixel with light artifact
-        nxpix: int unsigned  # number of pixels in x
-        nypix: int unsigned  # number of pixels in y
-        nzpix: int unsigned  # number of pixels in z
-        nxpix_offset: int unsigned  # number of offset pixels in x
-        nxpix_retrace: int unsigned  # number of retrace pixels in x
-        pixel_size_um :float  # width / height of a pixel in um
-        z_step_um :float  # z-step in um
-        z_stack_flag : tinyint unsigned  # Is z-stack?
+        npixartifact : int unsigned         # Number of pixel with light artifact
+        nxpix: int unsigned                 # number of pixels in x
+        nypix: int unsigned                 # number of pixels in y
+        nzpix: int unsigned                 # number of pixels in z
+        nxpix_offset: int unsigned          # number of offset pixels in x
+        nxpix_retrace: int unsigned         # number of retrace pixels in x
+        pixel_size_um :float                # width of a pixel in um (also height if y is second dimension)
+        z_step_um = NULL :float             # z-step in um
         """
-
         return definition
 
     @property
@@ -177,18 +174,13 @@ class FieldTemplate(dj.Computed):
                     raise e
 
     def add_field(self, field_key, filepaths, verboselvl=0):
-
         if verboselvl > 4:
             print('\t\tAdd field with files:', filepaths)
 
-        from_raw_data = (self.raw_params_table & field_key).fetch1('from_raw_data')
-        data_stack_name, alt_stack_name = (self.userinfo_table & field_key).fetch1(
-            "data_stack_name", "alt_stack_name")
         setupid = (self.experiment_table().ExpInfo & field_key).fetch1("setupid")
 
-        field_entry, avg_entries = load_field_key_data(
-            field_key=field_key, filepaths=filepaths, ch_names=(data_stack_name, alt_stack_name),
-            setupid=setupid, from_raw_data=from_raw_data)
+        rec = self.load_first_file_wo_error(filepaths=filepaths, setupid=setupid, date=field_key['date'])
+        field_entry, avg_entries = self.complete_keys(base_key=field_key, rec=rec)
 
         self.insert1(field_entry, allow_direct_insert=True)
         for avg_entry in avg_entries:
@@ -203,63 +195,50 @@ class FieldTemplate(dj.Computed):
 
         plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4))
 
+    @staticmethod
+    def load_first_file_wo_error(filepaths, setupid, date):
+        """Load first file from filepaths and return recording and filepath. Skip all files causes errors."""
+        for i, filepath in enumerate(filepaths):
+            try:
+                rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=date)
+                break
+            except Exception as e:
+                error_msg = f"Failed to load file with error {e}:\n{filepath}"
+                if filepath == filepaths[-1]:
+                    raise OSError(error_msg)
+                if input(f"{error_msg}\nTry again for {filepaths[i + 1]}? (y/n)') != 'y'") == 'y':
+                    continue
+                else:
+                    raise OSError(error_msg)
+        else:
+            raise OSError(f"Failed to load any of the files:\n{filepaths}")
 
-def load_field_key_data(field_key, filepaths, from_raw_data, ch_names, setupid) -> (dict, list):
-    ch_stacks, wparams, filepath = load_first_file_wo_error(filepaths, from_raw_data, ch_names)
+        return rec
 
-    nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
-    nypix = wparams["user_dypix"]
-    nzpix = wparams["user_dzpix"]
+    @staticmethod
+    def complete_keys(base_key, rec) -> (dict, list):
+        field_entry = deepcopy(base_key)
 
-    pixel_size_um = setup_utils.get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid,
-                                                     npix=nxpix)
-    z_step_um = wparams.get('zstep_um', 0.)
-    z_stack_flag = int(wparams['user_scantype'] == 11)
-    npixartifact = setup_utils.get_npixartifact(setupid=setupid)
-    scan_type = wparams_utils.get_scan_type(wparams)
+        field_entry["field_data_file"] = rec.filepath
+        field_entry["absx"] = rec.pos_x_um
+        field_entry["absy"] = rec.pos_y_um
+        field_entry["absz"] = rec.pos_z_um
+        field_entry["scan_type"] = rec.scan_type
+        field_entry["npixartifact"] = rec.pix_n_artifact
+        field_entry["nxpix"] = rec.pix_nx
+        field_entry["nypix"] = rec.pix_ny
+        field_entry["nzpix"] = rec.pix_nz
+        field_entry["nxpix_offset"] = rec.pix_n_line_offset
+        field_entry["nxpix_retrace"] = rec.pix_n_retrace
+        field_entry["pixel_size_um"] = rec.pix_dx_um
+        field_entry["z_step_um"] = rec.pix_dz_um
 
-    # keys
-    field_entry = deepcopy(field_key)
-    field_entry["fromfile"] = filepath
-    field_entry["absx"] = wparams['xcoord_um']
-    field_entry["absy"] = wparams['ycoord_um']
-    field_entry["absz"] = wparams['zcoord_um']
-    field_entry["scan_type"] = scan_type
-    field_entry["npixartifact"] = npixartifact
-    field_entry["nxpix"] = nxpix
-    field_entry["nypix"] = nypix
-    field_entry["nzpix"] = nzpix
-    field_entry["nxpix_offset"] = wparams["user_nxpixlineoffs"]
-    field_entry["nxpix_retrace"] = wparams["user_npixretrace"]
-    field_entry["pixel_size_um"] = pixel_size_um
-    field_entry["z_step_um"] = z_step_um
-    field_entry["z_stack_flag"] = z_stack_flag
+        # get stack avgs
+        avg_entries = []
+        for name, stack in rec.ch_stacks.items():
+            avg_entry = deepcopy(base_key)
+            avg_entry["ch_name"] = name
+            avg_entry["ch_average"] = np.median(stack, 2)
+            avg_entries.append(avg_entry)
 
-    # get stack avgs
-    avg_entries = []
-    for name, stack in ch_stacks.items():
-        avg_entry = deepcopy(field_key)
-        avg_entry["ch_name"] = name
-        avg_entry["ch_average"] = np.median(stack, 2)
-        avg_entries.append(avg_entry)
-
-    return field_entry, avg_entries
-
-
-def load_first_file_wo_error(filepaths, from_raw_data, ch_names):
-    for i, filepath in enumerate(filepaths):
-        try:
-            ch_stacks, wparams = read_utils.load_stacks(filepath, from_raw_data=from_raw_data, ch_names=ch_names)
-            break
-        except Exception as e:
-            error_msg = f"Failed to load file with error {e}:\n{filepath}"
-            if filepath == filepaths[-1]:
-                raise OSError(error_msg)
-            if input(f"{error_msg}\nTry again for {filepaths[i + 1]}? (y/n)') != 'y'") == 'y':
-                continue
-            else:
-                raise OSError(error_msg)
-    else:
-        raise OSError(f"Failed to load any of the files:\n{filepaths}")
-
-    return ch_stacks, wparams, filepath
+        return field_entry, avg_entries

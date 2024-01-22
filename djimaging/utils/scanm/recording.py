@@ -11,7 +11,8 @@ class ScanMRecording:
                  date=None, stimulator_delay=None,
                  roi_mask_ignore_not_found=True,
                  trigger_ch_name='wDataCh2', time_precision='line',
-                 triggers_ignore_not_found=True, trigger_threshold=30_000):
+                 triggers_ignore_not_found=True, trigger_threshold=30_000,
+                 repeated_stim=None, ntrigger_rep=None):
         # File
         self.filepath = filepath
         self.filename = os.path.split(self.filepath)[1]
@@ -22,6 +23,7 @@ class ScanMRecording:
         self.date = date
         self.stimulator_delay = stimulator_delay
         self.scan_type = None
+        self.scan_type_id = None
 
         # Channel data
         self.ch_stacks = None
@@ -41,8 +43,11 @@ class ScanMRecording:
         self.triggers_ignore_not_found = triggers_ignore_not_found
         self.trigger_ch_name = trigger_ch_name
         self.trigger_threshold = trigger_threshold
+        self.repeated_stim = repeated_stim
+        self.ntrigger_rep = ntrigger_rep
         self.trigger_times = None
         self.trigger_values = None
+        self.trigger_valid = None
 
         # Pixel info
         self.pix_nx_full = None
@@ -51,6 +56,7 @@ class ScanMRecording:
         self.pix_nx = None
         self.pix_ny = None
         self.pix_nz = None
+        self.pix_n_artifact = None
 
         # Scan info
         self.real_pixel_duration = None
@@ -143,6 +149,7 @@ class ScanMRecording:
 
         # Scan type
         self.scan_type = wparams_utils.get_scan_type(wparams)
+        self.scan_type_id = wparams.pop("user_scantype")
 
         # Pixel info
         self.pix_n_retrace = int(wparams.pop("user_npixretrace"))
@@ -151,6 +158,7 @@ class ScanMRecording:
         self.pix_nx = int(self.pix_nx_full - self.pix_n_retrace - self.pix_n_line_offset)
         self.pix_ny = int(wparams.pop("user_dypix"))
         self.pix_nz = int(wparams.pop("user_dzpix"))
+        self.pix_n_artifact = setup_utils.get_npixartifact(setupid=self.setup_id)
 
         # Scan info
         self.real_pixel_duration = wparams.pop('realpixdur') * 1e-6
@@ -195,9 +203,15 @@ class ScanMRecording:
             npix_x_offset_right=self.pix_n_retrace,
             precision=self.time_precision)
 
-    def compute_triggers(self, trigger_threshold=None, time_precision=None):
+    def compute_triggers(self, trigger_threshold=None, time_precision=None, repeated_stim=None, ntrigger_rep=None):
         if trigger_threshold is not None:
             self.trigger_threshold = trigger_threshold
+
+        if repeated_stim is not None:
+            self.repeated_stim = repeated_stim
+
+        if ntrigger_rep is not None:
+            self.ntrigger_rep = ntrigger_rep
 
         if self.stimulator_delay is None:
             if self.date is None:
@@ -207,9 +221,18 @@ class ScanMRecording:
         if self.frame_times is None or (time_precision != self.time_precision):
             self.compute_frame_times(time_precision=time_precision)
 
-        self.trigger_times, self.trigger_values = traces_and_triggers_utils.compute_triggers(
-            stack=self.ch_stacks[self.trigger_ch_name],
-            frame_times=self.frame_times,
-            frame_dt_offset=self.frame_dt_offset,
-            threshold=self.trigger_threshold,
-            stimulator_delay=self.stimulator_delay)
+        if ntrigger_rep is None or ntrigger_rep > 0:
+            self.trigger_times, self.trigger_values = traces_and_triggers_utils.compute_triggers(
+                stack=self.ch_stacks[self.trigger_ch_name],
+                frame_times=self.frame_times,
+                frame_dt_offset=self.frame_dt_offset,
+                threshold=self.trigger_threshold,
+                stimulator_delay=self.stimulator_delay)
+        else:
+            self.trigger_times, self.trigger_values = np.array([]), np.array([])
+
+        if ntrigger_rep is not None:
+            if self.repeated_stim == 0:
+                self.trigger_valid = self.trigger_times.size == ntrigger_rep
+            else:
+                self.trigger_valid = self.trigger_times.size % ntrigger_rep == 0

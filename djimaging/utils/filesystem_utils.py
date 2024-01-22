@@ -27,7 +27,8 @@ def get_file_info_df(folder, user_dict, from_raw_data):
         elif is_file_info_alias_match(file_info_dict, aliases=hr_aliases, key_list=["region", "field", "stimulus"]):
             kind = 'hr'
             mask_order = len(rm_aliases) + 1
-        elif is_file_info_alias_match(file_info_dict, aliases=ol_aliases, key_list=["region", "field", "stimulus"]):
+        elif is_file_info_alias_match(
+                file_info_dict, aliases=ol_aliases, key_list=["region", "field", "stimulus"], allow_num_suffix=True):
             kind = 'outline'
             mask_order = len(rm_aliases) + 1
         else:
@@ -98,20 +99,6 @@ def find_folders_with_file_of_type(data_dir: str, ending: str = '.ini', ignore_h
     return os_walk_output
 
 
-def get_info_from_loc(data_file, loc, fill_value, suffix='auto'):
-    data_file = os.path.split(data_file)[1]
-
-    if suffix == 'auto':
-        suffix = data_file.split('.')[-1]
-
-    if not suffix.startswith('.'):
-        suffix = '.' + suffix
-
-    split_string = data_file[:data_file.find(suffix)].split("_")
-    info = split_string[loc] if loc < len(split_string) else fill_value
-    return info
-
-
 def is_alias_number_match(name: str, alias: str):
     if name == alias:
         return True
@@ -127,35 +114,6 @@ def is_alias_number_match(name: str, alias: str):
     return False
 
 
-def scan_region_field_file_dicts(folder: str, user_dict: dict, verbose: bool = False, suffix='.h5') -> dict:
-    """Return a dictionary that maps (region, field) to their respective files"""
-
-    loc_mapper = {k: v for k, v in user_dict.items() if k.endswith('loc')}
-
-    file_dicts = dict()
-
-    files = sorted(os.listdir(folder))
-
-    for file in files:
-        if file.startswith('.') or not file.endswith(suffix):
-            continue
-
-        datatype, animal, region, field, stimulus, cond1, cond2, cond3 = get_filename_info(
-            file if suffix == '.h5' else 'SMP_' + file, **loc_mapper)  # locs refer to h5 files, which start with SMP
-
-        if field is None:
-            if verbose:
-                print(f"\tSkipping file with unrecognized field={field}: {file}")
-            continue
-
-        # Add file to list
-        if (region, field) not in file_dicts:
-            file_dicts[(region, field)] = dict(files=[])
-        file_dicts[(region, field)]['files'].append(file)
-
-    return file_dicts
-
-
 def get_file_info_at_loc(file_info, loc):
     if loc is None or loc < 0:
         return None
@@ -163,7 +121,7 @@ def get_file_info_at_loc(file_info, loc):
         return file_info[loc] if len(file_info) > loc else None
 
 
-def is_file_info_alias_match(file_info_dict, aliases, key_list=None):
+def is_file_info_alias_match(file_info_dict, aliases, key_list=None, allow_num_suffix=False):
     key_list = file_info_dict.keys() if key_list is None else key_list
     for key in key_list:
         value = file_info_dict.get(key, None)
@@ -171,8 +129,13 @@ def is_file_info_alias_match(file_info_dict, aliases, key_list=None):
         if value is None:
             continue
 
-        if value.lower() in aliases:
-            return True
+        if not allow_num_suffix:
+            if value.lower() in aliases:
+                return True
+        else:
+            for alias in aliases:
+                if is_alias_number_match(value.lower(), alias):
+                    return True
 
     return False
 

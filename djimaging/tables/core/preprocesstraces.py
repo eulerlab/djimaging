@@ -223,7 +223,7 @@ class PreprocessTracesTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return ((self.traces_table() & 'trace_flag=1' & 'trigger_flag=1') * self.preprocessparams_table()).proj()
+            return ((self.traces_table() & 'trace_flag=1' & 'trigger_valid=1') * self.preprocessparams_table()).proj()
         except (AttributeError, TypeError):
             pass
 

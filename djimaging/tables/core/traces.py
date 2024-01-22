@@ -25,7 +25,7 @@ class TracesTemplate(dj.Computed):
         trace          :longblob              # array of raw trace
         trace_times    :longblob              # numerical array of trace times
         trace_flag     :tinyint unsigned      # Are values in trace correct (1) or not (0)?
-        trigger_flag   :tinyint unsigned      # Are triggertimes inside trace_times (1) or not (0)?
+        trigger_valid   :tinyint unsigned      # Are triggertimes inside trace_times (1) or not (0)?
         """
         return definition
 
@@ -102,7 +102,7 @@ class TracesTemplate(dj.Computed):
             trace_key['trace'] = roi_data['trace']
             trace_key['trace_times'] = roi_data['trace_times']
             trace_key['trace_flag'] = roi_data['valid_flag']
-            trace_key['trigger_flag'] = check_valid_triggers_rel_to_tracetime(
+            trace_key['trigger_valid'] = check_valid_triggers_rel_to_tracetime(
                 trace_flag=trace_key['trace_flag'], trace_times=trace_key['trace_times'], triggertimes=triggertimes)
 
             self.insert1(trace_key)
