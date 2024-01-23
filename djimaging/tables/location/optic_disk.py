@@ -66,13 +66,13 @@ class OpticDiskTemplate(dj.Computed):
 
         file_info_df, from_raw_data = self.load_exp_file_info_df(key)
         if len(file_info_df) > 0:
-            fromfile = file_info_df['file'].iloc[0]
+            fromfile = file_info_df['filepath'].iloc[0]
 
         if fromfile is not None:
             if from_raw_data:
-                odx, ody, odz = load_od_pos_from_h5_file(fromfile)
-            else:
                 odx, ody, odz = load_od_pos_from_smp_file(fromfile)
+            else:
+                odx, ody, odz = load_od_pos_from_h5_file(fromfile)
         else:
             if (self.experiment_table().ExpInfo & key).fetch1("od_ini_flag") == 1:
                 odx, ody, odz = (self.experiment_table().ExpInfo & key).fetch1("odx", "ody", "odz")
