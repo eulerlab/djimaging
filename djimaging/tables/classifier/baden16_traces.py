@@ -10,16 +10,14 @@ from scipy import interpolate
 import datajoint as dj
 
 
-def preprocess_chirp(chirp_average, dt, shift=2, n_int=249):
+def preprocess_chirp(chirp_average, dt, shift=1):
     """
-    Preprocesses chirp traces by resampling if necessary, averaging across repetitions, cutting off
-    last 7 frames and downsampling to 249 frames to match Baden traces;
-    subtracting mean of first 8 frames (baseline subtraction); and normalizing
-    to be in the range [-1, 1]
+    Preprocesses chirp traces by resampling.
+    The previous cutting of the last 7 frames has been replaced by an equivalent speedup factor.
+    Traces are baseline corrected and normalized to be in the range [-1, 1]
     :param chirp_average: chirp average trace
-    :param dt: float, time between two frames
+    :param dt: float, time between two datapoints of chirp_average
     :param shift: int, number of frames to shift chirp trace. Old chirp was different. Shift corrects for this.
-    :param n_int: Number of points to interpolate over. For new chirp stimulus, this is 249. For old chirp this is 251.
     :return: array; shape rois x frames
     """
     if chirp_average.ndim > 1:
@@ -27,18 +25,18 @@ def preprocess_chirp(chirp_average, dt, shift=2, n_int=249):
 
     baden_dt = 0.128
 
-    # extract original baseline before shifting
+    # Extract original baseline before shifting
     baden16_baseline = np.mean(chirp_average[:int(np.round(8 * baden_dt / dt))])
 
-    # Shift
-    baden16_average = np.roll(chirp_average, int(np.round(shift * baden_dt / dt)))
+    # Shift to re-correct for stimulator delay
+    time_avg = np.arange(chirp_average.size) * dt + (shift * baden_dt)
 
-    time_avg = np.arange(baden16_average.size) * dt  # Allow different frequencies
-    baden16_time = np.arange(249) * (32. / (n_int - 1))
+    baden16_time = np.linspace(0, 32, 249)
 
     # Resample to Baden frequency which was (in stimulus space) slightly different
     baden16_average = interpolate.interp1d(
-        time_avg, baden16_average, assume_sorted=True, bounds_error=False, fill_value='extrapolate')(baden16_time)
+        time_avg, chirp_average, assume_sorted=True, bounds_error=False,
+        fill_value=(chirp_average[0], chirp_average[-1]))(baden16_time)
 
     # Normalize
     baden16_average -= baden16_baseline
@@ -47,7 +45,7 @@ def preprocess_chirp(chirp_average, dt, shift=2, n_int=249):
     return baden16_average
 
 
-def preprocess_bar(bar_average, dt, shift=-3):
+def preprocess_bar(bar_average, dt, shift=-4):
     """
     Preprocesses bar time component by resampling if necessary and by rolling to match Baden traces;
     :param bar_average: moving bar average trace in preferred direction
@@ -72,9 +70,8 @@ def preprocess_bar(bar_average, dt, shift=-3):
 class Baden16TracesTemplate(dj.Computed):
     database = ""
 
-    _shift_chirp = 2
-    _shift_bar = -3
-    _chirp_n_int = 249
+    _shift_chirp = 1
+    _shift_bar = -4
 
     _stim_name_chirp = 'gChirp'
     _stim_name_bar = 'movingbar'
@@ -117,7 +114,7 @@ class Baden16TracesTemplate(dj.Computed):
         bar_time_component, bar_dt = (self.os_ds_table & dict(stim_name=self._stim_name_bar) & key).fetch1(
             'time_component', 'time_component_dt')
 
-        preproc_chirp = preprocess_chirp(chirp_average, dt=chirp_dt, shift=self._shift_chirp, n_int=self._chirp_n_int)
+        preproc_chirp = preprocess_chirp(chirp_average, dt=chirp_dt, shift=self._shift_chirp)
         preproc_bar = preprocess_bar(bar_time_component, dt=bar_dt, shift=self._shift_bar)
 
         key = key.copy()
