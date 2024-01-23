@@ -62,7 +62,7 @@ class RoiCanvas:
 
         if pres_names is None:
             pres_names = [f"stim{i + 1}" for i in range(len(self.ch0_stacks))]
-        self.stim_names = pres_names
+        self.pres_names = pres_names
         self.main_stim_idx = main_stim_idx
         self.output_files = output_files
 
@@ -614,7 +614,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def create_widget_sel_stim(self):
-        widget = Dropdown(options=self.stim_names, value=self.stim_names[self._selected_stim_idx],
+        widget = Dropdown(options=self.pres_names, value=self.pres_names[self._selected_stim_idx],
                           description='Stimulus:', disabled=False)
 
         def change(value):
@@ -625,7 +625,7 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def set_selected_stim(self, value):
         self.widget_sel_stim.value = value
-        self._selected_stim_idx = np.argmax([stim_name == value for stim_name in self.stim_names])
+        self._selected_stim_idx = np.argmax([stim_name == value for stim_name in self.pres_names])
 
         self.update_roi_masks_backup()
         self.output_file = self.output_files[self._selected_stim_idx]
@@ -1017,7 +1017,7 @@ class InteractiveRoiCanvas(RoiCanvas):
     def exec_save_all_to_file(self, button=None):
         import time
         self.update_progress(0)
-        for i, stim in enumerate(self.stim_names, start=1):
+        for i, stim in enumerate(self.pres_names, start=1):
             self.set_selected_stim(stim)
             try:
                 self.exec_save_to_file()
@@ -1025,7 +1025,7 @@ class InteractiveRoiCanvas(RoiCanvas):
                 self.widget_save_info.description = 'Error!'.ljust(20)
                 warnings.warn(f'Error saving {stim}: {e}')
             time.sleep(0.5)
-            self.update_progress(100 * i / len(self.stim_names))
+            self.update_progress(100 * i / len(self.pres_names))
 
     def create_widget_save_info(self):
         widget = HTML(value=f'{self.output_file}', placeholder='output_file', description=''.ljust(20))
@@ -1236,22 +1236,18 @@ class InteractiveRoiCanvas(RoiCanvas):
     def insert_database(self, roi_mask_tab, field_key):
         from djimaging.utils.mask_utils import to_igor_format, compare_roi_masks
 
-        stim_to_roi_mask = {}
-        for stim in self.stim_names:
-            self.set_selected_stim(stim)
+        pres_and_roi_mask = []
+        for pres_key in self.pres_names:
+            self.set_selected_stim(pres_key)
             roi_mask = self.prep_roi_mask_for_file()
-            stim_to_roi_mask[stim] = to_igor_format(roi_mask)
+            pres_and_roi_mask.append((pres_key, to_igor_format(roi_mask)))
 
-        main_stim_condition = self.stim_names[self.main_stim_idx]
-        main_roi_mask = stim_to_roi_mask[main_stim_condition]
-
-        stim, condition = self.split_name(main_stim_condition)
-        new_key = {**field_key, "stim_name": stim, "roi_mask": main_roi_mask, "condition": condition}
+        main_roi_mask = pres_and_roi_mask[self.main_stim_idx][1]
+        new_key = {**field_key, **self.pres_names[self.main_stim_idx], "roi_mask": main_roi_mask}
 
         roi_mask_tab().insert1(new_key)
-        for i, (stim_condition, roi_mask) in enumerate(stim_to_roi_mask.items()):
-            stim, condition = self.split_name(stim_condition)
-            new_key = {**field_key, "stim_name": stim, "roi_mask": roi_mask, "condition": condition}
+        for i, (pres_key, roi_mask) in enumerate(pres_and_roi_mask):
+            new_key = {**field_key, **pres_key, "roi_mask": roi_mask}
 
             as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(roi_mask, main_roi_mask, max_shift=self.max_shift)
             new_key['as_field_mask'] = as_field_mask
@@ -1293,7 +1289,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def exec_stim_next(self, button=None):
-        self.set_selected_stim(self.stim_names[(self._selected_stim_idx + 1) % len(self.stim_names)])
+        self.set_selected_stim(self.pres_names[(self._selected_stim_idx + 1) % len(self.pres_names)])
 
     def create_widget_stim_prev(self):
         widget = Button(description='<<', disabled=False, button_style='success',
@@ -1302,7 +1298,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def exec_stim_prev(self, button=None):
-        self.set_selected_stim(self.stim_names[(self._selected_stim_idx - 1) % len(self.stim_names)])
+        self.set_selected_stim(self.pres_names[(self._selected_stim_idx - 1) % len(self.pres_names)])
 
 
 def plot_diagnostics(mask, traces, cc, mask_xs, mask_ys):
