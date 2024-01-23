@@ -54,7 +54,8 @@ def test_populate_user(database_fixture):
         'region_loc': 2,
         'field_loc': 3,
         'stimulus_loc': 4,
-        'condition_loc': 5,
+        'cond1_loc': 5,
+        'cond2_loc': 6,
     }
     UserInfo().upload_user(userinfo)
     assert len(UserInfo()) == 1
