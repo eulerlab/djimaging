@@ -1,3 +1,5 @@
+# TODO: Add table that filters cells based on these parameters
+
 import datajoint as dj
 
 from djimaging.utils.dj_utils import make_hash

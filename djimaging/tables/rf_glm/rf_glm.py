@@ -1,3 +1,79 @@
+"""
+Receptive field estimation using GLMs.
+
+Example usage:
+
+from djimaging.tables import receptivefield, rf_glm
+
+@schema
+class DNoiseTraceParams(receptivefield.DNoiseTraceParamsTemplate):
+    pass
+
+
+@schema
+class DNoiseTrace(receptivefield.DNoiseTraceTemplate):
+    presentation_table = Presentation
+    stimulus_table = Stimulus
+    traces_table = PreprocessTraces
+    params_table = DNoiseTraceParams
+
+
+@schema
+class RfGlmParams(rf_glm.RfGlmParamsTemplate):
+    pass
+
+
+@schema
+class RfGlm(rf_glm.RfGlmTemplate):
+    noise_traces_table = DNoiseTrace
+    params_table = RfGlmParams
+    preprocesstraces_table = PreprocessTraces
+    stimulus_table = Stimulus
+    presentation_table = Presentation
+    traces_table = Traces
+
+
+@schema
+class RfGlmSingleModel(rf_glm.RfGlmSingleModelTemplate):
+    noise_traces_table = DNoiseTrace
+    glm_table = RfGlm
+
+
+@schema
+class RfGlmQualityParams(rf_glm.RfGlmQualityParamsTemplate):
+    pass
+
+
+@schema
+class RfGlmQuality(rf_glm.RfGlmQualityTemplate):
+    glm_single_model_table = RfGlmSingleModel
+    glm_table = RfGlm
+    params_table = RfGlmQualityParams
+
+
+@schema
+class SplitRfGlmParams(receptivefield.SplitRFParamsTemplate):
+    pass
+
+
+@schema
+class SplitRfGlm(receptivefield.SplitRFTemplate):
+    rf_table = RfGlm
+    split_rf_params_table = SplitRfGlmParams
+
+
+@schema
+class FitGauss2DRfGlm(receptivefield.FitGauss2DRFTemplate):
+    split_rf_table = SplitRfGlm
+    stimulus_table = Stimulus
+
+
+@schema
+class FitDoG2DRfGlm(receptivefield.FitDoG2DRFTemplate):
+    split_rf_table = SplitRfGlm
+    stimulus_table = Stimulus
+"""
+
 import warnings
 from abc import abstractmethod
 from copy import deepcopy
@@ -10,7 +86,7 @@ from djimaging.tables.rf_glm.rf_glm_utils import ReceptiveFieldGLM, plot_rf_summ
 from djimaging.utils.dj_utils import get_primary_key
 
 
-class RFGLMParamsTemplate(dj.Lookup):
+class RfGlmParamsTemplate(dj.Lookup):
     database = ""
 
     @property
@@ -58,7 +134,7 @@ class RFGLMParamsTemplate(dj.Lookup):
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
-class RFGLMTemplate(dj.Computed):
+class RfGlmTemplate(dj.Computed):
     database = ""
 
     # TODO: Make definition as in STA, i.e. add shift and rf_time
@@ -136,7 +212,7 @@ class RFGLMTemplate(dj.Computed):
         plt.show()
 
 
-class RFGLMQualityParamsTemplate(dj.Lookup):
+class RfGlmQualityParamsTemplate(dj.Lookup):
     database = ""
 
     @property
@@ -162,7 +238,7 @@ class RFGLMQualityParamsTemplate(dj.Lookup):
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
-class RFGLMSingleModelTemplate(dj.Computed):
+class RfGlmSingleModelTemplate(dj.Computed):
     database = ""
     _default_metric = 'mse'
 
@@ -242,7 +318,7 @@ class RFGLMSingleModelTemplate(dj.Computed):
         plt.show()
 
 
-class RFGLMQualityTemplate(dj.Computed):
+class RfGlmQualityTemplate(dj.Computed):
     database = ""
 
     @property

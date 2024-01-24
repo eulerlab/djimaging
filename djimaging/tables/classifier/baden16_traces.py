@@ -1,3 +1,8 @@
+"""
+Preprocess traces to match Baden et al. 2016 dataset.
+Mostly used to match traces for RGC classification.
+"""
+
 from abc import abstractmethod
 
 import numpy as np
@@ -8,63 +13,6 @@ from djimaging.utils.trace_utils import get_mean_dt
 from djimaging.utils.dj_utils import get_primary_key
 from scipy import interpolate
 import datajoint as dj
-
-
-def preprocess_chirp(chirp_average, dt, shift=1):
-    """
-    Preprocesses chirp traces by resampling.
-    The previous cutting of the last 7 frames has been replaced by an equivalent speedup factor.
-    Traces are baseline corrected and normalized to be in the range [-1, 1]
-    :param chirp_average: chirp average trace
-    :param dt: float, time between two datapoints of chirp_average
-    :param shift: int, number of frames to shift chirp trace. Old chirp was different. Shift corrects for this.
-    :return: array; shape rois x frames
-    """
-    if chirp_average.ndim > 1:
-        raise ValueError(f"chirp_trace must be 1D, but has shape {chirp_average.shape}")
-
-    baden_dt = 0.128
-
-    # Extract original baseline before shifting
-    baden16_baseline = np.mean(chirp_average[:int(np.round(8 * baden_dt / dt))])
-
-    # Shift to re-correct for stimulator delay
-    time_avg = np.arange(chirp_average.size) * dt + (shift * baden_dt)
-
-    baden16_time = np.linspace(0, 32, 249)
-
-    # Resample to Baden frequency which was (in stimulus space) slightly different
-    baden16_average = interpolate.interp1d(
-        time_avg, chirp_average, assume_sorted=True, bounds_error=False,
-        fill_value=(chirp_average[0], chirp_average[-1]))(baden16_time)
-
-    # Normalize
-    baden16_average -= baden16_baseline
-    baden16_average /= np.max(np.abs(baden16_average))
-
-    return baden16_average
-
-
-def preprocess_bar(bar_average, dt, shift=-4):
-    """
-    Preprocesses bar time component by resampling if necessary and by rolling to match Baden traces;
-    :param bar_average: moving bar average trace in preferred direction
-    :param dt: float, time between two frames
-    :param shift: int, number of frames to shift bar trace. Old bar has different. Shift corrects for this.
-    :return: array; shape rois x frames
-    """
-    if bar_average.ndim > 1:
-        raise ValueError(f"time_component must be 1D, but has shape {bar_average.shape}")
-
-    baden_dt = 0.128
-
-    time = np.arange(bar_average.size) * dt
-    baden16_time = np.arange(32) * baden_dt
-    baden16_average = interpolate.interp1d(
-        time, bar_average, assume_sorted=True, bounds_error=False, fill_value='extrapolate')(baden16_time)
-    # Shift
-    baden16_average = np.roll(baden16_average, shift)
-    return baden16_average
 
 
 class Baden16TracesTemplate(dj.Computed):
@@ -139,3 +87,60 @@ class Baden16TracesTemplate(dj.Computed):
         ax.set(xlabel='frames', ylabel='signal', title='bar')
 
         plt.show()
+
+
+def preprocess_chirp(chirp_average, dt, shift=1):
+    """
+    Preprocesses chirp traces by resampling.
+    The previous cutting of the last 7 frames has been replaced by an equivalent speedup factor.
+    Traces are baseline corrected and normalized to be in the range [-1, 1]
+    :param chirp_average: chirp average trace
+    :param dt: float, time between two datapoints of chirp_average
+    :param shift: int, number of frames to shift chirp trace. Old chirp was different. Shift corrects for this.
+    :return: array; shape rois x frames
+    """
+    if chirp_average.ndim > 1:
+        raise ValueError(f"chirp_trace must be 1D, but has shape {chirp_average.shape}")
+
+    baden_dt = 0.128
+
+    # Extract original baseline before shifting
+    baden16_baseline = np.mean(chirp_average[:int(np.round(8 * baden_dt / dt))])
+
+    # Shift to re-correct for stimulator delay
+    time_avg = np.arange(chirp_average.size) * dt + (shift * baden_dt)
+
+    baden16_time = np.linspace(0, 32, 249)
+
+    # Resample to Baden frequency which was (in stimulus space) slightly different
+    baden16_average = interpolate.interp1d(
+        time_avg, chirp_average, assume_sorted=True, bounds_error=False,
+        fill_value=(chirp_average[0], chirp_average[-1]))(baden16_time)
+
+    # Normalize
+    baden16_average -= baden16_baseline
+    baden16_average /= np.max(np.abs(baden16_average))
+
+    return baden16_average
+
+
+def preprocess_bar(bar_average, dt, shift=-4):
+    """
+    Preprocesses bar time component by resampling if necessary and by rolling to match Baden traces;
+    :param bar_average: moving bar average trace in preferred direction
+    :param dt: float, time between two frames
+    :param shift: int, number of frames to shift bar trace. Old bar has different. Shift corrects for this.
+    :return: array; shape rois x frames
+    """
+    if bar_average.ndim > 1:
+        raise ValueError(f"time_component must be 1D, but has shape {bar_average.shape}")
+
+    baden_dt = 0.128
+
+    time = np.arange(bar_average.size) * dt
+    baden16_time = np.arange(32) * baden_dt
+    baden16_average = interpolate.interp1d(
+        time, bar_average, assume_sorted=True, bounds_error=False, fill_value='extrapolate')(baden16_time)
+    # Shift
+    baden16_average = np.roll(baden16_average, shift)
+    return baden16_average

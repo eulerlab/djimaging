@@ -1,3 +1,19 @@
+"""
+High resolution stack images.
+
+Example usage:
+
+from djimaging.tables import misc
+
+@schema
+class HighRes(misc.HighResTemplate):
+    field_table = Field
+    experiment_table = Experiment
+    userinfo_table = UserInfo
+
+    class StackAverages(misc.HighResTemplate.StackAverages):
+        pass
+"""
 import warnings
 from abc import abstractmethod
 from copy import deepcopy

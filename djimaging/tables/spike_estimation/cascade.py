@@ -1,3 +1,32 @@
+"""
+Tables for spike estimation using the Cascade toolbox.
+
+Example usage:
+
+from djimaging.tables import spike_estimation
+
+@schema
+class CascadeTraceParams(spike_estimation.CascadeTracesParamsTemplate):
+    pass
+
+@schema
+class CascadeTraces(spike_estimation.CascadeTracesTemplate):
+    cascadetraces_params_table = CascadeTraceParams
+    presentation_table = Presentation
+    traces_table = Traces
+
+@schema
+class CascadeParams(spike_estimation.CascadeParamsTemplate):
+    pass
+
+@schema
+class CascadeSpikes(spike_estimation.CascadeSpikesTemplate):
+    presentation_table = Presentation
+    cascadetraces_params_table = CascadeTraceParams
+    cascadetraces_table = CascadeTraces
+    cascade_params_table = CascadeParams
+"""
+
 import warnings
 
 import os
@@ -15,43 +44,6 @@ from djimaging.utils.dj_utils import get_primary_key
 from djimaging.tables.core.preprocesstraces import detrend_trace, drop_left_and_right
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 from djimaging.utils.trace_utils import get_mean_dt
-
-
-def compute_cascade_trace(trace, trace_times, window_len_seconds, poly_order, q_lower=2.5, q_upper=80, f_cutoff=None):
-    """Preprocess trace for cascade toolbox. Includes detrending, lowpass filtering and dF/F computation."""
-    trace = np.asarray(trace).copy()
-    dt, dt_rel_error = get_mean_dt(tracetime=trace_times)
-
-    if dt_rel_error > 0.1:
-        warnings.warn('Inconsistent step-sizes in trace, resample trace.')
-        trace_times, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=dt)
-
-    trace = drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace=True)
-    trace, smoothed_trace = detrend_trace(trace, window_len_seconds, 1. / dt, poly_order)
-
-    if (f_cutoff is not None) and (f_cutoff > 0):
-        trace = filter_utils.lowpass_filter_trace(trace=trace, fs=1. / dt, f_cutoff=f_cutoff)
-
-    trace = compute_dff(trace, q_lower=q_lower, q_upper=q_upper)
-
-    return trace, trace_times
-
-
-def compute_dff(trace, q_lower=2.5, q_upper=80.):
-    """Compute dF/F proxy from trace."""
-    trace = np.asarray(trace).copy()
-
-    trace_lower = np.percentile(trace, q_lower)
-    trace_upper = np.percentile(trace, q_upper)
-
-    # Compute the change in fluorescence (ΔF)
-    delta_fluorescence = trace - trace_lower
-
-    # Compute ΔF/F
-    if trace_upper - trace_lower > 0.:
-        trace = delta_fluorescence / float(trace_upper - trace_lower)
-
-    return trace
 
 
 class CascadeTracesParamsTemplate(dj.Lookup):
@@ -352,3 +344,40 @@ class CascadeSpikesTemplate(dj.Computed):
         ax.set_title('spike_prob')
         plot_utils.plot_signals_heatmap(ax=ax, signals=spike_prob[sort_idxs, :], symmetric=False)
         plt.show()
+
+
+def compute_cascade_trace(trace, trace_times, window_len_seconds, poly_order, q_lower=2.5, q_upper=80, f_cutoff=None):
+    """Preprocess trace for cascade toolbox. Includes detrending, lowpass filtering and dF/F computation."""
+    trace = np.asarray(trace).copy()
+    dt, dt_rel_error = get_mean_dt(tracetime=trace_times)
+
+    if dt_rel_error > 0.1:
+        warnings.warn('Inconsistent step-sizes in trace, resample trace.')
+        trace_times, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=dt)
+
+    trace = drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace=True)
+    trace, smoothed_trace = detrend_trace(trace, window_len_seconds, 1. / dt, poly_order)
+
+    if (f_cutoff is not None) and (f_cutoff > 0):
+        trace = filter_utils.lowpass_filter_trace(trace=trace, fs=1. / dt, f_cutoff=f_cutoff)
+
+    trace = compute_dff(trace, q_lower=q_lower, q_upper=q_upper)
+
+    return trace, trace_times
+
+
+def compute_dff(trace, q_lower=2.5, q_upper=80.):
+    """Compute dF/F proxy from trace."""
+    trace = np.asarray(trace).copy()
+
+    trace_lower = np.percentile(trace, q_lower)
+    trace_upper = np.percentile(trace, q_upper)
+
+    # Compute the change in fluorescence (ΔF)
+    delta_fluorescence = trace - trace_lower
+
+    # Compute ΔF/F
+    if trace_upper - trace_lower > 0.:
+        trace = delta_fluorescence / float(trace_upper - trace_lower)
+
+    return trace

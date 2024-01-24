@@ -1,3 +1,26 @@
+"""
+Tables for Chirp response quality index (QI) and features.
+
+Example usage:
+
+from djimaging.tables import response
+
+@schema
+class ChirpQI(response.ChirpQITemplate):
+    _stim_family = "chirp"
+    _stim_name = "chirp"
+
+    stimulus_table = Stimulus
+    snippets_table = Snippets
+
+
+@schema
+class ChirpFeatures(response.ChirpFeaturesTemplate):
+    stimulus_table = Stimulus
+    snippets_table = Snippets
+    presentation_table = Presentation
+"""
+
 from abc import abstractmethod
 
 import datajoint as dj

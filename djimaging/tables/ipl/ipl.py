@@ -1,3 +1,23 @@
+"""
+Defines tables for IPL depth analysis, e.g. to determine where in the IPL ROIs are located.
+
+Example usage:
+
+from djimaging.tables import ipl
+
+@schema
+class IplBorders(ipl.IplBordersTemplate):
+    field_or_pres_table = Field
+    userinfo_table = UserInfo
+
+
+@schema
+class RoiIplDepth(ipl.RoiIplDepthTemplate):
+    roimask_table = RoiMask
+    ipl_border_table = IplBorders
+    roi_table = Roi
+"""
+
 from abc import abstractmethod
 
 import datajoint as dj

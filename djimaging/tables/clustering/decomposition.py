@@ -1,3 +1,8 @@
+"""
+Features extraction (e.g. PCA, sparse PCA, etc.) of traces.
+Mostly used for clustering.
+"""
+
 from abc import abstractmethod
 from copy import deepcopy
 
@@ -34,94 +39,10 @@ class FeaturesParamsTemplate(dj.Lookup):
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
-def compute_features(traces: list, ncomps: list, kind: str, params_dict: dict) -> (list, list, list):
-    """Reduce dimension of traces to features and stack them to feature matrix"""
-    kind = kind.lower()
-
-    if kind == 'sparse_pca':
-        features, traces_reconstructed, infos = compute_features_sparse_pca(traces=traces, ncomps=ncomps, **params_dict)
-    elif kind == 'pca':
-        assert len(params_dict) == 0
-        features, traces_reconstructed, infos = compute_features_pca(traces=traces, ncomps=ncomps)
-    elif kind == 'none':
-        features, traces_reconstructed, infos = deepcopy(traces), deepcopy(traces), [dict()] * len(traces)
-    else:
-        raise NotImplementedError(kind)
-
-    return features, traces_reconstructed, infos
-
-
-def compute_variance_explained_sparse_pca(X: np.ndarray, P: np.ndarray) -> (float, float):
-    """Camacho et al. (2019): explained here https://github.com/scikit-learn/scikit-learn/issues/11512"""
-    Xc = X - X.mean(axis=0)  # center data
-    T = Xc @ P @ np.linalg.pinv(P.T @ P)
-
-    explained_variance = np.trace(P @ T.T @ T @ P.T)
-    total_variance = np.trace(Xc.T @ Xc)
-
-    return explained_variance, total_variance
-
-
-def compute_features_sparse_pca(traces: list, ncomps: list, alpha=1) -> (list, list, list):
-    from sklearn.decomposition import SparsePCA
-    from sklearn.preprocessing import StandardScaler
-
-    features, traces_reconstructed, infos = [], [], []
-    for traces_i, ncomps_i in zip(traces, ncomps):
-        sc = StandardScaler()
-        norm_traces_i = sc.fit_transform(X=traces_i)
-
-        decomp = SparsePCA(n_components=ncomps_i, random_state=0, alpha=alpha, verbose=1)
-        features_i = decomp.fit_transform(X=norm_traces_i)
-
-        try:
-            traces_reconstructed_i = sc.inverse_transform(X=decomp.inverse_transform(X=features_i))
-        except AttributeError:  # SparsePCA.inverse_transform was only added in scikit-learn 1.2
-            traces_reconstructed_i = None
-
-        explained_variance, total_variance = compute_variance_explained_sparse_pca(
-            X=norm_traces_i, P=decomp.components_.T)
-
-        info_i = dict()
-        info_i["components"] = decomp.components_
-        info_i["explained_variance"] = explained_variance
-        info_i["explained_variance_ratio"] = explained_variance / total_variance
-
-        features.append(features_i)
-        traces_reconstructed.append(traces_reconstructed_i)
-        infos.append(info_i)
-
-    return features, traces_reconstructed, infos
-
-
-def compute_features_pca(traces: list, ncomps: list) -> (list, list, list):
-    from sklearn.decomposition import PCA
-    from sklearn.preprocessing import StandardScaler
-
-    features, traces_reconstructed, infos = [], [], []
-    for traces_i, ncomps_i in zip(traces, ncomps):
-        sc = StandardScaler(with_mean=True, with_std=True)
-        norm_traces_i = sc.fit_transform(X=traces_i)
-
-        decomp = PCA(n_components=ncomps_i, random_state=0)
-        features_i = decomp.fit_transform(X=norm_traces_i)
-
-        traces_reconstructed_i = sc.inverse_transform(X=decomp.inverse_transform(X=features_i))
-
-        info_i = dict()
-        info_i["components"] = decomp.components_
-        info_i["explained_variance"] = decomp.explained_variance_
-        info_i["explained_variance_ratio"] = decomp.explained_variance_ratio_
-
-        features.append(features_i)
-        traces_reconstructed.append(traces_reconstructed_i)
-        infos.append(info_i)
-
-    return features, traces_reconstructed, infos
-
-
 class FeaturesTemplate(dj.Computed):
     database = ""
+
+    _quality_restriction = None  # Restriction applied to roi_quality_table if any.
 
     @property
     def definition(self):
@@ -167,7 +88,10 @@ class FeaturesTemplate(dj.Computed):
         average_key = 'average_norm' if norm_trace else 'average'
         stim_names = stim_names.split('_')
 
-        tab = (self.roi_quality_table & "q_tot = 1.")
+        tab = self.roi_table
+
+        if self._quality_restriction is not None:
+            tab = tab & (self.roi_quality_table & self._quality_restriction)
 
         for stim_i in stim_names:
             tab = tab * (self.averages_table & f"stim_name='{stim_i}'").proj(
@@ -264,3 +188,89 @@ class FeaturesTemplate(dj.Computed):
                 plt.colorbar(im, ax=ax)
 
         plt.show()
+
+
+def compute_features(traces: list, ncomps: list, kind: str, params_dict: dict) -> (list, list, list):
+    """Reduce dimension of traces to features and stack them to feature matrix"""
+    kind = kind.lower()
+
+    if kind == 'sparse_pca':
+        features, traces_reconstructed, infos = compute_features_sparse_pca(traces=traces, ncomps=ncomps, **params_dict)
+    elif kind == 'pca':
+        assert len(params_dict) == 0
+        features, traces_reconstructed, infos = compute_features_pca(traces=traces, ncomps=ncomps)
+    elif kind == 'none':
+        features, traces_reconstructed, infos = deepcopy(traces), deepcopy(traces), [dict()] * len(traces)
+    else:
+        raise NotImplementedError(kind)
+
+    return features, traces_reconstructed, infos
+
+
+def compute_variance_explained_sparse_pca(X: np.ndarray, P: np.ndarray) -> (float, float):
+    """Camacho et al. (2019): explained here https://github.com/scikit-learn/scikit-learn/issues/11512"""
+    Xc = X - X.mean(axis=0)  # center data
+    T = Xc @ P @ np.linalg.pinv(P.T @ P)
+
+    explained_variance = np.trace(P @ T.T @ T @ P.T)
+    total_variance = np.trace(Xc.T @ Xc)
+
+    return explained_variance, total_variance
+
+
+def compute_features_sparse_pca(traces: list, ncomps: list, alpha=1) -> (list, list, list):
+    from sklearn.decomposition import SparsePCA
+    from sklearn.preprocessing import StandardScaler
+
+    features, traces_reconstructed, infos = [], [], []
+    for traces_i, ncomps_i in zip(traces, ncomps):
+        sc = StandardScaler()
+        norm_traces_i = sc.fit_transform(X=traces_i)
+
+        decomp = SparsePCA(n_components=ncomps_i, random_state=0, alpha=alpha, verbose=1)
+        features_i = decomp.fit_transform(X=norm_traces_i)
+
+        try:
+            traces_reconstructed_i = sc.inverse_transform(X=decomp.inverse_transform(X=features_i))
+        except AttributeError:  # SparsePCA.inverse_transform was only added in scikit-learn 1.2
+            traces_reconstructed_i = None
+
+        explained_variance, total_variance = compute_variance_explained_sparse_pca(
+            X=norm_traces_i, P=decomp.components_.T)
+
+        info_i = dict()
+        info_i["components"] = decomp.components_
+        info_i["explained_variance"] = explained_variance
+        info_i["explained_variance_ratio"] = explained_variance / total_variance
+
+        features.append(features_i)
+        traces_reconstructed.append(traces_reconstructed_i)
+        infos.append(info_i)
+
+    return features, traces_reconstructed, infos
+
+
+def compute_features_pca(traces: list, ncomps: list) -> (list, list, list):
+    from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
+
+    features, traces_reconstructed, infos = [], [], []
+    for traces_i, ncomps_i in zip(traces, ncomps):
+        sc = StandardScaler(with_mean=True, with_std=True)
+        norm_traces_i = sc.fit_transform(X=traces_i)
+
+        decomp = PCA(n_components=ncomps_i, random_state=0)
+        features_i = decomp.fit_transform(X=norm_traces_i)
+
+        traces_reconstructed_i = sc.inverse_transform(X=decomp.inverse_transform(X=features_i))
+
+        info_i = dict()
+        info_i["components"] = decomp.components_
+        info_i["explained_variance"] = decomp.explained_variance_
+        info_i["explained_variance_ratio"] = decomp.explained_variance_ratio_
+
+        features.append(features_i)
+        traces_reconstructed.append(traces_reconstructed_i)
+        infos.append(info_i)
+
+    return features, traces_reconstructed, infos

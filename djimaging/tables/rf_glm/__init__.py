@@ -1,2 +1,2 @@
-from .rf_glm import RFGLMParamsTemplate, RFGLMTemplate, RFGLMQualityParamsTemplate, RFGLMQualityTemplate, \
-    RFGLMSingleModelTemplate
+from .rf_glm import RfGlmParamsTemplate, RfGlmTemplate, RfGlmQualityParamsTemplate, RfGlmQualityTemplate, \
+    RfGlmSingleModelTemplate

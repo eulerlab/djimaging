@@ -1,3 +1,7 @@
+"""
+This module contains tables for preprocessing traces for receptive field estimation.
+"""
+
 from abc import abstractmethod
 
 import datajoint as dj

@@ -1,3 +1,8 @@
+"""
+This module defines the optic disk table.
+Mostly used for location of the recorded field center relative to the optic disk.
+"""
+
 import os
 import warnings
 from abc import abstractmethod

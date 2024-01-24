@@ -1,3 +1,7 @@
+"""
+Tables for receptive field feature extraction.
+"""
+
 import warnings
 from abc import abstractmethod
 from copy import deepcopy

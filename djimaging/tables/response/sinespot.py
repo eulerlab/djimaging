@@ -1,3 +1,25 @@
+"""
+Tables for Sinespot response quality index (QI) and features.
+
+Example usage:
+
+from djimaging.tables import response
+
+@schema
+class SineSpotQI(response.SineSpotQITemplate):
+    _stim_family = "sinespot"
+    _stim_name = "sinespot"
+
+    stimulus_table = Stimulus
+    snippets_table = Snippets
+
+@schema
+class SineSpotFeatures(response.SineSpotFeaturesTemplate):
+    stimulus_table = Stimulus
+    preprocesstraces_table = PreprocessTraces
+    presentation_table = Presentation
+"""
+
 from abc import abstractmethod
 
 import datajoint as dj

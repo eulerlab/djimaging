@@ -24,8 +24,12 @@ class OsDsIndexes(response.OsDsIndexesTemplate):
 
 @schema
 class Baden16Traces(classifier.Baden16TracesTemplate):
-    roi_table = Roi
-    preprocessparams_table = PreprocessParams
+    _shift_chirp = 1
+    _shift_bar = -4
+
+    _stim_name_chirp = 'gChirp'
+    _stim_name_bar = 'movingbar'
+
     averages_table = Averages
     os_ds_table = OsDsIndexes
 

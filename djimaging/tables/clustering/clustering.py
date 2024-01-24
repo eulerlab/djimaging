@@ -1,3 +1,41 @@
+"""
+Clustering of features (e.g. PCA, parse PCA, etc.) of traces
+
+Example usage:
+
+from djimaging.tables import clustering
+
+@schema
+class FeaturesParams(clustering.FeaturesParamsTemplate):
+    pass
+
+@schema
+class Features(clustering.FeaturesTemplate):
+
+    # Optional quality filtering, defines table and restriction on ROI level
+    _quality_restriction = None
+    roi_quality_table = None
+
+    params_table = FeaturesParams
+    averages_table = Averages
+    roi_table = Roi
+
+    class RoiFeatures(clustering.FeaturesTemplate.RoiFeatures):
+        pass
+
+@schema
+class ClusteringParameters(clustering.ClusteringParametersTemplate):
+    pass
+
+@schema
+class Clustering(clustering.ClusteringTemplate):
+    features_table = Features
+    params_table = ClusteringParameters
+
+    class RoiCluster(clustering.ClusteringTemplate.RoiCluster):
+        pass
+"""
+
 from abc import abstractmethod
 
 import datajoint as dj
@@ -6,6 +44,122 @@ from djimaging.utils import plot_utils
 from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import get_primary_key
+
+
+class ClusteringParametersTemplate(dj.Lookup):
+    database = ""
+
+    @property
+    def definition(self):
+        definition = """
+        clustering_id: int # unique param set id
+        ---
+        kind: varchar(255)
+        params_dict: longblob
+        min_count: int
+        """
+        return definition
+
+    def add(self, kind, params_dict, clustering_id=1, min_count=0, skip_duplicates=False):
+        assert isinstance(params_dict, dict)
+        key = dict(clustering_id=clustering_id, kind=kind, params_dict=params_dict, min_count=min_count)
+        self.insert1(key, skip_duplicates=skip_duplicates)
+
+
+class ClusteringTemplate(dj.Computed):
+    database = ""
+
+    @property
+    def definition(self):
+        definition = """
+        -> self.features_table
+        -> self.params_table
+        ---
+        clusters : longblob
+        """
+        return definition
+
+    @property
+    def key_source(self):
+        try:
+            return self.features_table.proj() * self.params_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
+    @property
+    @abstractmethod
+    def features_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def params_table(self):
+        pass
+
+    def make(self, key):
+
+        kind, params_dict, min_count = (self.params_table & key).fetch1('kind', 'params_dict', 'min_count')
+        features = (self.features_table & key).fetch1('features')
+
+        decomp_kind = (self.features_table.params_table & key).fetch1('kind')
+
+        if kind == 'gmm' and decomp_kind == 'none':
+            return
+        elif kind == 'hierarchical_correlation' and not decomp_kind == 'none':
+            return
+
+        _, cluster_idxs = cluster_features(X=np.hstack(features), kind=kind, params_dict=params_dict)
+        cluster_idxs = remove_clusters(cluster_idxs=cluster_idxs, min_count=min_count, invalid_value=-1)
+
+        traces = (self.features_table() & key).fetch1('traces')
+        cluster_idxs = sort_clusters(traces=np.hstack(traces), cluster_idxs=cluster_idxs, invalid_value=-1)
+
+        main_key = key.copy()
+        main_key['clusters'] = cluster_idxs
+        self.insert1(main_key)
+
+        for cluster_idx, row in zip(cluster_idxs, self.features_table.RoiFeatures & key):
+            roi_key = key.copy()
+            roi_key.update({k: v for k, v in row.items() if k in self.features_table.RoiFeatures.primary_key})
+            roi_key['cluster_idx'] = cluster_idx
+            self.RoiCluster().insert1(roi_key)
+
+    class RoiCluster(dj.Part):
+        @property
+        def definition(self):
+            definition = """
+            -> master
+            -> master.features_table.RoiFeatures
+            ---
+            cluster_idx : int
+            """
+            return definition
+
+    def plot1(self, key=None):
+        key = get_primary_key(table=self, key=key)
+
+        clusters = (self & key).fetch1('clusters')
+
+        fig, ax = plt.subplots(1, 1, figsize=(6, 2))
+        plot_utils.set_long_title(fig=fig, title=key)
+        ax.hist(clusters, bins=np.arange(clusters.min() - 0.25, clusters.max() + 0.5, 0.5))
+        ax.set(title='Counts')
+        plt.tight_layout()
+        plt.show()
+
+    def plot1_averages(self, key=None):
+        self.plot1_traces(key=key, kind='averages')
+
+    def plot1_heatmaps(self, key=None):
+        self.plot1_traces(key=key, kind='traces')
+
+    def plot1_traces(self, key=None, kind='traces'):
+        key = get_primary_key(table=self, key=key)
+
+        stim_names = (self.features_table.params_table & key).fetch1('stim_names').split('_')
+        traces_list = (self.features_table & key).fetch1('traces')
+        clusters = (self & key).fetch1('clusters')
+        plot_utils.plot_clusters(traces_list, stim_names, clusters, kind=kind, title=key)
 
 
 def cluster_features(X, kind: str, params_dict: dict):
@@ -104,26 +258,6 @@ def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic',
     return model, cluster_idxs
 
 
-class ClusteringParametersTemplate(dj.Lookup):
-    database = ""
-
-    @property
-    def definition(self):
-        definition = """
-        clustering_id: int # unique param set id
-        ---
-        kind: varchar(255)
-        params_dict: longblob
-        min_count: int
-        """
-        return definition
-
-    def add(self, kind, params_dict, clustering_id=1, min_count=0, skip_duplicates=False):
-        assert isinstance(params_dict, dict)
-        key = dict(clustering_id=clustering_id, kind=kind, params_dict=params_dict, min_count=min_count)
-        self.insert1(key, skip_duplicates=skip_duplicates)
-
-
 def remove_clusters(cluster_idxs, min_count, invalid_value=-1):
     new_cluster_idxs = np.full(cluster_idxs.size, invalid_value)
 
@@ -152,99 +286,3 @@ def sort_clusters(traces, cluster_idxs, invalid_value=-1):
         sorted_cluster_idxs[cluster_idxs == new_cidx] = cidx
 
     return sorted_cluster_idxs
-
-
-class ClusteringTemplate(dj.Computed):
-    database = ""
-
-    @property
-    def definition(self):
-        definition = """
-        -> self.features_table
-        -> self.params_table
-        ---
-        clusters : longblob
-        """
-        return definition
-
-    @property
-    def key_source(self):
-        try:
-            return self.features_table.proj() * self.params_table.proj()
-        except (AttributeError, TypeError):
-            pass
-
-    @property
-    @abstractmethod
-    def features_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def params_table(self):
-        pass
-
-    def make(self, key):
-
-        kind, params_dict, min_count = (self.params_table & key).fetch1('kind', 'params_dict', 'min_count')
-        features = (self.features_table & key).fetch1('features')
-
-        decomp_kind = (self.features_table.params_table & key).fetch1('kind')
-
-        if kind == 'gmm' and decomp_kind == 'none':
-            return
-        elif kind == 'hierarchical_correlation' and not decomp_kind == 'none':
-            return
-
-        _, cluster_idxs = cluster_features(X=np.hstack(features), kind=kind, params_dict=params_dict)
-        cluster_idxs = remove_clusters(cluster_idxs=cluster_idxs, min_count=min_count, invalid_value=-1)
-
-        traces = (self.features_table() & key).fetch1('traces')
-        cluster_idxs = sort_clusters(traces=np.hstack(traces), cluster_idxs=cluster_idxs, invalid_value=-1)
-
-        main_key = key.copy()
-        main_key['clusters'] = cluster_idxs
-        self.insert1(main_key)
-
-        for cluster_idx, row in zip(cluster_idxs, self.features_table.RoiFeatures & key):
-            roi_key = key.copy()
-            roi_key.update({k: v for k, v in row.items() if k in self.features_table.RoiFeatures.primary_key})
-            roi_key['cluster_idx'] = cluster_idx
-            self.RoiCluster().insert1(roi_key)
-
-    class RoiCluster(dj.Part):
-        @property
-        def definition(self):
-            definition = """
-            -> master
-            -> master.features_table.RoiFeatures
-            ---
-            cluster_idx : int
-            """
-            return definition
-
-    def plot1(self, key=None):
-        key = get_primary_key(table=self, key=key)
-
-        clusters = (self & key).fetch1('clusters')
-
-        fig, ax = plt.subplots(1, 1, figsize=(6, 2))
-        plot_utils.set_long_title(fig=fig, title=key)
-        ax.hist(clusters, bins=np.arange(clusters.min() - 0.25, clusters.max() + 0.5, 0.5))
-        ax.set(title='Counts')
-        plt.tight_layout()
-        plt.show()
-
-    def plot1_averages(self, key=None):
-        self.plot1_traces(key=key, kind='averages')
-
-    def plot1_heatmaps(self, key=None):
-        self.plot1_traces(key=key, kind='traces')
-
-    def plot1_traces(self, key=None, kind='traces'):
-        key = get_primary_key(table=self, key=key)
-
-        stim_names = (self.features_table.params_table & key).fetch1('stim_names').split('_')
-        traces_list = (self.features_table & key).fetch1('traces')
-        clusters = (self & key).fetch1('clusters')
-        plot_utils.plot_clusters(traces_list, stim_names, clusters, kind=kind, title=key)

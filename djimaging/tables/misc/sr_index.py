@@ -1,3 +1,22 @@
+"""
+Table for computing SR index for each ROI. SR index is defined as (ROI_avg - lb) / (ub - lb), where lb is the background
+and lb is the light artifact intensity.
+
+Example usage:
+
+from djimaging.tables import misc
+
+@schema
+class SrIndex(misc.SrIndexTemplate):
+    _stim_name = 'gChirp'
+
+    presentation_table = Presentation
+    roimask_table = RoiMask
+    roi_table = Roi
+    stimulus_table = Stimulus
+    raw_params_table = RawDataParams
+"""
+
 import warnings
 from abc import abstractmethod
 

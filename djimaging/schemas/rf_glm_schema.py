@@ -16,14 +16,14 @@ class DNoiseTrace(receptivefield.DNoiseTraceTemplate):
 
 
 @schema
-class RFGLMParams(rf_glm.RFGLMParamsTemplate):
+class RfGlmParams(rf_glm.RfGlmParamsTemplate):
     pass
 
 
 @schema
-class RFGLM(rf_glm.RFGLMTemplate):
+class RfGlm(rf_glm.RfGlmTemplate):
     noise_traces_table = DNoiseTrace
-    params_table = RFGLMParams
+    params_table = RfGlmParams
     preprocesstraces_table = PreprocessTraces
     stimulus_table = Stimulus
     presentation_table = Presentation
@@ -31,41 +31,41 @@ class RFGLM(rf_glm.RFGLMTemplate):
 
 
 @schema
-class RFGLMSingleModel(rf_glm.RFGLMSingleModelTemplate):
+class RfGlmSingleModel(rf_glm.RfGlmSingleModelTemplate):
     noise_traces_table = DNoiseTrace
-    glm_table = RFGLM
+    glm_table = RfGlm
 
 
 @schema
-class RFGLMQualityParams(rf_glm.RFGLMQualityParamsTemplate):
+class RfGlmQualityParams(rf_glm.RfGlmQualityParamsTemplate):
     pass
 
 
 @schema
-class RFGLMQuality(rf_glm.RFGLMQualityTemplate):
-    glm_single_model_table = RFGLMSingleModel
-    glm_table = RFGLM
-    params_table = RFGLMQualityParams
+class RfGlmQuality(rf_glm.RfGlmQualityTemplate):
+    glm_single_model_table = RfGlmSingleModel
+    glm_table = RfGlm
+    params_table = RfGlmQualityParams
 
 
 @schema
-class SplitRFParams(receptivefield.SplitRFParamsTemplate):
+class SplitRfGlmParams(receptivefield.SplitRFParamsTemplate):
     pass
 
 
 @schema
-class SplitRF(receptivefield.SplitRFTemplate):
-    rf_table = RFGLM
-    split_rf_params_table = SplitRFParams
+class SplitRfGlm(receptivefield.SplitRFTemplate):
+    rf_table = RfGlm
+    split_rf_params_table = SplitRfGlmParams
 
 
 @schema
-class FitGauss2DRF(receptivefield.FitGauss2DRFTemplate):
-    split_rf_table = SplitRF
+class FitGauss2DRfGlm(receptivefield.FitGauss2DRFTemplate):
+    split_rf_table = SplitRfGlm
     stimulus_table = Stimulus
 
 
 @schema
-class FitDoG2DRF(receptivefield.FitDoG2DRFTemplate):
-    split_rf_table = SplitRF
+class FitDoG2DRfGlm(receptivefield.FitDoG2DRFTemplate):
+    split_rf_table = SplitRfGlm
     stimulus_table = Stimulus

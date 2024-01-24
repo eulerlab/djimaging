@@ -1,3 +1,22 @@
+"""
+ROI quality table for standard quality filtering.
+
+Example usage:
+
+from djimaging.tables import response
+
+@schema
+class RoiQualityParams(response.RoiQualityParamsTemplate):
+    pass
+
+@schema
+class RoiQuality(response.RoiQualityTemplate):
+    params_table = RoiQualityParams
+    chirp_qi_table = ChirpQI
+    roi_table = Roi
+
+"""
+
 from abc import abstractmethod
 
 import datajoint as dj

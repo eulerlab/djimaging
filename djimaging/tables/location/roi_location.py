@@ -1,3 +1,31 @@
+"""
+This module defines ROI location tables, if field location is insufficient.
+
+Example usage:
+
+from djimaging.tables import location
+
+@schema
+class RelativeRoiLocationWrtField(location.RelativeRoiLocationWrtFieldTemplate):
+    roi_table = Roi
+    roi_mask_table = RoiMask
+    field_table = Field
+    presentation_table = Presentation
+
+
+@schema
+class RelativeRoiLocation(location.RelativeRoiLocationTemplate):
+    relative_field_location_wrt_field_table = RelativeRoiLocationWrtField
+    relative_field_location_table = RelativeFieldLocation
+    field_table = Field
+
+
+@schema
+class RetinalRoiLocation(location.RetinalRoiLocationTemplate):
+    relative_roi_location_table = RelativeRoiLocation
+    expinfo_table = Experiment.ExpInfo
+"""
+
 import warnings
 from abc import abstractmethod
 import datajoint as dj

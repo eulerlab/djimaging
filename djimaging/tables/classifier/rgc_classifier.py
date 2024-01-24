@@ -1,3 +1,47 @@
+"""
+Classifier for RGCs used Baden et al. 2016 dataset.
+
+Example usage:
+
+from djimaging.tables import classifier
+
+@schema
+class Baden16Traces(classifier.Baden16TracesTemplate):
+    _shift_chirp = 1
+    _shift_bar = -4
+
+    _stim_name_chirp = 'gChirp'
+    _stim_name_bar = 'movingbar'
+
+    averages_table = Averages
+    os_ds_table = OsDsIndexes
+
+@schema
+class ClassifierTrainingData(classifier.ClassifierTrainingDataTemplate):
+    pass
+
+
+@schema
+class ClassifierMethod(classifier.ClassifierMethodTemplate):
+    classifier_training_data_table = ClassifierTrainingData
+
+
+@schema
+class Classifier(classifier.ClassifierTemplate):
+    classifier_training_data_table = ClassifierTrainingData
+    classifier_method_table = ClassifierMethod
+
+
+@schema
+class CelltypeAssignment(classifier.CelltypeAssignmentTemplate):
+    classifier_training_data_table = ClassifierTrainingData
+    classifier_table = Classifier
+    baden_trace_table = Baden16Traces
+    field_table = Field
+    roi_table = Roi
+    os_ds_table = OsDsIndexes
+"""
+
 import os
 import pickle as pkl
 import warnings
@@ -33,6 +77,62 @@ def prepare_dj_config_rgc_classifier(output_folder, input_folder="/gpfs01/euler/
     dj_config_stores = dj.config.get('stores', None) or dict()
     dj_config_stores.update(stores_dict)
     dj.config['stores'] = dj_config_stores
+
+
+class ClassifierTrainingDataTemplate(dj.Manual):
+    database = ""
+    store = "classifier_input"
+
+    @property
+    def definition(self):
+        definition = """
+        # holds feature basis and training data for classifier
+        training_data_hash     :   varchar(32)     # hash of the classifier training data files
+        ---
+        project                :   enum("True", "False")     # flag whether to project data onto features anew or not
+        output_path            :   varchar(255)
+        chirp_feats_file       :   filepath@{store}
+        bar_feats_file         :   filepath@{store}
+        baden_data_file        :   filepath@{store}
+        training_data_file     :   filepath@{store}
+        """.format(store=self.store)
+        return definition
+
+    def add_default(self, skip_duplicates=False):
+        ipath = dj.config['stores']["classifier_input"]["location"] + '/'
+        opath = dj.config['stores']["classifier_output"]["location"] + '/'
+
+        self.add_trainingdata(
+            project="False",
+            output_path=opath,
+            chirp_feats_file=ipath + 'chirp_feats.npz',
+            bar_feats_file=ipath + 'bar_feats.npz',
+            baden_data_file=ipath + 'RGCData_postprocessed.mat',
+            training_data_file=ipath + 'training_all.pkl',
+            skip_duplicates=skip_duplicates,
+        )
+
+    def add_trainingdata(self, project: str, output_path: str, chirp_feats_file: str, bar_feats_file: str,
+                         baden_data_file: str, training_data_file: str, skip_duplicates: bool = False) -> None:
+
+        key = dict(
+            project=project,
+            output_path=output_path,
+            chirp_feats_file=chirp_feats_file,
+            bar_feats_file=bar_feats_file,
+            baden_data_file=baden_data_file,
+            training_data_file=training_data_file)
+        key["training_data_hash"] = make_hash(key)
+        self.insert1(key, skip_duplicates=skip_duplicates)
+
+    def get_training_data(self, key: Key):
+        if (self & key).fetch1("project") == "True":
+            raise NotImplementedError
+        else:
+            training_data_file = (self & key).fetch1("training_data_file")
+            with open(training_data_file, "rb") as f:
+                training_data = pkl.load(f)
+            return training_data
 
 
 class ClassifierMethodTemplate(dj.Lookup):
@@ -109,62 +209,6 @@ class ClassifierMethodTemplate(dj.Lookup):
         classifier.fit(X=training_data["X"], y=training_data["y"])
         score = classifier.score(X=training_data["X"], y=training_data["y"])
         return classifier, score
-
-
-class ClassifierTrainingDataTemplate(dj.Manual):
-    database = ""
-    store = "classifier_input"
-
-    @property
-    def definition(self):
-        definition = """
-        # holds feature basis and training data for classifier
-        training_data_hash     :   varchar(32)     # hash of the classifier training data files
-        ---
-        project                :   enum("True", "False")     # flag whether to project data onto features anew or not
-        output_path            :   varchar(255)
-        chirp_feats_file       :   filepath@{store}
-        bar_feats_file         :   filepath@{store}
-        baden_data_file        :   filepath@{store}
-        training_data_file     :   filepath@{store}
-        """.format(store=self.store)
-        return definition
-
-    def add_default(self, skip_duplicates=False):
-        ipath = dj.config['stores']["classifier_input"]["location"] + '/'
-        opath = dj.config['stores']["classifier_output"]["location"] + '/'
-
-        self.add_trainingdata(
-            project="False",
-            output_path=opath,
-            chirp_feats_file=ipath + 'chirp_feats.npz',
-            bar_feats_file=ipath + 'bar_feats.npz',
-            baden_data_file=ipath + 'RGCData_postprocessed.mat',
-            training_data_file=ipath + 'training_all.pkl',
-            skip_duplicates=skip_duplicates,
-        )
-
-    def add_trainingdata(self, project: str, output_path: str, chirp_feats_file: str, bar_feats_file: str,
-                         baden_data_file: str, training_data_file: str, skip_duplicates: bool = False) -> None:
-
-        key = dict(
-            project=project,
-            output_path=output_path,
-            chirp_feats_file=chirp_feats_file,
-            bar_feats_file=bar_feats_file,
-            baden_data_file=baden_data_file,
-            training_data_file=training_data_file)
-        key["training_data_hash"] = make_hash(key)
-        self.insert1(key, skip_duplicates=skip_duplicates)
-
-    def get_training_data(self, key: Key):
-        if (self & key).fetch1("project") == "True":
-            raise NotImplementedError
-        else:
-            training_data_file = (self & key).fetch1("training_data_file")
-            with open(training_data_file, "rb") as f:
-                training_data = pkl.load(f)
-            return training_data
 
 
 def classify_cell(preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2,

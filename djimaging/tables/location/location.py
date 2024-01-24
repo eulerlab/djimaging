@@ -1,3 +1,30 @@
+"""
+Tables for location of the recorded fields relative to the optic disk.
+
+Example usage:
+
+from djimaging.tables import location
+
+@schema
+class OpticDisk(location.OpticDiskTemplate):
+    userinfo_table = UserInfo
+    experiment_table = Experiment
+    raw_params_table = RawDataParams
+
+
+@schema
+class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
+    field_table = Field
+    opticdisk_table = OpticDisk
+
+
+@schema
+class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
+    relativefieldlocation_table = RelativeFieldLocation
+    expinfo_table = Experiment.ExpInfo
+
+"""
+
 import warnings
 from abc import abstractmethod
 
@@ -7,23 +34,6 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 
 from djimaging.utils.scanm.setup_utils import get_retinal_position
-
-
-def plot_rel_xy_pos(relx, rely, view='igor_local'):
-    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-    ax.scatter(rely, relx, label='all', s=1, alpha=0.5)
-    ax.set(xlabel="rely", ylabel="relx")
-
-    if view == 'igor_local':
-        pass
-    elif view == 'igor_setup':
-        ax.invert_xaxis()
-    else:
-        raise NotImplementedError(view)
-
-    ax.set_aspect(aspect="equal", adjustable="datalim")
-
-    plt.show()
 
 
 class RelativeFieldLocationTemplate(dj.Computed):
@@ -218,3 +228,20 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
         ax.set(xlabel="temporal_nasal", ylabel="ventral_dorsal")
         ax.set_aspect(aspect="equal", adjustable="datalim")
         plt.show()
+
+
+def plot_rel_xy_pos(relx, rely, view='igor_local'):
+    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+    ax.scatter(rely, relx, label='all', s=1, alpha=0.5)
+    ax.set(xlabel="rely", ylabel="relx")
+
+    if view == 'igor_local':
+        pass
+    elif view == 'igor_setup':
+        ax.invert_xaxis()
+    else:
+        raise NotImplementedError(view)
+
+    ax.set_aspect(aspect="equal", adjustable="datalim")
+
+    plt.show()

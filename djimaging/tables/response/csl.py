@@ -1,3 +1,29 @@
+"""
+Tables for CSL (contrast stimulus) response quality index (QI) and features.
+
+Example usage:
+
+from djimaging.tables import response
+
+@schema
+class CslQI(response.CslQITemplate):
+    _stim_family = "csl"
+    _stim_name = "csl"
+
+    stimulus_table = Stimulus
+    snippets_table = Snippets
+
+
+@schema
+class CslFeatures(response.CslFeaturesTemplate):
+    stimulus_table = Stimulus
+    averages_table = Averages
+
+@schema
+class CslSlope(response.CslSlopeTemplate):
+    csl_features_table = CslFeatures
+"""
+
 from abc import abstractmethod
 
 from scipy.optimize import curve_fit
@@ -10,59 +36,19 @@ from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.trace_utils import find_closest
 
 
-def compute_csl_metrics(csl_trace, csl_time, triggertimes_rel, baseline_delay_s=0.5, response_delay_s=3.,
-                        q_lb=5, q_ub=95):
-    contrasts = [10, 20, 40, 60, 80, 100]
+class CslQITemplate(RepeatQITemplate):
+    _stim_family = "csl"
+    _stim_name = "csl"
 
-    # Find indexes
-    idxs_baseline_start = np.zeros(len(contrasts), dtype=int)
-    idxs_response_start = np.zeros(len(contrasts), dtype=int)
-    idxs_response_end = np.zeros(len(contrasts), dtype=int)
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
 
-    for contrast_idx, contrast in enumerate(contrasts):
-        trigger_start = triggertimes_rel[contrast_idx]
-        trigger_end = triggertimes_rel[contrast_idx + 1]
-
-        idxs_baseline_start[contrast_idx] = find_closest(trigger_start + baseline_delay_s, csl_time, as_index=True)
-        idxs_response_start[contrast_idx] = find_closest(trigger_start + response_delay_s, csl_time, as_index=True)
-        idxs_response_end[contrast_idx] = find_closest(trigger_end, csl_time, as_index=True)
-
-    assert np.all(idxs_baseline_start < idxs_response_start)
-    assert np.all(idxs_response_start < idxs_response_end)
-
-    # Get baselines
-    baselines = []
-    for i, (idx_a, idx_b) in enumerate(zip(idxs_baseline_start, idxs_response_start)):
-        baselines.append(csl_trace[idx_a:idx_b])
-
-    baselines = np.concatenate(baselines)
-    baseline_mean = np.mean(baselines)
-    baseline_std = np.std(baselines)
-
-    # Normalize
-    csl_norm = (csl_trace - baseline_mean) / baseline_std
-
-    # Compute response metrics
-    sds = np.full(len(contrasts), np.nan)
-    lbs = np.full(len(contrasts), np.nan)
-    ubs = np.full(len(contrasts), np.nan)
-
-    for i, (idx_b, idx_c) in enumerate(zip(idxs_response_start, idxs_response_end)):
-        sds[i] = np.std(csl_norm[idx_b:idx_c])
-        lbs[i] = np.percentile(csl_norm[idx_b:idx_c], q_lb)
-        ubs[i] = np.percentile(csl_norm[idx_b:idx_c], q_ub)
-
-    return csl_norm, sds, lbs, ubs, idxs_baseline_start, idxs_response_start, idxs_response_end
-
-
-def linear(x, a, b):
-    return a * x + b
-
-
-def fit_linear(csl_responses):
-    slope, intercept = curve_fit(
-        f=linear, xdata=np.linspace(0, 1, csl_responses.size, endpoint=True), ydata=csl_responses)[0]
-    return slope, intercept
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
 
 
 class CslFeaturesTemplate(dj.Computed):
@@ -214,16 +200,56 @@ class CslSlopeTemplate(dj.Computed):
         plt.show()
 
 
-class CslQITemplate(RepeatQITemplate):
-    _stim_family = "csl"
-    _stim_name = "csl"
+def compute_csl_metrics(csl_trace, csl_time, triggertimes_rel, baseline_delay_s=0.5, response_delay_s=3.,
+                        q_lb=5, q_ub=95):
+    contrasts = [10, 20, 40, 60, 80, 100]
 
-    @property
-    @abstractmethod
-    def stimulus_table(self):
-        pass
+    # Find indexes
+    idxs_baseline_start = np.zeros(len(contrasts), dtype=int)
+    idxs_response_start = np.zeros(len(contrasts), dtype=int)
+    idxs_response_end = np.zeros(len(contrasts), dtype=int)
 
-    @property
-    @abstractmethod
-    def snippets_table(self):
-        pass
+    for contrast_idx, contrast in enumerate(contrasts):
+        trigger_start = triggertimes_rel[contrast_idx]
+        trigger_end = triggertimes_rel[contrast_idx + 1]
+
+        idxs_baseline_start[contrast_idx] = find_closest(trigger_start + baseline_delay_s, csl_time, as_index=True)
+        idxs_response_start[contrast_idx] = find_closest(trigger_start + response_delay_s, csl_time, as_index=True)
+        idxs_response_end[contrast_idx] = find_closest(trigger_end, csl_time, as_index=True)
+
+    assert np.all(idxs_baseline_start < idxs_response_start)
+    assert np.all(idxs_response_start < idxs_response_end)
+
+    # Get baselines
+    baselines = []
+    for i, (idx_a, idx_b) in enumerate(zip(idxs_baseline_start, idxs_response_start)):
+        baselines.append(csl_trace[idx_a:idx_b])
+
+    baselines = np.concatenate(baselines)
+    baseline_mean = np.mean(baselines)
+    baseline_std = np.std(baselines)
+
+    # Normalize
+    csl_norm = (csl_trace - baseline_mean) / baseline_std
+
+    # Compute response metrics
+    sds = np.full(len(contrasts), np.nan)
+    lbs = np.full(len(contrasts), np.nan)
+    ubs = np.full(len(contrasts), np.nan)
+
+    for i, (idx_b, idx_c) in enumerate(zip(idxs_response_start, idxs_response_end)):
+        sds[i] = np.std(csl_norm[idx_b:idx_c])
+        lbs[i] = np.percentile(csl_norm[idx_b:idx_c], q_lb)
+        ubs[i] = np.percentile(csl_norm[idx_b:idx_c], q_ub)
+
+    return csl_norm, sds, lbs, ubs, idxs_baseline_start, idxs_response_start, idxs_response_end
+
+
+def linear(x, a, b):
+    return a * x + b
+
+
+def fit_linear(csl_responses):
+    slope, intercept = curve_fit(
+        f=linear, xdata=np.linspace(0, 1, csl_responses.size, endpoint=True), ydata=csl_responses)[0]
+    return slope, intercept
