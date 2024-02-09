@@ -26,12 +26,10 @@ from abc import abstractmethod
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy import signal
 
 from djimaging.tables.response.response_quality import RepeatQITemplate
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.plot_utils import plot_trace_and_trigger
-from djimaging.utils.trace_utils import get_mean_dt, find_closest
+from djimaging.tables.core.averages import compute_upsampled_average
 
 
 class ChirpQITemplate(RepeatQITemplate):
@@ -50,18 +48,29 @@ class ChirpQITemplate(RepeatQITemplate):
 
 
 class ChirpFeaturesTemplate(dj.Computed):
-    # TODO: Add more features
-
     database = ""
+
+    _fs_resample = 500
+    _t_on_step = 2
+    _t_off_step = 5
+    _t_max = 6
+    _t_flicker_start = 10
+    _t_flicker_end = 29
+
+    _hfi_constant = 1e4  # See Baden et al 2013
 
     @property
     def definition(self):
         definition = '''
-        # Computes an OnOff and a transience index based on the chirp step response
+        # Computes Chirp features for local and global chirps.
+        # See Franke et al. 2017 for details, for HFi see also Baden et al. 2013
         -> self.snippets_table
         ---
-        on_off_index:       float   # index indicating light preference (-1 Off, 1 On)
-        transience_index:   float   # index indicating transience of response
+        polarity_index: float # Polarity index (POi) from Franke et al. 2017
+        high_frequency_index: float # High Frequency Index (HFi) from Baden et al. 2013 and Franke et al. 2017
+        transience_index: float # Response transience index (RTi) from Franke et al. 2017
+        plateau_index: float # Response plateau index (RPi) from Franke et al. 2017
+        tonic_release_index: float # Tonic release index (TRi) from Franke et al. 2017
         '''
         return definition
 
@@ -88,132 +97,292 @@ class ChirpFeaturesTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key):
-        snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
-        trigger_times = (self.presentation_table() & key).fetch1('triggertimes')
+    def compute_entry(self, key, plot=False):
+        snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
+            'snippets', 'snippets_times', 'triggertimes_snippets')
+        average, average_times, _ = compute_upsampled_average(
+            snippets, snippets_times, triggertimes_snippets, f_resample=self._fs_resample)
 
-        on_off_index = compute_on_off_index(snippets, snippets_times, trigger_times)
-        transience_index = compute_transience_index(snippets, snippets_times, trigger_times)
+        if plot:
+            fig, axs = plt.subplots(1, 6, figsize=(15, 2))
+            ax = axs[0]
+            ax.set_title(f"Average trace; fs={self._fs_resample} Hz")
+            ax.plot(average)
+            ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / self._fs_resample}s")
+        else:
+            axs = [None] * 6
 
-        self.insert1(dict(key, on_off_index=on_off_index, transience_index=transience_index))
+        mean_dt = np.mean(np.diff(snippets_times, axis=0))
+        high_frequency_index = compute_high_frequency_index(
+            snippets=snippets, fs=1 / mean_dt, constant=self._hfi_constant, plot=axs[1])
+
+        # Normalize as in Franke et al. 2017
+        average /= np.max(np.abs(average))
+        average = average - np.median(average[:int(self._fs_resample * self._t_on_step)])
+
+        polarity_index = compute_polarity_index(
+            average=average, fs=self._fs_resample, t_on_step=self._t_on_step, t_off_step=self._t_off_step, plot=axs[2])
+
+        transience_index = compute_transience_index(
+            average=average, fs=self._fs_resample, t_on_step=self._t_on_step, t_max=self._t_max, plot=axs[3])
+
+        plateau_index = compute_plateau_index(
+            average=average, fs=self._fs_resample, t_on_step=self._t_on_step, t_max=self._t_max, plot=axs[4])
+
+        tonic_release_index = compute_tonic_release_index(
+            average=average, fs=self._fs_resample,
+            t_flicker_start=self._t_flicker_start, t_flicker_end=self._t_flicker_end, plot=axs[5])
+
+        if plot:
+            plt.tight_layout()
+            plt.show()
+
+        return polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index
+
+    def make(self, key, plot=False):
+        polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index = \
+            self.compute_entry(key, plot=plot)
+
+        self.insert1(dict(
+            key,
+            polarity_index=polarity_index,
+            high_frequency_index=high_frequency_index,
+            transience_index=transience_index,
+            plateau_index=plateau_index,
+            tonic_release_index=tonic_release_index,
+        ))
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
+        polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index = \
+            (self & key).fetch1(
+                'polarity_index', 'high_frequency_index', 'transience_index', 'plateau_index', 'tonic_release_index')
 
-        snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-            "snippets", "snippets_times", "triggertimes_snippets")
+        plot_values = np.array(self.compute_entry(key, plot=True))
+        db_values = np.array(
+            [polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index])
 
-        on_off_index, transience_index = (self & key).fetch1('on_off_index', 'transience_index')
-
-        ax = plot_trace_and_trigger(
-            time=snippets_times, trace=snippets, triggertimes=triggertimes_snippets, title=str(key))
-
-        ax.set(title=f"on_off_index={on_off_index:.2f}\ntransience_index={transience_index:.2f}")
-
-        plt.tight_layout()
-        plt.show()
-
-    def plot(self, restriction=None):
-        if restriction is None:
-            restriction = dict()
-
-        on_off_index, transience_index = (self & restriction).fetch('on_off_index', 'transience_index')
-
-        fig, axs = plt.subplots(1, 2, figsize=(8, 3))
-        ax = axs[0]
-        ax.set(title='on_off_index')
-        ax.hist(on_off_index)
-
-        ax = axs[1]
-        ax.set(title='transience_index')
-        ax.hist(transience_index)
-
-        plt.tight_layout()
-        plt.show()
+        if not np.all(plot_values == db_values):
+            raise ValueError("Computed values do not match stored values")
 
 
-def compute_on_off_index(snippets, snippets_times, trigger_times, light_step_duration=1):
-    # TODO: Reimplement cleaner
-    dts = [get_mean_dt(tracetime=snippets_times_i)[0] for snippets_times_i in snippets_times.T]
-    fs = 1. / np.mean(dts)
+def compute_high_frequency_index(snippets, fs, constant=1e4, plot=None):
+    """
+    Calculate the High Frequency Index (HFi) from Baden et al. 2013 and Franke et al. 2017.
+    This metric is invariant to linear transformations of the signal.
 
-    start_trigs = trigger_times[::2]
-    light_step_frames = int(light_step_duration * fs)
+    Note: In the paper the ratio is flipped in the equation which is probably a typo.
 
-    on_responses = np.zeros((light_step_frames, snippets.shape[1]))
-    off_responses = np.zeros((light_step_frames, snippets.shape[1]))
 
-    for i in range(snippets.shape[1]):
-        step_up = start_trigs[i] + 2
-        step_down = start_trigs[i] + 5
+    :param snippets: A 2d (time X trial) numpy array
+    :param fs: Sampling rate of the data in Hz.
+    :param constant: A constant to scale the HFi before taking the log.
+    :param plot: If True, plot the average trace and the frequency bands.
 
-        snip_times = snippets_times[:, i]
-        snip = snippets[:, i]
-        snip = snip - snip.min()
+    :return: High Frequency Index (HFi) for each ROI.
+    """
 
-        step_up_idx = find_closest(step_up, data=snip_times, as_index=True)
-        step_down_idx = find_closest(step_down, data=snip_times, as_index=True)
+    # Determine the number of points corresponding to the first 6 seconds
+    n_points = int(6 * fs)
+    fft_results = np.fft.rfft(snippets[:n_points, :], axis=0)
+    fft_power = np.abs(fft_results) ** 2
+    fft_mean_power = np.mean(fft_power, axis=1)
 
-        baseline_on = np.median(snip[:step_up_idx])
-        on_response = snip[step_up_idx:step_up_idx + light_step_frames] - baseline_on
-        on_response[on_response < 0] = 0
+    # Define frequency bands
+    freqs = np.fft.rfftfreq(n_points, d=1 / fs)
+    band1 = (freqs >= 0.5) & (freqs <= 1)  # 0.5–1 Hz
+    band2 = (freqs >= 2) & (freqs <= 16)  # 2–16 Hz
 
-        baseline_off = np.median(snip[step_down_idx - light_step_frames:step_down_idx])
-        off_response = snip[step_down_idx:step_down_idx + light_step_frames] - baseline_off
-        off_response[off_response < 0] = 0
+    # Calculate mean power in each band
+    f1 = np.mean(fft_mean_power[band1])
+    f2 = np.mean(fft_mean_power[band2])
 
-        on_responses[:, i] = on_response
-        off_responses[:, i] = off_response
+    # Calculate HFi. Note: corrected from np.log10(f1 / f2)
+    high_frequency_index = np.log10(constant * f2 / f1)
 
-    avg_on = on_responses[4:, :].mean()
-    avg_off = off_responses[4:, :].mean()
+    if plot:
+        if isinstance(plot, plt.Axes):
+            ax = plot
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+        ax.set_title(f"HFi: {high_frequency_index:.2f}")
+        ax.loglog(freqs, fft_mean_power)
+        ax.fill_between(x=freqs[band1], y1=np.min(fft_mean_power), y2=np.max(fft_mean_power), alpha=0.5)
+        ax.plot([freqs[band1][0], freqs[band1][-1]], [f1, f1], 'r')
+        ax.plot([freqs[band2][0], freqs[band2][-1]], [f2, f2], 'r')
+        ax.fill_between(x=freqs[band2], y1=np.min(fft_mean_power), y2=np.max(fft_mean_power), alpha=0.5)
 
-    if avg_on + avg_off < 1e-10:
-        on_off_index = 0
+    return high_frequency_index
+
+
+def compute_polarity_index(average, fs, alpha=2, t_on_step=2, t_off_step=5, plot=None):
+    """
+    Calculate the polarity index (POi) from Franke et al. 2017.
+
+    Note: In the paper it's not clear how they treated negative values, we clip them to zero.
+
+    :param average: A 1d numpy array of trace
+    :param fs: Sampling rate of the data in Hz.
+    :param alpha: Duration of the response window in seconds.
+    :param t_on_step: Time of the on-step of the stimulus in seconds.
+    :param t_off_step: Time of the off-step of the stimulus in seconds.
+    :param plot: If True, plot the average trace and the response window.
+
+    :return: Polarity index (POi) for each ROI.
+    """
+
+    idx_on_start = int(np.floor(t_on_step * fs))
+    idx_on_end = int(np.floor((t_on_step + alpha) * fs))
+
+    idx_off_start = int(np.floor(t_off_step * fs))
+    idx_off_end = int(np.floor((t_off_step + alpha) * fs))
+
+    avg_on = np.clip(np.mean(average[idx_on_start:idx_on_end]), 0, None)
+    avg_off = np.clip(np.mean(average[idx_off_start:idx_off_end]), 0, None)
+
+    scale = avg_on + avg_off
+    if scale < 1e-9:
+        polarity_index = 0.5
     else:
-        on_off_index = (avg_on - avg_off) / (avg_on + avg_off)
+        polarity_index = (avg_on - avg_off) / scale
 
-    return on_off_index
+    if plot:
+        if isinstance(plot, plt.Axes):
+            ax = plot
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+        ax.set_title(f"POi: {polarity_index:.2f}")
+        ax.plot(average)
+        ax.plot([idx_on_start, idx_on_end], [avg_on, avg_on], color='r')
+        ax.plot([idx_off_start, idx_off_end], [avg_off, avg_off], color='r')
+        ax.set_xlim(0, fs * (t_off_step + 2 * alpha))
+        ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
+
+    return polarity_index
 
 
-def compute_transience_index(snippets, snippets_times, trigger_times, upsam_fre=500):
-    # TODO: Reimplement cleaner
-    dts = [get_mean_dt(tracetime=snippets_times_i)[0] for snippets_times_i in snippets_times.T]
-    fs = 1. / np.mean(dts)
+def compute_transience_index(average, fs, alpha=0.4, t_on_step=2, t_max=6, plot=None):
+    """
+    Calculate the response transience index (RTi) from Franke et al. 2017.
 
-    upsampling_factor = int(snippets.shape[0] / fs * upsam_fre)
+    Note: In the paper it's not clear how they treated negative values.
 
-    resampled_snippets = np.zeros((upsampling_factor, snippets.shape[1]))
-    resampled_snippets_times = np.zeros((upsampling_factor, snippets.shape[1]))
+    :param average: A 1d numpy array of trace
+    :param fs: Sampling rate of the data in Hz.
+    :param alpha: Duration of the response window in seconds.
+    :param t_on_step: Time of the on-step of the stimulus in seconds.
+    :param t_max: Time of the offset of the response window in seconds.
+    :param plot: If True, plot the average trace and the response window.
 
-    for i in range(snippets.shape[1]):
-        resampled_snippets[:, i] = signal.resample(snippets[:, i], int(upsampling_factor))
+    :return: Response transience index (RTi).
+    """
 
-        start_time = snippets_times[0, i]
-        end_time = snippets_times[-1, i]
-        resampled_snippets_times[:, i] = np.linspace(start_time, end_time, upsampling_factor)
+    idx_start = int(t_on_step * fs)
+    idx_end = int(t_max * fs)
 
-    start_trigs_local = trigger_times[::2]
+    average_shifted = average - np.median(average[:idx_start])
 
-    transience_indexes = np.zeros(snippets.shape[1])
-    for i in range(snippets.shape[1]):
-        stim_start = start_trigs_local[i]
-        stim_end = start_trigs_local[i] + 6
-        snip_times = resampled_snippets_times[:, i]
-        snip = resampled_snippets[:, i]
-        snip = snip - snip.min()
-        stim_start_idx = np.argmax(np.isclose(snip_times, stim_start, atol=1e-01))
-        stim_end_idx = np.argmax(np.isclose(snip_times, stim_end, atol=1e-01))
-        trace = snip[stim_start_idx:stim_end_idx]
-        peak = np.argmax(trace)
-        peak_alpha = np.argmax(np.isclose(snip_times, snip_times[peak] + 0.4, atol=1e-01))
-        transience_indexes[i] = 1 - (snip[stim_start_idx + peak_alpha] / snip[stim_start_idx + peak])
+    idx_max = idx_start + np.argmax(average_shifted[idx_start:idx_end])
+    idx_max_alpha = idx_max + int(alpha * fs)
+    transience_index = 1 - (average_shifted[idx_max_alpha] / average_shifted[idx_max])
 
-    transience_index = np.mean(transience_indexes)
+    if plot:
+        if isinstance(plot, plt.Axes):
+            ax = plot
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+        ax.set_title(f"RTi: {transience_index:.2f}")
+        ax.plot(average_shifted)
+        ax.axvline(idx_max, c='r')
+        ax.plot(idx_max, average_shifted[idx_max], 'rX')
+        ax.axvline(idx_max_alpha, c='r')
+        ax.plot(idx_max_alpha, average_shifted[idx_max_alpha], 'rX')
+        ax.set_xlim(0, fs * (t_max + 3))
+        ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
+
     return transience_index
 
 
-def split_ChirpInterleaved(chirp_trace):
-    chirp_trace_ave = np.mean(chirp_trace, axis=1)
-    chirp_trace_global = chirp_trace_ave[int(chirp_trace_ave.shape[0] / 2):]
-    return chirp_trace_global
+def compute_plateau_index(average, fs, alpha=2., t_on_step=2, t_max=6, plot=None):
+    """
+    Calculate the response plateau index (RPi) from Franke et al. 2017.
+
+    Note: In the paper it's not clear how they treated negative values.
+
+    :param average: A 1d numpy array of trace
+    :param fs: Sampling rate of the data in Hz.
+    :param alpha: Duration of the response window in seconds.
+    :param t_on_step: Time of the on-step of the stimulus in seconds.
+    :param t_max: Time of the offset of the response window in seconds.
+    :param plot: If True, plot the average trace and the response window.
+
+    :return: Response plateau index (RPi).
+    """
+
+    idx_start = int(t_on_step * fs)
+    idx_end = int(t_max * fs)
+
+    idx_max = idx_start + np.argmax(average[idx_start:idx_end])
+    idx_max_alpha = idx_max + int(alpha * fs)
+    plateau_index = average[idx_max_alpha] / average[idx_max]
+
+    if plot:
+        if isinstance(plot, plt.Axes):
+            ax = plot
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+        ax.set_title(f"RPi: {plateau_index:.2f}")
+        ax.plot(average)
+        ax.axvline(idx_max, c='r')
+        ax.plot(idx_max, average[idx_max], 'rX')
+        ax.axvline(idx_max_alpha, c='r')
+        ax.plot(idx_max_alpha, average[idx_max_alpha], 'rX')
+        ax.set_xlim(0, fs * (t_max + 2 * alpha))
+        ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
+
+    return plateau_index
+
+
+def compute_tonic_release_index(average, fs, t_flicker_start=10, t_flicker_end=29, dt_baseline=1, plot=None):
+    """
+    Calculate the tonic release index (TRi) from Franke et al. 2017.
+
+    :param average: A 1d numpy array of trace
+    :param fs: Sampling rate of the data in Hz.
+    :param t_flicker_start: Time of the onset of the flicker in seconds.
+    :param t_flicker_end: Time of the offset of the flicker in seconds.
+    :param dt_baseline: Duration of the baseline window in seconds.
+    :param plot: If True, plot the average trace and the response window.
+
+    :return: Tonic release index (TRi).
+    """
+
+    idx_baseline_flicker_start = int(fs * (t_flicker_start - dt_baseline))
+    idx_flicker_start = int(fs * t_flicker_start)
+    idx_flicker_end = int(fs * t_flicker_end)
+
+    average_flicker = average[idx_flicker_start:idx_flicker_end]
+
+    tonic_release_index = np.sum(np.abs(average_flicker[average_flicker < 0])) / np.sum(np.abs(average_flicker))
+
+    if plot:
+        # Test is plot is instance of matplotlib axis
+        if isinstance(plot, plt.Axes):
+            ax = plot
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+        ax.set_title(f"TRi: {tonic_release_index:.2f}")
+        ax.plot(average)
+        ax.plot([idx_baseline_flicker_start, idx_flicker_start], [0, 0], c='r')
+
+        ax.axvline(idx_flicker_start, c='r', ls='--')
+        ax.axvline(idx_flicker_end, c='r', ls='--')
+        ax.fill_between(np.arange(idx_flicker_start, idx_flicker_end),
+                        np.clip(average_flicker, None, 0), color='r',
+                        alpha=0.5, zorder=10)
+        ax.fill_between(np.arange(idx_flicker_start, idx_flicker_end),
+                        np.clip(average_flicker, 0, None), color='g',
+                        alpha=0.5, zorder=10)
+        ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
+
+    return tonic_release_index

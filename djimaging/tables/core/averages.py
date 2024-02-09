@@ -142,22 +142,8 @@ class ResampledAveragesTemplate(AveragesTemplate):
     def make(self, key):
         snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
         triggertimes_snippets = (self.snippets_table() & key).fetch1('triggertimes_snippets')
-
-        dt = 1 / self._f_resample
-        stim_dur = np.median(np.diff(triggertimes_snippets[0]))
-        resampled_n = int(np.ceil(stim_dur * self._f_resample))
-        n_reps = snippets.shape[1]
-
-        average_times = np.arange(0, resampled_n) * dt
-
-        snippets_resampled = np.zeros((resampled_n, n_reps))
-        for rep_idx in range(n_reps):
-            snippets_resampled[:, rep_idx] = np.interp(
-                x=average_times,
-                xp=snippets_times[:, rep_idx] - triggertimes_snippets[0, rep_idx],
-                fp=snippets[:, rep_idx])
-
-        average = np.mean(snippets_resampled, axis=1)
+        average, average_times, _ = compute_upsampled_average(
+            snippets, snippets_times, triggertimes_snippets, f_resample=self._f_resample)
         average_norm = self.normalize_average(average)
         triggertimes_rel = np.mean(triggertimes_snippets - triggertimes_snippets[0, :], axis=1)
 
@@ -188,3 +174,23 @@ class ResampledAveragesTemplate(AveragesTemplate):
             triggertimes=triggertimes_rel, trace_norm=average_norm)
 
         plt.show()
+
+
+def compute_upsampled_average(snippets, snippets_times, triggertimes_snippets, f_resample=500):
+    dt = 1 / f_resample
+    stim_dur = np.median(np.diff(triggertimes_snippets[0]))
+    resampled_n = int(np.ceil(stim_dur * f_resample))
+    n_reps = snippets.shape[1]
+
+    average_times = np.arange(0, resampled_n) * dt
+
+    snippets_resampled = np.zeros((resampled_n, n_reps))
+    for rep_idx in range(n_reps):
+        snippets_resampled[:, rep_idx] = np.interp(
+            x=average_times,
+            xp=snippets_times[:, rep_idx] - triggertimes_snippets[0, rep_idx],
+            fp=snippets[:, rep_idx])
+
+    average = np.mean(snippets_resampled, axis=1)
+
+    return average, average_times, snippets_resampled
