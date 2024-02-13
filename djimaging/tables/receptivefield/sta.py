@@ -22,16 +22,20 @@ class STAParamsTemplate(dj.Lookup):
         frac_train : float  # Fraction of data used for training in (0, 1].
         frac_dev : float  # Fraction of data used for hyperparameter optimization in [0, 1).
         frac_test : float  # Fraction of data used for testing [0, 1).
-        store_x : enum("data", "shape")  # Store x (stimulus) as data or shape (less storage)?
-        store_y : enum("data", "shape")  # Store y (response) as data or shape (less storage)?
+        store_x : enum("shape", "data")  # Store x (stimulus) as data or shape (less storage)?
+        store_y : enum("shape", "data")  # Store y (response) as data or shape (less storage)?
         """
         return definition
 
     def add_default(
             self, sta_params_id=1, rf_method="sta", filter_dur_s_past=1., filter_dur_s_future=0.,
-            frac_train=0.8, frac_dev=0., frac_test=0.2, store_x='shape', store_y='data',
+            frac_train=0.8, frac_dev=0., frac_test=0.2, store_x='shape', store_y='shape',
             skip_duplicates=False):
         """Add default preprocess parameter to table"""
+
+        if store_x == 'data' or store_y == 'data':
+            if input("Are you sure you want to store the data? This creates a lot of overhead. (y/n) ") != 'y':
+                return
 
         key = dict(
             sta_params_id=sta_params_id,
