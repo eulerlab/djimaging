@@ -234,14 +234,25 @@ def compute_half_amp_width(rf_time, trf, trf_peak_idxs, plot=False, max_dt_futur
     pre_root = roots[(roots - t_main_peak) < 0][-1] if np.any(roots[(roots - t_main_peak) < 0]) else rf_time[0]
     post_root = roots[(roots - t_main_peak) > 0][0] if np.any(roots[(roots - t_main_peak) > 0]) else rf_time[-1]
 
-    right_sol = minimize(lambda x: (trf_fun(x) - half_amp) ** 2, x0=np.mean([post_root, t_main_peak]),
-                         bounds=[(t_main_peak, post_root)])
-    left_sol = minimize(lambda x: (trf_fun(x) - half_amp) ** 2, x0=np.mean([pre_root, t_main_peak]),
-                        bounds=[(pre_root, t_main_peak)])
+    pre_root = np.maximum(pre_root, rf_time[0])
+    post_root = np.minimum(post_root, rf_time[-1])
 
-    assert right_sol.success and left_sol.success
+    t_right = t_main_peak
+    t_left = t_main_peak
 
-    half_amp_width = float(np.abs(right_sol.x - left_sol.x))
+    def min_fun(x):
+        return (trf_fun(x) - half_amp) ** 2
+
+    for w in [0.5, 0.9, 0.99]:
+        right_sol = minimize(min_fun, x0=w * t_main_peak + (1 - w) * post_root, bounds=[(t_main_peak, post_root)])
+        if right_sol.success and right_sol.fun <= min_fun(t_right):
+            t_right = float(right_sol.x)
+
+        left_sol = minimize(min_fun, x0=w * t_main_peak + (1 - w) * pre_root, bounds=[(pre_root, t_main_peak)])
+        if left_sol.success and left_sol.fun <= min_fun(t_left):
+            t_left = float(left_sol.x)
+
+    half_amp_width = float(np.abs(t_right - t_left))
 
     if plot:
         plt.figure()
@@ -251,7 +262,7 @@ def compute_half_amp_width(rf_time, trf, trf_peak_idxs, plot=False, max_dt_futur
         plt.axvline(t_main_peak, c='green', label='main peak')
         plt.axvline(pre_root, c='c', label='search start')
         plt.axvline(post_root, c='purple', label='search end')
-        plt.plot([left_sol.x, right_sol.x], [half_amp, half_amp], c='red', lw=2, alpha=0.7, marker='o',
+        plt.plot([t_left, t_right], [half_amp, half_amp], c='red', lw=2, alpha=0.7, marker='o',
                  label='solution')
         plt.legend()
         plt.show()
