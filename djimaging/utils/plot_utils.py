@@ -142,21 +142,22 @@ def plot_srf(srf, ax=None, vabsmax=None, pixelsize=None):
     return ax
 
 
-def plot_trf(trf, t_trf=None, peak_idxs=None, ax=None):
+def plot_trf(trf, t_trf=None, peak_idxs=None, ax=None, lim_y=True):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(6, 6))
 
     if t_trf is None:
         t_trf = np.arange(-trf.size + 1, 1)
 
-    vabsmax = np.nanmax(np.abs(trf))
-
     ax.set(title='tRF')
     ax.fill_between(t_trf, trf)
     if peak_idxs is not None:
         for peak_idx in peak_idxs:
             ax.axvline(t_trf[peak_idx], color='r')
-    ax.set(ylim=(-1.1 * vabsmax, 1.1 * vabsmax))
+
+    if lim_y:
+        vabsmax = np.nanmax(np.abs(trf))
+        ax.set(ylim=(-1.1 * vabsmax, 1.1 * vabsmax))
 
     return ax
 

@@ -245,6 +245,7 @@ def compute_half_amp_width(rf_time, trf, trf_peak_idxs, plot=False, max_dt_futur
 
     if plot:
         plt.figure()
+        plt.title('Half amplitude width')
         plt.fill_between(rf_time, trf, label='trf', alpha=0.5)
         plt.fill_between(t_trf_int, trf_fun(t_trf_int), color='gray', label='trf (interpolated)', alpha=0.5)
         plt.axvline(t_main_peak, c='green', label='main peak')
@@ -276,10 +277,12 @@ def compute_main_peak_lag(rf_time, trf, trf_peak_idxs, plot=False, max_dt_future
 
     if plot:
         plt.figure()
+        plt.title('Main peak lag')
         plt.fill_between(rf_time, trf, label='trf', alpha=0.5)
         plt.plot(rf_time_int, trf_int, alpha=0.8)
-        plt.axvline(peak_dt_approx, c='red')
-        plt.axvline(peak_dt, c='cyan', ls='--')
+        plt.axvline(peak_dt_approx, c='red', label='Approx solution')
+        plt.axvline(peak_dt, c='cyan', ls='--', label='Solution')
+        plt.legend()
         plt.show()
 
     return np.abs(peak_dt)
