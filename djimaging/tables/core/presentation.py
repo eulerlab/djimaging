@@ -157,11 +157,20 @@ class PresentationTemplate(dj.Computed):
 
         # Set defaults
         if self.incl_cond1 and not self.field_table.incl_cond1:
-            file_info_df['cond1'].fillna('control', inplace=True)
+            if 'cond1' in file_info_df:
+                file_info_df['cond1'].fillna('control', inplace=True)
+            else:
+                file_info_df['cond1'] = 'control'
         if self.incl_cond2 and not self.field_table.incl_cond2:
-            file_info_df['cond2'].fillna('control', inplace=True)
+            if 'cond2' in file_info_df:
+                file_info_df['cond2'].fillna('control', inplace=True)
+            else:
+                file_info_df['cond2'] = 'control'
         if self.incl_cond3 and not self.field_table.incl_cond3:
-            file_info_df['cond3'].fillna('control', inplace=True)
+            if 'cond3' in file_info_df:
+                file_info_df['cond3'].fillna('control', inplace=True)
+            else:
+                file_info_df['cond3'] = 'control'
 
         return file_info_df
 
