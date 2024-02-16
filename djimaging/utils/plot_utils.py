@@ -127,8 +127,18 @@ def plot_trace_and_trigger(time, trace, triggertimes, trace_norm=None, title=Non
 def plot_srf(srf, ax=None, vabsmax=None, pixelsize=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+
     if vabsmax is None:
         vabsmax = np.nanmax(np.abs(srf))
+
+    if np.any(srf < 0):
+        vmin = -vabsmax
+        vmax = vabsmax
+        cmap = 'bwr'
+    else:
+        vmin = 0
+        vmax = vabsmax
+        cmap = 'viridis'
 
     if pixelsize is not None:
         extent = np.array([-srf.shape[1] / 2., srf.shape[1] / 2., -srf.shape[0] / 2., srf.shape[0] / 2.]) * pixelsize
@@ -136,7 +146,7 @@ def plot_srf(srf, ax=None, vabsmax=None, pixelsize=None):
         extent = None
 
     ax.set(title='sRF')
-    im = ax.imshow(srf.T, vmin=-vabsmax, vmax=vabsmax, cmap='bwr', origin='lower', extent=extent)
+    im = ax.imshow(srf.T, vmin=vmin, vmax=vmax, cmap=cmap, interpolation='none', origin='lower', extent=extent)
     plt.colorbar(im, ax=ax)
 
     return ax

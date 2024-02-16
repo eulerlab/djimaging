@@ -32,12 +32,19 @@ def merge_strf(srf, trf):
     return rf
 
 
-def split_strf(strf, blur_std: float = 0, blur_npix: int = 1, upsample_srf_scale: int = 0):
+def split_strf(strf, method='SVD', blur_std: float = 0, blur_npix: int = 1, upsample_srf_scale: int = 0):
     """Split STRF into sRF and tRF"""
     if blur_std > 0:
         strf = np.stack([smooth_rf(rf=srf_i, blur_std=blur_std, blur_npix=blur_npix) for srf_i in strf])
 
-    srf, trf = svd_rf(strf)
+    if method.lower() == 'svd':
+        srf, trf = split_rf_svd(strf)
+    elif method.lower() == 'sd':
+        srf, trf = split_rf_sd(strf)
+    elif method.lower() == 'peak':
+        srf, trf = split_rf_peak(strf)
+    else:
+        raise NotImplementedError(f"Method {method} for RF split not implemented")
 
     if upsample_srf_scale > 1:
         srf = resize_srf(srf, scale=upsample_srf_scale)
@@ -45,40 +52,66 @@ def split_strf(strf, blur_std: float = 0, blur_npix: int = 1, upsample_srf_scale
     return srf, trf
 
 
-def svd_rf(w):
+def split_rf_svd(strf):
     """
     Assuming an RF is time-space separable, get spatial and temporal filters using SVD.
     From RFEst.
     """
-    dims = w.shape
+    dims = strf.shape
 
     if len(dims) == 3:
         dims_tRF = dims[0]
         dims_sRF = dims[1:]
-        U, S, Vt = randomized_svd(w.reshape(dims_tRF, -1), 3, random_state=0)
+        U, S, Vt = randomized_svd(strf.reshape(dims_tRF, -1), 3, random_state=0)
         srf = Vt[0].reshape(*dims_sRF)
         trf = U[:, 0]
 
     elif len(dims) == 2:
         dims_tRF = dims[0]
         dims_sRF = dims[1]
-        U, S, Vt = randomized_svd(w.reshape(dims_tRF, dims_sRF), 3, random_state=0)
+        U, S, Vt = randomized_svd(strf.reshape(dims_tRF, dims_sRF), 3, random_state=0)
         srf = Vt[0]
         trf = U[:, 0]
 
     else:
         raise NotImplementedError
 
+    srf, trf = rescale_trf_srf(srf, trf, strf)
+    return srf, trf
+
+
+def rescale_trf_srf(srf, trf, strf):
     # Rescale
     trf /= np.max(np.abs(trf))
 
     max_sign = np.sign(srf[np.unravel_index(np.argmax(np.abs(srf)), srf.shape)])
-    srf *= (np.max(max_sign * w) / np.max(max_sign * srf))
+    srf *= (np.max(max_sign * strf) / np.max(max_sign * srf))
 
-    merged_w = merge_strf(srf=srf, trf=trf)
-    if not np.isclose(np.max(max_sign * merged_w), np.max(max_sign * w), rtol=0.1):
-        warnings.warn(f"{np.max(max_sign * merged_w)} vs. {np.max(max_sign * w)}")
+    merged_strf = merge_strf(srf=srf, trf=trf)
+    if not np.isclose(np.max(max_sign * merged_strf), np.max(max_sign * strf), rtol=0.1):
+        warnings.warn(f"{np.max(max_sign * merged_strf)} vs. {np.max(max_sign * strf)}")
 
+    return srf, trf
+
+
+def split_rf_sd(strf):
+    """
+    Project STRF onto sRF using standard deviation over time. Then get tRF from peak in this.
+    """
+    srf = np.std(strf, axis=0)
+    ix, iy = np.unravel_index(np.argmax(np.abs(srf)), srf.shape)
+    assert srf[ix, iy] == np.max(np.abs(srf)), (srf[ix, iy], np.max(np.abs(srf)))
+    trf = strf[:, ix, iy]
+    return srf, trf
+
+
+def split_rf_peak(strf):
+    """
+    Find single peak in STRF and use to split into sRF and tRF.
+    """
+    it, ix, iy = np.unravel_index(np.argmax(np.abs(strf)), strf.shape)
+    srf = strf[it]
+    trf = strf[:, ix, iy]
     return srf, trf
 
 

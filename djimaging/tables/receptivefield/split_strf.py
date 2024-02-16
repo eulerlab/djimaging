@@ -21,6 +21,7 @@ class SplitRFParamsTemplate(dj.Lookup):
         definition = """
         split_rf_params_id: tinyint unsigned # unique param set id
         ---
+        method : varchar(32)  # Method used to split RF, currently available are SVD, STD, and MAX
         blur_std : float
         blur_npix : int unsigned
         upsample_srf_scale : int unsigned
@@ -35,6 +36,7 @@ class SplitRFParamsTemplate(dj.Lookup):
             split_rf_params_id=1,
             blur_std=1.,
             blur_npix=1,
+            method='SVD',
             upsample_srf_scale=0,
             peak_nstd=1,
             npeaks_max=0,
@@ -56,6 +58,7 @@ class SplitRFTemplate(dj.Computed):
         ---
         srf: longblob  # spatio receptive field
         trf: longblob  # temporal receptive field
+        polarity : tinyint  # Polarity of the RF, 1 for positive, -1 for negative
         split_qidx : float  # Quality index as explained variance of the sRF tRF split between 0 and 1
         trf_peak_idxs : blob  # Indexes of peaks in tRF
         '''
@@ -84,20 +87,24 @@ class SplitRFTemplate(dj.Computed):
         rf_time = self.fetch1_rf_time(key=key)
 
         # Get preprocess params
-        blur_std, blur_npix, upsample_srf_scale, peak_nstd, npeaks_max = self.split_rf_params_table().fetch1(
-            'blur_std', 'blur_npix', 'upsample_srf_scale', 'peak_nstd', 'npeaks_max')
+        method, blur_std, blur_npix, upsample_srf_scale, peak_nstd, npeaks_max = (
+                self.split_rf_params_table & key).fetch1(
+            'method', 'blur_std', 'blur_npix', 'upsample_srf_scale', 'peak_nstd', 'npeaks_max')
 
         # Get tRF and sRF
-        srf, trf = split_strf(strf, blur_std=blur_std, blur_npix=blur_npix, upsample_srf_scale=upsample_srf_scale)
+        srf, trf = split_strf(
+            strf, method=method, blur_std=blur_std, blur_npix=blur_npix, upsample_srf_scale=upsample_srf_scale)
 
         # Make tRF always positive, so that sRF reflects the polarity of the RF
         polarity, peak_idxs = compute_polarity_and_peak_idxs(
             rf_time=rf_time, trf=trf, nstd=peak_nstd, npeaks_max=npeaks_max if npeaks_max > 0 else None,
             max_dt_future=self._max_dt_future)
 
-        if polarity == -1:
-            srf *= -1
-            trf *= -1
+        if method.lower() in ['svd']:
+            if polarity == -1:
+                srf *= -1
+                trf *= -1
+                polarity = 1
 
         strf_fit = merge_strf(srf=resize_srf(srf, output_shape=strf.shape[1:]), trf=trf)
         split_qidx = compute_explained_rf(strf, strf_fit)
@@ -106,6 +113,7 @@ class SplitRFTemplate(dj.Computed):
         rf_key = deepcopy(key)
         rf_key['srf'] = srf
         rf_key['trf'] = trf
+        rf_key['polarity'] = polarity
         rf_key['trf_peak_idxs'] = peak_idxs
         rf_key['split_qidx'] = split_qidx
         self.insert1(rf_key)
