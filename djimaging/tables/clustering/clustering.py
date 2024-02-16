@@ -13,8 +13,8 @@ class FeaturesParams(clustering.FeaturesParamsTemplate):
 class Features(clustering.FeaturesTemplate):
 
     # Optional quality filtering, defines table and restriction on ROI level
-    _quality_restriction = None
-    roi_quality_table = None
+    _restr_filter = None
+    roi_quality_table = None  # Could be any table to filter data
 
     params_table = FeaturesParams
     averages_table = Averages
@@ -100,13 +100,10 @@ class ClusteringTemplate(dj.Computed):
 
         kind, params_dict, min_count = (self.params_table & key).fetch1('kind', 'params_dict', 'min_count')
         features = (self.features_table & key).fetch1('features')
-
         decomp_kind = (self.features_table.params_table & key).fetch1('kind')
 
-        if kind == 'gmm' and decomp_kind == 'none':
-            return
-        elif kind == 'hierarchical_correlation' and not decomp_kind == 'none':
-            return
+        if (kind == 'gmm' and decomp_kind == 'none') or (kind == 'hierarchical_ward' and not decomp_kind == 'none'):
+            print(f'Skipping clustering with kind={kind} and decomp_kind={decomp_kind}. Not supported.')
 
         _, cluster_idxs = cluster_features(X=np.hstack(features), kind=kind, params_dict=params_dict)
         cluster_idxs = remove_clusters(cluster_idxs=cluster_idxs, min_count=min_count, invalid_value=-1)
