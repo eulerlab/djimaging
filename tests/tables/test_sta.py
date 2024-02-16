@@ -1,8 +1,9 @@
 import numpy as np
 import pytest
 
-from djimaging.tables.receptivefield import rf_utils
-from djimaging.tables.receptivefield.rf_utils import prepare_noise_data, split_data
+from djimaging.utils.receptive_fields import fit_rf_utils
+from djimaging.utils.receptive_fields.fit_rf_utils import split_data
+from djimaging.utils.receptive_fields.preprocess_rf_utils import prepare_noise_data
 
 try:
     import rfest

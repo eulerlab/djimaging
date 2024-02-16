@@ -56,6 +56,19 @@ class FieldTemplate(dj.Computed):
         return definition
 
     @property
+    def new_primary_keys(self):
+        new_primary_keys = ['field']
+        if self.incl_region:
+            new_primary_keys.append('region')
+        if self.incl_cond1:
+            new_primary_keys.append('cond1')
+        if self.incl_cond2:
+            new_primary_keys.append('cond2')
+        if self.incl_cond3:
+            new_primary_keys.append('cond3')
+        return new_primary_keys
+
+    @property
     def key_source(self):
         try:
             return self.experiment_table.proj() * self.raw_params_table.proj()
@@ -91,10 +104,11 @@ class FieldTemplate(dj.Computed):
 
     def make(self, key, verboselvl=0):
         self.add_experiment_fields(
-            key, only_new=False, verboselvl=verboselvl, suppress_errors=False, restr_headers=None)
+            key, only_new=False, verboselvl=verboselvl, suppress_errors=False, restr_headers=None,
+            allow_user_input=False)
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
-                          restr_headers: Optional[list] = None):
+                          allow_user_input: bool = True, restr_headers: Optional[list] = None):
         """Scan filesystem for new fields and add them to the database."""
         if restrictions is None:
             restrictions = dict()
@@ -103,19 +117,6 @@ class FieldTemplate(dj.Computed):
             self.add_experiment_fields(
                 key, restr_headers=restr_headers, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    @property
-    def new_primary_keys(self):
-        new_primary_keys = ['field']
-        if self.incl_region:
-            new_primary_keys.append('region')
-        if self.incl_cond1:
-            new_primary_keys.append('cond1')
-        if self.incl_cond2:
-            new_primary_keys.append('cond2')
-        if self.incl_cond3:
-            new_primary_keys.append('cond3')
-        return new_primary_keys
-
     def load_exp_file_info_df(self, exp_key):
         from_raw_data = (self.raw_params_table & exp_key).fetch1('from_raw_data')
         header_path = (self.experiment_table & exp_key).fetch1('header_path')
@@ -123,21 +124,22 @@ class FieldTemplate(dj.Computed):
         user_dict = (self.userinfo_table & exp_key).fetch1()
 
         file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
-        file_info_df = file_info_df[file_info_df['field'].notnull() & (file_info_df['kind'] == 'response')]
-        file_info_df.sort_values('mask_order', inplace=True, ascending=True)
+        if len(file_info_df) > 0:
+            file_info_df = file_info_df[file_info_df['field'].notnull() & (file_info_df['kind'] == 'response')]
+            file_info_df.sort_values('mask_order', inplace=True, ascending=True)
 
-        # Set defaults
-        if self.incl_cond1:
-            file_info_df['cond1'].fillna('control', inplace=True)
-        if self.incl_cond2:
-            file_info_df['cond2'].fillna('control', inplace=True)
-        if self.incl_cond3:
-            file_info_df['cond3'].fillna('control', inplace=True)
+            # Set defaults
+            if self.incl_cond1:
+                file_info_df['cond1'].fillna('control', inplace=True)
+            if self.incl_cond2:
+                file_info_df['cond2'].fillna('control', inplace=True)
+            if self.incl_cond3:
+                file_info_df['cond3'].fillna('control', inplace=True)
 
         return file_info_df
 
     def add_experiment_fields(
-            self, exp_key, only_new: bool, verboselvl: int, suppress_errors: bool,
+            self, exp_key, only_new: bool, verboselvl: int, suppress_errors: bool, allow_user_input: bool = False,
             restr_headers: Optional[list] = None):
 
         if restr_headers is not None:
@@ -148,6 +150,11 @@ class FieldTemplate(dj.Computed):
                 return
 
         file_info_df = self.load_exp_file_info_df(exp_key)
+        if len(file_info_df) == 0:
+            if verboselvl > 0:
+                print(f"\tSkipping because no files found for key={exp_key}")
+            return
+
         field_dfs = file_info_df.groupby(self.new_primary_keys)
 
         if verboselvl > 0:
@@ -165,21 +172,22 @@ class FieldTemplate(dj.Computed):
                 print(f"\tAdding field: `{field_key}`")
 
             try:
-                self.add_field(
-                    field_key=field_key, filepaths=field_df['filepath'].values, verboselvl=verboselvl)
+                self.add_field(field_key=field_key, filepaths=field_df['filepath'].values,
+                               allow_user_input=allow_user_input, verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
                     print("Suppressed Error:", e, '\n\tfor key:\n', field_key, '\n\t', field_df['filepath'])
                 else:
                     raise e
 
-    def add_field(self, field_key, filepaths, verboselvl=0):
+    def add_field(self, field_key, filepaths, verboselvl=0, allow_user_input=False):
         if verboselvl > 4:
             print('\t\tAdd field with files:', filepaths)
 
         setupid = (self.experiment_table().ExpInfo & field_key).fetch1("setupid")
 
-        rec = self.load_first_file_wo_error(filepaths=filepaths, setupid=setupid, date=field_key['date'])
+        rec = self.load_first_file_wo_error(filepaths=filepaths, setupid=setupid, date=field_key['date'],
+                                            allow_user_input=allow_user_input)
         field_entry, avg_entries = self.complete_keys(base_key=field_key, rec=rec)
 
         self.insert1(field_entry, allow_direct_insert=True)
@@ -196,7 +204,7 @@ class FieldTemplate(dj.Computed):
         plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4))
 
     @staticmethod
-    def load_first_file_wo_error(filepaths, setupid, date):
+    def load_first_file_wo_error(filepaths, setupid, date, allow_user_input=False):
         """Load first file from filepaths and return recording and filepath. Skip all files causes errors."""
         for i, filepath in enumerate(filepaths):
             try:
@@ -206,8 +214,9 @@ class FieldTemplate(dj.Computed):
                 error_msg = f"Failed to load file with error {e}:\n{filepath}"
                 if filepath == filepaths[-1]:
                     raise OSError(error_msg)
-                if input(f"{error_msg}\nTry again for {filepaths[i + 1]}? (y/n)') != 'y'") == 'y':
-                    continue
+                elif allow_user_input:
+                    if input(f"{error_msg}\nTry again for {filepaths[i + 1]}? (y/n)') != 'y'") == 'y':
+                        continue
                 else:
                     raise OSError(error_msg)
         else:

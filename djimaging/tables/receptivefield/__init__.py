@@ -1,4 +1,5 @@
 from .noise_traces import DNoiseTraceParamsTemplate, DNoiseTraceTemplate
-from .rf_properties import SplitRFParamsTemplate, SplitRFTemplate, \
-    FitGauss2DRFTemplate, FitDoG2DRFTemplate, TempRFPropertiesTemplate
+from .split_strf import SplitRFParamsTemplate, SplitRFTemplate
 from .sta import STAParamsTemplate, STATemplate
+from .spatial_rf import FitGauss2DRFTemplate, FitDoG2DRFTemplate
+from .temporal_rf import TempRFPropertiesTemplate

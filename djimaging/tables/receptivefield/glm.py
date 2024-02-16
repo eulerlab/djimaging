@@ -82,7 +82,7 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.rf_glm.rf_glm_utils import ReceptiveFieldGLM, plot_rf_summary, quality_test
+from djimaging.utils.receptive_fields.glm_utils import ReceptiveFieldGLM, plot_rf_summary, quality_test
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -101,7 +101,7 @@ class RfGlmParamsTemplate(dj.Lookup):
         betas : blob
         kfold : tinyint unsigned        
         metric = "mse": enum("mse", "corrcoef")
-        output_nonlinearity = 'none' : varchar(255)
+        output_nonlinearity = 'none' : varchar(32)
         other_params_dict : longblob
         """
         return definition
@@ -245,11 +245,11 @@ class RfGlmSingleModelTemplate(dj.Computed):
     @property
     def definition(self):
         definition = '''
-            # Pick best model for all parameterizations
-            -> self.glm_table
-            ---
-            score_test : float
-            '''
+        # Pick best model for all parameterizations
+        -> self.glm_table
+        ---
+        score_test : float
+        '''
         return definition
 
     @property
@@ -324,12 +324,12 @@ class RfGlmQualityTemplate(dj.Computed):
     @property
     def definition(self):
         definition = '''
-            # Compute basic receptive fields
-            -> self.glm_single_model_table
-            -> self.params_table
-            ---
-            rf_glm_qidx : float
-            '''
+        # Compute basic receptive fields
+        -> self.glm_single_model_table
+        -> self.params_table
+        ---
+        rf_glm_qidx : float
+        '''
         return definition
 
     @property

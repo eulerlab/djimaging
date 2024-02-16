@@ -63,7 +63,7 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 
-from djimaging.tables.receptivefield.rf_utils import compute_linear_rf
+from djimaging.utils.receptive_fields.fit_rf_utils import compute_linear_rf
 from djimaging.utils.dj_utils import get_primary_key
 
 

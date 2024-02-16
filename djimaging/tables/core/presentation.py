@@ -58,6 +58,20 @@ class PresentationTemplate(dj.Computed):
         return definition
 
     @property
+    def new_primary_keys(self):
+        """Primary keys that will be added in this table with respect to the field table."""
+        new_primary_keys = ['stim_name']
+        if self.incl_region and not self.field_table.incl_region:
+            new_primary_keys.append('region')
+        if self.incl_cond1 and not self.field_table.incl_cond1:
+            new_primary_keys.append('cond1')
+        if self.incl_cond2 and not self.field_table.incl_cond2:
+            new_primary_keys.append('cond2')
+        if self.incl_cond3 and not self.field_table.incl_cond3:
+            new_primary_keys.append('cond3')
+        return new_primary_keys
+
+    @property
     @abstractmethod
     def raw_params_table(self):
         pass
@@ -128,20 +142,6 @@ class PresentationTemplate(dj.Computed):
 
         for key in (self.key_source & restrictions):
             self.add_field_presentations(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
-
-    @property
-    def new_primary_keys(self):
-        """Primary keys that will be added in this table with respect to the field table."""
-        new_primary_keys = ['stim_name']
-        if self.incl_region and not self.field_table.incl_region:
-            new_primary_keys.append('region')
-        if self.incl_cond1 and not self.field_table.incl_cond1:
-            new_primary_keys.append('cond1')
-        if self.incl_cond2 and not self.field_table.incl_cond2:
-            new_primary_keys.append('cond2')
-        if self.incl_cond3 and not self.field_table.incl_cond3:
-            new_primary_keys.append('cond3')
-        return new_primary_keys
 
     def load_field_stim_file_info_df(self, field_stim_key):
         file_info_df = self.field_table().load_exp_file_info_df(field_stim_key)

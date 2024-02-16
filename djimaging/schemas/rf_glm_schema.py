@@ -1,3 +1,4 @@
+import djimaging.tables.receptivefield.split_strf
 from djimaging.schemas.core_schema import *
 from djimaging.tables import receptivefield, rf_glm
 
@@ -49,12 +50,12 @@ class RfGlmQuality(rf_glm.RfGlmQualityTemplate):
 
 
 @schema
-class SplitRfGlmParams(receptivefield.SplitRFParamsTemplate):
+class SplitRfGlmParams(djimaging.tables.receptivefield.split_strf.SplitRFParamsTemplate):
     pass
 
 
 @schema
-class SplitRfGlm(receptivefield.SplitRFTemplate):
+class SplitRfGlm(djimaging.tables.receptivefield.split_strf.SplitRFTemplate):
     rf_table = RfGlm
     split_rf_params_table = SplitRfGlmParams
 

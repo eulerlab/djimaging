@@ -8,7 +8,8 @@ from matplotlib import pyplot as plt
 from scipy.stats import ttest_1samp
 from sklearn.model_selection import KFold
 
-from djimaging.tables.receptivefield.rf_utils import split_strf, split_data, build_design_matrix, get_rf_timing_params
+from djimaging.utils.receptive_fields.fit_rf_utils import split_data, build_design_matrix, get_rf_timing_params
+from djimaging.utils.receptive_fields.split_rf_utils import split_strf
 
 try:
     import rfest

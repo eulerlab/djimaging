@@ -63,7 +63,7 @@ class TracesTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key):
+    def make(self, key, verboselvl=0):
         include_artifacts, compute_from_stack, trace_precision, from_raw_data = (self.raw_params_table & key).fetch1(
             "include_artifacts", "compute_from_stack", "trace_precision", "from_raw_data")
 
@@ -86,7 +86,8 @@ class TracesTemplate(dj.Computed):
 
             for roi_id, roi_data in roi2trace.items():
                 if np.any(-roi_mask[:n_artifact, :] == roi_id):
-                    print(key, roi_id)
+                    if verboselvl > 0:
+                        print('Found light artifact in :', key, roi_id)
                 roi2trace[roi_id]['incl_artifact'] = np.any(-roi_mask[:n_artifact, :] == roi_id)
 
         else:

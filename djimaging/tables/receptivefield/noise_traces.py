@@ -7,7 +7,7 @@ from abc import abstractmethod
 import datajoint as dj
 import numpy as np
 
-from djimaging.tables.receptivefield.rf_utils import prepare_noise_data
+from djimaging.utils.receptive_fields.preprocess_rf_utils import prepare_noise_data
 from djimaging.utils.dj_utils import get_primary_key
 
 
