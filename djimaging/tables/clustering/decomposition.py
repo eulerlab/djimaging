@@ -34,7 +34,7 @@ class FeaturesParamsTemplate(dj.Lookup):
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
-def compute_features(traces: list, ncomps: list, kind: str, params_dict: dict) -> (list, list, list):
+def compute_features(traces: list, ncomps: list, kind: str, params_dict: dict, standardize=False) -> (list, list, list):
     """Reduce dimension of traces to features and stack them to feature matrix"""
     kind = kind.lower()
 
@@ -42,7 +42,7 @@ def compute_features(traces: list, ncomps: list, kind: str, params_dict: dict) -
         features, traces_reconstructed, infos = compute_features_sparse_pca(traces=traces, ncomps=ncomps, **params_dict)
     elif kind == 'pca':
         assert len(params_dict) == 0
-        features, traces_reconstructed, infos = compute_features_pca(traces=traces, ncomps=ncomps)
+        features, traces_reconstructed, infos = compute_features_pca(traces=traces, ncomps=ncomps, **params_dict)
     elif kind == 'none':
         features, traces_reconstructed, infos = deepcopy(traces), deepcopy(traces), [dict()] * len(traces)
     else:
@@ -62,20 +62,27 @@ def compute_variance_explained_sparse_pca(X: np.ndarray, P: np.ndarray) -> (floa
     return explained_variance, total_variance
 
 
-def compute_features_sparse_pca(traces: list, ncomps: list, alpha=1) -> (list, list, list):
+def compute_features_sparse_pca(traces: list, ncomps: list, alpha=1, standardize=False) -> (list, list, list):
     from sklearn.decomposition import SparsePCA
-    from sklearn.preprocessing import StandardScaler
 
     features, traces_reconstructed, infos = [], [], []
     for traces_i, ncomps_i in zip(traces, ncomps):
-        sc = StandardScaler()
-        norm_traces_i = sc.fit_transform(X=traces_i)
+        if standardize:
+            from sklearn.preprocessing import StandardScaler
+            sc = StandardScaler(with_mean=True, with_std=True)
+            norm_traces_i = sc.fit_transform(X=traces_i)
+        else:
+            sc = None
+            norm_traces_i = traces_i
 
         decomp = SparsePCA(n_components=ncomps_i, random_state=0, alpha=alpha, verbose=1)
         features_i = decomp.fit_transform(X=norm_traces_i)
 
         try:
-            traces_reconstructed_i = sc.inverse_transform(X=decomp.inverse_transform(X=features_i))
+            if standardize:
+                traces_reconstructed_i = sc.inverse_transform(X=decomp.inverse_transform(X=features_i))
+            else:
+                traces_reconstructed_i = decomp.inverse_transform(X=features_i)
         except AttributeError:  # SparsePCA.inverse_transform was only added in scikit-learn 1.2
             traces_reconstructed_i = None
 
@@ -94,19 +101,26 @@ def compute_features_sparse_pca(traces: list, ncomps: list, alpha=1) -> (list, l
     return features, traces_reconstructed, infos
 
 
-def compute_features_pca(traces: list, ncomps: list) -> (list, list, list):
+def compute_features_pca(traces: list, ncomps: list, standardize=False) -> (list, list, list):
     from sklearn.decomposition import PCA
-    from sklearn.preprocessing import StandardScaler
 
     features, traces_reconstructed, infos = [], [], []
     for traces_i, ncomps_i in zip(traces, ncomps):
-        sc = StandardScaler(with_mean=True, with_std=True)
-        norm_traces_i = sc.fit_transform(X=traces_i)
+        if standardize:
+            from sklearn.preprocessing import StandardScaler
+            sc = StandardScaler(with_mean=True, with_std=True)
+            norm_traces_i = sc.fit_transform(X=traces_i)
+        else:
+            sc = None
+            norm_traces_i = traces_i
 
         decomp = PCA(n_components=ncomps_i, random_state=0)
         features_i = decomp.fit_transform(X=norm_traces_i)
 
-        traces_reconstructed_i = sc.inverse_transform(X=decomp.inverse_transform(X=features_i))
+        if standardize:
+            traces_reconstructed_i = sc.inverse_transform(X=decomp.inverse_transform(X=features_i))
+        else:
+            traces_reconstructed_i = decomp.inverse_transform(X=features_i)
 
         info_i = dict()
         info_i["components"] = decomp.components_
