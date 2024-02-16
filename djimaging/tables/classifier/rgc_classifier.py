@@ -81,7 +81,7 @@ def prepare_dj_config_rgc_classifier(output_folder, input_folder="/gpfs01/euler/
 
 class ClassifierTrainingDataTemplate(dj.Manual):
     database = ""
-    store = "classifier_input"
+    _store = "classifier_input"
 
     @property
     def definition(self):
@@ -95,7 +95,7 @@ class ClassifierTrainingDataTemplate(dj.Manual):
         bar_feats_file         :   filepath@{store}
         baden_data_file        :   filepath@{store}
         training_data_file     :   filepath@{store}
-        """.format(store=self.store)
+        """.format(store=self._store)
         return definition
 
     def add_default(self, skip_duplicates=False):
@@ -143,10 +143,10 @@ class ClassifierMethodTemplate(dj.Lookup):
         definition = """
         classifier_params_hash  : varchar(32)     # hash of the classifier params config
         ---
-        classifier_fn           : varchar(64)     # path to classifier method fn
+        classifier_fn           : varchar(255)    # path to classifier method fn
         classifier_config       : longblob        # method configuration object
         classifier_seed         : int
-        comment                 : varchar(300)    # comment
+        comment                 : varchar(255)    # comment
         """
         return definition
 

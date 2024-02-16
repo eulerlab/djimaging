@@ -29,8 +29,6 @@ from djimaging.utils.scanm.recording import ScanMRecording
 class HighResTemplate(dj.Computed):
     database = ""
 
-    from_raw_data = None  # Can be used to overwrite the default behavior
-
     @property
     def definition(self):
         definition = """

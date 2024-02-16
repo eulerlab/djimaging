@@ -10,7 +10,7 @@ class RawDataParamsTemplate(dj.Lookup):
     def definition(self):
         definition = """
         -> self.userinfo_table
-        raw_id:       int       # unique param set id
+        raw_id: tinyint unsigned  # unique param set id
         ---
         from_raw_data: tinyint unsigned  # Load raw smp data (1) or h5 data (0)
         compute_from_stack: tinyint unsigned  # Compute traces from stack. Otherwise try to import Igor traces.

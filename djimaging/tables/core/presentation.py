@@ -27,13 +27,13 @@ class PresentationTemplate(dj.Computed):
         """
 
         if self.incl_region and not self.field_table.incl_region:
-            definition += "    region   :varchar(255)    # region (e.g. LR or RR)\n"
+            definition += "    region   :varchar(16)    # region (e.g. LR or RR)\n"
         if self.incl_cond1 and not self.field_table.incl_cond1:
-            definition += "    cond1    :varchar(255)    # condition (pharmacological or other)\n"
+            definition += "    cond1    :varchar(16)    # condition (pharmacological or other)\n"
         if self.incl_cond2 and not self.field_table.incl_cond2:
-            definition += "    cond2    :varchar(255)    # condition (pharmacological or other)\n"
+            definition += "    cond2    :varchar(16)    # condition (pharmacological or other)\n"
         if self.incl_cond3 and not self.field_table.incl_cond3:
-            definition += "    cond3    :varchar(255)    # condition (pharmacological or other)\n"
+            definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
 
         definition += """
         ---

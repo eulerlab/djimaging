@@ -52,7 +52,7 @@ class ClusteringParametersTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        clustering_id: int # unique param set id
+        clustering_id: tinyint unsigned # unique param set id
         ---
         kind: varchar(255)
         params_dict: longblob

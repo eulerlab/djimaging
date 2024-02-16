@@ -27,7 +27,7 @@ class SplitRFParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        split_rf_params_id: int # unique param set id
+        split_rf_params_id: tinyint unsigned # unique param set id
         ---
         blur_std : float
         blur_npix : int unsigned
@@ -161,7 +161,7 @@ class RFContoursParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        rf_contours_params_id: int # unique param set id
+        rf_contours_params_id: tinyint unsigned # unique param set id
         ---
         normalize_srf : enum('none', 'zeroone', 'zscore')
         levels : blob

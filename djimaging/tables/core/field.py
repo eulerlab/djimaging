@@ -25,17 +25,17 @@ class FieldTemplate(dj.Computed):
         # Recording fields
         -> self.experiment_table
         -> self.raw_params_table
-        field   :varchar(255)          # string identifying files corresponding to field
+        field   :varchar(16)          # string identifying files corresponding to field
         """
 
         if self.incl_region:
-            definition += "    region   :varchar(255)    # region (e.g. LR or RR)\n"
+            definition += "    region   :varchar(16)    # region (e.g. LR or RR)\n"
         if self.incl_cond1:
-            definition += "    cond1    :varchar(255)    # condition (pharmacological or other)\n"
+            definition += "    cond1    :varchar(16)    # condition (pharmacological or other)\n"
         if self.incl_cond2:
-            definition += "    cond2    :varchar(255)    # condition (pharmacological or other)\n"
+            definition += "    cond2    :varchar(16)    # condition (pharmacological or other)\n"
         if self.incl_cond3:
-            definition += "    cond3    :varchar(255)    # condition (pharmacological or other)\n"
+            definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
 
         definition += """
         ---

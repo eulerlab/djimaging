@@ -17,7 +17,7 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        dnoise_params_id: int # unique param set id
+        dnoise_params_id: tinyint unsigned # unique param set id
         ---
         fit_kind : varchar(255)
         fupsample_trace : tinyint unsigned  # Multiplier of sampling frequency, using linear interpolation.

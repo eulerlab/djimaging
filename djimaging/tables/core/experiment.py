@@ -20,10 +20,10 @@ class ExperimentTemplate(dj.Computed):
         # Header-File location, name and path
         -> self.userinfo_table
         date                        :date                     # date of recording
-        exp_num                     :mediumint                # experiment number in a day
+        exp_num                     :tinyint unsigned         # experiment number in a day
         ---
         header_path                 :varchar(255)             # path to header file
-        header_name                 :varchar(255)             # name of header file
+        header_name                 :varchar(63)              # name of header file
         """
         return definition
 

@@ -182,7 +182,7 @@ class CascadeParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        cascade_params_id: int # unique param set id
+        cascade_params_id: tinyint unsigned # unique param set id
         ---
         model_name : varchar(255)
         cascade_model_subfolder : varchar(255)

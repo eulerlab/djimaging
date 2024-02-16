@@ -14,10 +14,9 @@ class UserInfoTemplate(dj.Manual):
     def definition(self):
         definition = f"""
         # Info for decoding file names
-    
-        experimenter                    :varchar(255)  # name of the experimenter
+        experimenter                    :varchar(32)  # name of the experimenter
         ---     
-        data_dir                        :varchar(255)  # path to header file, used for computed tables
+        data_dir                        :varchar(255)   # path to header file, used for computed tables
         field_loc                       :tinyint       # string location for field
         stimulus_loc                    :tinyint       # string location for stimulus
         animal_loc=NULL                 :tinyint       # string location for number of animal (e.g. M1)

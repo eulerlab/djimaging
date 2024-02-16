@@ -73,7 +73,7 @@ class STAParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        sta_params_id: int # unique param set id
+        sta_params_id: tinyint unsigned # unique param set id
         ---
         rf_method : enum("sta", "mle")
         filter_dur_s_past : float # filter duration in seconds into the past

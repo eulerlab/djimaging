@@ -16,7 +16,7 @@ class RoiTemplate(dj.Computed):
         definition = """
         # ROI information
         -> self.roi_mask_table
-        roi_id           :int                # integer id of each ROI
+        roi_id           :smallint           # integer id of each ROI
         ---
         roi_size         :int                # number of pixels in ROI
         roi_size_um2     :float              # size of ROI in micrometers squared

@@ -13,6 +13,145 @@ from djimaging.utils.plot_utils import plot_trace_and_trigger
 from djimaging.utils.trace_utils import get_mean_dt
 
 
+class PreprocessParamsTemplate(dj.Lookup):
+    database = ""
+
+    @property
+    def definition(self):
+        definition = """
+        preprocess_id:       tinyint unsigned    # unique param set id
+        ---
+        window_length:       int       # window length for SavGol filter in seconds
+        poly_order:          int       # order of polynomial for savgol filter
+        non_negative:        tinyint unsigned  # Clip negative values of trace
+        subtract_baseline:   tinyint unsigned  # Subtract baseline
+        standardize:         tinyint unsigned  # standardize (1: with sd of baseline, 2: sd of trace, 0: nothing)
+        f_cutoff = 0 : float  # Cutoff frequency for low pass filter, only applied when > 0.
+        fs_resample = 0 : float  # Resampling frequency, only applied when > 0.
+        """
+        return definition
+
+    def add_default(self, preprocess_id=1, window_length=60, poly_order=3, non_negative=False,
+                    subtract_baseline=True, standardize=1, f_cutoff=None, fs_resample=None,
+                    skip_duplicates=False):
+        key = dict(
+            preprocess_id=preprocess_id,
+            window_length=window_length,
+            poly_order=int(poly_order),
+            non_negative=int(non_negative),
+            subtract_baseline=int(subtract_baseline),
+            standardize=int(standardize),
+            f_cutoff=f_cutoff if f_cutoff is not None else 0,
+            fs_resample=fs_resample if fs_resample is not None else 0,
+        )
+        """Add default preprocess parameter to table"""
+        self.insert1(key, skip_duplicates=skip_duplicates)
+
+
+class PreprocessTracesTemplate(dj.Computed):
+    database = ""
+    _baseline_max_dt = np.inf
+
+    @property
+    def definition(self):
+        definition = """
+        # performs basic preprocessing on raw traces
+        -> self.traces_table
+        -> self.preprocessparams_table
+        ---
+        preprocess_trace_times: longblob   # Time of preprocessed trace, if not resampled same as in trace.
+        preprocess_trace:      longblob    # preprocessed trace
+        smoothed_trace:        longblob    # output of savgol filter which is subtracted from the raw trace
+        """
+        return definition
+
+    @property
+    @abstractmethod
+    def traces_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def preprocessparams_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
+
+    @property
+    def key_source(self):
+        try:
+            return ((self.traces_table() & 'trace_flag=1' & 'trigger_valid=1') * self.preprocessparams_table()).proj()
+        except (AttributeError, TypeError):
+            pass
+
+    def make(self, key):
+        window_len_seconds, poly_order, subtract_baseline, non_negative, standardize, f_cutoff, fs_resample = \
+            (self.preprocessparams_table() & key).fetch1(
+                'window_length', 'poly_order', 'subtract_baseline', 'non_negative', 'standardize',
+                'f_cutoff', 'fs_resample')
+
+        trace_times, trace = (self.traces_table() & key).fetch1('trace_times', 'trace')
+        stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
+
+        preprocess_trace_times, preprocess_trace, smoothed_trace = process_trace(
+            trace_times=trace_times, trace=trace, stim_start=stim_start,
+            poly_order=poly_order, window_len_seconds=window_len_seconds,
+            subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative,
+            f_cutoff=f_cutoff, fs_resample=fs_resample, baseline_max_dt=self._baseline_max_dt)
+
+        self.insert1(dict(key, preprocess_trace_times=preprocess_trace_times,
+                          preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
+
+    def plot1(self, key=None, xlim=None, ylim=None):
+        key = get_primary_key(self, key)
+
+        preprocess_trace_times, preprocess_trace, smoothed_trace = (self & key).fetch1(
+            "preprocess_trace_times", "preprocess_trace", "smoothed_trace")
+        trace_times, trace = (self.traces_table() & key).fetch1("trace_times", "trace")
+        triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+
+        fig, axs = plt.subplots(3, 1, figsize=(10, 6), sharex='all')
+
+        ax = axs[0]
+        plot_trace_and_trigger(time=trace_times, trace=trace - np.mean(smoothed_trace),
+                               triggertimes=triggertimes, ax=ax, title=str(key))
+        ax.set(ylabel='mean subtracted\nraw trace')
+
+        ax = axs[1]
+        plot_trace_and_trigger(time=trace_times, trace=smoothed_trace - np.mean(smoothed_trace),
+                               triggertimes=triggertimes, ax=ax)
+        ax.set(ylabel='mean subtracted\ntrend')
+
+        ax = axs[2]
+        plot_trace_and_trigger(time=preprocess_trace_times, trace=preprocess_trace, triggertimes=triggertimes, ax=ax)
+        ax.set(ylabel='preprocessed\ntrace')
+
+        ax.set(xlim=xlim, ylim=ylim)
+
+        plt.show()
+
+    def plot(self, restriction=None, sort=True):
+        if restriction is None:
+            restriction = dict()
+
+        preprocess_traces = (self & restriction).fetch("preprocess_trace")
+        preprocess_traces = math_utils.padded_vstack(preprocess_traces, cval=np.nan)
+        n = preprocess_traces.shape[0]
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 1 + np.minimum(n * 0.1, 10)))
+        if len(restriction) > 0:
+            plot_utils.set_long_title(fig=fig, title=restriction)
+
+        sort_idxs = trace_utils.argsort_traces(preprocess_traces, ignore_nan=True) if sort else np.arange(n)
+
+        ax.set_title('preprocess_traces')
+        plot_utils.plot_signals_heatmap(ax=ax, signals=preprocess_traces[sort_idxs, :], symmetric=False)
+        plt.show()
+
+
 def drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace: bool = False):
     """Drop left and right most values if they are out of limits of the rest of the trace.
     This is necessary because the first few and last few points may be affected by artifacts.
@@ -147,142 +286,3 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds,
             trace_times, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=1. / fs_resample)
 
     return trace_times, trace, smoothed_trace
-
-
-class PreprocessParamsTemplate(dj.Lookup):
-    database = ""
-
-    @property
-    def definition(self):
-        definition = """
-        preprocess_id:       int       # unique param set id
-        ---
-        window_length:       int       # window length for SavGol filter in seconds
-        poly_order:          int       # order of polynomial for savgol filter
-        non_negative:        tinyint unsigned  # Clip negative values of trace
-        subtract_baseline:   tinyint unsigned  # Subtract baseline
-        standardize:         tinyint unsigned  # standardize (1: with sd of baseline, 2: sd of trace, 0: nothing)
-        f_cutoff = 0 : float  # Cutoff frequency for low pass filter, only applied when > 0.
-        fs_resample = 0 : float  # Resampling frequency, only applied when > 0.
-        """
-        return definition
-
-    def add_default(self, preprocess_id=1, window_length=60, poly_order=3, non_negative=False,
-                    subtract_baseline=True, standardize=1, f_cutoff=None, fs_resample=None,
-                    skip_duplicates=False):
-        key = dict(
-            preprocess_id=preprocess_id,
-            window_length=window_length,
-            poly_order=int(poly_order),
-            non_negative=int(non_negative),
-            subtract_baseline=int(subtract_baseline),
-            standardize=int(standardize),
-            f_cutoff=f_cutoff if f_cutoff is not None else 0,
-            fs_resample=fs_resample if fs_resample is not None else 0,
-        )
-        """Add default preprocess parameter to table"""
-        self.insert1(key, skip_duplicates=skip_duplicates)
-
-
-class PreprocessTracesTemplate(dj.Computed):
-    database = ""
-    _baseline_max_dt = np.inf
-
-    @property
-    def definition(self):
-        definition = """
-        # performs basic preprocessing on raw traces
-        -> self.traces_table
-        -> self.preprocessparams_table
-        ---
-        preprocess_trace_times: longblob   # Time of preprocessed trace, if not resampled same as in trace.
-        preprocess_trace:      longblob    # preprocessed trace
-        smoothed_trace:        longblob    # output of savgol filter which is subtracted from the raw trace
-        """
-        return definition
-
-    @property
-    @abstractmethod
-    def traces_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def preprocessparams_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def presentation_table(self):
-        pass
-
-    @property
-    def key_source(self):
-        try:
-            return ((self.traces_table() & 'trace_flag=1' & 'trigger_valid=1') * self.preprocessparams_table()).proj()
-        except (AttributeError, TypeError):
-            pass
-
-    def make(self, key):
-        window_len_seconds, poly_order, subtract_baseline, non_negative, standardize, f_cutoff, fs_resample = \
-            (self.preprocessparams_table() & key).fetch1(
-                'window_length', 'poly_order', 'subtract_baseline', 'non_negative', 'standardize',
-                'f_cutoff', 'fs_resample')
-
-        trace_times, trace = (self.traces_table() & key).fetch1('trace_times', 'trace')
-        stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
-
-        preprocess_trace_times, preprocess_trace, smoothed_trace = process_trace(
-            trace_times=trace_times, trace=trace, stim_start=stim_start,
-            poly_order=poly_order, window_len_seconds=window_len_seconds,
-            subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative,
-            f_cutoff=f_cutoff, fs_resample=fs_resample, baseline_max_dt=self._baseline_max_dt)
-
-        self.insert1(dict(key, preprocess_trace_times=preprocess_trace_times,
-                          preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
-
-    def plot1(self, key=None, xlim=None, ylim=None):
-        key = get_primary_key(self, key)
-
-        preprocess_trace_times, preprocess_trace, smoothed_trace = (self & key).fetch1(
-            "preprocess_trace_times", "preprocess_trace", "smoothed_trace")
-        trace_times, trace = (self.traces_table() & key).fetch1("trace_times", "trace")
-        triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
-
-        fig, axs = plt.subplots(3, 1, figsize=(10, 6), sharex='all')
-
-        ax = axs[0]
-        plot_trace_and_trigger(time=trace_times, trace=trace - np.mean(smoothed_trace),
-                               triggertimes=triggertimes, ax=ax, title=str(key))
-        ax.set(ylabel='mean subtracted\nraw trace')
-
-        ax = axs[1]
-        plot_trace_and_trigger(time=trace_times, trace=smoothed_trace - np.mean(smoothed_trace),
-                               triggertimes=triggertimes, ax=ax)
-        ax.set(ylabel='mean subtracted\ntrend')
-
-        ax = axs[2]
-        plot_trace_and_trigger(time=preprocess_trace_times, trace=preprocess_trace, triggertimes=triggertimes, ax=ax)
-        ax.set(ylabel='preprocessed\ntrace')
-
-        ax.set(xlim=xlim, ylim=ylim)
-
-        plt.show()
-
-    def plot(self, restriction=None, sort=True):
-        if restriction is None:
-            restriction = dict()
-
-        preprocess_traces = (self & restriction).fetch("preprocess_trace")
-        preprocess_traces = math_utils.padded_vstack(preprocess_traces, cval=np.nan)
-        n = preprocess_traces.shape[0]
-
-        fig, ax = plt.subplots(1, 1, figsize=(10, 1 + np.minimum(n * 0.1, 10)))
-        if len(restriction) > 0:
-            plot_utils.set_long_title(fig=fig, title=restriction)
-
-        sort_idxs = trace_utils.argsort_traces(preprocess_traces, ignore_nan=True) if sort else np.arange(n)
-
-        ax.set_title('preprocess_traces')
-        plot_utils.plot_signals_heatmap(ax=ax, signals=preprocess_traces[sort_idxs, :], symmetric=False)
-        plt.show()

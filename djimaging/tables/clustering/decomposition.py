@@ -21,7 +21,7 @@ class FeaturesParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        features_id: int # unique param set id
+        features_id: tinyint unsigned # unique param set id
         ---
         kind: varchar(255)
         params_dict: longblob

@@ -18,20 +18,6 @@ from djimaging.utils.mask_utils import to_igor_format, to_python_format, to_roi_
 from djimaging.utils.plot_utils import plot_field
 
 
-def load_stack_data(files, data_name, alt_name, from_raw_data,
-                    roi_mask_dir=None, old_prefix=None, new_prefix=None):
-    ch0_stacks, ch1_stacks, output_files = [], [], []
-    for data_file in files:
-        ch_stacks, wparams = read_utils.load_stacks(
-            data_file, from_raw_data=from_raw_data, ch_names=(data_name, alt_name))
-        ch0_stacks.append(ch_stacks[data_name])
-        ch1_stacks.append(ch_stacks[alt_name])
-        output_files.append(to_roi_mask_file(
-            data_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix))
-
-    return ch0_stacks, ch1_stacks, output_files
-
-
 class RoiMaskTemplate(dj.Manual):
     database = ""
     _max_shift = 5
@@ -425,6 +411,20 @@ class RoiMaskTemplate(dj.Manual):
             return dict()
 
         return bg_dict
+
+
+def load_stack_data(files, data_name, alt_name, from_raw_data,
+                    roi_mask_dir=None, old_prefix=None, new_prefix=None):
+    ch0_stacks, ch1_stacks, output_files = [], [], []
+    for data_file in files:
+        ch_stacks, wparams = read_utils.load_stacks(
+            data_file, from_raw_data=from_raw_data, ch_names=(data_name, alt_name))
+        ch0_stacks.append(ch_stacks[data_name])
+        ch1_stacks.append(ch_stacks[alt_name])
+        output_files.append(to_roi_mask_file(
+            data_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix))
+
+    return ch0_stacks, ch1_stacks, output_files
 
 
 def load_default_autorois_models(kind='default_rgc'):

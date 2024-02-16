@@ -48,13 +48,13 @@ class StimulusTemplate(dj.Manual):
     def definition(self):
         definition = """
         # Light stimuli
-        stim_name           :varchar(255)       # Unique string identifier
+        stim_name           :varchar(16)       # Unique string identifier
         ---
-        alias               :varchar(9999)      # Strings (_ seperator) to identify this stimulus, not case sensitive!
+        alias               :varchar(255)       # Strings (_ seperator) to identify this stimulus, not case sensitive!
         stim_family=""      :varchar(255)       # To group stimuli (e.g. gChirp and lChirp) for downstream processing 
         framerate=0         :float              # framerate in Hz
         isrepeated=0        :tinyint unsigned   # Is the stimulus repeated? Used for snippets
-        ntrigger_rep=0      :int unsigned       # Number of triggers (per repetition)  
+        ntrigger_rep=0      :mediumint unsigned       # Number of triggers (per repetition)  
         stim_path=""        :varchar(255)       # Path to hdf5 file containing numerical array and info about stim
         commit_id=""        :varchar(255)       # Commit id corresponding to stimulus entry in GitHub repo
         stim_hash=""        :varchar(255)       # QDSPy hash

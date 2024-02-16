@@ -92,7 +92,7 @@ class RfGlmParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        rf_glm_params_id: int # unique param set id
+        rf_glm_params_id: tinyint unsigned # unique param set id
         ---
         filter_dur_s_past : float # filter duration in seconds into the past
         filter_dur_s_future : float # filter duration in seconds into the future
