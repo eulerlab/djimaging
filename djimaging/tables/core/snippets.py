@@ -108,6 +108,44 @@ class SnippetsTemplate(dj.Computed):
 
 
 class GroupSnippetsTemplate(dj.Computed):
+    """
+    Example trial info for Center-Ring-Surround flicker (CRS) stimulus with test sequences:
+    crs_trial_info = [
+        dict(name='UV', ntrigger=120),
+        dict(name='_', ntrigger=1),
+        dict(name='UV-test', ntrigger=2),
+        dict(name='green-test', ntrigger=2),
+        dict(name='_', ntrigger=1),
+        dict(name='green', ntrigger=120),
+        dict(name='_', ntrigger=1),
+        dict(name='UV-test', ntrigger=2),
+        dict(name='green-test', ntrigger=2),
+        dict(name='_', ntrigger=1),
+        dict(name='green', ntrigger=120),
+        dict(name='_', ntrigger=1),
+        dict(name='UV-test', ntrigger=2),
+        dict(name='green-test', ntrigger=2),
+        dict(name='_', ntrigger=1),
+        dict(name='UV', ntrigger=120),
+        dict(name='_', ntrigger=1),
+        dict(name='UV-test', ntrigger=2),
+        dict(name='green-test', ntrigger=2),
+        dict(name='_', ntrigger=1),
+    ]
+
+    Example for moving bar (MB):
+    mb_trial_info = [
+        {'name': 0, 'ntrigger': 1},
+        {'name': 180, 'ntrigger': 1},
+        {'name': 45, 'ntrigger': 1},
+        {'name': 225, 'ntrigger': 1},
+        {'name': 90, 'ntrigger': 1},
+        {'name': 270, 'ntrigger': 1},
+        {'name': 135, 'ntrigger': 1},
+        {'name': 315, 'ntrigger': 1},
+    ]
+    """
+
     database = ""
 
     @property

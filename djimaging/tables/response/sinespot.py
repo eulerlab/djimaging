@@ -26,9 +26,9 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.utils.receptive_fields.fit_rf_utils import get_mean_dt
 from djimaging.tables.response.response_quality import RepeatQITemplate
 from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.trace_utils import get_mean_dt
 
 
 class SineSpotQITemplate(RepeatQITemplate):
