@@ -37,15 +37,15 @@ class RetinalFieldLocationTableParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        table_hash : varchar(32)         # hash of the classifier params config
+        table_hash : varchar(63)         # hash of the classifier params config
         ---
         table_path :   attach@{store} # Path to table
-        col_experimenter = 'experimenter' : varchar(255)
-        col_exp_num = 'exp_num' : varchar(255)
-        col_date = 'date' : varchar(255)
-        col_field = 'field' : varchar(255)
-        col_ventral_dorsal_pos = 'ventral_dorsal_pos' : varchar(255)
-        col_temporal_nasal_pos = 'temporal_nasal_pos' : varchar(255)
+        col_experimenter = 'experimenter' : varchar(191)
+        col_exp_num = 'exp_num' : varchar(191)
+        col_date = 'date' : varchar(191)
+        col_field = 'field' : varchar(191)
+        col_ventral_dorsal_pos = 'ventral_dorsal_pos' : varchar(191)
+        col_temporal_nasal_pos = 'temporal_nasal_pos' : varchar(191)
         """.format(store=self.store)
         return definition
 

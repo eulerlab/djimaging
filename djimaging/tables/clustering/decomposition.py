@@ -23,11 +23,11 @@ class FeaturesParamsTemplate(dj.Lookup):
         definition = """
         features_id: tinyint unsigned # unique param set id
         ---
-        kind: varchar(255)
+        kind: varchar(191)
         params_dict: longblob
         norm_trace: tinyint unsigned  # Used normalized averages or averages?
-        stim_names: varchar(255)  # Stimuli to consider, separated by '_'
-        ncomps: varchar(255)  # Number of components separated by '_'
+        stim_names: varchar(191)  # Stimuli to consider, separated by '_'
+        ncomps: varchar(191)  # Number of components separated by '_'
         pre_standardize: tinyint unsigned  # Standardize features before decomposition?
         post_standardize: tinyint unsigned  # Standardize features after decomposition?
         """

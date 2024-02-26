@@ -26,7 +26,7 @@ class OpticDiskTemplate(dj.Computed):
         -> self.experiment_table
         -> self.raw_params_table
         ---
-        od_fromfile :varchar(255)  # File from which optic disc data was extracted
+        od_fromfile :varchar(191)  # File from which optic disc data was extracted
         odx      :float            # XCoord_um relative to the optic disk
         ody      :float            # YCoord_um relative to the optic disk
         odz      :float            # ZCoord_um relative to the optic disk

@@ -101,7 +101,7 @@ class RfGlmParamsTemplate(dj.Lookup):
         betas : blob
         kfold : tinyint unsigned        
         metric = "mse": enum("mse", "corrcoef")
-        output_nonlinearity = 'none' : varchar(32)
+        output_nonlinearity = 'none' : varchar(63)
         other_params_dict : longblob
         """
         return definition

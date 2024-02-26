@@ -25,21 +25,21 @@ class FieldTemplate(dj.Computed):
         # Recording fields
         -> self.experiment_table
         -> self.raw_params_table
-        field   :varchar(16)          # string identifying files corresponding to field
+        field   :varchar(63)          # string identifying files corresponding to field
         """
 
         if self.incl_region:
-            definition += "    region   :varchar(16)    # region (e.g. LR or RR)\n"
+            definition += "    region   :varchar(63)    # region (e.g. LR or RR)\n"
         if self.incl_cond1:
-            definition += "    cond1    :varchar(16)    # condition (pharmacological or other)\n"
+            definition += "    cond1    :varchar(63)    # condition (pharmacological or other)\n"
         if self.incl_cond2:
-            definition += "    cond2    :varchar(16)    # condition (pharmacological or other)\n"
+            definition += "    cond2    :varchar(63)    # condition (pharmacological or other)\n"
         if self.incl_cond3:
-            definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
+            definition += "    cond3    :varchar(63)    # condition (pharmacological or other)\n"
 
         definition += """
         ---
-        field_data_file: varchar(255)  # info extracted from which file?
+        field_data_file: varchar(191)  # info extracted from which file?
         absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
         absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
         absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
@@ -96,7 +96,7 @@ class FieldTemplate(dj.Computed):
             definition = """
             # Stack median (over time of the available channels)
             -> master
-            ch_name : varchar(255)  # name of the channel
+            ch_name : varchar(191)  # name of the channel
             ---
             ch_average :longblob  # Stack median over time
             """

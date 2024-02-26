@@ -14,9 +14,9 @@ class UserInfoTemplate(dj.Manual):
     def definition(self):
         definition = f"""
         # Info for decoding file names
-        experimenter                    :varchar(32)  # name of the experimenter
+        experimenter                    :varchar(63)  # name of the experimenter
         ---     
-        data_dir                        :varchar(255)   # path to header file, used for computed tables
+        data_dir                        :varchar(191)   # path to header file, used for computed tables
         field_loc                       :tinyint       # string location for field
         stimulus_loc                    :tinyint       # string location for stimulus
         animal_loc=NULL                 :tinyint       # string location for number of animal (e.g. M1)
@@ -25,14 +25,14 @@ class UserInfoTemplate(dj.Manual):
         cond1_loc=NULL                  :tinyint       # string location for condition 1 (e.g. pharmacological)
         cond2_loc=NULL                  :tinyint       # string location for condition 2 (e.g. pharmacological)
         cond3_loc=NULL                  :tinyint       # string location for condition 3 (e.g. pharmacological)
-        opticdisk_alias='od_opticdisk_opticdisc'  :varchar(255)  # alias(es) for optic disk (separated by _)
-        outline_alias='outline_edge'    :varchar(255)  # alias(es) for retinal outline / edge (separated by _)
-        highres_alias='hq_hr_highresolution_512' :varchar(255)  # alias(es) for high resolution stack
-        mask_alias='chirp_mb_movingbar' :varchar(255)  # Ordered alias(es) for field roi mask (separated by _)
-        pre_data_dir='Pre'              :varchar(255)  # directory for h5 data files
-        raw_data_dir='Raw'              :varchar(255)  # directory for smp and smh data files
-        data_stack_name='wDataCh0'      :varchar(255)  # main data channel, e.g. OGB-1
-        alt_stack_name='wDataCh1'       :varchar(255)  # alternative data channel, e.g. SR101
+        opticdisk_alias='od_opticdisk_opticdisc'  :varchar(191)  # alias(es) for optic disk (separated by _)
+        outline_alias='outline_edge'    :varchar(191)  # alias(es) for retinal outline / edge (separated by _)
+        highres_alias='hq_hr_highresolution_512' :varchar(191)  # alias(es) for high resolution stack
+        mask_alias='chirp_mb_movingbar' :varchar(191)  # Ordered alias(es) for field roi mask (separated by _)
+        pre_data_dir='Pre'              :varchar(191)  # directory for h5 data files
+        raw_data_dir='Raw'              :varchar(191)  # directory for smp and smh data files
+        data_stack_name='wDataCh0'      :varchar(191)  # main data channel, e.g. OGB-1
+        alt_stack_name='wDataCh1'       :varchar(191)  # alternative data channel, e.g. SR101
         """
         return definition
 

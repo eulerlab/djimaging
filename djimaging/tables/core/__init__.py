@@ -1,7 +1,7 @@
 from .averages import AveragesTemplate, ResampledAveragesTemplate
 from .experiment import ExperimentTemplate
 from .preprocesstraces import PreprocessTracesTemplate, PreprocessParamsTemplate
-from .snippets import SnippetsTemplate
+from .snippets import SnippetsTemplate, GroupSnippetsTemplate
 from .stimulus import StimulusTemplate
 from .userinfo import UserInfoTemplate
 from .raw_data import RawDataParamsTemplate

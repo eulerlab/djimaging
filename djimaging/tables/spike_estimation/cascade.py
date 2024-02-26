@@ -184,9 +184,9 @@ class CascadeParamsTemplate(dj.Lookup):
         definition = """
         cascade_params_id: tinyint unsigned # unique param set id
         ---
-        model_name : varchar(255)
-        cascade_model_subfolder : varchar(255)
-        cascade_folder : varchar(255)
+        model_name : varchar(191)
+        cascade_model_subfolder : varchar(191)
+        cascade_folder : varchar(191)
         """
         return definition
 

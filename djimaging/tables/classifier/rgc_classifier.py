@@ -87,10 +87,10 @@ class ClassifierTrainingDataTemplate(dj.Manual):
     def definition(self):
         definition = """
         # holds feature basis and training data for classifier
-        training_data_hash     :   varchar(32)     # hash of the classifier training data files
+        training_data_hash     :   varchar(63)     # hash of the classifier training data files
         ---
         project                :   enum("True", "False")     # flag whether to project data onto features anew or not
-        output_path            :   varchar(255)
+        output_path            :   varchar(191)
         chirp_feats_file       :   filepath@{store}
         bar_feats_file         :   filepath@{store}
         baden_data_file        :   filepath@{store}
@@ -141,12 +141,12 @@ class ClassifierMethodTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        classifier_params_hash  : varchar(32)     # hash of the classifier params config
+        classifier_params_hash  : varchar(63)     # hash of the classifier params config
         ---
-        classifier_fn           : varchar(255)    # path to classifier method fn
+        classifier_fn           : varchar(191)    # path to classifier method fn
         classifier_config       : longblob        # method configuration object
         classifier_seed         : int
-        comment                 : varchar(255)    # comment
+        comment                 : varchar(191)    # comment
         """
         return definition
 

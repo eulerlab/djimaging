@@ -21,7 +21,7 @@ class SplitRFParamsTemplate(dj.Lookup):
         definition = """
         split_rf_params_id: tinyint unsigned # unique param set id
         ---
-        method : varchar(32)  # Method used to split RF, currently available are SVD, STD, and MAX
+        method : varchar(63)  # Method used to split RF, currently available are SVD, STD, and MAX
         blur_std : float
         blur_npix : int unsigned
         upsample_srf_scale : int unsigned

@@ -22,7 +22,7 @@ class ExperimentTemplate(dj.Computed):
         date                        :date                     # date of recording
         exp_num                     :tinyint unsigned         # experiment number in a day
         ---
-        header_path                 :varchar(255)             # path to header file
+        header_path                 :varchar(191)             # path to header file
         header_name                 :varchar(63)              # name of header file
         """
         return definition
@@ -240,13 +240,13 @@ class ExperimentTemplate(dj.Computed):
                -> master
                ---
                eye                :enum("left", "right", "unknown") # left or right eye of the animal
-               projname           :varchar(255)                     # name of experimental project
-               setupid            :varchar(255)                     # setup 1-3
+               projname           :varchar(191)                     # name of experimental project
+               setupid            :varchar(191)                     # setup 1-3
                prep="wholemount"  :enum("wholemount", "slice")      # preparation type of the retina
-               preprem            :varchar(255)                     # comments on the preparation
-               darkadapt_hrs      :varchar(255)                     # time spent dark adapting animal before disection
-               slicethickness_um  :varchar(255)                     # thickness of each slice in slice preparation
-               bathtemp_degc      :varchar(255)                     # temperature of bath chamber
+               preprem            :varchar(191)                     # comments on the preparation
+               darkadapt_hrs      :varchar(191)                     # time spent dark adapting animal before disection
+               slicethickness_um  :varchar(191)                     # thickness of each slice in slice preparation
+               bathtemp_degc      :varchar(191)                     # temperature of bath chamber
                prepwmorient       :smallint         # retina orientation in chamber (0° = dorsal away from experimenter). Defaults to 0. Use -1, 111 or "unkown" to encode unknown.
                odx                :float            # x location of optic disk as read in from .ini file
                ody                :float            # y location of optic disk as read in from .ini file (if available)
@@ -264,14 +264,14 @@ class ExperimentTemplate(dj.Computed):
                # Animal info and genetic background set by user in preprocessing
                -> master
                ---
-               genline                   :varchar(255)                     # Genetic background line
-               genbkglinerem             :varchar(255)                     # Comments about background line
-               genline_reporter          :varchar(255)                     # Genetic reporter line
-               genline_reporterrem       :varchar(255)                     # Comments about reporter line
-               animspecies="mouse"       :varchar(255)                     # animal species
-               animgender                :varchar(255)                     # gender.
-               animdob                   :varchar(255)                     # Whether to have this or DOB?
-               animrem                   :varchar(255)                     # Comments about animal
+               genline                   :varchar(191)                     # Genetic background line
+               genbkglinerem             :varchar(191)                     # Comments about background line
+               genline_reporter          :varchar(191)                     # Genetic reporter line
+               genline_reporterrem       :varchar(191)                     # Comments about reporter line
+               animspecies="mouse"       :varchar(191)                     # animal species
+               animgender                :varchar(191)                     # gender.
+               animdob                   :varchar(191)                     # Whether to have this or DOB?
+               animrem                   :varchar(191)                     # Comments about animal
                """
             return definition
 
@@ -282,19 +282,19 @@ class ExperimentTemplate(dj.Computed):
                # Indicator used for imaging set by user in preprocessing
                -> master
                ---
-               isepored                    :varchar(255)     # whether the retina was electroporated
-               eporrem                     :varchar(255)     # comments about the electroporation
-               epordye                     :varchar(255)     # which dye was used for the electroporation
-               isvirusinject               :varchar(5)       # whether the retina was injected
-               virusvect                   :varchar(255)     # what vector was used in the injection
-               virusserotype               :varchar(255)     # what serotype was used in the injection
-               virustransprotein           :varchar(255)     # the viral transprotein
-               virusinjectrem              :varchar(255)     # comments about the injection
-               virusinjectq                :varchar(255)     # numerical rating of the injection quality
-               isbraininject               :varchar(5)       # whether the retina was injected
-               tracer                      :varchar(255)     # which tracer has been used in the brain injection
-               braininjectq                :varchar(255)     # numerical rating of the brain injection quality
-               braininjectrem              :varchar(255)     # comments on the brain injection
+               isepored                    :varchar(191)     # whether the retina was electroporated
+               eporrem                     :varchar(191)     # comments about the electroporation
+               epordye                     :varchar(191)     # which dye was used for the electroporation
+               isvirusinject               :varchar(63)       # whether the retina was injected
+               virusvect                   :varchar(191)     # what vector was used in the injection
+               virusserotype               :varchar(191)     # what serotype was used in the injection
+               virustransprotein           :varchar(191)     # the viral transprotein
+               virusinjectrem              :varchar(191)     # comments about the injection
+               virusinjectq                :varchar(191)     # numerical rating of the injection quality
+               isbraininject               :varchar(63)       # whether the retina was injected
+               tracer                      :varchar(191)     # which tracer has been used in the brain injection
+               braininjectq                :varchar(191)     # numerical rating of the brain injection quality
+               braininjectrem              :varchar(191)     # comments on the brain injection
                """
             return definition
 
@@ -306,9 +306,9 @@ class ExperimentTemplate(dj.Computed):
             -> master
             ---
             pharmaflag      :tinyint unsigned # 1 there was pharma, 0 no pharma
-            drug            :varchar(255)     # which drug was applied
-            pharmconc       :varchar(255)     # concentration used in micromolar
-            preapptime      :varchar(255)     # preapplication time
-            pharmcom        :varchar(255)     # experimenter comments
+            drug            :varchar(191)     # which drug was applied
+            pharmconc       :varchar(191)     # concentration used in micromolar
+            preapptime      :varchar(191)     # preapplication time
+            pharmcom        :varchar(191)     # experimenter comments
             """
             return definition

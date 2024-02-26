@@ -54,7 +54,7 @@ class ClusteringParametersTemplate(dj.Lookup):
         definition = """
         clustering_id: tinyint unsigned # unique param set id
         ---
-        kind: varchar(255)
+        kind: varchar(191)
         params_dict: longblob
         min_count: int
         """
