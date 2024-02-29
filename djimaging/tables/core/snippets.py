@@ -84,10 +84,10 @@ class SnippetsTemplate(dj.Computed):
         stim_name = (self.stimulus_table() & key).fetch1('stim_name')
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
-        trace_times, traces = (self.preprocesstraces_table() & key).fetch1('preprocess_trace_times', 'preprocess_trace')
+        trace_times, trace = (self.preprocesstraces_table() & key).fetch1('preprocess_trace_times', 'preprocess_trace')
 
         snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_reps(
-            traces, trace_times, triggertimes, ntrigger_rep, allow_drop_last=True, pad_trace=self._pad_trace)
+            trace, trace_times, triggertimes, ntrigger_rep, allow_drop_last=True, pad_trace=self._pad_trace)
 
         dt_baseline = None if self._dt_base_line_dict is None else self._dt_base_line_dict.get(stim_name, None)
         if dt_baseline is not None:
