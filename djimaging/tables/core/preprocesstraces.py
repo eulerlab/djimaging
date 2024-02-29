@@ -240,9 +240,11 @@ def subtract_baseline_trace(trace, trace_times, stim_start: float, inplace: bool
     return trace
 
 
-def process_trace(trace_times, trace, poly_order, window_len_seconds,
-                  subtract_baseline: bool, standardize: int, non_negative: bool, stim_start: float = None,
-                  f_cutoff: float = None, fs_resample: float = None, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3),
+def process_trace(trace_times, trace, poly_order=3, window_len_seconds=0,
+                  subtract_baseline: bool = False, standardize: int = 0,
+                  non_negative: bool = False, stim_start: float = None,
+                  f_cutoff: float = None, fs_resample: float = None,
+                  drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3),
                   dt_rtol=0.1, baseline_max_dt=np.inf):
     """Detrend and preprocess trace"""
     assert standardize in [0, 1, 2], standardize
@@ -260,7 +262,10 @@ def process_trace(trace_times, trace, poly_order, window_len_seconds,
     if (f_cutoff is not None) and (f_cutoff > 0):
         trace = lowpass_filter_trace(trace=trace, fs=fs, f_cutoff=f_cutoff)
 
-    trace, smoothed_trace = detrend_trace(trace, window_len_seconds, fs, poly_order)
+    if window_len_seconds > 0:
+        trace, smoothed_trace = detrend_trace(trace, window_len_seconds, fs, poly_order)
+    else:
+        smoothed_trace = np.zeros_like(trace)
 
     if stim_start is not None:
         if not np.any(trace_times < stim_start):
