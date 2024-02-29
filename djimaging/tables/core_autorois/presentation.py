@@ -25,9 +25,9 @@ class PresentationTemplate(dj.Computed):
         -> self.field_table
         -> self.stimulus_table
         -> self.raw_params_table
-        condition             :varchar(255)     # condition (pharmacological or other)
+        condition             :varchar(191)     # condition (pharmacological or other)
         ---
-        {self.filepath}       :varchar(255)     # path to h5 file
+        {self.filepath}       :varchar(191)     # path to h5 file
         trigger_flag          :tinyint unsigned # Are triggers as expected (1) or not (0)?
         triggertimes          :longblob         # triggertimes in each presentation
         triggervalues         :longblob         # values of the recorded triggers
@@ -80,7 +80,7 @@ class PresentationTemplate(dj.Computed):
             definition = """
             # Stack median (over time of the available channels)
             -> master
-            ch_name : varchar(255)  # name of the channel
+            ch_name : varchar(191)  # name of the channel
             ---
             ch_average : longblob  # Stack median over time
             """

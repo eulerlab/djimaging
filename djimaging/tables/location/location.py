@@ -91,7 +91,7 @@ class OpticDiskTemplate(dj.Computed):
         # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
         -> self.experiment_table
         ---
-        od_fromfile :varchar(255)  # File from which optic disc data was extracted
+        od_fromfile :varchar(191)  # File from which optic disc data was extracted
         odx      :float         # XCoord_um relative to the optic disk
         ody      :float         # YCoord_um relative to the optic disk
         odz      :float         # ZCoord_um relative to the optic disk

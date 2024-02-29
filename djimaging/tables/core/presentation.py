@@ -25,9 +25,9 @@ class PresentationTemplate(dj.Computed):
         -> self.field_table
         -> self.stimulus_table
         -> self.params_table
-        condition             :varchar(255)     # condition (pharmacological or other)
+        condition             :varchar(191)     # condition (pharmacological or other)
         ---
-        {self.filepath}     :varchar(255)     # path to h5 file
+        {self.filepath}     :varchar(191)     # path to h5 file
         trigger_flag          :tinyint unsigned # Are triggers as expected (1) or not (0)?
         triggertimes          :longblob         # triggertimes in each presentation
         triggervalues         :longblob         # values of the recorded triggers
@@ -80,7 +80,7 @@ class PresentationTemplate(dj.Computed):
             definition = """
             # Stack median (over time of the available channels)
             -> master
-            ch_name : varchar(255)  # name of the channel
+            ch_name : varchar(191)  # name of the channel
             ---
             ch_average : longblob  # Stack median over time
             """
@@ -132,7 +132,7 @@ class PresentationTemplate(dj.Computed):
             user_nypixlineoffs=0       :int        
             user_divframebufreq        :float        
             user_scantype              :float        
-            user_scanpathfunc          :varchar(255) 
+            user_scanpathfunc          :varchar(191) 
             user_nsubpixoversamp       :int        
             user_nfrperstep            :int        
             user_xoffset_v             :float        
@@ -148,18 +148,18 @@ class PresentationTemplate(dj.Computed):
             zstep_um=0                 :float        
             zoom                       :float        
             angle_deg                  :float        
-            datestamp_d_m_y            :varchar(255) 
-            timestamp_h_m_s_ms         :varchar(255) 
-            inchan_pixbuflenlist       :varchar(255) 
-            username                   :varchar(255) 
-            guid                       :varchar(255) 
-            origpixdatafilename        :varchar(255) 
-            stimbuflenlist             :varchar(255) 
-            callingprocessver          :varchar(255) 
-            callingprocesspath         :varchar(255) 
-            targetedstimdurlist        :varchar(255) 
-            computername               :varchar(255) 
-            scanm_pver_targetos        :varchar(255) 
+            datestamp_d_m_y            :varchar(191) 
+            timestamp_h_m_s_ms         :varchar(191) 
+            inchan_pixbuflenlist       :varchar(191) 
+            username                   :varchar(191) 
+            guid                       :varchar(191) 
+            origpixdatafilename        :varchar(191) 
+            stimbuflenlist             :varchar(191) 
+            callingprocessver          :varchar(191) 
+            callingprocesspath         :varchar(191) 
+            targetedstimdurlist        :varchar(191) 
+            computername               :varchar(191) 
+            scanm_pver_targetos        :varchar(191) 
             user_zlensscaler=0         :float        
             user_stimbufperfr=0        :float        
             user_aspectratiofr=0       :float        
@@ -170,15 +170,15 @@ class PresentationTemplate(dj.Computed):
             user_setupid=0             :float        
             user_nzpixretrace=0        :float        
             user_laserwavelen_nm=0     :float        
-            user_scanpathfunc          :varchar(255) 
+            user_scanpathfunc          :varchar(191) 
             user_dzfrdecoded=0         :int        
             user_dxfrdecoded=0         :int        
             user_dyfrdecoded=0         :int        
             user_zeroz_v=0             :float        
-            igorguiver                 :varchar(255) 
-            user_comment=''            :varchar(255) 
-            user_objective=''          :varchar(255) 
-            realstimdurlist=""         :varchar(255) 
+            igorguiver                 :varchar(191) 
+            user_comment=''            :varchar(191) 
+            user_objective=''          :varchar(191) 
+            realstimdurlist=""         :varchar(191) 
             user_ichfastscan=0         :float        
             user_trajdefvrange_v=0     :float        
             user_ntrajparams=0         :float        

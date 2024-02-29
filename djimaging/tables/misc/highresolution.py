@@ -77,7 +77,7 @@ class HighResTemplate(dj.Computed):
         # High resolution stack information.
         -> self.field_table
         ---
-        fromfile : varchar(255)  # Absolute path to file
+        fromfile : varchar(191)  # Absolute path to file
         nframes : int  # Number of frames averaged
         absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
         absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
@@ -120,7 +120,7 @@ class HighResTemplate(dj.Computed):
             definition = """
             # Stack median (over time of the available channels)
             -> master
-            ch_name : varchar(255)  # name of the channel
+            ch_name : varchar(191)  # name of the channel
             ---
             ch_average :longblob  # Stack median over time
             """

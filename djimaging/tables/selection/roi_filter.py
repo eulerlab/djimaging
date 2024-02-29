@@ -14,7 +14,7 @@ class CellFilterParamsTemplate(dj.Lookup):
         qi_thres_chirp                  :  float               # QI threshold for full-field chirp response
         qi_thres_bar                    :  float               # QI threshold for moving bar response
         cell_selection_constraint       :  enum("and", "or")   # constraint flag (and, or) for QI
-        condition = 'control'           :  varchar(255)        # Condition to classify. Empty strings = all conditions. 
+        condition = 'control'           :  varchar(191)        # Condition to classify. Empty strings = all conditions. 
         """
         return definition
 

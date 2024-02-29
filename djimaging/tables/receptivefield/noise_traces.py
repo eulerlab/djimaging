@@ -15,7 +15,7 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
         definition = """
         dnoise_params_id: int # unique param set id
         ---
-        fit_kind : varchar(255)
+        fit_kind : varchar(191)
         fupsample_trace : tinyint unsigned  # Multiplier of sampling frequency, using linear interpolation.
         fupsample_stim = 0 : tinyint unsigned  # Multiplier of sampling stimulus, using repeat.
         lowpass_cutoff = 0: float  # Cutoff frequency low pass filter, applied if larger 0.

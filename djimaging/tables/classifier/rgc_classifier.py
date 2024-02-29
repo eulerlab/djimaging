@@ -43,7 +43,7 @@ class ClassifierMethodTemplate(dj.Lookup):
         definition = """
         classifier_params_hash  : varchar(32)     # hash of the classifier params config
         ---
-        classifier_fn           : varchar(64)     # path to classifier method fn
+        classifier_fn           : varchar(63)     # path to classifier method fn
         classifier_config       : longblob        # method configuration object
         classifier_seed         : int
         comment                 : varchar(300)    # comment
@@ -122,7 +122,7 @@ class ClassifierTrainingDataTemplate(dj.Manual):
         training_data_hash     :   varchar(32)     # hash of the classifier training data files
         ---
         project                :   enum("True", "False")     # flag whether to project data onto features anew or not
-        output_path            :   varchar(255)
+        output_path            :   varchar(191)
         chirp_feats_file       :   filepath@{store}
         bar_feats_file         :   filepath@{store}
         baden_data_file        :   filepath@{store}

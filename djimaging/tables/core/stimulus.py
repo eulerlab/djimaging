@@ -48,16 +48,16 @@ class StimulusTemplate(dj.Manual):
     def definition(self):
         definition = """
         # Light stimuli
-        stim_name           :varchar(255)       # Unique string identifier
+        stim_name           :varchar(191)       # Unique string identifier
         ---
         alias               :varchar(9999)      # Strings (_ seperator) to identify this stimulus, not case sensitive!
-        stim_family=""      :varchar(255)       # To group stimuli (e.g. gChirp and lChirp) for downstream processing 
+        stim_family=""      :varchar(191)       # To group stimuli (e.g. gChirp and lChirp) for downstream processing 
         framerate=0         :float              # framerate in Hz
         isrepeated=0        :tinyint unsigned   # Is the stimulus repeated? Used for snippets
         ntrigger_rep=0      :int unsigned       # Number of triggers (per repetition)  
-        stim_path=""        :varchar(255)       # Path to hdf5 file containing numerical array and info about stim
-        commit_id=""        :varchar(255)       # Commit id corresponding to stimulus entry in GitHub repo
-        stim_hash=""        :varchar(255)       # QDSPy hash
+        stim_path=""        :varchar(191)       # Path to hdf5 file containing numerical array and info about stim
+        commit_id=""        :varchar(191)       # Commit id corresponding to stimulus entry in GitHub repo
+        stim_hash=""        :varchar(191)       # QDSPy hash
         trial_info=NULL     :longblob           # trial information, e.g. directions of moving bar
         stim_trace=NULL     :longblob           # array of stimulus if available
         stim_dict=NULL      :longblob           # stimulus information dictionary, contains e.g. spatial extent
