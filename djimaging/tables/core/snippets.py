@@ -28,6 +28,17 @@ def get_aligned_snippets_times(snippets_times, raise_error=True, tol=1e-4):
 class SnippetsTemplate(dj.Computed):
     database = ""
     _pad_trace = False  # If True, chose snippet times always contain the trigger times
+    _dt_base_line_dict = None  # dict of baseline time for each stimulus with stimulus based baseline correction
+
+    """
+    Examples for _dt_base_line_dict:
+    
+    Baden 16 / Franke 17:
+    _dt_base_line_dict = {
+        'gChirp': 8*0.128,
+        'movingbar':  5*0.128,
+    }
+    """
 
     @property
     def definition(self):
@@ -70,12 +81,18 @@ class SnippetsTemplate(dj.Computed):
             pass
 
     def make(self, key):
+        stim_name = (self.stimulus_table() & key).fetch1('stim_name')
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
         trace_times, traces = (self.preprocesstraces_table() & key).fetch1('preprocess_trace_times', 'preprocess_trace')
 
         snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_reps(
             traces, trace_times, triggertimes, ntrigger_rep, allow_drop_last=True, pad_trace=self._pad_trace)
+
+        dt_baseline = None if self._dt_base_line_dict is None else self._dt_base_line_dict.get(stim_name, None)
+        if dt_baseline is not None:
+            n_baseline = int(np.round(dt_baseline / np.mean(np.diff(snippets_times, axis=0))))
+            snippets = snippets - np.median(snippets[:n_baseline, :], axis=0)
 
         self.insert1(dict(
             **key,
