@@ -188,6 +188,16 @@ class FitGauss2DRFTemplate(dj.Computed):
     def stimulus_table(self):
         pass
 
+    def fetch1_pixel_size(self, key):
+        stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
+        stim_pixel_size_x_um = stim_dict["pix_scale_x_um"]
+        stim_pixel_size_y_um = stim_dict["pix_scale_y_um"]
+        upsample_srf_scale = (self.split_rf_table.split_rf_params_table() & key).fetch1('upsample_srf_scale')
+        pixel_size_x_um = stim_pixel_size_x_um / upsample_srf_scale if upsample_srf_scale > 1 else stim_pixel_size_x_um
+        pixel_size_y_um = stim_pixel_size_y_um / upsample_srf_scale if upsample_srf_scale > 1 else stim_pixel_size_y_um
+
+        return pixel_size_x_um, pixel_size_y_um
+
     def make(self, key):
         srf = (self.split_rf_table() & key).fetch1("srf")
         stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
@@ -195,8 +205,11 @@ class FitGauss2DRFTemplate(dj.Computed):
         # Fit RF model
         srf_fit, srf_params, qi = fit_rf_model(srf, kind='gauss', polarity=self._polarity)
 
+        # Pixel size
+        pixel_size_x_um, pixel_size_y_um = self.fetch1_pixel_size(key=key)
+
         # Compute properties
-        area, diameter = compute_gauss_srf_area(srf_params, stim_dict["pix_scale_x_um"], stim_dict["pix_scale_y_um"])
+        area, diameter = compute_gauss_srf_area(srf_params, pixel_size_x_um, pixel_size_y_um)
         center_index = compute_center_index(srf=srf, srf_center=srf_fit)
         surround_index = compute_surround_index(srf=srf, srf_center=srf_fit)
 
@@ -287,6 +300,16 @@ class FitDoG2DRFTemplate(dj.Computed):
     def stimulus_table(self):
         pass
 
+    def fetch1_pixel_size(self, key):
+        stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
+        stim_pixel_size_x_um = stim_dict["pix_scale_x_um"]
+        stim_pixel_size_y_um = stim_dict["pix_scale_y_um"]
+        upsample_srf_scale = (self.split_rf_table.split_rf_params_table() & key).fetch1('upsample_srf_scale')
+        pixel_size_x_um = stim_pixel_size_x_um / upsample_srf_scale if upsample_srf_scale > 1 else stim_pixel_size_x_um
+        pixel_size_y_um = stim_pixel_size_y_um / upsample_srf_scale if upsample_srf_scale > 1 else stim_pixel_size_y_um
+
+        return pixel_size_x_um, pixel_size_y_um
+
     def make(self, key):
         srf = (self.split_rf_table() & key).fetch1("srf")
         stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
@@ -314,8 +337,10 @@ class FitDoG2DRFTemplate(dj.Computed):
             warnings.warn(f'Failed to fit DoG center for key={key}')
             return
 
-        area, diameter = compute_gauss_srf_area(
-            srf_gauss_params, stim_dict["pix_scale_x_um"], stim_dict["pix_scale_y_um"])
+        # Pixel size
+        pixel_size_x_um, pixel_size_y_um = self.fetch1_pixel_size(key=key)
+
+        area, diameter = compute_gauss_srf_area(srf_gauss_params, pixel_size_x_um, pixel_size_y_um)
 
         # Save
         fit_key = deepcopy(key)
