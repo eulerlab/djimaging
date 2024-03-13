@@ -151,32 +151,6 @@ class SplitRFTemplate(dj.Computed):
         plt.show()
 
 
-class RFContoursParamsTemplate(dj.Lookup):
-    database = ""
-
-    @property
-    def definition(self):
-        definition = """
-        rf_contours_params_id: int # unique param set id
-        ---
-        normalize_srf : enum('none', 'zeroone', 'zscore')
-        levels : blob
-        """
-        return definition
-
-    def add_default(self, skip_duplicates=False, **params):
-        """Add default preprocess parameter to table"""
-        key = dict(
-            normalize_srf='none',
-            blur_std=1.,
-            blur_npix=1,
-            upsample_srf_scale=0,
-            peak_nstd=1,
-        )
-        key.update(**params)
-        self.insert1(key, skip_duplicates=skip_duplicates)
-
-
 class FitGauss2DRFTemplate(dj.Computed):
     database = ""
 
@@ -404,6 +378,108 @@ class FitDoG2DRFTemplate(dj.Computed):
             print(params)
             group.hist(column=columns)
             plt.show()
+
+
+class RfOffsetTemplate(dj.Computed):
+    """
+    Example usage:
+    @schema
+    class RfOffset(RfOffsetTemplate):
+        _stimulus_offset_dx_um = 0.  # Set to zero if the stimulus center is equal to the field center
+        _stimulus_offset_dy_um = 0.  # Set to zero if the stimulus center is equal to the field center
+
+        stimulus_tab = Stimulus
+        rf_split_tab = SplitRF
+        rf_fit_tab = FitGauss2DRF
+    """
+
+    database = ''
+
+    _stimulus_offset_dx_um = 0.
+    _stimulus_offset_dy_um = 0.
+
+    @property
+    def definition(self):
+        definition = """
+        # Computes distance to center
+        -> self.rf_fit_tab
+        ---
+        rf_dx_um: float
+        rf_dy_um: float
+        rf_d_um: float
+        """
+        return definition
+
+    @property
+    def key_source(self):
+        try:
+            return self.rf_fit_tab.proj()
+        except (AttributeError, TypeError):
+            pass
+
+    @property
+    @abstractmethod
+    def stimulus_tab(self):
+        pass
+
+    @property
+    @abstractmethod
+    def rf_split_tab(self):
+        pass
+
+    @property
+    @abstractmethod
+    def rf_fit_tab(self):
+        pass
+
+    def fetch1_pixel_size(self, key):
+        pixel_size_x_um, pixel_size_y_um = self.rf_fit_tab().fetch1_pixel_size(key)
+        if not np.isclose(pixel_size_x_um, pixel_size_y_um):
+            raise ValueError("Pixel size is not isotropic")
+        return pixel_size_x_um
+
+    def fetch_and_compute(self, key):
+        """Compute offset w.r.t. stimulus center in microns"""
+        pixel_size_um = self.fetch1_pixel_size(key)
+
+        srf = (self.rf_split_tab & key).fetch1('srf')
+
+        try:
+            srf_params = (self.rf_fit_tab & key).fetch1('srf_eff_center_params')
+        except dj.DataJointError:
+            srf_params = (self.rf_fit_tab & key).fetch1('srf_params')
+
+        # Compute offset w.r.t. stimulus center.
+        # Plus one half to get pixel center, e.g. if the RF is centered on bottom left pixel,
+        # the fit will be 0, 0. For a 2x2 stimulus the offset is half a pixel: 0.5 - 2 / 2 = -0.5
+        rf_dx_um = ((srf_params['x_mean'] + 0.5) - (srf.shape[1] / 2)) * pixel_size_um
+        rf_dy_um = ((srf_params['y_mean'] + 0.5) - (srf.shape[0] / 2)) * pixel_size_um
+
+        return rf_dx_um, rf_dy_um
+
+    def make(self, key):
+        # Position of sRF center in stimulus coordinates
+        rf_dx_um, rf_dy_um = self.fetch_and_compute(key)
+
+        # Corrected for stimulus offset if any
+        rf_dx_um += self._stimulus_offset_dx_um
+        rf_dy_um += self._stimulus_offset_dy_um
+
+        if not np.isfinite(rf_dx_um) or not np.isfinite(rf_dy_um):
+            return
+
+        rf_d_um = (rf_dx_um ** 2 + rf_dy_um ** 2) ** 0.5
+        self.insert1(dict(**key, rf_dx_um=rf_dx_um, rf_dy_um=rf_dy_um, rf_d_um=rf_d_um))
+
+    def plot(self, exp_key):
+        rf_dx_um, rf_dy_um = (self & exp_key).fetch('rf_dx_um', 'rf_dy_um')
+
+        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+
+        for i, (rf_dx_um_i, rf_dy_um_i) in enumerate(zip(rf_dx_um, rf_dy_um)):
+            ax.plot([0, rf_dx_um_i], [0, rf_dy_um_i], '-', c=f'C{i % 10}', alpha=0.4)
+
+        return fig, ax
 
 
 class TempRFPropertiesTemplate(dj.Computed):
