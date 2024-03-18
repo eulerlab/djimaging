@@ -48,7 +48,7 @@ class StimulusTemplate(dj.Manual):
     def definition(self):
         definition = """
         # Light stimuli
-        stim_name           :varchar(191)       # Unique string identifier
+        stim_name           :varchar(32)       # Unique string identifier
         ---
         alias               :varchar(9999)      # Strings (_ seperator) to identify this stimulus, not case sensitive!
         stim_family=""      :varchar(191)       # To group stimuli (e.g. gChirp and lChirp) for downstream processing 
