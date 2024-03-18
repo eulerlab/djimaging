@@ -21,7 +21,7 @@ class FieldTemplate(dj.Computed):
         definition = """
         # Recording fields
         -> self.experiment_table
-        field   :varchar(191)          # string identifying files corresponding to field
+        field   :varchar(32)          # string identifying files corresponding to field
         ---
         fromfile: varchar(191)  # info extracted from which file?
         absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
@@ -196,7 +196,7 @@ class FieldWithConditionTemplate(FieldTemplate):
             definition = """
                 # Stack median (over time of the available channels)
                 -> master
-                ch_name : varchar(191)  # name of the channel
+                ch_name : varchar(32)  # name of the channel
                 ---
                 ch_average :longblob  # Stack median over time
                 """

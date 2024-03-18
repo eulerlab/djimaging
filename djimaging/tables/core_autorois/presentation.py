@@ -25,7 +25,7 @@ class PresentationTemplate(dj.Computed):
         -> self.field_table
         -> self.stimulus_table
         -> self.raw_params_table
-        condition             :varchar(63)     # condition (pharmacological or other)
+        condition             :varchar(32)     # condition (pharmacological or other)
         ---
         {self.filepath}       :varchar(191)     # path to h5 file
         trigger_flag          :tinyint unsigned # Are triggers as expected (1) or not (0)?

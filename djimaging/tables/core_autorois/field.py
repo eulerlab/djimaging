@@ -24,7 +24,7 @@ class FieldTemplate(dj.Computed):
         # Recording fields
         -> self.experiment_table
         -> self.raw_params_table
-        field   :varchar(191)          # string identifying files corresponding to field
+        field   :varchar(32)          # string identifying files corresponding to field
         """
 
         if self._include_conditions:

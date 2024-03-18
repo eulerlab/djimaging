@@ -14,7 +14,7 @@ class UserInfoTemplate(dj.Manual):
         definition = """
         # Info for decoding file names
     
-        experimenter                    :varchar(191)  # name of the experimenter
+        experimenter                    :varchar(32)  # name of the experimenter
         ---     
         data_dir                        :varchar(191)  # path to header file, used for computed tables
         datatype_loc                    :tinyint       # string location for datatype (e.g. SMP)
