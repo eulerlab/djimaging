@@ -36,7 +36,7 @@ class RoiCanvas:
             initial_roi_mask=None,
             main_stim_idx: int = 0,
             n_artifact: int = 0,
-            upscale: int = 5,
+            upscale: int = 5,  # If negative, will downscale by this factor
             autorois_models: Optional[Dict] = None,
             output_files=None,
             pixel_size_um=(1., 1.),
@@ -71,8 +71,9 @@ class RoiCanvas:
         self.ny = ch0_stacks[0].shape[1]
 
         self.upscale = upscale
-        self.npx = self.nx * self.upscale
-        self.npy = self.ny * self.upscale
+        self.rescale = self.upscale if self.upscale > 0 else 1 / abs(self.upscale)
+        self.npx = int(self.nx * self.rescale)
+        self.npy = int(self.ny * self.rescale)
         self.pixel_size_um = pixel_size_um
 
         if autorois_models is not None:
@@ -308,7 +309,7 @@ class RoiCanvas:
         axs[0].set_title('current_mask')
         _current_mask = self.current_mask.copy().astype(float)
         _current_mask[_current_mask == 0] = np.nan
-        im = axs[0].imshow(_current_mask, vmin=-0.5, vmax=9.5, cmap='tab10')
+        im = axs[0].imshow(_current_mask, vmin=-0.5, vmax=9.5, cmap='tab10', interpolation='none')
         plt.colorbar(im, ax=axs[0])
 
         axs[1].set_title('current_mask_img')
@@ -317,11 +318,11 @@ class RoiCanvas:
         axs[2].set_title('roi_masks')
         _roi_masks = self.roi_masks.copy().astype(float)
         _roi_masks[_roi_masks == 0] = np.nan
-        im = axs[2].imshow(_roi_masks, vmin=-0.5, vmax=9.5, cmap='tab10')
+        im = axs[2].imshow(_roi_masks, vmin=-0.5, vmax=9.5, cmap='tab10', interpolation='none')
         plt.colorbar(im, ax=axs[2])
 
         axs[3].set_title('roi_mask_img')
-        axs[3].imshow(self.roi_mask_img)
+        axs[3].imshow(self.roi_mask_img, interpolation='none')
 
         plt.tight_layout()
         plt.show()
@@ -1123,8 +1124,8 @@ class InteractiveRoiCanvas(RoiCanvas):
     def _apply_tool(self, x, y, down):
         """Apply tool. Down means mouse down event"""
 
-        ix = int(x / self.upscale)
-        iy = self.ny - int(y / self.upscale) - 1  # Flip ud
+        ix = int(x / self.rescale)
+        iy = self.ny - int(y / self.rescale) - 1  # Flip ud
 
         logging.debug(f'Apply tool={self._selected_tool} at x={x}, y={y}, ix={ix}, iy={iy}')
 
@@ -1161,7 +1162,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.drawing = True
 
         self._apply_tool(x, y, down=True)
-        self.last_mouse_pos_xy = (int(x / self.upscale), int(y / self.upscale))
+        self.last_mouse_pos_xy = (int(x / self.rescale), int(y / self.rescale))
 
         self.draw_current_mask_img(update=True)
 
@@ -1169,10 +1170,10 @@ class InteractiveRoiCanvas(RoiCanvas):
         if not self.drawing:
             return
 
-        if self.last_mouse_pos_xy == (int(x / self.upscale), int(y / self.upscale)):
+        if self.last_mouse_pos_xy == (int(x / self.rescale), int(y / self.rescale)):
             return
 
-        self.last_mouse_pos_xy = (int(x / self.upscale), int(y / self.upscale))
+        self.last_mouse_pos_xy = (int(x / self.rescale), int(y / self.rescale))
         self._apply_tool(x, y, down=False)
 
         self.draw_current_mask_img(update=True)
@@ -1194,7 +1195,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         if update:
             self.update_current_mask_img()
 
-        img = image_utils.upscale_image(self.current_mask_img, upscale=self.upscale)
+        img = image_utils.int_rescale_image(self.current_mask_img, scale=self.upscale)
         img = np.flipud(np.swapaxes(img, 0, 1))
 
         with hold_canvas():
@@ -1206,7 +1207,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         if update:
             self.update_roi_mask_img()
 
-        img = image_utils.upscale_image(self.roi_mask_img, upscale=self.upscale)
+        img = image_utils.int_rescale_image(self.roi_mask_img, scale=self.upscale)
         img = np.flipud(np.swapaxes(img, 0, 1))
 
         with hold_canvas():
@@ -1220,20 +1221,21 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         if self.bg_img.shape[:2] == (self.nx, self.ny):
             logging.debug('Upscaling background image')
-            img = image_utils.upscale_image(self.bg_img, self.upscale)
-        elif self.bg_img.shape[:2] == (self.nx * self.upscale, self.ny * self.upscale):
-            logging.debug('Not upscaling background image')
-            img = self.bg_img
+            img = image_utils.int_rescale_image(self.bg_img, scale=self.upscale)
         else:
-            x_upscale = (self.nx * self.upscale) / self.bg_img.shape[0]
-            y_upscale = (self.ny * self.upscale) / self.bg_img.shape[1]
-            bg_rescale = np.mean([x_upscale, y_upscale])
-            logging.debug(f'Resizing background image by factor {bg_rescale}')
-
-            if (bg_rescale >= 1) and (int(bg_rescale) == bg_rescale):
-                img = image_utils.upscale_image(self.bg_img, bg_rescale)
+            if self.bg_img.shape[:2] == (int(self.nx * self.rescale), int(self.ny * self.rescale)):
+                logging.debug('Not upscaling background image')
+                img = self.bg_img
             else:
-                img = image_utils.rescale_image(self.bg_img, bg_rescale)
+                x_scale = (self.nx * self.rescale) / self.bg_img.shape[0]
+                y_scale = (self.ny * self.rescale) / self.bg_img.shape[1]
+                bg_scale = np.mean([x_scale, y_scale])
+                logging.debug(f'Resizing background image by factor {bg_scale}')
+
+                if int(bg_scale) == bg_scale:
+                    img = image_utils.int_rescale_image(self.bg_img, bg_scale)
+                else:
+                    img = image_utils.rescale_image(self.bg_img, bg_scale)
 
         img = np.flipud(np.swapaxes(img, 0, 1))
 

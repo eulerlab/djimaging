@@ -55,8 +55,32 @@ def color_image(data_img, cmap='viridis', gamma=1.0, alpha=255):
     return color_img
 
 
-def upscale_image(data_img, upscale):
-    if not hasattr(upscale, '__iter__'):
-        upscale = [upscale, upscale]
+def int_rescale_image(data_img, scale: int):
+    if scale > 1:
+        return int_upscale_image(data_img, scale)
+    elif scale < -1:
+        return int_downscale_image(data_img, abs(scale))
+    else:
+        return data_img
 
-    return np.repeat(np.repeat(data_img, upscale[0], axis=0), upscale[1], axis=1)
+
+def int_upscale_image(data_img, upscale: int):
+    return np.repeat(np.repeat(data_img, upscale, axis=0), upscale, axis=1)
+
+
+def int_downscale_image(data_img, downscale: int):
+    """Take mean of blocks of size upscale"""
+    data_img = data_img.copy()
+    # data_img = data_img[::downscale][:, ::downscale]
+    # Take mean of blocks of size downscale
+    data_img = np.mean(
+        np.mean(
+            data_img.reshape(
+                data_img.shape[0] // downscale, downscale, data_img.shape[1] // downscale, downscale, -1,
+            ),
+            axis=1
+        ),
+        axis=2
+    )
+
+    return data_img
