@@ -390,6 +390,7 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         self.widget_sel_autorois = self.create_widget_sel_autorois()
         self.widget_exec_autorois = self.create_widget_exec_autorois()
+        self.widget_exec_autorois_all_stacks = self.create_widget_exec_autorois_all_stacks()
         self.widget_exec_autorois_missing = self.create_widget_exec_autorois_missing()
 
         self.widget_save_and_new = self.create_widget_save_and_new()
@@ -407,9 +408,6 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         self.widget_read_only = self.create_widget_read_only()
         self.widget_dangerzone = self.create_widget_dangerzone()
-
-        # ToDo: Add AutoROIs on one or all stimuli widget
-        # ToDo: Add AutoROIs to keep existing ROI masks.
 
         # Create canvas
         self.img = self.create_widget_canvas()
@@ -445,7 +443,8 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         w_tools = VBox((
             HBox((self.widget_read_only, self.widget_dangerzone,)),
-            HBox((self.widget_exec_autorois, self.widget_exec_autorois_missing, self.widget_sel_autorois)),
+            HBox((self.widget_exec_autorois, self.widget_exec_autorois_missing,
+                  self.widget_exec_autorois_all_stacks, self.widget_sel_autorois)),
             HBox((self.widget_stim_prev, self.widget_stim_next, self.widget_sel_stim)),
             HBox((self.widget_roi_prev, self.widget_roi_next, self.widget_roi)),
             HBox((self.widget_save_and_new, self.widget_save, self.widget_undo, self.widget_kill_roi)),
@@ -564,6 +563,7 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         self.widget_dangerzone.value = dangerzone
         self.widget_exec_autorois.disabled = not dangerzone
+        self.widget_exec_autorois_all_stacks.disabled = not dangerzone
         self.widget_exec_autorois_missing.disabled = not dangerzone
         self.widget_kill_all.disabled = not dangerzone
         self.widget_reset_all.disabled = not dangerzone
@@ -660,26 +660,48 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def create_widget_exec_autorois(self):
-        widget_exec_autorois = Button(description='Detect ROIs', disabled=False, button_style='success')
+        widget_exec_autorois = Button(description='AutoROIs', disabled=False, button_style='success')
         widget_exec_autorois.on_click(self.exec_autorois_all)
+        return widget_exec_autorois
+
+    def create_widget_exec_autorois_all_stacks(self):
+        widget_exec_autorois = Button(description='AR all stacks', disabled=False, button_style='success')
+        widget_exec_autorois.on_click(self.exec_autorois_all_stacks)
         return widget_exec_autorois
 
     def exec_autorois_all(self, button=None):
         self._exec_autorois(missing_only=False)
 
-    def _exec_autorois(self, missing_only=False):
+    def exec_autorois_all_stacks(self, button=None):
+        self._exec_autorois(missing_only=False, all_stimuli=True)
+
+    def _exec_autorois(self, missing_only=False, all_stimuli=False):
         current_model = self.widget_sel_autorois.value
         model = self.autorois_models[current_model]
         if model is not None:
             self.update_progress(0)
             self.set_busy()
 
-            roi_mask_new = model.create_mask_from_data(
-                ch0_stack=self.ch0_stacks[self._selected_stim_idx],
-                ch1_stack=self.ch1_stacks[self._selected_stim_idx],
-                n_artifact=self.n_artifact,
-                pixel_size_um=self.pixel_size_um,
-            )
+            try:
+                if not all_stimuli:
+                    roi_mask_new = model.create_mask_from_data(
+                        ch0_stack=self.ch0_stacks[self._selected_stim_idx],
+                        ch1_stack=self.ch1_stacks[self._selected_stim_idx],
+                        n_artifact=self.n_artifact,
+                        pixel_size_um=self.pixel_size_um,
+                    )
+                else:
+                    roi_mask_new = model.create_mask_from_data(
+                        ch0_stack=self.ch0_stacks,
+                        ch1_stack=self.ch1_stacks,
+                        n_artifact=self.n_artifact,
+                        pixel_size_um=self.pixel_size_um,
+                        multiple_stacks=True,
+                    )
+            except Exception as e:
+                logging.error(f'Error in autorois: {e}')
+                self.set_idle()
+                return
 
             if missing_only:
                 roi_mask_old = self.roi_masks.copy()
@@ -699,7 +721,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.set_idle()
 
     def create_widget_exec_autorois_missing(self):
-        widget = Button(description='Add missing ROIs', disabled=False, button_style='success')
+        widget = Button(description='AR fill', disabled=False, button_style='success')
         widget.on_click(self.exec_autorois_missing)
         return widget
 
@@ -815,8 +837,10 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.widget_shift_dy.value = value
             self.shifts[self._selected_stim_idx, 1] = value
 
-        self.widget_exec_autorois.disabled = self.widget_shift_dx.value != 0 or self.widget_shift_dy.value != 0
-        self.widget_exec_autorois_missing.disabled = self.widget_shift_dx.value != 0 or self.widget_shift_dy.value != 0
+        disable_ar = self.widget_shift_dx.value != 0 or self.widget_shift_dy.value != 0
+        self.widget_exec_autorois.disabled = disable_ar
+        self.widget_exec_autorois_all_stacks.disabled = disable_ar
+        self.widget_exec_autorois_missing.disabled = disable_ar
 
         if update:
             self.update_backgrounds()

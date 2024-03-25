@@ -8,7 +8,6 @@ import numpy as np
 from djimaging.tables.misc.highresolution import load_high_res_stack
 
 from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
-from djimaging.autorois.corr_roi_mask_utils import CorrRoiMask
 
 from djimaging.utils import scanm_utils
 from djimaging.utils.datafile_utils import as_pre_filepath
@@ -450,6 +449,8 @@ def _add_autorois_unet(autorois_models: dict):
 
 
 def _add_autorois_corr(autorois_models: dict, kind: str):
+    from djimaging.autorois.corr_roi_mask_utils import CorrRoiMask
+
     if kind == 'default_rgc':
         kws = dict(cut_x=(0, 0), cut_z=(0, 0), min_area_um2=10, max_area_um2=400, n_pix_max=None, line_threshold_q=70,
                    use_ch0_stack=True, grow_use_corr_map=False, grow_threshold=0.1,
@@ -460,5 +461,27 @@ def _add_autorois_corr(autorois_models: dict, kind: str):
                    grow_only_local_thresh_pixels=True)
     else:
         raise NotImplementedError(kind)
+
     corr_model = CorrRoiMask(**kws)
     autorois_models['CorrRoiMask'] = corr_model
+
+
+def _add_cellpose(autorois_models: dict, kind: str = 'default_rgc'):
+    from djimaging.autorois.cellpose_wrapper import CellposeWrapper
+
+    if kind == 'default_rgc':
+        init_params = dict(
+            model_type='cyto',
+            gpu=False,
+        )
+
+        eval_params = dict(
+            min_size=4,
+            diameter=15,
+            channels=[0, 0],
+        )
+    else:
+        raise NotImplementedError(kind)
+
+    model_cellpose = CellposeWrapper(init_kwargs=init_params, eval_kwargs=eval_params)
+    autorois_models['Cellpose'] = model_cellpose
