@@ -20,12 +20,13 @@ CslMetrics().populate(make_kwargs=dict(plot=True))
 from abc import abstractmethod
 
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.scanm_utils import split_trace_by_reps
 from djimaging.tables.core.preprocesstraces import process_trace
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 import datajoint as dj
+
+from djimaging.utils.snippet_utils import split_trace_by_reps
 
 
 class CslMetricsTemplate(dj.Computed):

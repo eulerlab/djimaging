@@ -5,7 +5,6 @@ import warnings
 
 import numpy as np
 from matplotlib import pyplot as plt
-from skimage.measure import label
 
 from djimaging.utils.alias_utils import check_shared_alias_str
 from djimaging.utils.scanm import read_h5_utils
@@ -162,6 +161,8 @@ def get_mask_by_bg(seed_ix, seed_iy, data, ref_value=None, thresh=0.2, max_pixel
 
 
 def relabel_mask(mask, connectivity, return_num=False):
+    from skimage.measure import label
+
     if return_num:
         new_mask, num = label(mask.T, connectivity=connectivity, return_num=True)
         return new_mask.T, num

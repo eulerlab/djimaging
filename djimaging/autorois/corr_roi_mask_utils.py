@@ -28,7 +28,8 @@ class CorrRoiMask:
         self.grow_use_corr_map = grow_use_corr_map
         self.grow_threshold = grow_threshold
 
-    def create_mask_from_data(self, ch0_stack, ch1_stack, n_artifact, pixel_size_um=(1., 1.), plot=False, **kwargs):
+    def create_mask_from_data(self, ch0_stack, ch1_stack=None, n_artifact=0, pixel_size_um=(1., 1.),
+                              plot=False, **kwargs):
         if len(kwargs) > 0:
             warnings.warn(f'ignoring kwargs: {kwargs}')
 
