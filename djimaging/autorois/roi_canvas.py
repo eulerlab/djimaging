@@ -23,6 +23,9 @@ try:
 except ImportError:
     warnings.warn('Failed to import ipycanvas. AutoROIs will not work.')
 
+logger = logging.getLogger('djimaging.autorois')
+logger.setLevel(logging.INFO)
+
 
 class RoiCanvas:
 
@@ -362,7 +365,9 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.current_cc = np.array([])
         self.widget_progress = self.create_widget_progress()
 
-        self.widget_diagnostics = self.create_widget_diagnostics() if show_diagnostics else None
+        self.show_diagnostics = show_diagnostics
+        self.widget_show_diagnostics = self.create_widget_show_diagnostics(self.show_diagnostics)
+        self.widget_diagnostics = self.create_widget_diagnostics()
         self.diagnostics_fig = None
 
         self.widget_bg = self.create_widget_bg()
@@ -462,10 +467,8 @@ class InteractiveRoiCanvas(RoiCanvas):
             HBox((self.widget_kill_all, self.widget_reset_all)),
         ))
 
-        if self.widget_diagnostics is None:
-            w_main = VBox((HBox((w_outputs, w_tools)), w_other_tools))
-        else:
-            w_main = VBox((HBox((w_outputs, w_tools)), self.widget_diagnostics, w_other_tools))
+        w_main = VBox((HBox((w_outputs, w_tools)),
+                       self.widget_show_diagnostics, self.widget_diagnostics, w_other_tools))
 
         return w_main
 
@@ -700,7 +703,7 @@ class InteractiveRoiCanvas(RoiCanvas):
                         multiple_stacks=True,
                     )
             except Exception as e:
-                logging.error(f'Error in autorois: {e}')
+                logger.error(f'Error in autorois: {e}')
                 self.set_idle()
                 return
 
@@ -1077,7 +1080,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         return np.corrcoef(traces)
 
     def update_diagnostics(self, update=True):
-        if self.widget_diagnostics is None:
+        if not self.show_diagnostics:
             return
 
         with self.widget_diagnostics:
@@ -1127,14 +1130,16 @@ class InteractiveRoiCanvas(RoiCanvas):
         ix = int(x / self.rescale)
         iy = self.ny - int(y / self.rescale) - 1  # Flip ud
 
-        logging.debug(f'Apply tool={self._selected_tool} at x={x}, y={y}, ix={ix}, iy={iy}')
+        logger.debug(f'Apply tool={self._selected_tool} at x={x}, y={y}, ix={ix}, iy={iy}')
+
+        # TODO: Make draw mask computation more efficient
 
         if self._selected_tool == 'draw':
             mask = mask_utils.create_circular_mask(
                 w=self.nx, h=self.ny, center=(ix, iy), radius=self._selected_size - 1)
             self.add_to_current_mask(mask=mask)
         elif self._selected_tool == 'erase':
-            logging.debug(f'Erasing from mask at x={x}, y={y}, ix={ix}, iy={iy}')
+            logger.debug(f'Erasing from mask at x={x}, y={y}, ix={ix}, iy={iy}')
             mask = mask_utils.create_circular_mask(
                 w=self.nx, h=self.ny, center=(ix, iy), radius=self._selected_size - 1)
             self.current_mask[mask] = False
@@ -1220,17 +1225,17 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.update_bg_img()
 
         if self.bg_img.shape[:2] == (self.nx, self.ny):
-            logging.debug('Upscaling background image')
+            logger.debug('Upscaling background image')
             img = image_utils.int_rescale_image(self.bg_img, scale=self.upscale)
         else:
             if self.bg_img.shape[:2] == (int(self.nx * self.rescale), int(self.ny * self.rescale)):
-                logging.debug('Not upscaling background image')
+                logger.debug('Not upscaling background image')
                 img = self.bg_img
             else:
                 x_scale = (self.nx * self.rescale) / self.bg_img.shape[0]
                 y_scale = (self.ny * self.rescale) / self.bg_img.shape[1]
                 bg_scale = np.mean([x_scale, y_scale])
-                logging.debug(f'Resizing background image by factor {bg_scale}')
+                logger.debug(f'Resizing background image by factor {bg_scale}')
 
                 if int(bg_scale) == bg_scale:
                     img = image_utils.int_rescale_image(self.bg_img, bg_scale)
@@ -1301,6 +1306,22 @@ class InteractiveRoiCanvas(RoiCanvas):
     def exec_roi_prev(self, button=None):
         prev_roi = self.widget_roi.options[(self.widget_roi.index - 1) % len(self.widget_roi.options)]
         self.set_selected_roi(prev_roi)
+
+    def create_widget_show_diagnostics(self, default=False):
+        widget = Checkbox(value=default, description='Plots', disabled=False)
+
+        def change(state):
+            if state['new']:
+                self.show_diagnostics = True
+                self.widget_diagnostics.layout.width = '80%'
+                self.update_diagnostics(update=True)
+            else:
+                self.show_diagnostics = False
+                self.widget_diagnostics.layout.width = '1%'
+                self.widget_diagnostics.clear_output()
+
+        widget.observe(change, names='value')
+        return widget
 
     def create_widget_diagnostics(self):
         widget = Output()
