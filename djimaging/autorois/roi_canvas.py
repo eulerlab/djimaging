@@ -2,6 +2,7 @@ import logging
 import os.path
 import pickle
 import warnings
+from datetime import datetime
 from typing import Optional, Dict
 
 import numpy as np
@@ -198,9 +199,19 @@ class RoiCanvas:
         """Add a mask to the current mask"""
         self.current_mask |= mask.astype(bool)
 
+    def add_to_current_mask_at_loc(self, mask, ix, iy):
+        """Add a potentially smaller mask to the current mask at location ix, iy"""
+        w, h = mask.shape
+        self.current_mask[ix - w // 2:ix + w // 2 + 1, iy - h // 2:iy + h // 2 + 1] |= mask.astype(bool)
+
     def add_to_current_delete_mask(self, mask):
         """Add a mask to the current delete mask"""
         self.current_delete_mask |= mask.astype(bool)
+
+    def add_to_current_delete_mask_at_loc(self, mask, ix, iy):
+        """Add a potentially smaller mask to the current delete mask at location ix, iy"""
+        w, h = mask.shape
+        self.current_delete_mask[ix - w // 2:ix + w // 2 + 1, iy - h // 2:iy + h // 2 + 1] |= mask.astype(bool)
 
     def load_current_mask(self):
         """Load current mask from all masks"""
@@ -426,10 +437,12 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         self.drawing = False
         self.last_mouse_pos_xy = (-1, -1)
+        self.brush_mask = compute_brush_mask(self._selected_size)
 
         self.canvas.on_mouse_down(self.on_mouse_down)
         self.canvas.on_mouse_move(self.on_mouse_move)
         self.canvas.on_mouse_up(self.on_mouse_up)
+        self.last_update_time = datetime.now()
 
         if self._initial_roi_mask is not None:
             self.set_read_only(True)
@@ -619,7 +632,7 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def create_widget_sel_stim(self):
         widget = Dropdown(options=self.stim_names, value=self.stim_names[self._selected_stim_idx],
-                          description='Stimulus:', disabled=False)
+                          description='File:', disabled=False)
 
         def change(value):
             self.set_selected_stim(value['new'])
@@ -739,7 +752,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.draw_current_mask_img(update=True)
         self.draw_roi_masks_img(update=True)
 
-    def set_selected_roi(self, value, update_if_same=False):
+    def set_selected_roi(self, value, update_if_same=False, draw=True):
         if value == self._selected_roi and not update_if_same:
             return
 
@@ -749,8 +762,9 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         self.load_current_mask()
         self.update_info()
-        self.draw_current_mask_img(update=True)
-        self.draw_roi_masks_img(update=True)
+        if draw:
+            self.draw_current_mask_img(update=True)
+            self.draw_roi_masks_img(update=True)
 
     def create_widget_roi(self):
         """Create and return button"""
@@ -813,13 +827,15 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def set_selected_size(self, value):
+        value = np.maximum(1, int(value))
         self._selected_size = value
+        self.brush_mask = compute_brush_mask(value)
 
     def create_widget_size(self):
         """Create and return button"""
-        widget = FloatSlider(min=1, max=10.0, step=0.5, value=self._selected_size,
-                             description='Size:', disabled=False, continuous_update=False, orientation='horizontal',
-                             readout=True, readout_format='.1f')
+        widget = IntSlider(min=1, max=50, value=self._selected_size,
+                           description='Size:', disabled=False, continuous_update=False, orientation='horizontal',
+                           readout=True)
 
         def change(value):
             self.set_selected_size(value['new'])
@@ -943,10 +959,10 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def exec_save_and_new(self, button=None):
         self.add_current_mask_to_roi_masks()
-        self.update_roi_masks_backup()
-        self.update_roi_options()
-        self.set_selected_roi(self.widget_roi.options[-1], update_if_same=True)
+        self.update_roi_options(draw=False)
+        self.set_selected_roi(self.widget_roi.options[-1], update_if_same=True, draw=False)
         self.load_current_mask()
+
         self.draw_current_mask_img(update=True)
         self.draw_roi_masks_img(update=True)
 
@@ -958,11 +974,12 @@ class InteractiveRoiCanvas(RoiCanvas):
     def exec_clean(self, button=None):
         self.set_busy()
         self.exec_save_and_new()
-        self.set_selected_roi(value=1, update_if_same=True)
+        self.set_selected_roi(value=1, update_if_same=True, draw=False)
         self.set_roi_masks(mask_utils.clean_rois(
             self.roi_masks, self.n_artifact, min_size=self.clean_min_size, connectivity=self.clean_connectivity,
             verbose=False))
-        self.draw_all(update=True)
+        self.draw_current_mask_img(update=True)
+        self.draw_roi_masks_img(update=True)
         self.set_idle()
 
     def create_widget_clean(self):
@@ -1116,13 +1133,13 @@ class InteractiveRoiCanvas(RoiCanvas):
         widget_info = HTML(value="--", placeholder='ROI cc:', description='ROI cc')
         return widget_info
 
-    def update_roi_options(self):
+    def update_roi_options(self, draw=True):
         max_roi = np.max(np.unique(self.roi_masks)) + 1
         self.widget_roi.disabled = True
         self.widget_roi.options = tuple(np.unique(self.roi_masks)[1:]) + (max_roi,)
         new_roi = self._selected_roi if self._selected_roi in self.widget_roi.options else self.widget_roi.options[0]
         self.widget_roi.disabled = False
-        self.set_selected_roi(new_roi, update_if_same=True)
+        self.set_selected_roi(new_roi, update_if_same=True, draw=draw)
 
     def _apply_tool(self, x, y, down):
         """Apply tool. Down means mouse down event"""
@@ -1132,18 +1149,12 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         logger.debug(f'Apply tool={self._selected_tool} at x={x}, y={y}, ix={ix}, iy={iy}')
 
-        # TODO: Make draw mask computation more efficient
-
         if self._selected_tool == 'draw':
-            mask = mask_utils.create_circular_mask(
-                w=self.nx, h=self.ny, center=(ix, iy), radius=self._selected_size - 1)
-            self.add_to_current_mask(mask=mask)
+            self.add_to_current_mask_at_loc(self.brush_mask, ix, iy)
         elif self._selected_tool == 'erase':
             logger.debug(f'Erasing from mask at x={x}, y={y}, ix={ix}, iy={iy}')
-            mask = mask_utils.create_circular_mask(
-                w=self.nx, h=self.ny, center=(ix, iy), radius=self._selected_size - 1)
-            self.current_mask[mask] = False
-            self.add_to_current_delete_mask(mask=mask)
+            self.add_to_current_mask_at_loc(np.zeros_like(self.brush_mask), ix, iy)
+            self.add_to_current_delete_mask_at_loc(self.brush_mask, ix, iy)
         elif self._selected_tool == 'cc':
             mask = mask_utils.get_mask_by_cc(
                 seed_ix=ix, seed_iy=iy, data=self.ch0_stacks[self._selected_stim_idx],
@@ -1170,6 +1181,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.last_mouse_pos_xy = (int(x / self.rescale), int(y / self.rescale))
 
         self.draw_current_mask_img(update=True)
+        self.last_update_time = datetime.now()
 
     def on_mouse_move(self, x, y):
         if not self.drawing:
@@ -1181,7 +1193,9 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.last_mouse_pos_xy = (int(x / self.rescale), int(y / self.rescale))
         self._apply_tool(x, y, down=False)
 
-        self.draw_current_mask_img(update=True)
+        if (datetime.now() - self.last_update_time).total_seconds() > 0.01:
+            self.draw_current_mask_img(update=True)
+            self.last_update_time = datetime.now()
 
     def on_mouse_up(self, x, y):
         self.last_mouse_pos_xy = (-1, -1)
@@ -1193,6 +1207,7 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         self.draw_current_mask_img(update=True)
         self.draw_roi_masks_img(update=True)
+        self.last_update_time = datetime.now()
 
     # Draw functions
     def draw_current_mask_img(self, update=True):
@@ -1412,3 +1427,10 @@ def plot_diagnostics(mask, traces, cc, mask_xs, mask_ys):
 
     plt.tight_layout(pad=0.1, w_pad=0.5, h_pad=0.5)
     return fig, axs
+
+
+def compute_brush_mask(rad):
+    rad = np.maximum(1, int(rad))
+    brush_mask = mask_utils.create_circular_mask(
+        w=rad * 2 - 1, h=rad * 2 - 1, center=(rad - 1, rad - 1), radius=rad - 1)
+    return brush_mask
