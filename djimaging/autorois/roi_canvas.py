@@ -202,7 +202,22 @@ class RoiCanvas:
     def add_to_current_mask_at_loc(self, mask, ix, iy):
         """Add a potentially smaller mask to the current mask at location ix, iy"""
         w, h = mask.shape
-        self.current_mask[ix - w // 2:ix + w // 2 + 1, iy - h // 2:iy + h // 2 + 1] |= mask.astype(bool)
+        i_l = ix - w // 2
+        i_r = ix + w // 2 + 1
+        i_b = iy - h // 2
+        i_t = iy + h // 2 + 1
+
+        if i_l > 0 and i_r < self.nx and i_b > 0 and i_t < self.ny:
+            self.current_mask[i_l:i_r, i_b:i_t] |= mask.astype(bool)
+        else:
+            # Edge cases
+            rm_l = abs(min(0, i_l))
+            rm_r = abs(min(0, self.nx - i_r))
+            rm_b = abs(min(0, i_b))
+            rm_t = abs(min(0, self.ny - i_t))
+
+            self.current_mask[i_l + rm_l:i_r - rm_r, i_b + rm_b:i_t - rm_t] |= (
+                mask[rm_l:mask.shape[0] - rm_r, rm_b:mask.shape[1] - rm_t].astype(bool))
 
     def add_to_current_delete_mask(self, mask):
         """Add a mask to the current delete mask"""
