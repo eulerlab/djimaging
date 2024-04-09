@@ -832,7 +832,7 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def create_widget_tool(self):
         """Create and return button"""
-        options = ['draw', 'erase', 'cc', 'select', 'bg']
+        options = ['draw', 'erase', 'quick-draw', 'select', 'cc', 'bg']
         widget = Dropdown(options=options, value=self._selected_tool, description='Tool:', disabled=False)
 
         def change(value):
@@ -972,12 +972,14 @@ class InteractiveRoiCanvas(RoiCanvas):
         widget_save.on_click(self.exec_save_current_roi)
         return widget_save
 
-    def exec_save_and_new(self, button=None):
+    def create_new_roi(self):
         self.add_current_mask_to_roi_masks()
         self.update_roi_options(draw=False)
         self.set_selected_roi(self.widget_roi.options[-1], update_if_same=True, draw=False)
         self.load_current_mask()
 
+    def exec_save_and_new(self, button=None):
+        self.create_new_roi()
         self.draw_current_mask_img(update=True)
         self.draw_roi_masks_img(update=True)
 
@@ -1166,6 +1168,8 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         if self._selected_tool == 'draw':
             self.add_to_current_mask_at_loc(self.brush_mask, ix, iy)
+        elif self._selected_tool == 'quick-draw':
+            self.add_to_current_mask_at_loc(self.brush_mask, ix, iy)
         elif self._selected_tool == 'erase':
             logger.debug(f'Erasing from mask at x={x}, y={y}, ix={ix}, iy={iy}')
             self.add_to_current_mask_at_loc(np.zeros_like(self.brush_mask), ix, iy)
@@ -1215,13 +1219,18 @@ class InteractiveRoiCanvas(RoiCanvas):
     def on_mouse_up(self, x, y):
         self.last_mouse_pos_xy = (-1, -1)
         self.drawing = False
+
         if self._selected_tool != 'select':
             self.update_info()
+
         if self._selected_tool == 'erase':
             self.remove_current_delete_mask_from_roi_masks()
+        elif self._selected_tool == 'quick-draw':
+            self.create_new_roi()
 
         self.draw_current_mask_img(update=True)
         self.draw_roi_masks_img(update=True)
+
         self.last_update_time = datetime.now()
 
     # Draw functions
