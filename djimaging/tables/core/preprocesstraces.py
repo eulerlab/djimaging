@@ -107,7 +107,9 @@ class PreprocessTracesTemplate(dj.Computed):
                 'f_cutoff', 'fs_resample')
 
         trace_times, trace = (self.traces_table() & key).fetch1('trace_times', 'trace')
-        stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
+        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+
+        stim_start = triggertimes[0] if len(triggertimes) > 0 else None
 
         preprocess_trace_times, preprocess_trace, smoothed_trace = process_trace(
             trace_times=trace_times, trace=trace, stim_start=stim_start,
