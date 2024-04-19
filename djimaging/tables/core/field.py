@@ -135,12 +135,17 @@ class FieldTemplate(dj.Computed):
                 file_info_df['cond2'].fillna('control', inplace=True)
             if self.incl_cond3:
                 file_info_df['cond3'].fillna('control', inplace=True)
+            if self.incl_region:
+                file_info_df['region'].fillna('N/A', inplace=True)
 
         return file_info_df
 
     def add_experiment_fields(
             self, exp_key, only_new: bool, verboselvl: int, suppress_errors: bool, allow_user_input: bool = False,
             restr_headers: Optional[list] = None):
+
+        if verboselvl > 5:
+            print("add_experiment_fields")
 
         if restr_headers is not None:
             header_path = (self.experiment_table & exp_key).fetch1('header_path')
@@ -160,8 +165,15 @@ class FieldTemplate(dj.Computed):
         if verboselvl > 0:
             print(f"Found {len(file_info_df)} files in {len(field_dfs)} for key={exp_key}")
 
-        for field_info, field_df in field_dfs:
+        for i, (field_info, field_df) in enumerate(field_dfs):
+
+            if verboselvl > 5:
+                print(f"Checking field: {field_info} ({i + 1}/{len(field_dfs)})")
+
             field_key = {**dict(zip(self.new_primary_keys, field_info)), **exp_key}
+
+            if verboselvl > 5:
+                print(f"checking field: {field_key}")
 
             if only_new and (len((self & field_key).proj()) > 0):
                 if verboselvl > 1:

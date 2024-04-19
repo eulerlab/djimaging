@@ -171,6 +171,11 @@ class PresentationTemplate(dj.Computed):
                 file_info_df['cond3'].fillna('control', inplace=True)
             else:
                 file_info_df['cond3'] = 'control'
+        if self.incl_region and not self.field_table.incl_region:
+            if 'region' in file_info_df:
+                file_info_df['region'].fillna('N/A', inplace=True)
+            else:
+                file_info_df['region'] = 'N/A'
 
         return file_info_df
 
