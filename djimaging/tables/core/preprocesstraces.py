@@ -19,6 +19,7 @@ class PreprocessParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
+        -> self.stimulus_table
         preprocess_id:       tinyint unsigned    # unique param set id
         ---
         window_length:       int       # window length for SavGol filter in seconds
@@ -31,9 +32,17 @@ class PreprocessParamsTemplate(dj.Lookup):
         """
         return definition
 
-    def add_default(self, preprocess_id=1, window_length=60, poly_order=3, non_negative=False,
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    def add_default(self, preprocess_id=1, stim_names=None, window_length=60, poly_order=3, non_negative=False,
                     subtract_baseline=True, standardize=1, f_cutoff=None, fs_resample=None,
                     skip_duplicates=False):
+        if stim_names is None:
+            stim_names = (self.stimulus_table()).fetch('stim_name')
+
         key = dict(
             preprocess_id=preprocess_id,
             window_length=window_length,
@@ -44,8 +53,12 @@ class PreprocessParamsTemplate(dj.Lookup):
             f_cutoff=f_cutoff if f_cutoff is not None else 0,
             fs_resample=fs_resample if fs_resample is not None else 0,
         )
-        """Add default preprocess parameter to table"""
-        self.insert1(key, skip_duplicates=skip_duplicates)
+
+        for stim_name in stim_names:
+            """Add default preprocess parameter to table"""
+            stim_key = key.copy()
+            stim_key['stim_name'] = stim_name
+            self.insert1(stim_key, skip_duplicates=skip_duplicates)
 
 
 class PreprocessTracesTemplate(dj.Computed):
