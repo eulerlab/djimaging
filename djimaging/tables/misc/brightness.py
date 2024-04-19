@@ -69,8 +69,11 @@ class RoiBrightnessTemplate(dj.Computed):
 
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
         main_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
-        alt_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
-
+        try:
+            alt_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{alt_name}"').fetch1(
+                'ch_average')
+        except dj.DataJointError:
+            alt_ch_average = np.full_like(main_ch_average, np.nan)
         main_ch_average = math_utils.normalize_zero_one(main_ch_average)
         alt_ch_average = math_utils.normalize_zero_one(alt_ch_average)
 

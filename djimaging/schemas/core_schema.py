@@ -116,7 +116,7 @@ class Traces(core.TracesTemplate):
 
 @schema
 class PreprocessParams(core.PreprocessParamsTemplate):
-    pass
+    stimulus_table = Stimulus
 
 
 @schema
