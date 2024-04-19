@@ -55,9 +55,8 @@ class Baden16TracesTemplate(dj.Computed):
         pass
 
     def make(self, key):
-        chirp_average, chirp_average_times = (self.averages_table & dict(stim_name=self._stim_name_chirp) & key).fetch1(
-            'average', 'average_times')
-        chirp_dt = get_mean_dt(chirp_average_times)[0]
+        chirp_average, chirp_dt = (self.averages_table & dict(stim_name=self._stim_name_chirp) & key).fetch1(
+            'average', 'average_dt')
 
         bar_time_component, bar_dt = (self.os_ds_table & dict(stim_name=self._stim_name_bar) & key).fetch1(
             'time_component', 'time_component_dt')

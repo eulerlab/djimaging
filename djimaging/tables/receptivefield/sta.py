@@ -161,18 +161,18 @@ class STATemplate(dj.Computed):
             "filter_dur_s_past", "filter_dur_s_future", "rf_method")
         store_x, store_y = (self.params_table() & key).fetch1("store_x", "store_y")
         frac_train, frac_dev, frac_test = (self.params_table() & key).fetch1("frac_train", "frac_dev", "frac_test")
-        dt, time, trace, stim = (self.noise_traces_table() & key).fetch1('dt', 'time', 'trace', 'stim')
+        noise_dt, trace, stim = (self.noise_traces_table() & key).fetch1('noise_dt', 'trace', 'stim')
         assert np.isclose(frac_train + frac_dev + frac_test, 1.0)
 
         rf, rf_time, rf_pred, x, y, shift = compute_linear_rf(
-            dt=dt, trace=trace, stim=stim, frac_train=frac_train, frac_dev=frac_dev, kind=rf_method,
+            dt=noise_dt, trace=trace, stim=stim, frac_train=frac_train, frac_dev=frac_dev, kind=rf_method,
             filter_dur_s_past=filter_dur_s_past, filter_dur_s_future=filter_dur_s_future,
             threshold_pred=np.all(trace >= 0), batch_size_n=6_000_000, verbose=verbose)
 
         rf_key = deepcopy(key)
         rf_key['rf'] = rf
         rf_key['rf_time'] = rf_time
-        rf_key['dt'] = dt
+        rf_key['dt'] = noise_dt
         rf_key['shift'] = shift
         self.insert1(rf_key)
 

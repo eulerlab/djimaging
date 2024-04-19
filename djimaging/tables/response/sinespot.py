@@ -94,9 +94,11 @@ class SineSpotFeaturesTemplate(dj.Computed):
     _rep_dt = 0.8
 
     def make(self, key):
-        trace, tracetimes = (self.preprocesstraces_table() & key).fetch1("preprocess_trace", "preprocess_trace_times")
+        trace_t0, trace_dt, trace = (self.preprocesstraces_table() & key).fetch1("trace_t0", "trace_dt", "trace")
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
+
+        tracetimes = np.arange(len(trace)) * trace_dt + trace_t0
 
         response_rep_x_cond = compute_sinespot_response_matrix(
             trace, tracetimes, triggertimes, ntrigger_rep, delay=self._delay, rep_dt=self._rep_dt)

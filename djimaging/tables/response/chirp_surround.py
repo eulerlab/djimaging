@@ -59,10 +59,15 @@ class ChirpSurroundTemplate(dj.Computed):
             pass
 
     def compute_entry(self, key, plot=False):
-        l_snippets, l_snippets_times, l_triggertimes_snippets = (self.lchirp_snippets_table() & key).fetch1(
-            'snippets', 'snippets_times', 'triggertimes_snippets')
-        g_snippets, g_snippets_times, g_triggertimes_snippets = (self.gchirp_snippets_table() & key).fetch1(
-            'snippets', 'snippets_times', 'triggertimes_snippets')
+        l_snippets_t0, l_snippets_dt, l_snippets, l_triggertimes_snippets = (self.lchirp_snippets_table() & key).fetch1(
+            "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
+        g_snippets_t0, g_snippets_dt, g_snippets, g_triggertimes_snippets = (self.gchirp_snippets_table() & key).fetch1(
+            "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
+
+        l_snippets_times = (np.tile(np.arange(l_snippets.shape[0]) * l_snippets_dt, (len(l_snippets_t0), 1)).T
+                            + l_snippets_t0)
+        g_snippets_times = (np.tile(np.arange(g_snippets.shape[0]) * g_snippets_dt, (len(g_snippets_t0), 1)).T
+                            + g_snippets_t0)
 
         l_average, l_average_times, _ = compute_upsampled_average(
             l_snippets, l_snippets_times, l_triggertimes_snippets, f_resample=self._fs_resample)

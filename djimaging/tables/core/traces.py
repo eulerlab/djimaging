@@ -23,8 +23,9 @@ class TracesTemplate(dj.Computed):
         -> self.raw_params_table
         ---
         trace          :longblob              # array of raw trace
-        trace_times    :longblob              # numerical array of trace times
-        trace_flag     :tinyint unsigned      # Are values in trace correct (1) or not (0)?
+        trace_t0       :float                 # numerical array of trace times
+        trace_dt       :float                 # time between frames
+        trace_valid    :tinyint unsigned      # Are values in trace correct (1) or not (0)?
         trigger_valid  :tinyint unsigned      # Are triggertimes inside trace_times (1) or not (0)?
         """
         return definition
@@ -80,7 +81,7 @@ class TracesTemplate(dj.Computed):
                 raise ValueError(f'Tried to populate traces with inconsistent roi mask for key=\n{key}\n' +
                                  'Compare ROI mask of Field and Presentation.')
 
-            roi2trace = roi2trace_from_stack(
+            roi2trace, frame_dt = roi2trace_from_stack(
                 filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
                 data_stack_name=data_stack_name, precision=trace_precision, from_raw_data=from_raw_data)
 
@@ -92,7 +93,7 @@ class TracesTemplate(dj.Computed):
 
         else:
             assert not from_raw_data, "from_raw_data=True only supported for compute_from_stack=True"
-            roi2trace = load_roi2trace(filepath, roi_ids)
+            roi2trace, frame_dt = load_roi2trace(filepath, roi_ids)
 
         for roi_id, roi_data in roi2trace.items():
             if not include_artifacts and roi_data.get('incl_artifact', False):
@@ -101,17 +102,19 @@ class TracesTemplate(dj.Computed):
             trace_key = key.copy()
             trace_key['roi_id'] = roi_id
             trace_key['trace'] = roi_data['trace']
-            trace_key['trace_times'] = roi_data['trace_times']
-            trace_key['trace_flag'] = roi_data['valid_flag']
+            trace_key['trace_t0'] = roi_data['trace_times'][0]
+            trace_key['trace_dt'] = frame_dt
+            trace_key['trace_valid'] = roi_data['trace_valid']
             trace_key['trigger_valid'] = check_valid_triggers_rel_to_tracetime(
-                trace_flag=trace_key['trace_flag'], trace_times=trace_key['trace_times'], triggertimes=triggertimes)
+                trace_valid=roi_data['trace_valid'], trace_times=roi_data['trace_times'], triggertimes=triggertimes)
 
             self.insert1(trace_key)
 
     def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(table=self, key=key)
-        trace_times, trace = (self & key).fetch1("trace_times", "trace")
+        trace_t0, trace_dt, trace = (self & key).fetch1("trace_t0", "trace_dt", "trace")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+        trace_times = np.arange(len(trace)) * trace_dt + trace_t0
 
         ax = plot_trace_and_trigger(
             time=trace_times, trace=trace, triggertimes=triggertimes, title=str(key))

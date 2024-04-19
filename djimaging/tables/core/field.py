@@ -25,17 +25,17 @@ class FieldTemplate(dj.Computed):
         # Recording fields
         -> self.experiment_table
         -> self.raw_params_table
-        field   :varchar(63)          # string identifying files corresponding to field
+        field   :varchar(32)          # string identifying files corresponding to field
         """
 
         if self.incl_region:
-            definition += "    region   :varchar(63)    # region (e.g. LR or RR)\n"
+            definition += "    region   :varchar(16)    # region (e.g. LR or RR)\n"
         if self.incl_cond1:
-            definition += "    cond1    :varchar(63)    # condition (pharmacological or other)\n"
+            definition += "    cond1    :varchar(16)    # condition (pharmacological or other)\n"
         if self.incl_cond2:
-            definition += "    cond2    :varchar(63)    # condition (pharmacological or other)\n"
+            definition += "    cond2    :varchar(16)    # condition (pharmacological or other)\n"
         if self.incl_cond3:
-            definition += "    cond3    :varchar(63)    # condition (pharmacological or other)\n"
+            definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
 
         definition += """
         ---
@@ -96,7 +96,7 @@ class FieldTemplate(dj.Computed):
             definition = """
             # Stack median (over time of the available channels)
             -> master
-            ch_name : varchar(191)  # name of the channel
+            ch_name : varchar(32)  # name of the channel
             ---
             ch_average :longblob  # Stack median over time
             """
@@ -214,7 +214,7 @@ class FieldTemplate(dj.Computed):
             alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
-            
+
         npixartifact = (self & key).fetch1('npixartifact')
 
         plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4))

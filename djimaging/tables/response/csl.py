@@ -81,8 +81,9 @@ class CslMetricsTemplate(dj.Computed):
         pass
 
     def _make_fetch_and_compute(self, key, plot=False):
-        trace_times, trace = (self.traces_table & key).fetch1('trace_times', 'trace')
-
+        trace_dt, trace_t0, trace = (self.traces_table & key).fetch1('trace_dt', 'trace_t0', 'trace')
+        trace_times = np.arange(trace.size) * trace_dt + trace
+        
         if len(trace) == 0:
             raise ValueError(f'Cannot compute CSL metrics for empty trace with key={key}')
 
@@ -216,7 +217,8 @@ def analyse_csl_response(trace_times, trace, triggertimes, ntrigger_rep, fs_resa
             [['A'] * 2, ['B'] * 2, ['C'] * 2, ['D'] * 2, ['E'] * 2, ['F'] * 2, ['G'] * 2, ['H', 'I']],
             figsize=(10, 10), height_ratios=[1] * 7 + [2])
     pp_trace_times, pp_trace, pp_smoothed_trace = process_trace(
-        trace_times, trace, poly_order=dt_order, window_len_seconds=dt_window, fs_resample=fs_resample)
+        trace=trace, trace_t0=trace_times[0], trace_dt=np.mean(np.diff(trace_times)),
+        poly_order=dt_order, window_len_seconds=dt_window, fs_resample=fs_resample)
 
     # Compute snippets
     snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_reps(

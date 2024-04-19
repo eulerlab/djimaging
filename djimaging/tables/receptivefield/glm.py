@@ -172,13 +172,14 @@ class RfGlmTemplate(dj.Computed):
 
     def make(self, key, suppress_outputs=False, clear_outputs=True):
         params = (self.params_table() & key).fetch1()
-        dt, time, trace, stim = (self.noise_traces_table() & key).fetch1('dt', 'time', 'trace', 'stim')
+        noise_dt, noise_t0, trace, stim = (self.noise_traces_table() & key).fetch1(
+            'noise_dt', 'noise_t0', 'trace', 'stim')
         other_params_dict = params.pop('other_params_dict')
         if suppress_outputs:
             other_params_dict['verbose'] = 0
 
         model = ReceptiveFieldGLM(
-            dt=dt, trace=trace, stim=stim,
+            dt=noise_dt, trace=trace, stim=stim,
             filter_dur_s_past=params['filter_dur_s_past'],
             filter_dur_s_future=params['filter_dur_s_future'],
             df_ts=params['df_ts'], df_ws=params['df_ws'],

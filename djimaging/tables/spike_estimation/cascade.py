@@ -91,8 +91,9 @@ class CascadeTracesTemplate(dj.Computed):
         -> self.traces_table
         -> self.cascadetraces_params_table
         ---
-        cascade_trace_times: longblob   # Time of preprocessed trace, if not resampled same as in trace.
-        cascade_trace:      longblob    # preprocessed trace
+        pp_trace:      longblob    # preprocessed trace
+        pp_trace_t0:   float      # start time of trace
+        pp_trace_dt:   float      # time step of trace
         """
         return definition
 
@@ -114,7 +115,7 @@ class CascadeTracesTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return (self.traces_table() & 'trace_flag=1' & 'trigger_valid=1').proj() * \
+            return (self.traces_table() & 'trace_valid=1' & 'trigger_valid=1').proj() * \
                 self.cascadetraces_params_table().proj()
         except (AttributeError, TypeError):
             pass
@@ -124,24 +125,31 @@ class CascadeTracesTemplate(dj.Computed):
             (self.cascadetraces_params_table() & key).fetch1(
                 'window_length', 'poly_order', 'q_lower', 'q_upper', 'f_cutoff', 'fs_resample')
 
-        trace_times, trace = (self.traces_table() & key).fetch1('trace_times', 'trace')
+        if fs_resample > 0:
+            warnings.warn("fs_resample is not implemented yet.")
+
+        trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1('trace_t0', 'trace_dt', 'trace')
         stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
 
         if stim_start is not None:
-            if not np.any(trace_times < stim_start):
-                raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
+            if trace_t0 < stim_start:
+                raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_t0:.1g}")
 
-        trace, trace_times = compute_cascade_trace(
-            trace, trace_times, window_len_seconds, poly_order, q_lower=q_lower, q_upper=q_upper, f_cutoff=f_cutoff)
+        pp_trace = compute_cascade_firing_rate(
+            trace, trace_dt=trace_dt, window_len_seconds=window_len_seconds, poly_order=poly_order,
+            q_lower=q_lower, q_upper=q_upper, f_cutoff=f_cutoff)
 
-        self.insert1(dict(key, cascade_trace_times=trace_times, cascade_trace=trace))
+        self.insert1(dict(key, pp_trace=pp_trace, pp_trace_t0=trace_t0, pp_trace_dt=trace_dt))
 
     def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(self, key)
 
-        cascade_trace_times, cascade_trace = (self & key).fetch1("cascade_trace_times", "cascade_trace")
-        trace_times, trace = (self.traces_table() & key).fetch1("trace_times", "trace")
+        pp_trace_t0, pp_trace_dt, pp_trace = (self & key).fetch1("pp_trace_t0", "pp_trace_dt", "pp_trace")
+        trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1("trace_t0", "trace_dt", "trace")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+
+        trace_times = np.arange(len(trace)) * trace_dt + trace_t0
+        rate_times = np.arange(len(pp_trace)) * pp_trace_dt + pp_trace_t0
 
         fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex='all')
 
@@ -150,7 +158,7 @@ class CascadeTracesTemplate(dj.Computed):
         ax.set(ylabel='mean subtracted\nraw trace')
 
         ax = axs[1]
-        plot_trace_and_trigger(time=cascade_trace_times, trace=cascade_trace, triggertimes=triggertimes, ax=ax)
+        plot_trace_and_trigger(time=rate_times, trace=pp_trace, triggertimes=triggertimes, ax=ax)
         ax.set(ylabel='preprocessed\ntrace')
 
         ax.set(xlim=xlim, ylim=ylim)
@@ -161,7 +169,7 @@ class CascadeTracesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        cascade_traces = (self & restriction).fetch("cascade_trace")
+        cascade_traces = (self & restriction).fetch("pp_trace")
         cascade_traces = math_utils.padded_vstack(cascade_traces, cval=np.nan)
         n = cascade_traces.shape[0]
 
@@ -215,7 +223,6 @@ class CascadeSpikesTemplate(dj.Computed):
         -> self.cascadetraces_table 
         -> self.cascade_params_table
         ---
-        spike_prob_times: longblob
         spike_prob:       longblob
         """
         return definition
@@ -304,25 +311,27 @@ class CascadeSpikesTemplate(dj.Computed):
 
     def make(self, key, cascade_models_path, cascade):
         model_name = (self.cascade_params_table & key).fetch1('model_name')
-        trace_times, traces, roi_ids = (self.cascadetraces_table & key).fetch(
-            'cascade_trace_times', 'cascade_trace', 'roi_id')
+        pp_traces, roi_ids = (self.cascadetraces_table & key).fetch('pp_trace', 'roi_id')
 
-        spike_probs = cascade.predict(model_name, np.stack(traces), verbosity=1, model_folder=cascade_models_path)
+        spike_probs = cascade.predict(model_name, np.stack(pp_traces), verbosity=1, model_folder=cascade_models_path)
 
-        for trace_time, spike_prob, roi_id in zip(trace_times, spike_probs, roi_ids):
-            self.insert1(dict(key, spike_prob_times=trace_time, spike_prob=spike_prob, roi_id=roi_id))
+        for spike_prob, roi_id in zip(spike_probs, roi_ids):
+            self.insert1(dict(key, spike_prob=spike_prob, roi_id=roi_id))
 
     def plot1(self, key=None, xlim=None):
         key = get_primary_key(self, key)
 
-        spike_prob_times, spike_prob = (self & key).fetch1("spike_prob_times", "spike_prob")
-        trace_times, traces = (self.cascadetraces_table & key).fetch1('cascade_trace_times', 'cascade_trace')
+        spike_prob = (self & key).fetch1("spike_prob")
+        pp_trace_t0, pp_trace_dt, pp_trace = (self.cascadetraces_table & key).fetch1(
+            "pp_trace_t0", "pp_trace_dt", "pp_trace")
+
+        trace_times = np.arange(len(pp_trace)) * pp_trace_dt + pp_trace_t0
 
         fig, ax = plt.subplots(1, 1, figsize=(10, 3))
-        ax.plot(trace_times, traces, 'k', label='trace')
+        ax.plot(trace_times, pp_trace, 'k', label='trace')
         ax.legend(loc='upper left')
         ax = ax.twinx()
-        ax.plot(spike_prob_times, spike_prob, 'r', label='spike_prob')
+        ax.plot(trace_times, spike_prob, 'r', label='spike_prob')
         ax.legend(loc='upper right')
         ax.set(xlim=xlim)
         plt.show()
@@ -346,24 +355,20 @@ class CascadeSpikesTemplate(dj.Computed):
         plt.show()
 
 
-def compute_cascade_trace(trace, trace_times, window_len_seconds, poly_order, q_lower=2.5, q_upper=80, f_cutoff=None):
+def compute_cascade_firing_rate(trace, trace_dt, window_len_seconds, poly_order, q_lower=2.5, q_upper=80,
+                                f_cutoff=None):
     """Preprocess trace for cascade toolbox. Includes detrending, lowpass filtering and dF/F computation."""
     trace = np.asarray(trace).copy()
-    dt, dt_rel_error = get_mean_dt(tracetime=trace_times)
-
-    if dt_rel_error > 0.1:
-        warnings.warn('Inconsistent step-sizes in trace, resample trace.')
-        trace_times, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=dt)
 
     trace = drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace=True)
-    trace, smoothed_trace = detrend_trace(trace, window_len_seconds, 1. / dt, poly_order)
+    trace, smoothed_trace = detrend_trace(trace, window_len_seconds, 1. / trace_dt, poly_order)
 
     if (f_cutoff is not None) and (f_cutoff > 0):
-        trace = filter_utils.lowpass_filter_trace(trace=trace, fs=1. / dt, f_cutoff=f_cutoff)
+        trace = filter_utils.lowpass_filter_trace(trace=trace, fs=1. / trace_dt, f_cutoff=f_cutoff)
 
     trace = compute_dff(trace, q_lower=q_lower, q_upper=q_upper)
 
-    return trace, trace_times
+    return trace
 
 
 def compute_dff(trace, q_lower=2.5, q_upper=80.):

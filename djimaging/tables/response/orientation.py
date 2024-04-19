@@ -74,13 +74,12 @@ class OsDsIndexesTemplate(dj.Computed):
 
     def make(self, key):
         dir_order = (self.stimulus_table() & key).fetch1('trial_info')
-        snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
-
-        dt = float(np.mean([get_mean_dt(snippets_time)[0] for snippets_time in snippets_times.T]))
+        snippets_t0, snippets_dt, snippets = (self.snippets_table() & key).fetch1(
+            'snippets_t0', 'snippets_dt', 'snippets')
 
         dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
             on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses = \
-            compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=dt)
+            compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=snippets_dt)
 
         self.insert1(dict(key,
                           ds_index=dsi, ds_pvalue=p_dsi,
@@ -90,7 +89,7 @@ class OsDsIndexesTemplate(dj.Computed):
                           on_off=on_off, d_qi=d_qi,
                           time_component=time_component, dir_component=dir_component,
                           surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
-                          avg_sorted_resp=avg_sorted_responses, time_component_dt=dt))
+                          avg_sorted_resp=avg_sorted_responses, time_component_dt=snippets_dt))
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)

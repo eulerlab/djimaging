@@ -36,6 +36,7 @@ class ScanMRecording:
 
         # Timing data
         self.time_precision = time_precision
+        self.frame_dt = None
         self.frame_times = None
         self.frame_dt_offset = None
 
@@ -200,7 +201,7 @@ class ScanMRecording:
         if time_precision is not None:
             self.time_precision = time_precision
 
-        self.frame_times, self.frame_dt_offset = traces_and_triggers_utils.compute_frame_times(
+        self.frame_times, self.frame_dt_offset, self.frame_dt = traces_and_triggers_utils.compute_frame_times(
             n_frames=self.ch_n_frames,
             pix_dt=self.real_pixel_duration,
             npix_x=self.pix_nx_full,

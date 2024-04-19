@@ -72,9 +72,10 @@ class PreprocessTracesTemplate(dj.Computed):
         -> self.traces_table
         -> self.preprocessparams_table
         ---
-        preprocess_trace_times: longblob   # Time of preprocessed trace, if not resampled same as in trace.
-        preprocess_trace:      longblob    # preprocessed trace
-        smoothed_trace:        longblob    # output of savgol filter which is subtracted from the raw trace
+        pp_trace: longblob    # preprocessed trace
+        smoothed_trace:   longblob    # output of savgol filter which is subtracted from the raw trace
+        pp_trace_t0:         float       # numerical array of trace times
+        pp_trace_dt:         float       # time between frames
         """
         return definition
 
@@ -96,7 +97,7 @@ class PreprocessTracesTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return ((self.traces_table() & 'trace_flag=1' & 'trigger_valid=1') * self.preprocessparams_table()).proj()
+            return ((self.traces_table() & 'trace_valid=1' & 'trigger_valid=1') * self.preprocessparams_table()).proj()
         except (AttributeError, TypeError):
             pass
 
@@ -106,27 +107,30 @@ class PreprocessTracesTemplate(dj.Computed):
                 'window_length', 'poly_order', 'subtract_baseline', 'non_negative', 'standardize',
                 'f_cutoff', 'fs_resample')
 
-        trace_times, trace = (self.traces_table() & key).fetch1('trace_times', 'trace')
+        trace, trace_t0, trace_dt = (self.traces_table() & key).fetch1('trace', 'trace_t0', 'trace_dt')
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
 
         stim_start = triggertimes[0] if len(triggertimes) > 0 else None
 
-        preprocess_trace_times, preprocess_trace, smoothed_trace = process_trace(
-            trace_times=trace_times, trace=trace, stim_start=stim_start,
-            poly_order=poly_order, window_len_seconds=window_len_seconds,
+        pp_trace, smoothed_trace, pp_trace_dt = process_trace(
+            trace=trace, trace_t0=trace_t0, trace_dt=trace_dt,
+            stim_start=stim_start, poly_order=poly_order, window_len_seconds=window_len_seconds,
             subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative,
             f_cutoff=f_cutoff, fs_resample=fs_resample, baseline_max_dt=self._baseline_max_dt)
 
-        self.insert1(dict(key, preprocess_trace_times=preprocess_trace_times,
-                          preprocess_trace=preprocess_trace, smoothed_trace=smoothed_trace))
+        self.insert1(dict(key, pp_trace_t0=trace_t0, pp_trace_dt=pp_trace_dt,
+                          pp_trace=pp_trace, smoothed_trace=smoothed_trace))
 
     def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(self, key)
 
-        preprocess_trace_times, preprocess_trace, smoothed_trace = (self & key).fetch1(
-            "preprocess_trace_times", "preprocess_trace", "smoothed_trace")
-        trace_times, trace = (self.traces_table() & key).fetch1("trace_times", "trace")
+        pp_trace_t0, pp_trace_dt, pp_trace, smoothed_trace = (self & key).fetch1(
+            "pp_trace_t0", "pp_trace_dt", "pp_trace", "smoothed_trace")
+        trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1("trace_t0", "trace_dt", "trace")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+
+        trace_times = np.arange(trace.size) * trace_dt + pp_trace_t0
+        pp_trace_times = np.arange(pp_trace.size) * pp_trace_dt + pp_trace_t0
 
         fig, axs = plt.subplots(3, 1, figsize=(10, 6), sharex='all')
 
@@ -141,7 +145,7 @@ class PreprocessTracesTemplate(dj.Computed):
         ax.set(ylabel='mean subtracted\ntrend')
 
         ax = axs[2]
-        plot_trace_and_trigger(time=preprocess_trace_times, trace=preprocess_trace, triggertimes=triggertimes, ax=ax)
+        plot_trace_and_trigger(time=pp_trace_times, trace=pp_trace, triggertimes=triggertimes, ax=ax)
         ax.set(ylabel='preprocessed\ntrace')
 
         ax.set(xlim=xlim, ylim=ylim)
@@ -152,7 +156,7 @@ class PreprocessTracesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        preprocess_traces = (self & restriction).fetch("preprocess_trace")
+        preprocess_traces = (self & restriction).fetch("pp_trace")
         preprocess_traces = math_utils.padded_vstack(preprocess_traces, cval=np.nan)
         n = preprocess_traces.shape[0]
 
@@ -255,22 +259,20 @@ def subtract_baseline_trace(trace, trace_times, stim_start: float, inplace: bool
     return trace
 
 
-def process_trace(trace_times, trace, poly_order=3, window_len_seconds=0,
+def process_trace(trace, trace_t0, trace_dt,
+                  poly_order=3, window_len_seconds=0,
                   subtract_baseline: bool = False, standardize: int = 0,
                   non_negative: bool = False, stim_start: float = None,
                   f_cutoff: float = None, fs_resample: float = None,
                   drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3),
-                  dt_rtol=0.1, baseline_max_dt=np.inf):
+                  baseline_max_dt=np.inf):
     """Detrend and preprocess trace"""
     assert standardize in [0, 1, 2], standardize
 
-    trace = np.asarray(trace).copy()
-    dt, dt_rel_error = get_mean_dt(tracetime=trace_times)
-    fs = 1. / dt
+    trace_times = np.arange(trace.size) * trace_dt + trace_t0
+    fs = 1. / trace_dt
 
-    if dt_rel_error > dt_rtol:
-        warnings.warn('Inconsistent step-sizes in trace, resample trace.')
-        tracetime, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=dt)
+    trace = np.asarray(trace).copy()
 
     trace = drop_left_and_right(trace, drop_nmin_lr=drop_nmin_lr, drop_nmax_lr=drop_nmax_lr, inplace=True)
 
@@ -300,9 +302,14 @@ def process_trace(trace_times, trace, poly_order=3, window_len_seconds=0,
 
     if (fs_resample is not None) and (fs_resample != 0) and (fs != fs_resample):
         if (fs_resample < fs) and np.isclose((fs / fs_resample), np.round(fs / fs_resample)):
+            fdownsample = int(np.round(fs / fs_resample))
+            trace_dt_new = trace_dt * fdownsample
             trace_times, trace = filter_utils.downsample_trace(
-                tracetime=trace_times, trace=trace, fdownsample=int(np.round(fs / fs_resample)))
+                tracetime=trace_times, trace=trace, fdownsample=fdownsample)
         else:
-            trace_times, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=1. / fs_resample)
+            trace_dt_new = 1. / fs_resample
+            trace_times, trace = filter_utils.resample_trace(tracetime=trace_times, trace=trace, dt=trace_dt_new)
+    else:
+        trace_dt_new = trace_dt
 
-    return trace_times, trace, smoothed_trace
+    return trace, smoothed_trace, trace_dt_new

@@ -21,7 +21,8 @@ class AveragesTemplate(dj.Computed):
         ---
         average             :longblob  # array of snippet average (time)
         average_norm        :longblob  # normalized array of snippet average (time)
-        average_times       :longblob  # array of average time, starting at t=0 (time)
+        average_t0          :float     # time of the first sample of the average
+        average_dt          :float     # time between samples of the average
         triggertimes_rel    :longblob  # array of relative triggertimes 
         """
         return definition
@@ -53,10 +54,15 @@ class AveragesTemplate(dj.Computed):
         return average_norm
 
     def make(self, key):
-        snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
+        snippets_t0, snippets_dt, snippets = (self.snippets_table() & key).fetch1(
+            'snippets_t0', 'snippets_dt', 'snippets')
         triggertimes_snippets = (self.snippets_table() & key).fetch1('triggertimes_snippets')
 
+        # TODO: make more efficient
+        snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
+                          + snippets_t0)
         average_times = get_aligned_snippets_times(snippets_times=snippets_times)
+
         average = np.mean(snippets, axis=1)
 
         average_norm = self.normalize_average(average)
@@ -67,18 +73,24 @@ class AveragesTemplate(dj.Computed):
             **key,
             average=average,
             average_norm=average_norm,
-            average_times=average_times,
+            average_t0=average_times[0],
+            average_dt=snippets_dt,
             triggertimes_rel=triggertimes_rel,
         ))
 
     def plot1(self, key=None, xlim=None):
         key = get_primary_key(table=self, key=key)
 
-        snippets, snippets_times, triggertimes_snippets = (self.snippets_table & key).fetch1(
-            "snippets", "snippets_times", "triggertimes_snippets")
+        snippets_t0, snippets_dt, snippets = (self.snippets_table & key).fetch1(
+            'snippets_t0', 'snippets_dt', 'snippets')
 
-        average, average_norm, average_times, triggertimes_rel = \
-            (self & key).fetch1('average', 'average_norm', 'average_times', 'triggertimes_rel')
+        average, average_norm, average_t0, average_dt, triggertimes_rel = \
+            (self & key).fetch1('average', 'average_norm', 'average_t0', 'average_dt', 'triggertimes_rel')
+
+        snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
+                          + snippets_t0)
+
+        average_times = get_aligned_snippets_times(snippets_times=snippets_times)
 
         fig, axs = plt.subplots(2, 1, figsize=(10, 4), sharex='all')
 
@@ -132,7 +144,7 @@ class ResampledAveragesTemplate(AveragesTemplate):
 
     database = ""
     _norm_kind = 'amp_one'
-    _f_resample = 500
+    _f_resample = 60
 
     @property
     @abstractmethod
@@ -140,8 +152,13 @@ class ResampledAveragesTemplate(AveragesTemplate):
         pass
 
     def make(self, key):
-        snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
+        snippets_t0, snippets_dt, snippets = (self.snippets_table() & key).fetch1(
+            'snippets_t0', 'snippets_dt', 'snippets')
         triggertimes_snippets = (self.snippets_table() & key).fetch1('triggertimes_snippets')
+
+        snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
+                          + snippets_t0)
+
         average, average_times, _ = compute_upsampled_average(
             snippets, snippets_times, triggertimes_snippets, f_resample=self._f_resample)
         average_norm = self.normalize_average(average)
@@ -151,18 +168,23 @@ class ResampledAveragesTemplate(AveragesTemplate):
             **key,
             average=average,
             average_norm=average_norm,
-            average_times=average_times,
+            average_t0=average_times[0],
+            average_dt=1 / self._f_resample,
             triggertimes_rel=triggertimes_rel,
         ))
 
     def plot1(self, key=None, xlim=None):
         key = get_primary_key(table=self, key=key)
 
-        snippets, snippets_times, triggertimes_snippets = (self.snippets_table & key).fetch1(
-            "snippets", "snippets_times", "triggertimes_snippets")
+        snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table & key).fetch1(
+            'snippets_t0', 'snippets_dt', 'snippets', 'triggertimes_snippets')
 
-        average, average_norm, average_times, triggertimes_rel = \
-            (self & key).fetch1('average', 'average_norm', 'average_times', 'triggertimes_rel')
+        average, average_norm, average_t0, average_dt, triggertimes_rel = \
+            (self & key).fetch1('average', 'average_norm', 'average_t0', 'average_dt', 'triggertimes_rel')
+
+        snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
+                          + snippets_t0)
+        average_times = np.arange(len(average)) * average_dt + average_t0
 
         fig, axs = plt.subplots(2, 1, figsize=(10, 4), sharex='all')
 

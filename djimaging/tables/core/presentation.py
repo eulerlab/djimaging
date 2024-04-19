@@ -27,19 +27,18 @@ class PresentationTemplate(dj.Computed):
         """
 
         if self.incl_region and not self.field_table.incl_region:
-            definition += "    region   :varchar(63)    # region (e.g. LR or RR)\n"
+            definition += "    region   :varchar(16)    # region (e.g. LR or RR)\n"
         if self.incl_cond1 and not self.field_table.incl_cond1:
-            definition += "    cond1    :varchar(63)    # condition (pharmacological or other)\n"
+            definition += "    cond1    :varchar(16)    # condition (pharmacological or other)\n"
         if self.incl_cond2 and not self.field_table.incl_cond2:
-            definition += "    cond2    :varchar(63)    # condition (pharmacological or other)\n"
+            definition += "    cond2    :varchar(16)    # condition (pharmacological or other)\n"
         if self.incl_cond3 and not self.field_table.incl_cond3:
-            definition += "    cond3    :varchar(63)    # condition (pharmacological or other)\n"
+            definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
 
         definition += """
         ---
         pres_data_file :varchar(191)        # path to file (e.g. h5 file)
         triggertimes :longblob              # triggertimes in each presentation
-        triggervalues :longblob             # values of the recorded triggers
         trigger_valid :tinyint unsigned     # Are triggers as expected (1) or not (0)?
         absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
         absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
@@ -109,7 +108,7 @@ class PresentationTemplate(dj.Computed):
             definition = """
             # Stack median (over time of the available channels)
             -> master
-            ch_name : varchar(191)  # name of the channel
+            ch_name : varchar(32)  # name of the channel
             ---
             ch_average : longblob  # Stack median over time
             """
@@ -272,7 +271,6 @@ class PresentationTemplate(dj.Computed):
 
         pres_entry["trigger_valid"] = int(rec.trigger_valid)
         pres_entry["triggertimes"] = rec.trigger_times
-        pres_entry["triggervalues"] = rec.trigger_values
 
         pres_entry["absx"] = rec.pos_x_um
         pres_entry["absy"] = rec.pos_y_um

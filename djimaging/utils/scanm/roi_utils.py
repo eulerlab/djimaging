@@ -24,21 +24,21 @@ def get_roi2trace(traces, traces_times, roi_ids):
         if traces.ndim == 3 and idx < traces.shape[-1]:
             trace = traces[:, :, idx]
             trace_times = traces_times[:, :, idx]
-            valid_flag = 1
+            trace_valid = 1
         elif traces.ndim == 2 and idx < traces.shape[-1]:
             trace = traces[:, idx]
             trace_times = traces_times[:, idx]
-            valid_flag = 1
+            trace_valid = 1
         else:
-            valid_flag = 0
+            trace_valid = 0
             trace = np.zeros(0)
             trace_times = np.zeros(0)
 
         if np.any(~np.isfinite(trace)) or np.any(~np.isfinite(trace_times)):
             warnings.warn(f'NaN trace or tracetime in for ROI{roi_id}.')
-            valid_flag = 0
+            trace_valid = 0
 
-        roi2trace[roi_id] = dict(trace=trace, trace_times=trace_times, valid_flag=valid_flag)
+        roi2trace[roi_id] = dict(trace=trace, trace_times=trace_times, trace_valid=trace_valid)
 
     return roi2trace
 

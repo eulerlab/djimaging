@@ -45,18 +45,18 @@ def compute_frame_times(wparams: dict, n_frames: int, precision: str = 'line') \
     else:
         raise NotImplementedError(scan_type)
 
-    frame_times, frame_dt_offset = traces_and_triggers_utils.compute_frame_times(
+    frame_times, frame_dt_offset, frame_dt = traces_and_triggers_utils.compute_frame_times(
         n_frames=n_frames, pix_dt=pix_dt, npix_x=npix_x, npix_2nd=npix_2nd,
         npix_x_offset_left=npix_x_offset_left, npix_x_offset_right=npix_x_offset_right, precision=precision)
 
-    return frame_times, frame_dt_offset
+    return frame_times, frame_dt_offset, frame_dt
 
 
 def compute_triggers_from_wparams(
         stack: np.ndarray, wparams: dict, stimulator_delay: float,
         threshold: int = 30_000, precision: str = 'line') -> (np.ndarray, np.ndarray):
     """Extract triggertimes from stack, get parameters from wparams"""
-    frame_times, frame_dt_offset = compute_frame_times(
+    frame_times, frame_dt_offset, frame_dt = compute_frame_times(
         wparams=wparams, n_frames=stack.shape[2], precision=precision)
     triggertimes, triggervalues = traces_and_triggers_utils.compute_triggers(
         stack=stack, frame_times=frame_times, frame_dt_offset=frame_dt_offset,

@@ -99,10 +99,17 @@ class FeaturesTemplate(dj.Computed):
 
         for stim_i in stim_names:
             tab = tab * (self.averages_table & f"stim_name='{stim_i}'" & restr).proj(
-                **{f'{stim_i}_avgs': average_key, f'{stim_i}_time': 'average_times', f'{stim_i}_name': 'stim_name'})
+                **{f'{stim_i}_avgs': average_key, f'{stim_i}_dt': 'average_dt',
+                   f'{stim_i}_t0': 'average_t0', f'{stim_i}_name': 'stim_name'})
 
-        times = [truncated_vstack(tab.fetch(f'{stim_i}_time'), rtol=rtol) for stim_i in stim_names]
-        traces = [truncated_vstack(tab.fetch(f'{stim_i}_avgs'), rtol=rtol) for stim_i in stim_names]
+        times = [
+            truncated_vstack(
+                np.arange(tab.fetch(f'{stim_i}_avgs').shape[0]) * tab.fetch1(f'{stim_i}_dt')
+                + tab.fetch1(f'{stim_i}_t0'), rtol=rtol)
+            for stim_i in stim_names]
+        traces = [
+            truncated_vstack(tab.fetch(f'{stim_i}_avgs'), rtol=rtol)
+            for stim_i in stim_names]
         roi_keys = tab.fetch(*self.roi_table.primary_key, as_dict=True)
         return traces, times, roi_keys, stim_names
 

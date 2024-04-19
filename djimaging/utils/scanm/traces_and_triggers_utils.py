@@ -60,7 +60,7 @@ def compute_frame_times(n_frames: int, pix_dt: int, npix_x: int, npix_2nd: int,
 
     frame_times = np.arange(n_frames) * frame_dt
 
-    return frame_times, frame_dt_offset
+    return frame_times, frame_dt_offset, frame_dt
 
 
 def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, precision: str = 'line') \
@@ -76,7 +76,7 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, preci
     if stack.shape[:2] != roi_mask.shape:
         raise ValueError(f"xy-dim of stack roi_mask must match but shapes are {stack.shape} and {roi_mask.shape}")
 
-    frame_times, frame_dt_offset = wparams_utils.compute_frame_times(
+    frame_times, frame_dt_offset, frame_dt = wparams_utils.compute_frame_times(
         wparams=wparams, n_frames=stack.shape[2], precision=precision)
 
     n_frames = stack.shape[2]
@@ -84,13 +84,14 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, preci
 
     traces_times = np.full((n_frames, roi_idxs.size), np.nan)
     traces = np.full((n_frames, roi_idxs.size), np.nan)
+    t0s = np.array([np.median(frame_dt_offset[roi_mask == roi_idx]) for roi_idx in roi_idxs])
 
     for i, roi_idx in enumerate(roi_idxs):
         roi_mask_i = roi_mask == roi_idx
-        traces_times[:, i] = frame_times + np.median(frame_dt_offset[roi_mask_i])
+        traces_times[:, i] = frame_times + t0s[i]
         traces[:, i] = np.mean(stack[roi_mask_i], axis=0)
 
-    return traces, traces_times
+    return traces, traces_times, frame_dt
 
 
 def roi2trace_from_stack(filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray,
@@ -100,18 +101,18 @@ def roi2trace_from_stack(filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarra
     else:
         ch_stacks, wparams = read_h5_utils.load_stacks_and_wparams(filepath, ch_names=(data_stack_name,))
 
-    traces, traces_times = compute_traces(
+    traces, traces_times, frame_dt = compute_traces(
         stack=ch_stacks[data_stack_name], roi_mask=roi_mask, wparams=wparams, precision=precision)
     roi2trace = roi_utils.get_roi2trace(traces=traces, traces_times=traces_times, roi_ids=roi_ids)
 
-    return roi2trace
+    return roi2trace, frame_dt
 
 
-def check_valid_triggers_rel_to_tracetime(trace_flag, trace_times, triggertimes):
+def check_valid_triggers_rel_to_tracetime(trace_valid, trace_times, triggertimes):
     if len(triggertimes) == 0:
         return 1
 
-    if trace_flag:
+    if trace_valid:
         if triggertimes[0] < trace_times[0]:
             return 0
         elif triggertimes[-1] > trace_times[-1]:

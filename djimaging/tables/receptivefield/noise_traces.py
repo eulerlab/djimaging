@@ -45,6 +45,7 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
 
 class DNoiseTraceTemplate(dj.Computed):
     database = ""
+    _traces_prefix = 'pp_'
 
     @property
     def definition(self):
@@ -53,10 +54,10 @@ class DNoiseTraceTemplate(dj.Computed):
         -> self.traces_table
         -> self.params_table
         ---
-        dt : float  # Time-step of time component
-        time : longblob  # Time lof aligned traces and stimulus
         trace : longblob   # Trace to fit
         stim : longblob  # Stimulus frames
+        noise_dt : float  # Time-step of time component
+        noise_t0 : float  # Time of first sample
         dt_rel_error : float  # Maximum relative error of dts, if too large, can have unwanted effects
         '''
         return definition
@@ -92,11 +93,14 @@ class DNoiseTraceTemplate(dj.Computed):
     def make(self, key):
         stim, stim_dict = (self.stimulus_table() & key).fetch1("stim_trace", "stim_dict")
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
-        trace, tracetime = (self.traces_table() & key).fetch1('preprocess_trace', 'preprocess_trace_times')
+        trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1(
+            self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace')
         fupsample_trace, fupsample_stim, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s, ref_time = (
                 self.params_table() & key).fetch1(
             "fupsample_trace", "fupsample_stim", "fit_kind", "lowpass_cutoff",
             "pre_blur_sigma_s", "post_blur_sigma_s", "ref_time")
+
+        tracetime = np.arange(trace.size) * trace_dt + trace_t0
 
         stim, trace, dt, t0, dt_rel_error = prepare_noise_data(
             trace=trace, tracetime=tracetime, stim=stim, triggertimes=triggertimes,
@@ -105,13 +109,11 @@ class DNoiseTraceTemplate(dj.Computed):
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
             pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s)
 
-        time = np.arange(trace.size) * dt + t0
-
         data_key = key.copy()
-        data_key['dt'] = dt
-        data_key['time'] = time
-        data_key['trace'] = trace
         data_key['stim'] = stim
+        data_key['trace'] = trace
+        data_key['noise_t0'] = t0
+        data_key['noise_dt'] = dt
         data_key['dt_rel_error'] = dt_rel_error
         self.insert1(data_key)
 
@@ -120,27 +122,31 @@ class DNoiseTraceTemplate(dj.Computed):
 
         from matplotlib import pyplot as plt
 
-        raw_trace, raw_tracetime = (self.traces_table() & key).fetch1('preprocess_trace', 'preprocess_trace_times')
+        raw_trace_t0, raw_trace_dt, raw_trace = (self.traces_table() & key).fetch1(
+            self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace')
 
-        time, trace, stim = (self & key).fetch1('time', 'trace', 'stim')
-        assert time.shape[0] == trace.shape[0], (time.shape[0], trace.shape[0])
-        assert time.shape[0] == stim.shape[0], (time.shape[0], stim.shape[0])
+        raw_tracetime = np.arange(raw_trace.size) * raw_trace_dt + raw_trace_t0
+
+        noise_t0, noise_dt, trace, stim = (self & key).fetch1('noise_t0', 'noise_dt', 'trace', 'stim')
+        assert trace.shape[0].shape[0] == stim.shape[0], "Trace and stim have different lengths"
+
+        tracetime = np.arange(trace.size) * noise_dt + noise_t0
 
         fit_kind = (self.params_table() & key).fetch1('fit_kind')
 
         fig, axs = plt.subplots(2, 1, figsize=(10, 5), sharex='all')
         ax = axs[0]
-        ax.plot(time, trace, label='output trace')
+        ax.plot(tracetime, trace, label='output trace')
         ax.legend(loc='upper left')
         ax = ax.twinx()
-        ax.vlines(time[1:][np.any(np.diff(stim, axis=0) > 0, axis=tuple(np.arange(1, stim.ndim)))], 0, 1,
+        ax.vlines(tracetime[1:][np.any(np.diff(stim, axis=0) > 0, axis=tuple(np.arange(1, stim.ndim)))], 0, 1,
                   label='stim changes', alpha=0.1, color='k')
         ax.legend(loc='upper right')
         ax.set(xlabel='Time', title=fit_kind)
         ax.set_xlim(xlim)
 
         ax = axs[1]
-        ax.plot(time, trace, label='output trace')
+        ax.plot(tracetime, trace, label='output trace')
         ax.legend(loc='upper left')
         ax = ax.twinx()
         ax.plot(raw_tracetime, raw_trace, 'r-', label='input trace', alpha=0.5)

@@ -42,7 +42,8 @@ def load_roi2trace(filepath: str, roi_ids: np.ndarray):
     with h5py.File(filepath, "r", driver="stdio") as h5_file:
         traces, traces_times = extract_traces(h5_file)
     roi2trace = get_roi2trace(traces=traces, traces_times=traces_times, roi_ids=roi_ids)
-    return roi2trace
+    frame_dt = np.mean(np.diff(traces_times, axis=0))
+    return roi2trace, frame_dt
 
 
 def extract_stacks(h5_file_open, ch_names=('wDataCh0', 'wDataCh1')) -> dict:
