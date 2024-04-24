@@ -14,7 +14,7 @@ class UserInfoTemplate(dj.Manual):
         definition = """
         # Info for decoding file names
     
-        experimenter                    :varchar(32)  # name of the experimenter
+        experimenter                    :varchar(16)  # name of the experimenter
         ---     
         data_dir                        :varchar(191)  # path to header file, used for computed tables
         datatype_loc                    :tinyint       # string location for datatype (e.g. SMP)
@@ -27,10 +27,10 @@ class UserInfoTemplate(dj.Manual):
         outline_alias='outline_edge'    :varchar(191)  # alias(es) for retinal outline / edge recordings (separated by _)
         highres_alias='hq_hr_highresolution_512' :varchar(191)  # alias(es) for high resolution stack
         mask_alias='chirp_mb_movingbar' :varchar(191)  # Ordered alias(es) for field roi mask (separated by _)
-        pre_data_dir='Pre'              :varchar(191)  # directory for h5 data files
-        raw_data_dir='Raw'              :varchar(191)  # directory for smp and smh data files
-        data_stack_name='wDataCh0'      :varchar(191)  # main data channel, e.g. OGB-1
-        alt_stack_name='wDataCh1'       :varchar(191)  # alternative data channel, e.g. SR101
+        pre_data_dir='Pre'              :varchar(32)  # directory for h5 data files
+        raw_data_dir='Raw'              :varchar(32)  # directory for smp and smh data files
+        data_stack_name='wDataCh0'      :varchar(32)  # main data channel, e.g. OGB-1
+        alt_stack_name='wDataCh1'       :varchar(32)  # alternative data channel, e.g. SR101
         """
         return definition
 

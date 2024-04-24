@@ -24,11 +24,11 @@ class FieldTemplate(dj.Computed):
         # Recording fields
         -> self.experiment_table
         -> self.raw_params_table
-        field   :varchar(32)          # string identifying files corresponding to field
+        field   :varchar(16)          # string identifying files corresponding to field
         """
 
         if self._include_conditions:
-            definition_head += "        condition    :varchar(191)    # condition (pharmacological or other)\n"
+            definition_head += "        condition    :varchar(16)    # condition (pharmacological or other)\n"
 
         definition_body = """
         ---
@@ -79,7 +79,7 @@ class FieldTemplate(dj.Computed):
             definition = """
             # Stack median (over time of the available channels)
             -> master
-            ch_name : varchar(191)  # name of the channel
+            ch_name : varchar(16)  # name of the channel
             ---
             ch_average :longblob  # Stack median over time
             """

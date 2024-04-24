@@ -48,10 +48,10 @@ class StimulusTemplate(dj.Manual):
     def definition(self):
         definition = """
         # Light stimuli
-        stim_name           :varchar(32)       # Unique string identifier
+        stim_name           :varchar(16)       # Unique string identifier
         ---
-        alias               :varchar(9999)      # Strings (_ seperator) to identify this stimulus, not case sensitive!
-        stim_family=""      :varchar(191)       # To group stimuli (e.g. gChirp and lChirp) for downstream processing 
+        alias               :varchar(191)      # Strings (_ seperator) to identify this stimulus, not case sensitive!
+        stim_family=""      :varchar(32)       # To group stimuli (e.g. gChirp and lChirp) for downstream processing 
         framerate=0         :float              # framerate in Hz
         isrepeated=0        :tinyint unsigned   # Is the stimulus repeated? Used for snippets
         ntrigger_rep=0      :int unsigned       # Number of triggers (per repetition)  

@@ -43,7 +43,7 @@ class ClassifierMethodTemplate(dj.Lookup):
         definition = """
         classifier_params_hash  : varchar(32)     # hash of the classifier params config
         ---
-        classifier_fn           : varchar(63)     # path to classifier method fn
+        classifier_fn           : varchar(191)     # path to classifier method fn
         classifier_config       : longblob        # method configuration object
         classifier_seed         : int
         comment                 : varchar(300)    # comment
