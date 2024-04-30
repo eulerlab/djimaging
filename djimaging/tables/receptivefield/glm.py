@@ -172,8 +172,12 @@ class RfGlmTemplate(dj.Computed):
 
     def make(self, key, suppress_outputs=False, clear_outputs=True):
         params = (self.params_table() & key).fetch1()
-        noise_dt, noise_t0, trace, stim = (self.noise_traces_table() & key).fetch1(
-            'noise_dt', 'noise_t0', 'trace', 'stim')
+        noise_dt, noise_t0, trace, stim_idxs = (self.noise_traces_table() & key).fetch1(
+            'noise_dt', 'noise_t0', 'trace', 'stim_idxs')
+        assert trace.size == stim_idxs.size, "Trace and stim_idxs must have the same size."
+        stim = (self.noise_traces_table.stimulus_table() & key).fetch1("stim_trace")
+        stim = stim[stim_idxs].astype(trace.dtype)
+
         other_params_dict = params.pop('other_params_dict')
         if suppress_outputs:
             other_params_dict['verbose'] = 0

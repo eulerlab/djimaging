@@ -92,7 +92,7 @@ class SplitRFTemplate(dj.Computed):
             'method', 'blur_std', 'blur_npix', 'upsample_srf_scale', 'peak_nstd', 'npeaks_max')
 
         # Get tRF and sRF
-        srf, trf = split_strf(
+        srf, trf, split_qidx = split_strf(
             strf, method=method, blur_std=blur_std, blur_npix=blur_npix, upsample_srf_scale=upsample_srf_scale)
 
         # Make tRF always positive, so that sRF reflects the polarity of the RF
@@ -106,8 +106,9 @@ class SplitRFTemplate(dj.Computed):
                 trf *= -1
                 polarity = 1
 
-        strf_fit = merge_strf(srf=resize_srf(srf, output_shape=strf.shape[1:]), trf=trf)
-        split_qidx = compute_explained_rf(strf, strf_fit)
+        if split_qidx is None:
+            strf_fit = merge_strf(srf=resize_srf(srf, output_shape=strf.shape[1:]), trf=trf)
+            split_qidx = compute_explained_rf(strf, strf_fit)
 
         # Save
         rf_key = deepcopy(key)

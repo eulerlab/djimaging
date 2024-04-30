@@ -141,12 +141,12 @@ def plot_srf(srf, ax=None, vabsmax=None, pixelsize=None):
         cmap = 'viridis'
 
     if pixelsize is not None:
-        extent = np.array([-srf.shape[1] / 2., srf.shape[1] / 2., -srf.shape[0] / 2., srf.shape[0] / 2.]) * pixelsize
+        extent = np.array([-srf.shape[0] / 2., srf.shape[0] / 2., -srf.shape[1] / 2., srf.shape[1] / 2.]) * pixelsize
     else:
         extent = None
 
     ax.set(title='sRF')
-    im = ax.imshow(srf.T, vmin=vmin, vmax=vmax, cmap=cmap, interpolation='none', origin='lower', extent=extent)
+    im = ax.imshow(srf, vmin=vmin, vmax=vmax, cmap=cmap, interpolation='none', origin='lower', extent=extent)
     plt.colorbar(im, ax=ax)
 
     return ax

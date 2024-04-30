@@ -19,7 +19,9 @@ def prepare_noise_data(stim, triggertimes, trace, tracetime, ntrigger_per_frame=
 
     if ntrigger_per_frame > 1:
         stimtime = np.repeat(triggertimes, ntrigger_per_frame)
-        stimtime += np.tile(np.arange(ntrigger_per_frame) / ntrigger_per_frame, stim.shape[0] // ntrigger_per_frame)
+        trigger_dt, _ = get_mean_dt(triggertimes)
+        stimtime += np.tile(np.arange(ntrigger_per_frame) * trigger_dt / ntrigger_per_frame,
+                            stim.shape[0] // ntrigger_per_frame)
     else:
         stimtime = triggertimes
 
@@ -61,10 +63,11 @@ def prepare_noise_data(stim, triggertimes, trace, tracetime, ntrigger_per_frame=
 
     trace = trace / np.std(trace)
 
-    if 'bool' in str(stim.dtype) or set(np.unique(stim).astype(float)) == {0., 1.}:
-        stim = 2 * stim.astype(np.int8) - 1
-    else:
-        stim = math_utils.normalize_zscore(stim)
+    if stim.ndim > 1:  # Otherwise assume stimulus indexes have been passed
+        if 'bool' in str(stim.dtype) or set(np.unique(stim).astype(float)) == {0., 1.}:
+            stim = 2 * stim.astype(np.int8) - 1
+        else:
+            stim = math_utils.normalize_zscore(stim)
 
     assert stim.shape[0] == trace.shape[0], (stim.shape[0], trace.shape[0])
 

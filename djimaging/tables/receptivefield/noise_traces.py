@@ -17,6 +17,7 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
+        -> self.stimulus_table
         dnoise_params_id: tinyint unsigned # unique param set id
         ---
         fit_kind : varchar(191)
@@ -29,18 +30,30 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
         """
         return definition
 
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
     def add_default(
-            self, dnoise_params_id=1, fit_kind="events", ref_time='trace',
+            self, stim_names=None, dnoise_params_id=1, fit_kind="events", ref_time='trace',
             fupsample_trace=1, fupsample_stim=1, lowpass_cutoff=0,
             pre_blur_sigma_s=0, post_blur_sigma_s=0, skip_duplicates=False):
         """Add default preprocess parameter to table"""
+
+        if stim_names is None:
+            stim_names = (self.stimulus_table()).fetch('stim_name')
 
         key = dict(dnoise_params_id=dnoise_params_id, fit_kind=fit_kind,
                    fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
                    ref_time=ref_time, lowpass_cutoff=lowpass_cutoff,
                    pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s)
 
-        self.insert1(key, skip_duplicates=skip_duplicates)
+        for stim_name in stim_names:
+            """Add default preprocess parameter to table"""
+            stim_key = key.copy()
+            stim_key['stim_name'] = stim_name
+            self.insert1(stim_key, skip_duplicates=skip_duplicates)
 
 
 class DNoiseTraceTemplate(dj.Computed):
@@ -55,7 +68,7 @@ class DNoiseTraceTemplate(dj.Computed):
         -> self.params_table
         ---
         trace : longblob   # Trace to fit
-        stim : longblob  # Stimulus frames
+        stim_idxs : longblob  # Stimulus frame indexes
         noise_dt : float  # Time-step of time component
         noise_t0 : float  # Time of first sample
         dt_rel_error : float  # Maximum relative error of dts, if too large, can have unwanted effects
@@ -101,17 +114,18 @@ class DNoiseTraceTemplate(dj.Computed):
             "pre_blur_sigma_s", "post_blur_sigma_s", "ref_time")
 
         tracetime = np.arange(trace.size) * trace_dt + trace_t0
+        stim_idxs = np.arange(stim.shape[0])
 
-        stim, trace, dt, t0, dt_rel_error = prepare_noise_data(
-            trace=trace, tracetime=tracetime, stim=stim, triggertimes=triggertimes,
+        stim_idxs, trace, dt, t0, dt_rel_error = prepare_noise_data(
+            trace=trace, tracetime=tracetime, stim=stim_idxs, triggertimes=triggertimes,
             ntrigger_per_frame=stim_dict.get('ntrigger_per_frame', 1),
             fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim, ref_time=ref_time,
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
             pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s)
 
         data_key = key.copy()
-        data_key['stim'] = stim
-        data_key['trace'] = trace
+        data_key['trace'] = trace.astype(np.float32)
+        data_key['stim_idxs'] = stim_idxs.astype(np.uint16)
         data_key['noise_t0'] = t0
         data_key['noise_dt'] = dt
         data_key['dt_rel_error'] = dt_rel_error
@@ -127,8 +141,11 @@ class DNoiseTraceTemplate(dj.Computed):
 
         raw_tracetime = np.arange(raw_trace.size) * raw_trace_dt + raw_trace_t0
 
-        noise_t0, noise_dt, trace, stim = (self & key).fetch1('noise_t0', 'noise_dt', 'trace', 'stim')
-        assert trace.shape[0].shape[0] == stim.shape[0], "Trace and stim have different lengths"
+        noise_t0, noise_dt, trace, stim_idxs = (self & key).fetch1('noise_t0', 'noise_dt', 'trace', 'stim_idxs')
+        assert trace.shape[0] == stim_idxs.shape[0], "Trace and stim have different lengths"
+
+        stim = (self.stimulus_table() & key).fetch1("stim_trace")
+        stim = stim[stim_idxs]
 
         tracetime = np.arange(trace.size) * noise_dt + noise_t0
 

@@ -1,11 +1,10 @@
-import djimaging.tables.receptivefield.split_strf
 from djimaging.schemas.core_schema import *
-from djimaging.tables import receptivefield, rf_glm
+from djimaging.tables import receptivefield
 
 
 @schema
 class DNoiseTraceParams(receptivefield.DNoiseTraceParamsTemplate):
-    pass
+    stimulus_table = Stimulus
 
 
 @schema
@@ -17,12 +16,12 @@ class DNoiseTrace(receptivefield.DNoiseTraceTemplate):
 
 
 @schema
-class RfGlmParams(rf_glm.RfGlmParamsTemplate):
+class RfGlmParams(receptivefield.glm.RfGlmParamsTemplate):
     pass
 
 
 @schema
-class RfGlm(rf_glm.RfGlmTemplate):
+class RfGlm(receptivefield.RfGlmTemplate):
     noise_traces_table = DNoiseTrace
     params_table = RfGlmParams
     preprocesstraces_table = PreprocessTraces
@@ -32,30 +31,30 @@ class RfGlm(rf_glm.RfGlmTemplate):
 
 
 @schema
-class RfGlmSingleModel(rf_glm.RfGlmSingleModelTemplate):
+class RfGlmSingleModel(receptivefield.RfGlmSingleModelTemplate):
     noise_traces_table = DNoiseTrace
     glm_table = RfGlm
 
 
 @schema
-class RfGlmQualityParams(rf_glm.RfGlmQualityParamsTemplate):
+class RfGlmQualityParams(receptivefield.RfGlmQualityParamsTemplate):
     pass
 
 
 @schema
-class RfGlmQuality(rf_glm.RfGlmQualityTemplate):
+class RfGlmQuality(receptivefield.RfGlmQualityTemplate):
     glm_single_model_table = RfGlmSingleModel
     glm_table = RfGlm
     params_table = RfGlmQualityParams
 
 
 @schema
-class SplitRfGlmParams(djimaging.tables.receptivefield.split_strf.SplitRFParamsTemplate):
+class SplitRfGlmParams(receptivefield.split_strf.SplitRFParamsTemplate):
     pass
 
 
 @schema
-class SplitRfGlm(djimaging.tables.receptivefield.split_strf.SplitRFTemplate):
+class SplitRfGlm(receptivefield.split_strf.SplitRFTemplate):
     rf_table = RfGlm
     split_rf_params_table = SplitRfGlmParams
 

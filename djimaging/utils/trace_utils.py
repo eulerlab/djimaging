@@ -53,7 +53,8 @@ def align_trace_to_stim(stim, stimtime, trace, tracetime):
 
     aligned_trace = np.zeros(stimtime.size)
     for i, (t_a, t_b) in enumerate(zip(stimtime, np.append(stimtime[1:], stimtime[-1] + dt))):
-        aligned_trace[i] = np.sum(trace[(tracetime >= t_a) & (tracetime < t_b)])
+        # Take mean to not put more weight on lagged frames
+        aligned_trace[i] = np.mean(trace[(tracetime >= t_a) & (tracetime < t_b)])
 
     assert aligned_stim.shape[0] == aligned_trace.shape[0], (aligned_stim.shape[0], aligned_trace.shape[0])
 

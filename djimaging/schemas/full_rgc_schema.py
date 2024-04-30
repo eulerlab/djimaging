@@ -64,7 +64,7 @@ class CelltypeAssignment(classifier.CelltypeAssignmentTemplate):
 # Receptive fields
 @schema
 class DNoiseTraceParams(receptivefield.DNoiseTraceParamsTemplate):
-    pass
+    stimulus_table = Stimulus
 
 
 @schema

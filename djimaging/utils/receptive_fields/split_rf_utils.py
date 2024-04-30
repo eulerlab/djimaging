@@ -37,8 +37,9 @@ def split_strf(strf, method='SVD', blur_std: float = 0, blur_npix: int = 1, upsa
     if blur_std > 0:
         strf = np.stack([smooth_rf(rf=srf_i, blur_std=blur_std, blur_npix=blur_npix) for srf_i in strf])
 
+    explained_variance = None
     if method.lower() == 'svd':
-        srf, trf = split_rf_svd(strf)
+        srf, trf, explained_variance = split_rf_svd(strf)
     elif method.lower() == 'sd':
         srf, trf = split_rf_sd(strf)
     elif method.lower() == 'peak':
@@ -49,7 +50,7 @@ def split_strf(strf, method='SVD', blur_std: float = 0, blur_npix: int = 1, upsa
     if upsample_srf_scale > 1:
         srf = resize_srf(srf, scale=upsample_srf_scale)
 
-    return srf, trf
+    return srf, trf, explained_variance
 
 
 def split_rf_svd(strf):
@@ -60,24 +61,26 @@ def split_rf_svd(strf):
     dims = strf.shape
 
     if len(dims) == 3:
-        dims_tRF = dims[0]
-        dims_sRF = dims[1:]
-        U, S, Vt = randomized_svd(strf.reshape(dims_tRF, -1), 3, random_state=0)
-        srf = Vt[0].reshape(*dims_sRF)
-        trf = U[:, 0]
+        dims_t_rf = dims[0]
+        dims_s_rf = dims[1:]
+        u, s, vt = randomized_svd(strf.reshape(dims_t_rf, -1), 3, random_state=0)
+        srf = vt[0].reshape(*dims_s_rf)
+        trf = u[:, 0]
 
     elif len(dims) == 2:
-        dims_tRF = dims[0]
-        dims_sRF = dims[1]
-        U, S, Vt = randomized_svd(strf.reshape(dims_tRF, dims_sRF), 3, random_state=0)
-        srf = Vt[0]
-        trf = U[:, 0]
+        dims_t_rf = dims[0]
+        dims_s_rf = dims[1]
+        u, s, vt = randomized_svd(strf.reshape(dims_t_rf, dims_s_rf), 3, random_state=0)
+        srf = vt[0]
+        trf = u[:, 0]
 
     else:
         raise NotImplementedError
 
+    explained_variance = s[0] ** 2 / np.sum(s ** 2)
+
     srf, trf = rescale_trf_srf(srf, trf, strf)
-    return srf, trf
+    return srf, trf, explained_variance
 
 
 def rescale_trf_srf(srf, trf, strf):

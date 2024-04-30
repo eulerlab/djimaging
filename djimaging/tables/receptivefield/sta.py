@@ -55,6 +55,11 @@ class FitDoG2DRF(receptivefield.FitDoG2DRFTemplate):
     split_rf_table = SplitRF
     stimulus_table = Stimulus
 
+@schema
+class TempRFProperties(receptivefield.TempRFPropertiesTemplate):
+    _max_dt_future = 0.1
+    split_rf_table = SplitRF
+    rf_table = STA
 """
 
 from abc import abstractmethod
@@ -161,8 +166,11 @@ class STATemplate(dj.Computed):
             "filter_dur_s_past", "filter_dur_s_future", "rf_method")
         store_x, store_y = (self.params_table() & key).fetch1("store_x", "store_y")
         frac_train, frac_dev, frac_test = (self.params_table() & key).fetch1("frac_train", "frac_dev", "frac_test")
-        noise_dt, trace, stim = (self.noise_traces_table() & key).fetch1('noise_dt', 'trace', 'stim')
         assert np.isclose(frac_train + frac_dev + frac_test, 1.0)
+
+        noise_dt, trace, stim_idxs = (self.noise_traces_table() & key).fetch1('noise_dt', 'trace', 'stim_idxs')
+        stim = (self.noise_traces_table.stimulus_table() & key).fetch1("stim_trace")
+        stim = stim[stim_idxs].astype(trace.dtype)
 
         rf, rf_time, rf_pred, x, y, shift = compute_linear_rf(
             dt=noise_dt, trace=trace, stim=stim, frac_train=frac_train, frac_dev=frac_dev, kind=rf_method,
@@ -170,8 +178,8 @@ class STATemplate(dj.Computed):
             threshold_pred=np.all(trace >= 0), batch_size_n=6_000_000, verbose=verbose)
 
         rf_key = deepcopy(key)
-        rf_key['rf'] = rf
-        rf_key['rf_time'] = rf_time
+        rf_key['rf'] = rf.astype(np.float32)
+        rf_key['rf_time'] = rf_time.astype(np.float32)
         rf_key['dt'] = noise_dt
         rf_key['shift'] = shift
         self.insert1(rf_key)
@@ -212,7 +220,7 @@ class STATemplate(dj.Computed):
         axs[-1].set(xlabel='Time')
         plt.tight_layout()
 
-    def plot1_frames(self, key=None):
+    def plot1_frames(self, key=None, downsample=1):
         key = get_primary_key(table=self, key=key)
 
         from matplotlib import pyplot as plt
@@ -220,18 +228,28 @@ class STATemplate(dj.Computed):
 
         rf, rf_time = (self & key).fetch1('rf', 'rf_time')
 
+        if downsample > 1:
+            rf = rf[::downsample]
+            rf_time = rf_time[::downsample]
+
         if rf.ndim == 2:
             fig, axs = plt.subplots(1, 1, figsize=(10, 3))
             axs.plot(rf_time, rf)
         elif rf.ndim == 3:
             n_rows = int(np.ceil(np.sqrt(rf.shape[0])))
             n_cols = int(np.ceil(rf.shape[0] / n_rows))
-            fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, n_rows * 3), squeeze=False, sharey='all',
-                                    sharex='all')
+            aspect_ratio = rf.shape[1] / rf.shape[2]
+            fig, axs = plt.subplots(
+                n_rows, n_cols, figsize=(np.minimum(n_cols * 3, 15), np.minimum(n_rows * 2 * aspect_ratio, 15)),
+                squeeze=False, sharey='all', sharex='all')
             axs = axs.flat
             vabsmax = np.max(np.abs(rf))
-            for ax, frame in zip(axs, rf):
+            for ax, frame, t in zip(axs, rf, rf_time):
                 plot_srf(frame, ax=ax, vabsmax=vabsmax)
+                ax.set_title(f"t={t:.3f}")
+            for ax in axs[len(rf):]:
+                ax.axis('off')
+            plt.tight_layout()
         else:
             raise NotImplementedError(rf.shape)
 

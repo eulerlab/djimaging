@@ -401,7 +401,7 @@ def plot_rf_summary(rf, quality_dict, model_dict, title=""):
 
     # Summarize RF
     if rf.ndim == 3:
-        srf, trf = split_strf(rf)
+        srf, trf, _ = split_strf(rf)
         vabsmax = np.max([np.max(np.abs(srf)), np.max(np.abs(rf))])
     elif rf.ndim == 1:
         trf = rf.flatten()
