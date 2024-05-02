@@ -99,16 +99,22 @@ class TracesTemplate(dj.Computed):
             if not include_artifacts and roi_data.get('incl_artifact', False):
                 continue
 
-            trace_key = key.copy()
-            trace_key['roi_id'] = roi_id
-            trace_key['trace'] = roi_data['trace']
-            trace_key['trace_t0'] = roi_data['trace_times'][0]
-            trace_key['trace_dt'] = frame_dt
-            trace_key['trace_valid'] = roi_data['trace_valid']
-            trace_key['trigger_valid'] = check_valid_triggers_rel_to_tracetime(
-                trace_valid=roi_data['trace_valid'], trace_times=roi_data['trace_times'], triggertimes=triggertimes)
+            try:
+                trace_key = key.copy()
+                trace_key['roi_id'] = roi_id
+                trace_key['trace'] = roi_data['trace']
+                trace_key['trace_t0'] = roi_data['trace_times'][0]
+                trace_key['trace_dt'] = frame_dt
+                trace_key['trace_valid'] = roi_data['trace_valid']
+                trace_key['trigger_valid'] = check_valid_triggers_rel_to_tracetime(
+                    trace_valid=roi_data['trace_valid'], trace_times=roi_data['trace_times'], triggertimes=triggertimes)
 
-            self.insert1(trace_key)
+                self.insert1(trace_key)
+            except Exception as e:
+                if roi_data['trace_valid']:
+                    raise e
+                else:
+                    print(f"Skipping invalid trace for {key} and roi_id={roi_id}")
 
     def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(table=self, key=key)

@@ -231,6 +231,11 @@ class PresentationTemplate(dj.Computed):
                              repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep, time_precision=trigger_precision)
         if compute_from_stack or from_raw_data:
             rec.compute_triggers()
+            if ntrigger_rep > 0.8 * rec.trigger_times.size:  # If expects triggers and way too few found repeat
+                while rec.trigger_times.size == 0:
+                    rec.trigger_threshold = 0.8 * rec.trigger_threshold
+                    rec.compute_triggers()
+
         pres_entry, scaninfo_entry, avg_entries = self.complete_keys(pres_key, rec)
 
         # Sanity checks
