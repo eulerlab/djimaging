@@ -52,6 +52,7 @@ class CascadeTracesParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
+        -> self.stimulus_table
         cas_params_id:    int       # unique param set id
         ---
         window_length:       int       # window length for SavGol filter in seconds
@@ -63,11 +64,19 @@ class CascadeTracesParamsTemplate(dj.Lookup):
         """
         return definition
 
-    def add_default(self, cas_params_id=1, window_length=60, poly_order=3,
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    def add_default(self, stim_names=None, cas_params_id=1, window_length=60, poly_order=3,
                     q_lower=2.5, q_upper=80., f_cutoff=None, fs_resample=None, skip_duplicates=False):
         assert q_lower < q_upper, f'q_lower={q_lower} must be smaller than q_upper={q_upper}'
         assert 0 <= q_lower <= 100, f'q_lower={q_lower} must be between 0 and 100'
         assert 0 <= q_upper <= 100, f'q_upper={q_upper} must be between 0 and 100'
+
+        if stim_names is None:
+            stim_names = (self.stimulus_table()).fetch('stim_name')
 
         key = dict(
             cas_params_id=cas_params_id,
@@ -77,8 +86,12 @@ class CascadeTracesParamsTemplate(dj.Lookup):
             fs_resample=fs_resample if fs_resample is not None else 0,
             f_cutoff=f_cutoff if f_cutoff is not None else 0,
         )
-        """Add default preprocess parameter to table"""
-        self.insert1(key, skip_duplicates=skip_duplicates)
+
+        for stim_name in stim_names:
+            """Add default preprocess parameter to table"""
+            stim_key = key.copy()
+            stim_key['stim_name'] = stim_name
+            self.insert1(stim_key, skip_duplicates=skip_duplicates)
 
 
 class CascadeTracesTemplate(dj.Computed):
@@ -132,7 +145,7 @@ class CascadeTracesTemplate(dj.Computed):
         stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
 
         if stim_start is not None:
-            if trace_t0 < stim_start:
+            if stim_start < trace_t0:
                 raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_t0:.1g}")
 
         pp_trace = compute_cascade_firing_rate(
