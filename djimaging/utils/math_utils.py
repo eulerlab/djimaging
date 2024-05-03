@@ -1,6 +1,23 @@
 import numpy as np
 
 
+def normalize(x, norm_kind, **kwargs):
+    if norm_kind == 'zscore':
+        return normalize_zscore(x)
+    elif norm_kind == 'zero_one':
+        return normalize_zero_one(x)
+    elif norm_kind == 'soft_zero_one':
+        return normalize_soft_zero_one(x, **kwargs)
+    elif norm_kind == 'amp_one':
+        return normalize_amp_one(x)
+    elif norm_kind == 'std_one':
+        return normalize_std_one(x)
+    elif norm_kind == 'none':
+        return x
+    else:
+        raise NotImplementedError(norm_kind)
+
+
 def normalize_zero_one(x):
     """Normalize array to be between zero and one"""
     x = np.asarray(x)
@@ -26,6 +43,12 @@ def normalize_amp_one(x):
     """Scale array such that the maximum absolute amplitude is one. Does not change zero."""
     x = np.asarray(x)
     return x / np.max(np.abs(x))
+
+
+def normalize_std_one(x):
+    """Scale array such that the maximum absolute amplitude is one standard deviation. Does not change zero."""
+    x = np.asarray(x)
+    return x / np.std(x)
 
 
 def normalize_amp_std(x):

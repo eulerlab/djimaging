@@ -17,8 +17,11 @@ def compute_gauss_srf_area(srf_params, pix_scale_x_um, pix_scale_y_um):
     return area, diameter
 
 
-def compute_surround_index(srf, srf_center):
-    return np.sum(srf - srf_center) / np.sum(np.abs(srf))
+def compute_surround_index(srf, srf_center=None, srf_surround=None):
+    if (srf_center is None) == (srf_surround is None):
+        raise ValueError('Provide either srf_center or srf_surround')
+    srf_surround = srf - srf_center if srf_surround is None else srf_surround
+    return np.sum(srf_surround) / np.sum(np.abs(srf))
 
 
 def compute_center_index(srf, srf_center):
