@@ -7,6 +7,9 @@ from djimaging.tables import response
 
 @schema
 class OsDsIndexes(response.OsDsIndexesTemplate):
+    _reduced_storage = True
+    _n_shuffles = 100
+
     stimulus_table = Stimulus
     snippets_table = Snippets
 """
@@ -16,17 +19,17 @@ from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
-from djimaging.utils.trace_utils import get_mean_dt
-
-from djimaging.utils import math_utils
 from matplotlib import pyplot as plt
 from scipy import stats
 
+from djimaging.utils import math_utils
 from djimaging.utils.dj_utils import get_primary_key
 
 
 class OsDsIndexesTemplate(dj.Computed):
     database = ""
+    _reduced_storage = True  # Don't save all intermediate results
+    _n_shuffles = 100  # Number of shuffles for null distribution
 
     @property
     def definition(self):
@@ -37,21 +40,26 @@ class OsDsIndexesTemplate(dj.Computed):
         ---
         ds_index:   float     # direction selectivity index as resulting vector length (absolute of projection on complex exponential)
         ds_pvalue:  float     # p-value indicating the percentile of the vector length in null distribution
-        ds_null:    blob      # null distribution of DSIs
         pref_dir:   float     # preferred direction
         os_index:   float     # orientation selectivity index in analogy to ds_index
         os_pvalue:  float     # analogous to ds_pvalue for orientation tuning
-        os_null:    blob      # null distribution of OSIs
         pref_or:    float     # preferred orientation
         on_off:     float     # on off index based on time kernel
         d_qi:       float     # quality index for moving bar response
-        time_component: blob
+        dir_component:     blob
+        time_component:    blob
         time_component_dt: float
-        dir_component:  blob
-        surrogate_v:    blob    #computed by projecting on time
-        surrogate_dsi:  float   #DSI of surrogate v 
-        avg_sorted_resp:    longblob    # response matrix, averaged across reps
+        surrogate_v:       blob    # computed by projecting on time
+        surrogate_dsi:     float   # DSI of surrogate v 
         """
+
+        if not self._reduced_storage:
+            definition += """
+        ds_null:    blob      # null distribution of DSIs
+        os_null:    blob      # null distribution of OSIs
+        avg_sorted_resp: longblob
+        """
+
         return definition
 
     @property
@@ -79,17 +87,24 @@ class OsDsIndexesTemplate(dj.Computed):
 
         dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
             on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses = \
-            compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=snippets_dt)
+            compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=snippets_dt, n_shuffles=self._n_shuffles)
 
-        self.insert1(dict(key,
-                          ds_index=dsi, ds_pvalue=p_dsi,
-                          ds_null=null_dist_dsi, pref_dir=pref_dir,
-                          os_index=osi, os_pvalue=p_osi,
-                          os_null=null_dist_osi, pref_or=pref_or,
-                          on_off=on_off, d_qi=d_qi,
-                          time_component=time_component, dir_component=dir_component,
-                          surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
-                          avg_sorted_resp=avg_sorted_responses, time_component_dt=snippets_dt))
+        entry = dict(
+            key,
+            ds_index=dsi, ds_pvalue=p_dsi, pref_dir=pref_dir,
+            os_index=osi, os_pvalue=p_osi, pref_or=pref_or,
+            on_off=on_off, d_qi=d_qi,
+            time_component=time_component.astype(np.float32), time_component_dt=snippets_dt,
+            dir_component=dir_component.astype(np.float32),
+            surrogate_v=surrogate_v.astype(np.float32), surrogate_dsi=dsi_s,
+        )
+
+        if not self._reduced_storage:
+            entry['ds_null'] = null_dist_dsi.astype(np.float32)
+            entry['os_null'] = null_dist_osi.astype(np.float32)
+            entry['avg_sorted_resp'] = avg_sorted_responses.astype(np.float32)
+
+        self.insert1(entry)
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
@@ -335,7 +350,7 @@ def compute_mb_qi(snippets, dir_order):
     return d_qi
 
 
-def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float):
+def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n_shuffles: int = 100):
     assert snippets.ndim == 2
     assert np.asarray(dir_order).ndim == 1
 
@@ -357,9 +372,9 @@ def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float):
 
     dsi_s, pref_dir_s = get_si(surrogate_v, sorted_directions, 1)
     osi_s, pref_or_s = get_si(surrogate_v, sorted_directions, 2)
-    null_dist_dsi = compute_null_dist(np.transpose(projected), sorted_directions, 1)
+    null_dist_dsi = compute_null_dist(np.transpose(projected), sorted_directions, 1, iters=n_shuffles)
     p_dsi = np.mean(null_dist_dsi > dsi_s)
-    null_dist_osi = compute_null_dist(np.transpose(projected), sorted_directions, 2)
+    null_dist_osi = compute_null_dist(np.transpose(projected), sorted_directions, 2, iters=n_shuffles)
     p_osi = np.mean(null_dist_osi > osi_s)
     d_qi = quality_index_ds(sorted_responses)
     on_off = get_on_off_index(time_component, dt=dt)

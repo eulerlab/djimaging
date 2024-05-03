@@ -68,7 +68,7 @@ class FitGauss2DRFTemplate(dj.Computed):
 
         # Save
         fit_key = deepcopy(key)
-        fit_key['srf_fit'] = srf_fit
+        fit_key['srf_fit'] = srf_fit.astype(np.float32)
         fit_key['srf_params'] = srf_params
         fit_key['rf_cdia_um'] = diameter
         fit_key['rf_area_um2'] = area
@@ -185,11 +185,11 @@ class FitDoG2DRFTemplate(dj.Computed):
 
         # Save
         fit_key = deepcopy(key)
-        fit_key['srf_fit'] = srf_fit
-        fit_key['srf_center_fit'] = srf_center_fit
-        fit_key['srf_surround_fit'] = srf_surround_fit
+        fit_key['srf_fit'] = srf_fit.astype(np.float32)
+        fit_key['srf_center_fit'] = srf_center_fit.astype(np.float32)
+        fit_key['srf_surround_fit'] = srf_surround_fit.astype(np.float32)
         fit_key['srf_params'] = srf_params
-        fit_key['srf_eff_center'] = srf_eff_center
+        fit_key['srf_eff_center'] = srf_eff_center.astype(np.float32)
         fit_key['srf_eff_center_params'] = srf_gauss_params
         fit_key['rf_cdia_um'] = diameter
         fit_key['rf_area_um2'] = area

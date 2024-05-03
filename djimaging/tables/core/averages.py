@@ -71,11 +71,11 @@ class AveragesTemplate(dj.Computed):
 
         self.insert1(dict(
             **key,
-            average=average,
-            average_norm=average_norm,
+            average=average.astype(np.float32),
+            average_norm=average_norm.astype(np.float32),
             average_t0=average_times[0],
             average_dt=snippets_dt,
-            triggertimes_rel=triggertimes_rel,
+            triggertimes_rel=triggertimes_rel.astype(np.float32),
         ))
 
     def plot1(self, key=None, xlim=None):

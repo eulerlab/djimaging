@@ -1,16 +1,14 @@
-import warnings
 from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
-from djimaging.utils import filter_utils, math_utils, plot_utils, trace_utils
 from matplotlib import pyplot as plt
 from scipy import signal
 
+from djimaging.utils import filter_utils, math_utils, plot_utils, trace_utils
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.filter_utils import lowpass_filter_trace
 from djimaging.utils.plot_utils import plot_trace_and_trigger
-from djimaging.utils.trace_utils import get_mean_dt
 
 
 class PreprocessParamsTemplate(dj.Lookup):
@@ -118,8 +116,13 @@ class PreprocessTracesTemplate(dj.Computed):
             subtract_baseline=subtract_baseline, standardize=standardize, non_negative=non_negative,
             f_cutoff=f_cutoff, fs_resample=fs_resample, baseline_max_dt=self._baseline_max_dt)
 
-        self.insert1(dict(key, pp_trace_t0=trace_t0, pp_trace_dt=pp_trace_dt,
-                          pp_trace=pp_trace, smoothed_trace=smoothed_trace))
+        self.insert1(dict(
+            key,
+            pp_trace_t0=trace_t0,
+            pp_trace_dt=pp_trace_dt,
+            pp_trace=pp_trace.astype(np.float32),
+            smoothed_trace=smoothed_trace.astype(np.float32)
+        ))
 
     def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(self, key)

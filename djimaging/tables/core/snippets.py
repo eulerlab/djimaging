@@ -100,10 +100,10 @@ class SnippetsTemplate(dj.Computed):
 
         self.insert1(dict(
             **key,
-            snippets=snippets,
+            snippets=snippets.astype(np.float32),
             snippets_t0=snippets_times[0, :],
             snippets_dt=pp_trace_dt,
-            triggertimes_snippets=triggertimes_snippets,
+            triggertimes_snippets=triggertimes_snippets.astype(np.float32),
             droppedlastrep_flag=int(droppedlastrep_flag),
         ))
 

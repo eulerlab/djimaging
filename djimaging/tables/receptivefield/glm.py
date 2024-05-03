@@ -202,7 +202,7 @@ class RfGlmTemplate(dj.Computed):
             plt.show()
 
         rf_key = deepcopy(key)
-        rf_key['rf'] = rf
+        rf_key['rf'] = rf.astype(np.float32)
         rf_key['dt'] = model_dict.pop('dt')
         rf_key['model_dict'] = model_dict
         rf_key['quality_dict'] = quality_dict

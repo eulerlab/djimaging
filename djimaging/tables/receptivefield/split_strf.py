@@ -112,8 +112,8 @@ class SplitRFTemplate(dj.Computed):
 
         # Save
         rf_key = deepcopy(key)
-        rf_key['srf'] = srf
-        rf_key['trf'] = trf
+        rf_key['srf'] = srf.astype(np.float32)
+        rf_key['trf'] = trf.astype(np.float32)
         rf_key['polarity'] = polarity
         rf_key['trf_peak_idxs'] = peak_idxs
         rf_key['split_qidx'] = split_qidx

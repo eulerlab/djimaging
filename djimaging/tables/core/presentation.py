@@ -275,7 +275,7 @@ class PresentationTemplate(dj.Computed):
         pres_entry["pres_data_file"] = rec.filepath
 
         pres_entry["trigger_valid"] = int(rec.trigger_valid)
-        pres_entry["triggertimes"] = rec.trigger_times
+        pres_entry["triggertimes"] = rec.trigger_times.astype(np.float32)
 
         pres_entry["absx"] = rec.pos_x_um
         pres_entry["absy"] = rec.pos_y_um
@@ -296,7 +296,7 @@ class PresentationTemplate(dj.Computed):
         for name, stack in rec.ch_stacks.items():
             avg_entry = deepcopy(base_key)
             avg_entry["ch_name"] = name
-            avg_entry["ch_average"] = np.median(stack, 2)
+            avg_entry["ch_average"] = np.median(stack, 2).astype(np.float32)
             avg_entries.append(avg_entry)
 
         # extract params for scaninfo
