@@ -152,7 +152,7 @@ class CascadeTracesTemplate(dj.Computed):
             trace, trace_dt=trace_dt, window_len_seconds=window_len_seconds, poly_order=poly_order,
             q_lower=q_lower, q_upper=q_upper, f_cutoff=f_cutoff)
 
-        self.insert1(dict(key, pp_trace=pp_trace, pp_trace_t0=trace_t0, pp_trace_dt=trace_dt))
+        self.insert1(dict(key, pp_trace=pp_trace.astype(np.float32), pp_trace_t0=trace_t0, pp_trace_dt=trace_dt))
 
     def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(self, key)
@@ -326,10 +326,15 @@ class CascadeSpikesTemplate(dj.Computed):
         model_name = (self.cascade_params_table & key).fetch1('model_name')
         pp_traces, roi_ids = (self.cascadetraces_table & key).fetch('pp_trace', 'roi_id')
 
-        spike_probs = cascade.predict(model_name, np.stack(pp_traces), verbosity=1, model_folder=cascade_models_path)
+        if len(pp_traces) == 0:
+            return
+        elif len(pp_traces) > 1:
+            pp_traces = np.stack(pp_traces)
+
+        spike_probs = cascade.predict(model_name, pp_traces, verbosity=1, model_folder=cascade_models_path)
 
         for spike_prob, roi_id in zip(spike_probs, roi_ids):
-            self.insert1(dict(key, spike_prob=spike_prob, roi_id=roi_id))
+            self.insert1(dict(key, spike_prob=spike_prob.astype(np.float32), roi_id=roi_id))
 
     def plot1(self, key=None, xlim=None):
         key = get_primary_key(self, key)
