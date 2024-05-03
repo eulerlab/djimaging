@@ -459,7 +459,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                 f"training_data_hash={tdh}\n"
                 f"classifier_params_hash={cph}\n"
                 f"preprocess_id={pid}\n"
-                f"{np.sum(celltypes == -1)} were not classified", loc='left')
+                f"{np.sum(celltypes == -1)}={np.mean(celltypes == -1):.0%} were not classified", loc='left')
 
         plt.tight_layout()
         plt.show()

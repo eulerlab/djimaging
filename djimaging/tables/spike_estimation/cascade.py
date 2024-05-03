@@ -282,7 +282,6 @@ class CascadeSpikesTemplate(dj.Computed):
             processes=1,
             make_kwargs=None,
     ):
-        assert make_kwargs is None, "make_kwargs is not supported for this table"
         if len(restrictions) == 0:
             cascade_params_ids = self.cascade_params_table.fetch('cascade_params_id')
         else:
@@ -306,6 +305,17 @@ class CascadeSpikesTemplate(dj.Computed):
 
             checks.check_packages()
 
+            if make_kwargs is None:
+                make_kwargs = dict()
+            else:
+                if 'cascade' in make_kwargs:
+                    raise ValueError("cascade cannot be passed as make_kwargs.")
+                if 'cascade_models_path' in make_kwargs:
+                    raise ValueError("cascade_models_path cannot be passed as make_kwargs.")
+
+            make_kwargs['cascade'] = cascade
+            make_kwargs['cascade_models_path'] = os.path.join(cascade_folder, cascade_model_subfolder)
+
             super().populate(
                 *restrictions,
                 dict(cascade_params_id=cascade_params_id),
@@ -317,12 +327,10 @@ class CascadeSpikesTemplate(dj.Computed):
                 max_calls=max_calls,
                 display_progress=display_progress,
                 processes=processes,
-                make_kwargs=dict(
-                    cascade_models_path=os.path.join(cascade_folder, cascade_model_subfolder),
-                    cascade=cascade),
+                make_kwargs=make_kwargs,
             )
 
-    def make(self, key, cascade_models_path, cascade):
+    def make(self, key, cascade_models_path, cascade, verboselvl=0):
         model_name = (self.cascade_params_table & key).fetch1('model_name')
         pp_traces, roi_ids = (self.cascadetraces_table & key).fetch('pp_trace', 'roi_id')
 
@@ -331,7 +339,7 @@ class CascadeSpikesTemplate(dj.Computed):
         elif len(pp_traces) > 1:
             pp_traces = np.stack(pp_traces)
 
-        spike_probs = cascade.predict(model_name, pp_traces, verbosity=1, model_folder=cascade_models_path)
+        spike_probs = cascade.predict(model_name, pp_traces, verbosity=verboselvl, model_folder=cascade_models_path)
 
         for spike_prob, roi_id in zip(spike_probs, roi_ids):
             self.insert1(dict(key, spike_prob=spike_prob.astype(np.float32), roi_id=roi_id))
