@@ -20,26 +20,42 @@ def get_mean_dt(tracetime, rtol_error=2.0, rtol_warning=1.0) -> (float, float):
     return dt, dt_rel_error
 
 
-def align_stim_to_trace(stim, stimtime, trace, tracetime):
+def align_stim_to_trace(stim: np.ndarray, stimtime: np.ndarray, trace: np.ndarray, tracetime: np.ndarray,
+                        stim_lag_atol: float = 0.003):
     """Align stimulus and trace.
-     Modified from RFEst"""
-    dt, dt_rel_error = get_mean_dt(tracetime, rtol_error=np.inf, rtol_warning=0.5)
+    Modified from RFEst.
 
-    stim_end = stimtime[-1] + np.max(np.diff(stimtime))
+    :param stim: Stimulus indexes or stimulus values
+    :param stimtime: Stimulus times in seconds
+    :param trace: Trace values
+    :param tracetime: Trace times in seconds
+    :param stim_lag_atol: Absolute tolerance for stimulus lag in seconds, if the trigger is not exactly aligned
 
-    valid_idxs = (tracetime >= stimtime[0]) & (tracetime < stim_end)
+    :return: aligned_stim, aligned_trace, dt_trace, t0, dt_rel_error
+    """
+    dt_trace, dt_rel_error = get_mean_dt(tracetime, rtol_error=np.inf, rtol_warning=0.5)
+    dt_stim, _ = get_mean_dt(stimtime, rtol_error=np.inf, rtol_warning=0.5)
+
+    if stim_lag_atol < 0:
+        raise ValueError(stim_lag_atol)
+    if stim_lag_atol >= dt_stim:
+        raise ValueError(stim_lag_atol)
+
+    stimtime = np.append(stimtime, stimtime[-1] + dt_stim) - stim_lag_atol
+
+    valid_idxs = (tracetime >= stimtime[0]) & (tracetime < stimtime[-1])
     r_tracetime, aligned_trace = filter_utils.resample_trace(
-        tracetime=tracetime[valid_idxs], trace=trace[valid_idxs], dt=dt)
-    t0 = r_tracetime[0]
+        tracetime=tracetime[valid_idxs], trace=trace[valid_idxs], dt=dt_trace)
 
     num_repeats = np.array([np.sum((r_tracetime >= t_a) & (r_tracetime < t_b))
-                            for t_a, t_b in
-                            zip(stimtime, np.append(stimtime[1:], r_tracetime[-1] + 1.))])
+                            for t_a, t_b in zip(stimtime[:-1], stimtime[1:])])
     aligned_stim = np.repeat(stim, num_repeats, axis=0)
 
     assert aligned_stim.shape[0] == aligned_trace.shape[0], (aligned_stim.shape[0], aligned_trace.shape[0])
 
-    return aligned_stim, aligned_trace, dt, t0, dt_rel_error
+    t0 = r_tracetime[0]
+
+    return aligned_stim, aligned_trace, dt_trace, t0, dt_rel_error
 
 
 def align_trace_to_stim(stim, stimtime, trace, tracetime):
