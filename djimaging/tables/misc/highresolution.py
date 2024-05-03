@@ -107,7 +107,7 @@ class HighResTemplate(dj.Computed):
         for avg_key in avg_entries:
             (self.StackAverages & key).insert1(avg_key, allow_direct_insert=True)
 
-    def plot1(self, key=None, figsize=(8, 4)):
+    def plot1(self, key=None, figsize=(8, 4), gamma=0.7):
         key = get_primary_key(table=self, key=key)
 
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
@@ -116,7 +116,7 @@ class HighResTemplate(dj.Computed):
             alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
-        plot_field(main_ch_average, alt_ch_average, roi_mask=None, title=key, figsize=figsize)
+        plot_field(main_ch_average, alt_ch_average, roi_mask=None, title=key, figsize=figsize, gamma=gamma)
 
     @staticmethod
     def complete_keys(base_key, rec) -> (dict, list):

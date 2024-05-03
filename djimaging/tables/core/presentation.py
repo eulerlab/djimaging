@@ -257,7 +257,7 @@ class PresentationTemplate(dj.Computed):
         for avg_entry in avg_entries:
             self.StackAverages().insert1(avg_entry, allow_direct_insert=True)
 
-    def plot1(self, key=None):
+    def plot1(self, key=None, gamma=0.7):
         key = get_primary_key(table=self, key=key)
         npixartifact = (self.field_table & key).fetch1('npixartifact')
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
@@ -266,7 +266,7 @@ class PresentationTemplate(dj.Computed):
             alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
-        plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4))
+        plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4), gamma=gamma)
 
     @staticmethod
     def complete_keys(base_key, rec) -> (dict, dict, list):

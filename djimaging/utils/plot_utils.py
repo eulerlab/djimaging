@@ -1,14 +1,26 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.utils.math_utils import normalize_zero_one
+
 
 def plot_field(main_ch_average, alt_ch_average, roi_mask=None, roi_ch_average=None, npixartifact=0,
-               title='', figsize=(20, 4), highlight_roi=None, fig=None, axs=None):
+               title='', figsize=(20, 4), highlight_roi=None, fig=None, axs=None, gamma=1.):
     if roi_mask is not None and roi_mask.size == 0:
         roi_mask = None
 
     if roi_ch_average is None:
         roi_ch_average = main_ch_average
+
+    # normalize
+    main_ch_average = normalize_zero_one(main_ch_average)
+    alt_ch_average = normalize_zero_one(alt_ch_average)
+    roi_ch_average = normalize_zero_one(roi_ch_average)
+
+    # gamma correction
+    main_ch_average = main_ch_average ** gamma
+    alt_ch_average = alt_ch_average ** gamma
+    roi_ch_average = roi_ch_average ** gamma
 
     if (fig is None) or (axs is None):
         fig, axs = plt.subplots(1, 2 if roi_mask is None else 4, figsize=figsize, sharex='all', sharey='all')

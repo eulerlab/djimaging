@@ -206,7 +206,7 @@ class FieldTemplate(dj.Computed):
         for avg_entry in avg_entries:
             self.StackAverages().insert1(avg_entry, allow_direct_insert=True)
 
-    def plot1(self, key=None):
+    def plot1(self, key=None, gamma=0.7):
         key = get_primary_key(table=self, key=key)
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
         main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
@@ -217,7 +217,8 @@ class FieldTemplate(dj.Computed):
 
         npixartifact = (self & key).fetch1('npixartifact')
 
-        plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4))
+        plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4),
+                   gamma=gamma)
 
     @staticmethod
     def load_first_file_wo_error(filepaths, setupid, date, allow_user_input=False):
