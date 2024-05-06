@@ -231,10 +231,19 @@ class PresentationTemplate(dj.Computed):
                              repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep, time_precision=trigger_precision)
         if compute_from_stack or from_raw_data:
             rec.compute_triggers()
-            if ntrigger_rep > 0.8 * rec.trigger_times.size:  # If expects triggers and way too few found repeat
-                while rec.trigger_times.size == 0:
-                    rec.trigger_threshold = 0.8 * rec.trigger_threshold
-                    rec.compute_triggers()
+            i = 0
+            # If expects triggers and way too few found repeat
+            while ntrigger_rep > 0.8 * rec.trigger_times.size and i < 5:
+                rec.trigger_threshold = 0.8 * rec.trigger_threshold
+                rec.compute_triggers()
+                i += 1
+
+            if ntrigger_rep > 0.8 * rec.trigger_times.size:
+                raise ValueError(f"Found {rec.trigger_times.size} triggers, expected {ntrigger_rep} triggers. \n"
+                                 f"Tried reducing trigger threshold but did not work. key=\n{pres_key}")
+
+            if i > 0 and verboselvl > 0:
+                print(f"Reduced trigger threshold to {rec.trigger_threshold:.3g} for {filepath}")
 
         pres_entry, scaninfo_entry, avg_entries = self.complete_keys(pres_key, rec)
 

@@ -145,7 +145,7 @@ class FieldTemplate(dj.Computed):
             restr_headers: Optional[list] = None):
 
         if verboselvl > 5:
-            print("add_experiment_fields")
+            print(f"add_experiment_fields for key =\n{exp_key}")
 
         if restr_headers is not None:
             header_path = (self.experiment_table & exp_key).fetch1('header_path')

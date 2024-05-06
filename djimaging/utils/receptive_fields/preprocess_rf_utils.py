@@ -19,7 +19,7 @@ def prepare_noise_data(stim, triggertimes, trace, tracetime, ntrigger_per_frame=
 
     if ntrigger_per_frame > 1:
         stimtime = np.repeat(triggertimes, ntrigger_per_frame)
-        trigger_dt, _ = get_mean_dt(triggertimes)
+        trigger_dt, _ = get_mean_dt(triggertimes, rtol_error=np.inf, rtol_warning=0.5)
         stimtime += np.tile(np.arange(ntrigger_per_frame) * trigger_dt / ntrigger_per_frame,
                             stim.shape[0] // ntrigger_per_frame)
     else:

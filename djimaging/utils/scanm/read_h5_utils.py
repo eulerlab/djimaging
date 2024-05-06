@@ -113,14 +113,15 @@ def extract_triggers(h5_file_open, check_triggervalues=False, ignore_not_found=T
     else:
         raise ValueError('Multiple triggertimes found')
 
-    if "Tracetimes0" in h5_file_open.keys():  # Correct if triggertimes are in frames and not in time (old version)
-        traces_times = np.asarray(h5_file_open["Tracetimes0"][()])
-        correct_triggertimes = triggertimes[-1] > 2 * np.max(traces_times)
-    else:
-        correct_triggertimes = triggertimes[0] > 250 and triggertimes[-1] > 1000
+    if triggertimes.size > 0:
+        if "Tracetimes0" in h5_file_open.keys():  # Correct if triggertimes are in frames and not in time (old version)
+            traces_times = np.asarray(h5_file_open["Tracetimes0"][()])
+            correct_triggertimes = triggertimes[-1] > 2 * np.max(traces_times)
+        else:
+            correct_triggertimes = triggertimes[0] > 250 and triggertimes[-1] > 1000
 
-    if correct_triggertimes:
-        triggertimes = triggertimes / 500.
+        if correct_triggertimes:
+            triggertimes = triggertimes / 500.
 
     key_triggervalues = [k for k in h5_file_open.keys() if k.lower() == 'triggervalues']
 

@@ -1,7 +1,47 @@
 import os
+import warnings
 from pathlib import Path
 import pandas as pd
 import numpy as np
+
+
+def get_file_info_row(folder, filename, loc_mapper, od_aliases, hr_aliases, ol_aliases, rm_aliases):
+    file_info = str(Path(filename).with_suffix('')).split('_')
+    file_info_dict = {name: get_file_info_at_loc(file_info, loc) for name, loc in loc_mapper.items()}
+    # Field or Stim are valid locations to place special field info like optic-disk
+    if is_file_info_alias_match(file_info_dict, aliases=od_aliases, key_list=["region", "field", "stimulus"]):
+        kind = 'od'
+        mask_order = len(rm_aliases) + 1
+    elif is_file_info_alias_match(file_info_dict, aliases=hr_aliases, key_list=["region", "field", "stimulus"]):
+        kind = 'hr'
+        mask_order = len(rm_aliases) + 1
+    elif is_file_info_alias_match(
+            file_info_dict, aliases=ol_aliases, key_list=["region", "field", "stimulus"], allow_num_suffix=True):
+        kind = 'outline'
+        mask_order = len(rm_aliases) + 1
+    else:
+        if file_info_dict.get('stimulus', None) is not None:
+            kind = 'response'
+            is_alias_match = [file_info_dict["stimulus"].lower() == rm_alias for rm_alias in rm_aliases]
+            mask_order = np.argmax(is_alias_match) if np.any(is_alias_match) else len(rm_aliases)
+        else:
+            raise ValueError(f"File {filename} does not contain a valid stimulus field: {file_info_dict}")
+
+    def get_cond(i):
+        cond = file_info_dict.get(f'cond{i + 1}', 'none')
+        if cond is None:
+            cond = 'none'
+        return cond.lower()
+
+    # Add penalty for non-control experiments
+    mask_order = float(mask_order) + sum([0. if get_cond(i) in ['control', 'none', 'c1', 'contr', 'cntr'] else 0.1
+                                          for i in range(3)])
+
+    file_info_dict["kind"] = kind
+    file_info_dict["filepath"] = os.path.join(folder, filename)
+    file_info_dict["mask_order"] = mask_order
+
+    return file_info_dict
 
 
 def get_file_info_df(folder, user_dict, from_raw_data):
@@ -18,37 +58,12 @@ def get_file_info_df(folder, user_dict, from_raw_data):
     # Extract file information
     file_info_dicts = []
     for filename in filenames:
-        file_info = str(Path(filename).with_suffix('')).split('_')
-        file_info_dict = {name: get_file_info_at_loc(file_info, loc) for name, loc in loc_mapper.items()}
-        # Field or Stim are valid locations to place special field info like optic-disk
-        if is_file_info_alias_match(file_info_dict, aliases=od_aliases, key_list=["region", "field", "stimulus"]):
-            kind = 'od'
-            mask_order = len(rm_aliases) + 1
-        elif is_file_info_alias_match(file_info_dict, aliases=hr_aliases, key_list=["region", "field", "stimulus"]):
-            kind = 'hr'
-            mask_order = len(rm_aliases) + 1
-        elif is_file_info_alias_match(
-                file_info_dict, aliases=ol_aliases, key_list=["region", "field", "stimulus"], allow_num_suffix=True):
-            kind = 'outline'
-            mask_order = len(rm_aliases) + 1
-        else:
-            kind = 'response'
-            is_alias_match = [file_info_dict["stimulus"].lower() == rm_alias for rm_alias in rm_aliases]
-            mask_order = np.argmax(is_alias_match) if np.any(is_alias_match) else len(rm_aliases)
-
-        def get_cond(i):
-            cond = file_info_dict.get(f'cond{i + 1}', 'none')
-            if cond is None:
-                cond = 'none'
-            return cond.lower()
-
-        # Add penalty for non-control experiments
-        mask_order = float(mask_order) + sum([0. if get_cond(i) in ['control', 'none', 'c1', 'contr', 'cntr'] else 0.1
-                                              for i in range(3)])
-
-        file_info_dict["kind"] = kind
-        file_info_dict["filepath"] = os.path.join(folder, filename)
-        file_info_dict["mask_order"] = mask_order
+        try:
+            file_info_dict = get_file_info_row(
+                folder, filename, loc_mapper, od_aliases, hr_aliases, ol_aliases, rm_aliases)
+        except Exception as e:
+            warnings.warn(f"Error in file {filename}: {e}")
+            continue
 
         file_info_dicts.append(file_info_dict)
 

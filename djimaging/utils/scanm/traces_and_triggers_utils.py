@@ -30,7 +30,7 @@ def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset
     # If trigger is on from the beginning it will be reset the first time a real trigger occurs.
     # In this case we miss the onset of the trigger.
     # In this case we have to derive the trigger-length from the other triggers.
-    if stack[0] >= threshold:
+    if stack[0] >= threshold and len(trigger_idxs) > 0:
         first_trigger_end_idx = np.argmax(stack < threshold)
         mean_trigger_dur = int(np.median([np.argmax(stack[trigger_idx + 1:] < threshold)
                                           for trigger_idx in trigger_idxs]))
