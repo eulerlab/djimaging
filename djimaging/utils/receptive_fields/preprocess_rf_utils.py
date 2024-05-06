@@ -62,6 +62,7 @@ def prepare_noise_data(stim, triggertimes, trace, tracetime, ntrigger_per_frame=
         trace = gaussian_filter(trace, sigma=post_blur_sigma_s / dt, mode='nearest')
 
     trace = trace / np.std(trace)
+    trace = np.clip(trace, -7, 7)  # Clip extreme outliers
 
     if stim.ndim > 1:  # Otherwise assume stimulus indexes have been passed
         if 'bool' in str(stim.dtype) or set(np.unique(stim).astype(float)) == {0., 1.}:

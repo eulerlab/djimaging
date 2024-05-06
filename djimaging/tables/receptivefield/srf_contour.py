@@ -1,19 +1,46 @@
+"""
+Estimate contours of receptive fields and compute metrics
+
+Example usage:
+
+from djimaging.tables import receptivefield
+
+@schema
+class RfContoursParams(receptivefield.RfContoursParamsTemplate):
+    pass
+
+
+@schema
+class RfContours(receptivefield.RfContoursTemplate):
+    split_rf_table = SplitRF
+    rf_contours_params_table = RfContoursParams
+    stimulus_table = Stimulus
+
+
+@schema
+class RfContourMetrics(receptivefield.RfContourMetricsTemplate):
+    _d_inner = 20  # Border around sRF center in um
+    _d_outer = 120  # Border around sRF center in um
+
+    rf_contour_table = RfContours
+"""
+
 from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.math_utils import normalize
+from djimaging.utils.plot_utils import plot_srf, set_long_title
 from djimaging.utils.receptive_fields.spatial_rf_utils import compute_center_index, compute_surround_index
 from djimaging.utils.receptive_fields.split_rf_utils import smooth_rf, resize_srf
 from djimaging.utils.receptive_fields.srf_contour_utils import (
     compute_contour, compute_irregular_index, get_center_and_surround_masks, plot_center_and_surround_masks)
-from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.math_utils import normalize
-from djimaging.utils.plot_utils import plot_srf, set_long_title
 
 
-class RFContoursParamsTemplate(dj.Lookup):
+class RfContoursParamsTemplate(dj.Lookup):
     database = ""
 
     @property
@@ -43,7 +70,7 @@ class RFContoursParamsTemplate(dj.Lookup):
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
-class RFContoursTemplate(dj.Computed):
+class RfContoursTemplate(dj.Computed):
     database = ""
 
     @property
@@ -105,8 +132,11 @@ class RFContoursTemplate(dj.Computed):
         if not np.isclose(pixel_size_x_um, pixel_size_y_um):
             raise ValueError("Pixel size is not isotropic")
 
+        polarity = 1 if np.abs(np.max(srf)) >= np.abs(np.min(srf)) else -1
+
         srf_contours, srf_contours_um2, srf_contours_cdia_um = _compute_contours(
-            srf, pixel_size_x_um, norm_kind, blur_std, blur_npix, upsample_srf_scale, levels, plot=plot, title=str(key))
+            srf, pixel_size_x_um, norm_kind, blur_std, blur_npix, upsample_srf_scale,
+            [lvl * polarity for lvl in levels], plot=plot, title=str(key))
 
         return srf_contours, srf_contours_um2, srf_contours_cdia_um
 
@@ -200,7 +230,7 @@ def _compute_contours(srf, pixel_size, norm_kind, blur_std, blur_npix, upsample_
     return srf_contours, srf_contours_um2, srf_contours_cdia_um
 
 
-class RFContourMetricsTemplate(dj.Computed):
+class RfContourMetricsTemplate(dj.Computed):
     database = ""
     _d_inner = 20  # Border around sRF center in um
     _d_outer = 120  # Border around sRF center in um
