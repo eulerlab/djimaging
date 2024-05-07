@@ -283,7 +283,10 @@ class RfContourMetricsTemplate(dj.Computed):
         if not np.isclose(pixel_size_x_um, pixel_size_y_um):
             raise ValueError("Pixel size is not isotropic")
 
-        srf_contour = srf_contours[levels[0]][0]
+        base_level = levels[0]
+        if -base_level in srf_contours:
+            base_level = -base_level
+        srf_contour = srf_contours[base_level][0]
 
         mask_center, mask_surround, mask_full_surround = get_center_and_surround_masks(
             cntr=srf_contour, srf_shape=srf.shape, pixelsize=pixel_size_x_um,
