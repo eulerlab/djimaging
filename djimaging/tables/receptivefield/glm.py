@@ -217,6 +217,52 @@ class RfGlmTemplate(dj.Computed):
         plt.show()
 
 
+class RfGlmQualityDictTemplate(dj.Computed):
+    database = ""
+
+    @property
+    def definition(self):
+        definition = '''
+            -> self.glm_table
+            ---
+            corrcoef_train = NULL : float
+            corrcoef_test = NULL : float
+            corrcoef_dev = NULL : float
+            mse_train = NULL : float
+            mse_dev = NULL : float
+            mse_test = NULL : float
+            '''
+        return definition
+
+    @property
+    def key_source(self):
+        try:
+            return self.glm_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
+    @property
+    @abstractmethod
+    def glm_table(self):
+        pass
+
+    def make(self, key):
+        quality_dict = (self.glm_table & key).fetch1('quality_dict')
+        self.insert1(dict(
+            **key,
+            corrcoef_train=quality_dict.get('corrcoef_train', np.nan),
+            corrcoef_dev=quality_dict.get('corrcoef_dev', np.nan),
+            corrcoef_test=quality_dict.get('corrcoef_test', np.nan),
+            mse_train=quality_dict.get('mse_train', np.nan),
+            mse_dev=quality_dict.get('mse_dev', np.nan),
+            mse_test=quality_dict.get('mse_test', np.nan),
+        ))
+
+    def plot(self, *restrictions):
+        import seaborn as sns
+        df_q = (self & restrictions).fetch(format='frame')
+
+
 class RfGlmQualityParamsTemplate(dj.Lookup):
     database = ""
 

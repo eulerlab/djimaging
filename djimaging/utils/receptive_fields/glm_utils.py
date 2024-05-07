@@ -327,7 +327,7 @@ class ReceptiveFieldGLM:
                 early_stopping = False
 
             if self.verbose > 0:
-                print(return_model)
+                print("return_model: ", return_model)
 
             model.fit(
                 y=y, metric=self.metric, num_iters=self.max_iters, min_iters=self.min_iters, step_size=self.step_size,
@@ -494,7 +494,15 @@ def plot_rf_summary(rf, quality_dict, model_dict, title=""):
         title_kw = dict()
         axs[7].axis('off')
 
-    for i, (y_type, ax) in enumerate(zip(['train', 'dev', 'test'], axs_big)):
+    y_types = []
+    if plot_y_train:
+        y_types.append('train')
+    if plot_y_dev:
+        y_types.append('dev')
+    if plot_y_test:
+        y_types.append('test')
+
+    for i, (y_type, ax) in enumerate(zip(y_types, axs_big)):
         y_data = model_dict.get(f'y_{y_type}', None)
         y_pred = model_dict.get(f'y_pred_{y_type}', model_dict.get(f'y_pred', None))
 

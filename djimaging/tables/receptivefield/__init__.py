@@ -4,5 +4,5 @@ from .sta import STAParamsTemplate, STATemplate
 from .spatial_rf import FitGauss2DRFTemplate, FitDoG2DRFTemplate
 from .temporal_rf import TempRFPropertiesTemplate
 from .glm import (RfGlmParamsTemplate, RfGlmTemplate, RfGlmSingleModelTemplate,
-                  RfGlmQualityParamsTemplate, RfGlmQualityTemplate)
+                  RfGlmQualityParamsTemplate, RfGlmQualityTemplate, RfGlmQualityDictTemplate)
 from .srf_contour import RfContoursParamsTemplate, RfContoursTemplate, RfContourMetricsTemplate
