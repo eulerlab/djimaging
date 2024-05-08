@@ -82,8 +82,9 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.utils.receptive_fields.glm_utils import ReceptiveFieldGLM, plot_rf_summary, quality_test
+from djimaging.utils.receptive_fields.plot_rf_utils import plot_rf_frames, plot_rf_video
 from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.receptive_fields.glm_utils import ReceptiveFieldGLM, plot_rf_summary, quality_test
 
 
 class RfGlmParamsTemplate(dj.Lookup):
@@ -216,6 +217,16 @@ class RfGlmTemplate(dj.Computed):
                         title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
         plt.show()
 
+    def plot1_frames(self, key=None, downsample=1):
+        key = get_primary_key(table=self, key=key)
+        rf, model_dict = (self & key).fetch1('rf', 'model_dict')
+        plot_rf_frames(rf, model_dict['rf_time'], downsample=downsample)
+
+    def plot1_video(self, key=None, fps=10):
+        key = get_primary_key(table=self, key=key)
+        rf, model_dict = (self & key).fetch1('rf', 'model_dict')
+        return plot_rf_video(rf, model_dict['rf_time'], fps=fps)
+
 
 class RfGlmQualityDictTemplate(dj.Computed):
     database = ""
@@ -259,7 +270,6 @@ class RfGlmQualityDictTemplate(dj.Computed):
         ))
 
     def plot(self, *restrictions):
-        import seaborn as sns
         df_q = (self & restrictions).fetch(format='frame')
 
 
