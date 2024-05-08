@@ -155,3 +155,9 @@ def compute_polarity_and_peak_idxs(trf, nstd=1., npeaks_max=None, rf_time=None, 
         polarity = 0
 
     return polarity, peak_idxs
+
+
+def compute_rel_weight_baseline(rf_time, trf, dt_baseline):
+    idxs_baseline = rf_time <= (np.min(rf_time) + dt_baseline)
+    rel_weight_baseline = np.sum(np.abs(trf[idxs_baseline])) / np.sum(np.abs(trf))
+    return rel_weight_baseline
