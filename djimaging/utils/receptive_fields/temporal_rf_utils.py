@@ -129,7 +129,7 @@ def compute_main_peak_lag(rf_time, trf, trf_peak_idxs, plot=False, max_dt_future
         plt.legend()
         plt.show()
 
-    return np.abs(peak_dt)
+    return -peak_dt
 
 
 def compute_polarity_and_peak_idxs(trf, nstd=1., npeaks_max=None, rf_time=None, max_dt_future=np.inf):

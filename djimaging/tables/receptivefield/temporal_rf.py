@@ -51,18 +51,22 @@ class TempRFPropertiesTemplate(dj.Computed):
             rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
         return rf_time
 
-    def make(self, key):
+    def make(self, key, plot=False):
         rf_time = self.fetch1_rf_time(key=key)
         trf, trf_peak_idxs = (self.split_rf_table & key).fetch1('trf', 'trf_peak_idxs')
+
+        if np.any(rf_time[trf_peak_idxs] > self._max_dt_future):
+            raise ValueError(f'Peak too the future. max_dt_future={self._max_dt_future}.'
+                             f' Compare to _max_dt_future in SplitRF table.')
 
         rel_weight_baseline = compute_rel_weight_baseline(
             rf_time, trf, dt_baseline=self._dt_baseline)
         transience_idx = compute_trf_transience_index(
             rf_time, trf, trf_peak_idxs, max_dt_future=self._max_dt_future)
         half_amp_width = compute_half_amp_width(
-            rf_time, trf, trf_peak_idxs, plot=False, max_dt_future=self._max_dt_future)
+            rf_time, trf, trf_peak_idxs, plot=plot, max_dt_future=self._max_dt_future)
         main_peak_lag = compute_main_peak_lag(
-            rf_time, trf, trf_peak_idxs, plot=False, max_dt_future=self._max_dt_future)
+            rf_time, trf, trf_peak_idxs, plot=plot, max_dt_future=self._max_dt_future)
 
         key = key.copy()
         key['rel_weight_baseline'] = rel_weight_baseline
@@ -73,7 +77,7 @@ class TempRFPropertiesTemplate(dj.Computed):
         self.insert1(key)
 
     def plot(self):
-        fig, axs = plt.subplots(1, 3, figsize=(12, 3))
+        fig, axs = plt.subplots(1, 4, figsize=(12, 3))
         for ax, name in zip(axs, ['rel_weight_baseline', 'transience_idx', 'half_amp_width', 'main_peak_lag']):
             ax.hist(self.fetch(name))
             ax.set_title(name)
