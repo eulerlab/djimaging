@@ -177,11 +177,11 @@ def prepare_noise_data(stim, triggertimes, trace, tracetime, ntrigger_per_frame=
             stimtime = triggertimes
     else:
         # Repeat each trigger in sequence
-        trigger_dt = np.median(np.diff(triggertimes))
         stimtime = []
-        for i, tt in enumerate(triggertimes):
+        last_dt = triggertimes[len(ntrigger_per_frame)] - triggertimes[len(ntrigger_per_frame) - 1]
+        for i, (tt_a, tt_b) in enumerate(zip(triggertimes, np.append(triggertimes[1:], triggertimes[-1] + last_dt))):
             n_repeats = ntrigger_per_frame[i % len(ntrigger_per_frame)]
-            stimtime_i = tt + np.arange(n_repeats) * trigger_dt / n_repeats
+            stimtime_i = tt_a + np.arange(n_repeats) * (tt_b - tt_a) / n_repeats
             stimtime.extend(stimtime_i)
         stimtime = np.array(stimtime)
 

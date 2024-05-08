@@ -6,6 +6,7 @@ import numpy as np
 
 from djimaging.tables.receptivefield.rf_utils import compute_linear_rf
 from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.receptive_fields.plot_rf_utils import plot_rf_frames, plot_rf_video
 
 
 class STAParamsTemplate(dj.Lookup):
@@ -111,8 +112,8 @@ class STATemplate(dj.Computed):
             threshold_pred=np.all(trace >= 0), batch_size_n=6_000_000, verbose=verbose)
 
         rf_key = deepcopy(key)
-        rf_key['rf'] = rf
-        rf_key['rf_time'] = rf_time
+        rf_key['rf'] = rf.astype(np.float32)
+        rf_key['rf_time'] = rf_time.astype(np.float32)
         rf_key['dt'] = dt
         rf_key['shift'] = shift
         self.insert1(rf_key)
@@ -121,9 +122,10 @@ class STATemplate(dj.Computed):
             rf_dataset_key = deepcopy(key)
             rf_dataset_key['kind'] = k
             rf_dataset_key['burn_in'] = rf_pred['burn_in']
-            rf_dataset_key['x'] = x[k] if store_x == 'data' else x[k].shape
-            rf_dataset_key['y'] = y[k] if store_y == 'data' else y[k].shape
-            rf_dataset_key['y_pred'] = rf_pred[f'y_pred_{k}'] if store_y == 'data' else rf_pred[f'y_pred_{k}'].shape
+            rf_dataset_key['x'] = x[k].astype(np.float32) if store_x == 'data' else x[k].shape
+            rf_dataset_key['y'] = y[k].astype(np.float32) if store_y == 'data' else y[k].shape
+            rf_dataset_key['y_pred'] = rf_pred[f'y_pred_{k}'].astype(np.float32) \
+                if store_y == 'data' else rf_pred[f'y_pred_{k}'].shape
             rf_dataset_key['cc'] = rf_pred[f'cc_{k}']
             rf_dataset_key['mse'] = rf_pred[f'mse_{k}']
             self.DataSet().insert1(rf_dataset_key)
@@ -153,27 +155,12 @@ class STATemplate(dj.Computed):
         axs[-1].set(xlabel='Time')
         plt.tight_layout()
 
-    def plot1_frames(self, key=None):
+    def plot1_frames(self, key=None, downsample=1):
         key = get_primary_key(table=self, key=key)
-
-        from matplotlib import pyplot as plt
-        from djimaging.utils.plot_utils import plot_srf
-
         rf, rf_time = (self & key).fetch1('rf', 'rf_time')
+        plot_rf_frames(rf, rf_time, downsample=downsample)
 
-        if rf.ndim == 2:
-            fig, axs = plt.subplots(1, 1, figsize=(10, 3))
-            axs.plot(rf_time, rf)
-        elif rf.ndim == 3:
-            n_rows = int(np.ceil(np.sqrt(rf.shape[0])))
-            n_cols = int(np.ceil(rf.shape[0] / n_rows))
-            fig, axs = plt.subplots(n_rows, n_cols, figsize=(n_cols * 3, n_rows * 3), squeeze=False, sharey='all',
-                                    sharex='all')
-            axs = axs.flat
-            vabsmax = np.max(np.abs(rf))
-            for ax, frame in zip(axs, rf):
-                plot_srf(frame, ax=ax, vabsmax=vabsmax)
-        else:
-            raise NotImplementedError(rf.shape)
-
-        return fig, axs
+    def plot1_video(self, key=None, fps=10):
+        key = get_primary_key(table=self, key=key)
+        rf, rf_time = (self & key).fetch1('rf', 'rf_time')
+        return plot_rf_video(rf, rf_time, fps=fps)

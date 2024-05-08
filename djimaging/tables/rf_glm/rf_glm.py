@@ -6,6 +6,7 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.utils.receptive_fields.plot_rf_utils import plot_rf_frames, plot_rf_video
 from djimaging.tables.rf_glm.rf_glm_utils import ReceptiveFieldGLM, plot_rf_summary, quality_test
 from djimaging.utils.dj_utils import get_primary_key
 
@@ -121,7 +122,7 @@ class RFGLMTemplate(dj.Computed):
             plt.show()
 
         rf_key = deepcopy(key)
-        rf_key['rf'] = rf
+        rf_key['rf'] = rf.astype(np.float32)
         rf_key['dt'] = model_dict.pop('dt')
         rf_key['model_dict'] = model_dict
         rf_key['quality_dict'] = quality_dict
@@ -135,8 +136,63 @@ class RFGLMTemplate(dj.Computed):
                         title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
         plt.show()
 
+    def plot1_frames(self, key=None, downsample=1):
+        key = get_primary_key(table=self, key=key)
+        rf, model_dict = (self & key).fetch1('rf', 'model_dict')
+        plot_rf_frames(rf, model_dict['rf_time'], downsample=downsample)
 
-class RFGLMQualityParamsTemplate(dj.Lookup):
+    def plot1_video(self, key=None, fps=10):
+        key = get_primary_key(table=self, key=key)
+        rf, model_dict = (self & key).fetch1('rf', 'model_dict')
+        return plot_rf_video(rf, model_dict['rf_time'], fps=fps)
+
+
+class RfGlmQualityDictTemplate(dj.Computed):
+    database = ""
+
+    @property
+    def definition(self):
+        definition = '''
+            -> self.glm_table
+            ---
+            corrcoef_train = NULL : float
+            corrcoef_test = NULL : float
+            corrcoef_dev = NULL : float
+            mse_train = NULL : float
+            mse_dev = NULL : float
+            mse_test = NULL : float
+            '''
+        return definition
+
+    @property
+    def key_source(self):
+        try:
+            return self.glm_table.proj()
+        except (AttributeError, TypeError):
+            pass
+
+    @property
+    @abstractmethod
+    def glm_table(self):
+        pass
+
+    def make(self, key):
+        quality_dict = (self.glm_table & key).fetch1('quality_dict')
+        self.insert1(dict(
+            **key,
+            corrcoef_train=quality_dict.get('corrcoef_train', np.nan),
+            corrcoef_dev=quality_dict.get('corrcoef_dev', np.nan),
+            corrcoef_test=quality_dict.get('corrcoef_test', np.nan),
+            mse_train=quality_dict.get('mse_train', np.nan),
+            mse_dev=quality_dict.get('mse_dev', np.nan),
+            mse_test=quality_dict.get('mse_test', np.nan),
+        ))
+
+    def plot(self, *restrictions):
+        df_q = (self & restrictions).fetch(format='frame')
+
+
+class RfGlmQualityParamsTemplate(dj.Lookup):
     database = ""
 
     @property
