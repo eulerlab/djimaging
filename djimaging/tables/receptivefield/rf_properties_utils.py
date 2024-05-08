@@ -296,4 +296,4 @@ def compute_main_peak_lag(rf_time, trf, trf_peak_idxs, plot=False, max_dt_future
         plt.legend()
         plt.show()
 
-    return np.abs(peak_dt)
+    return -peak_dt
