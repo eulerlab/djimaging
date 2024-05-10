@@ -82,7 +82,7 @@ class CslMetricsTemplate(dj.Computed):
 
     def _make_fetch_and_compute(self, key, plot=False):
         trace_dt, trace_t0, trace = (self.traces_table & key).fetch1('trace_dt', 'trace_t0', 'trace')
-        trace_times = np.arange(trace.size) * trace_dt + trace
+        trace_times = np.arange(trace.size) * trace_dt + trace_t0
         
         if len(trace) == 0:
             raise ValueError(f'Cannot compute CSL metrics for empty trace with key={key}')
