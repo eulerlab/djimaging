@@ -18,7 +18,7 @@ Create a docker container and install this package and its requirements in it.
 Download the package:
 
 ```bash
-git clone https://github.com/jonathanoesterle/djimaging.git
+git clone https://github.com/eulerlab/djimaging.git
 ````
 
 Install the package e.g. using pip as an editable package:
@@ -50,8 +50,8 @@ python3 make_user.py your_username_here
 
 This will create a folder <code>djimaging/djimaging/user/your_username_here/notebooks</code>
 with some tutorial notebooks.
-> ❗ Per default everyhing in this folder will not be under version control.
-> Consider adding an expection for your files here, but do not upload them to the shared repository.
+> ❗ Per default everything in this folder will not be under version control.
+> Consider adding an expectation for your files here, but do not upload them to the shared repository.
 > Do not upload personal config files.
 
 ### Clean up
