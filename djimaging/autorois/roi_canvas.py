@@ -272,7 +272,6 @@ class RoiCanvas:
 
     def erase_from_masks(self, x, y, mask):
         """Remove pixels from current mask and all masks"""
-
         roi_masks = self.roi_masks.copy()
         roi_masks[mask] = 0
         self.set_roi_masks(roi_masks)
@@ -396,6 +395,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_diagnostics = self.create_widget_diagnostics()
         self.diagnostics_fig = None
 
+        self.widget_pause_draw = self.create_widget_pause_draw()
+
         self.widget_bg = self.create_widget_bg()
         self.widget_cmap = self.create_widget_cmap()
 
@@ -450,6 +451,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.canvas_masks = self.img[2]
         self.canvas = self.img[3]
 
+        self.draw_updates = True
+
         self.drawing = False
         self.last_mouse_pos_xy = (-1, -1)
         self.brush_mask = compute_brush_mask(self._selected_size)
@@ -496,7 +499,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         ))
 
         w_main = VBox((HBox((w_outputs, w_tools)),
-                       self.widget_show_diagnostics, self.widget_diagnostics, w_other_tools))
+                       HBox((self.widget_show_diagnostics, self.widget_pause_draw)),
+                       self.widget_diagnostics, w_other_tools))
 
         return w_main
 
@@ -1235,6 +1239,8 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     # Draw functions
     def draw_current_mask_img(self, update=True):
+        if not self.draw_updates:
+            return
 
         if update:
             self.update_current_mask_img()
@@ -1247,6 +1253,8 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.canvas.put_image_data(img, 0, 0)
 
     def draw_roi_masks_img(self, update=True):
+        if not self.draw_updates:
+            return
 
         if update:
             self.update_roi_mask_img()
@@ -1259,7 +1267,6 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.canvas_masks.put_image_data(img, 0, 0)
 
     def draw_bg(self, update=True):
-
         if update:
             self.update_bg_img()
 
@@ -1362,6 +1369,18 @@ class InteractiveRoiCanvas(RoiCanvas):
                 self.show_diagnostics = False
                 self.widget_diagnostics.layout.width = '1%'
                 self.widget_diagnostics.clear_output()
+
+        widget.observe(change, names='value')
+        return widget
+
+    def create_widget_pause_draw(self, default=True):
+        widget = Checkbox(value=default, description='Draw', disabled=False)
+
+        def change(state):
+            self.draw_updates = state['new']
+            if state['new']:
+                self.draw_current_mask_img(update=True)
+                self.draw_roi_masks_img(update=True)
 
         widget.observe(change, names='value')
         return widget
