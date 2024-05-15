@@ -34,18 +34,21 @@ class CellposeWrapper:
         eval_kwargs = self.eval_kwargs.copy()
 
         if 'min_size' in eval_kwargs:
-            eval_kwargs['min_size'] = int(eval_kwargs['min_size'] * np.mean(pixel_size_um[:2]))
+            eval_kwargs['min_size'] = int(eval_kwargs['min_size'] / np.mean(pixel_size_um[:2]))
+            print(f"min_size: {eval_kwargs['min_size']} [px]")
 
         if 'diameter' in eval_kwargs:
-            eval_kwargs['diameter'] = int(eval_kwargs['diameter'] * np.mean(pixel_size_um[:2]))
+            eval_kwargs['diameter'] = int(eval_kwargs['diameter'] / np.mean(pixel_size_um[:2]))
+            print(f"diameter: {eval_kwargs['diameter']} [px]")
 
         if len(pixel_size_um) > 2:
             eval_kwargs['anisotropy'] = pixel_size_um[2] / np.mean(pixel_size_um[:2])
+            print(f"anisotropy: {eval_kwargs['anisotropy']}")
 
         if multiple_stacks and 'stitch_threshold' not in eval_kwargs:
             eval_kwargs['stitch_threshold'] = 1e-9  # Stitch everything together
 
-        masks, flows, styles, diams = self.model.eval(imgs, do_3D=do_3D, **self.eval_kwargs)
+        masks, flows, styles, diams = self.model.eval(imgs, do_3D=do_3D, **eval_kwargs)
 
         if plot:
             self.plot_results(imgs, masks, flows)
