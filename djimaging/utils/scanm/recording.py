@@ -1,6 +1,7 @@
 import os
 
 import h5py
+import matplotlib.pyplot as plt
 import numpy as np
 
 from djimaging.utils.scanm import read_h5_utils, read_smp_utils, wparams_utils, setup_utils, traces_and_triggers_utils
@@ -11,7 +12,7 @@ class ScanMRecording:
                  date=None, stimulator_delay=None,
                  roi_mask_ignore_not_found=True,
                  trigger_ch_name='wDataCh2', time_precision='line',
-                 triggers_ignore_not_found=True, trigger_threshold=30_000,
+                 triggers_ignore_not_found=True, trigger_threshold='auto',
                  repeated_stim=None, ntrigger_rep=None):
         # File
         self.filepath = filepath
@@ -227,6 +228,15 @@ class ScanMRecording:
 
         if self.frame_times is None or (time_precision != self.time_precision):
             self.compute_frame_times(time_precision=time_precision)
+
+        if trigger_threshold == 'auto':
+            vmin = self.ch_stacks[self.trigger_ch_name].min()
+            vmax = self.ch_stacks[self.trigger_ch_name].max()
+
+            if vmin < 25_000 and vmax > 35_000:
+                self.trigger_threshold = 30_000
+            else:
+                self.trigger_threshold = 0.5 * (vmin + vmax)
 
         if self.ntrigger_rep is None or self.ntrigger_rep > 0:
             self.trigger_times, self.trigger_values = traces_and_triggers_utils.compute_triggers(

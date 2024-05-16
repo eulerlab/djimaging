@@ -230,15 +230,20 @@ class PresentationTemplate(dj.Computed):
         rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=pres_key['date'],
                              repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep, time_precision=trigger_precision)
         if compute_from_stack or from_raw_data:
-            rec.compute_triggers()
+            rec.compute_triggers(trigger_threshold='auto')
             i = 0
             # If expects triggers and way too few found repeat
-            while ntrigger_rep > 0.8 * rec.trigger_times.size and i < 5:
+            while (ntrigger_rep < 0.8 * rec.trigger_times.size) and i < 5:
+                if verboselvl > 1:
+                    print(f"Found {rec.trigger_times.size} triggers, expected {ntrigger_rep} triggers. \n"
+                          f"{0.8 * rec.trigger_times.size} \n "
+                          f"Trying to reduce trigger threshold for {filepath}")
+
                 rec.trigger_threshold = 0.8 * rec.trigger_threshold
                 rec.compute_triggers()
                 i += 1
 
-            if ntrigger_rep > 0.8 * rec.trigger_times.size:
+            if ntrigger_rep < 0.8 * rec.trigger_times.size:
                 raise ValueError(f"Found {rec.trigger_times.size} triggers, expected {ntrigger_rep} triggers. \n"
                                  f"Tried reducing trigger threshold but did not work. key=\n{pres_key}")
 

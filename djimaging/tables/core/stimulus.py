@@ -50,7 +50,7 @@ class StimulusTemplate(dj.Manual):
         # Light stimuli
         stim_name           :varchar(32)       # Unique string identifier
         ---
-        alias               :varchar(191)       # Strings (_ seperator) to identify this stimulus, not case sensitive!
+        alias               :varchar(999)       # Strings (_ seperator) to identify this stimulus, not case sensitive!
         stim_family=""      :varchar(191)       # To group stimuli (e.g. gChirp and lChirp) for downstream processing 
         framerate=0         :float              # framerate in Hz
         isrepeated=0        :tinyint unsigned   # Is the stimulus repeated? Used for snippets
