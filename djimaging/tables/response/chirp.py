@@ -384,7 +384,7 @@ def compute_tonic_release_index(average, fs, t_flicker_start=10, t_flicker_end=2
         ax.axvline(idx_flicker_start, c='r', ls='--')
         ax.axvline(idx_flicker_end, c='r', ls='--')
 
-        baseline_trace = np.ones_like(average) * baseline
+        baseline_trace = np.ones_like(average_flicker) * baseline
 
         ax.fill_between(np.arange(idx_flicker_start, idx_flicker_end),
                         baseline_trace, np.clip(average_flicker, None, 0) + baseline,
