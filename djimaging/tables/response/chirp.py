@@ -365,7 +365,8 @@ def compute_tonic_release_index(average, fs, t_flicker_start=10, t_flicker_end=2
     idx_flicker_start = int(fs * t_flicker_start)
     idx_flicker_end = int(fs * t_flicker_end)
 
-    average_flicker = average[idx_flicker_start:idx_flicker_end]
+    baseline = np.median(average[idx_baseline_flicker_start:idx_flicker_start])
+    average_flicker = average[idx_flicker_start:idx_flicker_end] - baseline
 
     tonic_release_index = np.sum(np.abs(average_flicker[average_flicker < 0])) / np.sum(np.abs(average_flicker))
 
@@ -377,16 +378,20 @@ def compute_tonic_release_index(average, fs, t_flicker_start=10, t_flicker_end=2
             fig, ax = plt.subplots(1, 1, figsize=(4, 2))
         ax.set_title(f"TRi: {tonic_release_index:.2f}")
         ax.plot(average)
-        ax.plot([idx_baseline_flicker_start, idx_flicker_start], [0, 0], c='r')
+        ax.plot([idx_baseline_flicker_start, idx_flicker_start], [baseline, baseline], c='c')
 
+        ax.axvline(idx_baseline_flicker_start, c='c', ls='--')
         ax.axvline(idx_flicker_start, c='r', ls='--')
         ax.axvline(idx_flicker_end, c='r', ls='--')
+
+        baseline_trace = np.ones_like(average) * baseline
+
         ax.fill_between(np.arange(idx_flicker_start, idx_flicker_end),
-                        np.clip(average_flicker, None, 0), color='r',
-                        alpha=0.5, zorder=10)
+                        baseline_trace, np.clip(average_flicker, None, 0) + baseline,
+                        color='r', alpha=0.5, zorder=10)
         ax.fill_between(np.arange(idx_flicker_start, idx_flicker_end),
-                        np.clip(average_flicker, 0, None), color='g',
-                        alpha=0.5, zorder=10)
+                        baseline_trace, np.clip(average_flicker, 0, None) + baseline,
+                        color='g', alpha=0.5, zorder=10)
         ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
 
     return tonic_release_index
