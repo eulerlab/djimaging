@@ -104,7 +104,7 @@ class ReceptiveFieldGLM:
         if self.verbose > 0:
             print("############ Evaluate model performance ############")
 
-        if (self.n_perm is not None) and (self.n_perm > 0):
+        if (self.n_perm is not None) and (self.n_perm > 0) and (self.frac_test > 0):
             assert trace_dict['test'].size > 1, trace_dict['test']
             score_trueX, score_permX = rfest.check.compute_permutation_test(
                 model, stim_dict['test'], trace_dict['test'], n_perm=self.n_perm, metric=self.metric, history=False)
@@ -122,9 +122,12 @@ class ReceptiveFieldGLM:
             quality_dict[f'{metric_}_train'] = model.compute_score(
                 y=trace_dict['train'][model.burn_in:], y_pred=y_pred_train, metric=metric_)
 
-            y_test_pred = model.predict({'stimulus': stim_dict['test']})
-            quality_dict[f'{metric_}_test'] = model.compute_score(
-                y=trace_dict['test'][model.burn_in:], y_pred=y_test_pred, metric=metric_)
+            if self.frac_test > 0:
+                y_test_pred = model.predict({'stimulus': stim_dict['test']})
+                quality_dict[f'{metric_}_test'] = model.compute_score(
+                    y=trace_dict['test'][model.burn_in:], y_pred=y_test_pred, metric=metric_)
+            else:
+                y_test_pred = None
 
         w = rfest.utils.uvec(model.w['opt']['stimulus'])
         if w.shape[1] != 1:
@@ -145,11 +148,13 @@ class ReceptiveFieldGLM:
             metric_dev_opt=float(model.metric_dev_opt),
             best_iteration=int(model.best_iteration),
             train_stop=model.train_stop,
-            y_test=np.array(trace_dict['test'][model.burn_in:]).astype(np.float32),
-            y_pred_test=np.array(y_test_pred).astype(np.float32),
             y_train=np.array(trace_dict['train'][model.burn_in:]).astype(np.float32),
             y_pred_train=np.array(y_pred_train).astype(np.float32),
         )
+
+        if self.frac_test > 0:
+            model_dict['y_test'] = np.array(trace_dict['test'][model.burn_in:]).astype(np.float32)
+            model_dict['y_pred_test'] = np.array(y_test_pred).astype(np.float32)
 
         if np.any(np.isfinite(model.metric_dev)):
             model_dict['metric_dev'] = np.array(model.metric_dev).astype(np.float32)
@@ -386,9 +391,14 @@ def quality_test(score_trueX, score_permX, metric):
 def plot_rf_summary(rf, quality_dict, model_dict, title=""):
     """Plot tRF and sRFs and quality test"""
 
+    plot_training = model_dict is not None and 'metric_train' in model_dict
+    plot_y_train = model_dict is not None and 'y_train' in model_dict
+    plot_y_dev = model_dict is not None and 'y_dev' in model_dict
+    plot_y_test = model_dict is not None and 'y_test' in model_dict
+
     # Create figure and axes
-    n_rows = 5
-    fig, axs = plt.subplots(n_rows, 4, figsize=(8, n_rows * 1.9), gridspec_kw=dict(height_ratios=(1.0, 1.5, 1, 1, 1)))
+    n_rows = 1 + plot_training + plot_y_train + plot_y_dev + plot_y_test
+    fig, axs = plt.subplots(n_rows, 4, figsize=(8, n_rows * 1.9))
 
     axs_big = []
     for i in np.arange(2, n_rows):
@@ -400,7 +410,7 @@ def plot_rf_summary(rf, quality_dict, model_dict, title=""):
 
     # Summarize RF
     if rf.ndim == 3:
-        srf, trf = split_strf(rf)
+        srf, trf = split_strf(rf)[:2]
         vabsmax = np.max([np.max(np.abs(srf)), np.max(np.abs(rf))])
     elif rf.ndim == 1:
         trf = rf.flatten()
@@ -441,10 +451,11 @@ def plot_rf_summary(rf, quality_dict, model_dict, title=""):
         im = ax.imshow(rf[np.argmin(trf)].T, cmap='bwr', vmin=-vabsmax, vmax=vabsmax, origin='lower')
         plt.colorbar(im, ax=ax)
 
-    if not model_dict:
+    if not plot_training:
+        plt.tight_layout(rect=(0.01, 0.01, 0.99, 0.90), h_pad=0.2, w_pad=0.2)
         return
 
-    if model_dict is not None:
+    if model_dict is not None and 'metric_train' in model_dict:
         ax = axs[4]
         ax.set(title=f"Metrics\n{model_dict['return_model']}", xlabel='Iteration', ylabel='Corrcoef')
         ax.plot(model_dict['metric_train'], label='train', c='blue')

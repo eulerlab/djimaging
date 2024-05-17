@@ -169,11 +169,21 @@ def prepare_noise_data(stim, triggertimes, trace, tracetime, ntrigger_per_frame=
     assert tracetime.ndim == 1, tracetime.shape
     assert trace.size == tracetime.size
 
-    if ntrigger_per_frame > 1:
-        stimtime = np.repeat(triggertimes, ntrigger_per_frame)
-        stimtime += np.tile(np.arange(ntrigger_per_frame) / ntrigger_per_frame, stim.shape[0] // ntrigger_per_frame)
+    if isinstance(ntrigger_per_frame, int):
+        if ntrigger_per_frame > 1:
+            stimtime = np.repeat(triggertimes, ntrigger_per_frame)
+            stimtime += np.tile(np.arange(ntrigger_per_frame) / ntrigger_per_frame, stim.shape[0] // ntrigger_per_frame)
+        else:
+            stimtime = triggertimes
     else:
-        stimtime = triggertimes
+        # Repeat each trigger in sequence
+        trigger_dt = np.median(np.diff(triggertimes))
+        stimtime = []
+        for i, tt in enumerate(triggertimes):
+            n_repeats = ntrigger_per_frame[i % len(ntrigger_per_frame)]
+            stimtime_i = tt + np.arange(n_repeats) * trigger_dt / n_repeats
+            stimtime.extend(stimtime_i)
+        stimtime = np.array(stimtime)
 
     if stim.shape[0] < stimtime.size:
         raise ValueError(
