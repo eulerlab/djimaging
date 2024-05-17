@@ -229,5 +229,5 @@ class STATemplate(dj.Computed):
 
     def plot1_video(self, key=None, fps=10):
         key = get_primary_key(table=self, key=key)
-        rf, model_dict = (self & key).fetch1('rf', 'model_dict')
-        return plot_rf_video(rf, model_dict['rf_time'], fps=fps)
+        rf, rf_time = (self & key).fetch1('rf', 'rf_time')
+        return plot_rf_video(rf, rf_time, fps=fps)
