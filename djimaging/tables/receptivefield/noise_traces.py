@@ -41,6 +41,7 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
 
 class DNoiseTraceTemplate(dj.Computed):
     database = ""
+    _stim_restriction = dict(stim_family='noise')
 
     @property
     def definition(self):
@@ -80,8 +81,7 @@ class DNoiseTraceTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.params_table() * self.traces_table().proj() & \
-                (self.stimulus_table() & "stim_family = 'noise'")
+            return self.params_table() * self.traces_table().proj() & (self.stimulus_table() & self._stim_restriction)
         except (AttributeError, TypeError):
             pass
 
@@ -96,7 +96,7 @@ class DNoiseTraceTemplate(dj.Computed):
 
         stim, trace, dt, t0, dt_rel_error = prepare_noise_data(
             trace=trace, tracetime=tracetime, stim=stim, triggertimes=triggertimes,
-            ntrigger_per_frame=stim_dict.get('ntrigger_per_frame', 1),
+            ntrigger_per_frame=stim_dict.get('ntrigger_per_frame', 1) if stim_dict is not None else 1,
             fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim, ref_time=ref_time,
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
             pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s)
