@@ -123,7 +123,7 @@ class STATemplate(dj.Computed):
         -> self.params_table
         ---
         rf: longblob  # spatio-temporal receptive field
-        rf_time: longblob #  time of RF, depends from dt and shift
+        rf_time: longblob #  time of RF, depends on dt and shift
         dt: float  # Time step between frames
         shift: int  # Shift of stimulus relative to trace. If negative, prediction looks into future.
         '''
@@ -163,6 +163,8 @@ class STATemplate(dj.Computed):
             return definition
 
     def make(self, key, verbose=False):
+        # TODO: Fix overhead by precomputing the design matrix
+
         filter_dur_s_past, filter_dur_s_future, rf_method = (self.params_table() & key).fetch1(
             "filter_dur_s_past", "filter_dur_s_future", "rf_method")
         store_x, store_y = (self.params_table() & key).fetch1("store_x", "store_y")

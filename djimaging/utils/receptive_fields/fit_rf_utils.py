@@ -17,17 +17,15 @@ def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
 
     x, y = split_data(x=stim, y=trace, frac_train=frac_train, frac_dev=frac_dev, as_dict=True)
 
-    is_spikes = np.all(y['train'] == y['train'].astype(int))
-
     if np.product(stim.shape) <= batch_size_n:
         rf, y_pred_train = _compute_linear_rf_single_batch(
             x_train=x['train'], y_train=y['train'], kind=kind, dim_t=dim_t, shift=shift, burn_in=burn_in,
-            threshold_pred=threshold_pred, is_spikes=is_spikes, dtype=dtype)
+            threshold_pred=threshold_pred, dtype=dtype)
     else:
         assert kind == 'sta', f"kind={kind} not supported for compute_per='feature'"
         rf, y_pred_train = _compute_sta_batchwise(
             x_train=x['train'], y_train=y['train'], kind=kind, dim_t=dim_t, shift=shift, burn_in=burn_in,
-            threshold_pred=threshold_pred, is_spikes=is_spikes, dtype=dtype,
+            threshold_pred=threshold_pred, dtype=dtype,
             batch_size=np.maximum(batch_size_n // stim.shape[0], 1), verbose=verbose)
 
     model_eval = dict()
@@ -49,13 +47,12 @@ def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
     return rf, rf_time, model_eval, x, y, shift
 
 
-def _compute_linear_rf_single_batch(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred, is_spikes,
-                                    dtype=np.float32):
+def _compute_linear_rf_single_batch(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred, dtype=np.float32):
     x_train_dm = build_design_matrix(x_train, n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
     y_train_dm = y_train[burn_in:].astype(dtype)
 
     if kind == 'sta':
-        rf = compute_rf_sta(X=x_train_dm, y=y_train_dm, is_spikes=is_spikes)
+        rf = compute_rf_sta(X=x_train_dm, y=y_train_dm)
     elif kind == 'mle':
         rf = compute_rf_mle(X=x_train_dm, y=y_train_dm)
     else:
@@ -67,7 +64,7 @@ def _compute_linear_rf_single_batch(x_train, y_train, dim_t, shift, burn_in, kin
     return rf, y_pred_train
 
 
-def _compute_sta_batchwise(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred, is_spikes,
+def _compute_sta_batchwise(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred,
                            batch_size=400, dtype=np.float32, verbose=False):
     x_shape = x_train.shape
     n_frames = x_shape[0]
@@ -87,7 +84,7 @@ def _compute_sta_batchwise(x_train, y_train, dim_t, shift, burn_in, kind, thresh
         x_train_dm_i = build_design_matrix(x_train[:, batch], n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
 
         if kind == 'sta':
-            rf_i = compute_rf_sta(X=x_train_dm_i, y=y_train_dm, is_spikes=is_spikes)
+            rf_i = compute_rf_sta(X=x_train_dm_i, y=y_train_dm)
         elif kind == 'mle':
             rf_i = compute_rf_mle(X=x_train_dm_i, y=y_train_dm)
         else:
@@ -126,10 +123,9 @@ def get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt):
 
 
 @jit(nopython=True)
-def compute_rf_sta(X, y, is_spikes=False):
+def compute_rf_sta(X, y):
     """From RFEst"""
-    w = X.T @ y
-    w /= np.sum(y) if is_spikes else len(y)
+    w = (X.T @ y) / np.sum(y)
     return w
 
 
