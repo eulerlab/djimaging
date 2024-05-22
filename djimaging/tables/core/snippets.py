@@ -32,6 +32,7 @@ class SnippetsTemplate(dj.Computed):
 
     """
     Examples for _dt_base_line_dict:
+    This is deprecated and should be replaced by the snippet_base_dt in the stimulus table.
     
     Baden 16 / Franke 17:
     _dt_base_line_dict = {
@@ -93,7 +94,7 @@ class SnippetsTemplate(dj.Computed):
         snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_reps(
             pp_trace, pp_trace_times, triggertimes, ntrigger_rep, allow_drop_last=True, pad_trace=self._pad_trace)
 
-        dt_baseline = None if self._dt_base_line_dict is None else self._dt_base_line_dict.get(stim_name, None)
+        dt_baseline = self.get_snippet_base_dt(stim_name)
         if dt_baseline is not None:
             n_baseline = int(np.round(dt_baseline / np.mean(np.diff(snippets_times, axis=0))))
             snippets = snippets - np.median(snippets[:n_baseline, :], axis=0)
@@ -106,6 +107,31 @@ class SnippetsTemplate(dj.Computed):
             triggertimes_snippets=triggertimes_snippets.astype(np.float32),
             droppedlastrep_flag=int(droppedlastrep_flag),
         ))
+
+    def get_snippet_base_dt(self, stim_name):
+        try:
+            dt_baseline = (self.stimulus_table & dict(stim_name=stim_name)).fetch1('snippet_base_dt')
+            if not np.isfinite(dt_baseline):
+                dt_baseline = None
+        except dj.DataJointError:
+            dt_baseline = None
+
+        print(dt_baseline)
+
+        dt_baseline_alt = None if self._dt_base_line_dict is None else self._dt_base_line_dict.get(stim_name, None)
+
+        if dt_baseline is not None and dt_baseline_alt is not None:
+            if dt_baseline != dt_baseline_alt:
+                raise ValueError(
+                    f"dt_baseline[Stimulus]={dt_baseline} and dt_baseline[Snippets]={dt_baseline_alt} are not equal. "
+                    f"Please set only one of them, ideally in the stimulus table."
+                )
+        elif dt_baseline is None and dt_baseline_alt is not None:
+            dt_baseline = dt_baseline_alt
+
+        print(dt_baseline)
+
+        return dt_baseline
 
     def plot1(self, key=None, xlim=None, xlim_aligned=None):
         key = get_primary_key(table=self, key=key)

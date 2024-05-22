@@ -49,7 +49,7 @@ class Field(core.FieldTemplate):
 
 @schema
 class Stimulus(core.StimulusTemplate):
-    pass
+    _incl_snippet_base_dt = True
 
 
 @schema
