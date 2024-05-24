@@ -116,8 +116,6 @@ class SnippetsTemplate(dj.Computed):
         except dj.DataJointError:
             dt_baseline = None
 
-        print(dt_baseline)
-
         dt_baseline_alt = None if self._dt_base_line_dict is None else self._dt_base_line_dict.get(stim_name, None)
 
         if dt_baseline is not None and dt_baseline_alt is not None:
@@ -128,8 +126,6 @@ class SnippetsTemplate(dj.Computed):
                 )
         elif dt_baseline is None and dt_baseline_alt is not None:
             dt_baseline = dt_baseline_alt
-
-        print(dt_baseline)
 
         return dt_baseline
 

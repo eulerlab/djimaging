@@ -289,8 +289,18 @@ class RoiMaskTemplate(dj.Manual):
         return roi_mask, src_file
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
-                          only_new_fields: bool = True, roi_mask_dir=None, old_prefix=None, new_prefix=None):
-        """Scan filesystem for new ROI masks and add them to the database."""
+                          only_new_fields: bool = True, roi_mask_dir=None, old_prefix=None, new_prefix=None,
+                          auto_fill_pres_keys: bool = False):
+        """Scan filesystem for new ROI masks and add them to the database.
+        :param restrictions: Restrictions for field_table
+        :param verboselvl: Verbosity level
+        :param suppress_errors: Suppress errors
+        :param only_new_fields: Only scan for new fields
+        :param roi_mask_dir: Directory where ROI masks are stored, typically Raw, Pre or AutoROIs
+        :param old_prefix: Prefix that should be replaced in file names
+        :param new_prefix: Prefix that should replace old_prefix in file names
+        :param auto_fill_pres_keys: Automatically fill presentation keys with zero shift if they are missing as files
+        """
         if restrictions is None:
             restrictions = dict()
 
@@ -301,9 +311,9 @@ class RoiMaskTemplate(dj.Manual):
 
         for key in (self.key_source & restrictions):
             try:
-                self.add_field_roi_masks(
-                    key, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
-                    verboselvl=verboselvl)
+                self._add_field_roi_masks(
+                    key, auto_fill_pres_keys=auto_fill_pres_keys,
+                    roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix, verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
                     warnings.warn(f'Error for key={key}:\n{e}')
@@ -313,20 +323,24 @@ class RoiMaskTemplate(dj.Manual):
 
         return err_list
 
-    def add_field_roi_masks(self, field_key, roi_mask_dir=None, old_prefix=None, new_prefix=None, verboselvl=0):
-        pres_keys = (self.presentation_table.proj() & field_key).fetch(as_dict=True)
+    def _add_field_roi_masks(self, field_key, auto_fill_pres_keys=False,
+                             roi_mask_dir=None, old_prefix=None, new_prefix=None, verboselvl=0):
+        pres_keys = (self.presentation_table & field_key).fetch('KEY')
 
         if verboselvl > 2:
             print('\nfield_key:', field_key, '\npres_keys:', pres_keys)
 
-        roi_masks = [self.load_presentation_roi_mask(key, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+        roi_masks = [self._load_presentation_roi_mask(key, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
                      for key in pres_keys]
 
         data_pairs = zip(pres_keys, roi_masks)
 
-        # Filter out keys without ROI mask
-        data_pairs = [(pres_key, roi_mask) for pres_key, roi_mask in data_pairs
-                      if roi_mask is not None]
+        if not auto_fill_pres_keys:
+            # Filter out keys without ROI mask
+            data_pairs = [(pres_key, roi_mask) for pres_key, roi_mask in data_pairs
+                          if roi_mask is not None]
+        else:
+            data_pairs = list(data_pairs)
 
         if len(data_pairs) == 0:
             if verboselvl > 1:
@@ -335,34 +349,54 @@ class RoiMaskTemplate(dj.Manual):
                 print('pres_keys:', [k for k in pres_keys])
             return
 
+        print(data_pairs)
+
         # Filter out keys that are already present
         data_pairs = [(pres_key, roi_mask) for pres_key, roi_mask in data_pairs
-                      if pres_key not in self.RoiMaskPresentation().proj()]
+                      if len(self.RoiMaskPresentation & pres_key) == 0]
 
         if len(data_pairs) == 0:
             if verboselvl > 1:
                 print('Nothing new to add for field:', field_key)
             return
 
-        if verboselvl > 0:
-            print(f'Adding {len(data_pairs)} ROI masks for field:', field_key)
+        if len(self & field_key) == 0:
+            # Find preferred file that should be used as main key.
+            mask_alias, highres_alias = (self.userinfo_table & field_key).fetch1("mask_alias", "highres_alias")
+            files = [(self.presentation_table & pres_key).fetch1('pres_data_file')
+                     for pres_key, roi_mask in data_pairs
+                     if roi_mask is not None]
 
-        # Find preferred file that should be used as main key.
-        mask_alias, highres_alias = (self.userinfo_table & field_key).fetch1("mask_alias", "highres_alias")
-        files = [(self.presentation_table & pres_key).fetch1('pres_data_file') for pres_key, roi_mask in data_pairs]
-        sort_idxs = sort_roi_mask_files(files, mask_alias=mask_alias, highres_alias=highres_alias, as_index=True)
+            if len(files) == 0:
+                if verboselvl > 1:
+                    print('No ROI masks found for field:', field_key)
+                return
+            else:
+                if verboselvl > 0:
+                    print(f'Adding {len(files)} ROI masks for field:', field_key)
 
-        main_pres_key, main_roi_mask = data_pairs[sort_idxs[0]]
+            sort_idxs = sort_roi_mask_files(files, mask_alias=mask_alias, highres_alias=highres_alias, as_index=True)
+            main_pres_key, main_roi_mask = data_pairs[sort_idxs[0]]
+        else:
+            main_pres_key, main_roi_mask = (self.RoiMaskPresentation & field_key).fetch1('KEY', 'roi_mask')
 
         self.insert1({**field_key, **main_pres_key, "roi_mask": main_roi_mask}, skip_duplicates=True)
         for pres_key, roi_mask in data_pairs:
-            as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(roi_mask, main_roi_mask, max_shift=self._max_shift)
-            self.RoiMaskPresentation().insert1(
-                {**pres_key, "roi_mask": roi_mask, "as_field_mask": as_field_mask,
-                 "shift_dx": shift_dx, "shift_dy": shift_dy},
-                skip_duplicates=True)
+            if roi_mask is not None:
+                as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(
+                    roi_mask, main_roi_mask, max_shift=self._max_shift)
+                self.RoiMaskPresentation().insert1(
+                    {**pres_key, "roi_mask": roi_mask, "as_field_mask": as_field_mask,
+                     "shift_dx": shift_dx, "shift_dy": shift_dy},
+                    skip_duplicates=True)
+            elif auto_fill_pres_keys:
+                self.RoiMaskPresentation().insert1(
+                    {**pres_key, "roi_mask": main_roi_mask, "as_field_mask": "same", "shift_dx": 0, "shift_dy": 0},
+                    skip_duplicates=True)
+            else:
+                raise ValueError(f'No ROI mask found for key={pres_key} but `auto_fill_pres_keys` is False')
 
-    def load_presentation_roi_mask(self, key, roi_mask_dir=None, old_prefix=None, new_prefix=None):
+    def _load_presentation_roi_mask(self, key, roi_mask_dir=None, old_prefix=None, new_prefix=None):
         igor_roi_masks, from_raw_data = (self.raw_params_table & key).fetch1('igor_roi_masks', 'from_raw_data')
         input_file = (self.presentation_table & key).fetch1("pres_data_file")
 
