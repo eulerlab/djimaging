@@ -39,7 +39,7 @@ from matplotlib import pyplot as plt
 
 from djimaging.utils import math_utils, plot_utils, trace_utils, filter_utils
 
-from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.dj_utils import get_primary_key, suppress_output
 
 from djimaging.tables.core.preprocesstraces import detrend_trace, drop_left_and_right
 from djimaging.utils.plot_utils import plot_trace_and_trigger
@@ -339,7 +339,8 @@ class CascadeSpikesTemplate(dj.Computed):
         elif len(pp_traces) > 1:
             pp_traces = np.stack(pp_traces)
 
-        spike_probs = cascade.predict(model_name, pp_traces, verbosity=verboselvl, model_folder=cascade_models_path)
+        with suppress_output(condition=verboselvl == 0):
+            spike_probs = cascade.predict(model_name, pp_traces, verbosity=verboselvl, model_folder=cascade_models_path)
 
         for spike_prob, roi_id in zip(spike_probs, roi_ids):
             self.insert1(dict(key, spike_prob=spike_prob.astype(np.float32), roi_id=roi_id))
