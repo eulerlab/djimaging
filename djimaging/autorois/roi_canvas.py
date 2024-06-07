@@ -1,4 +1,4 @@
-import os.path
+import os.path  # noqa: E999
 import pickle
 import warnings
 from datetime import datetime
