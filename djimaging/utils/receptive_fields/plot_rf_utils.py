@@ -1,4 +1,6 @@
 import numpy as np
+from matplotlib import pyplot as plt
+from matplotlib.patches import Ellipse
 
 
 def plot_rf_frames(rf, rf_time, downsample=1):
@@ -58,3 +60,26 @@ def plot_rf_video(rf, rf_time, fps=10):
 
     anim = FuncAnimation(fig, update, frames=np.arange(int(len(rf) * 1.5)), blit=True, interval=1000 / fps)
     return HTML(anim.to_html5_video())
+
+
+def plot_srf_gauss_fit(ax, srf=None, vabsmax=None, srf_params=None, n_std=2, color='k', ms=3, plot_cb=False, **kwargs):
+    if srf_params is not None:
+        ax.plot(srf_params['x_mean'], srf_params['y_mean'], zorder=100, marker='x', ms=ms, c=color, **kwargs)
+        ax.add_patch(Ellipse(
+            xy=(srf_params['x_mean'], srf_params['y_mean']),
+            width=n_std * 2 * srf_params['x_stddev'],
+            height=n_std * 2 * srf_params['y_stddev'],
+            angle=np.rad2deg(srf_params['theta']), color=color, fill=False, **kwargs))
+
+    if srf is not None:
+        if vabsmax is None:
+            vmin = np.min(srf)
+            vmax = np.max(srf)
+            cmap = 'gray'
+        else:
+            vmin = -vabsmax
+            vmax = vabsmax
+            cmap = 'bwr'
+        im = ax.imshow(srf, vmin=vmin, vmax=vmax, cmap=cmap, zorder=0, origin='lower')
+        if plot_cb:
+            plt.colorbar(im, ax=ax)

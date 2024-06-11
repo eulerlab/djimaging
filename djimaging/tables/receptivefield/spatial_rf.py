@@ -11,6 +11,7 @@ import numpy as np
 
 from matplotlib import pyplot as plt
 
+from djimaging.utils.receptive_fields.plot_rf_utils import plot_srf_gauss_fit
 from djimaging.utils.receptive_fields.spatial_rf_utils import compute_gauss_srf_area, compute_surround_index, \
     compute_center_index, fit_rf_model
 from djimaging.utils.dj_utils import get_primary_key
@@ -82,10 +83,11 @@ class FitGauss2DRFTemplate(dj.Computed):
         key = get_primary_key(table=self, key=key)
         srf = (self.split_rf_table() & key).fetch1("srf")
         srf_fit, rf_qidx = (self & key).fetch1("srf_fit", 'rf_qidx')
+        srf_params = (self & key).fetch1("srf_params")
 
         vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
 
-        fig, axs = plt.subplots(1, 3, figsize=(10, 3))
+        fig, axs = plt.subplots(1, 4, figsize=(12, 3))
 
         ax = axs[0]
         plot_srf(srf, ax=ax, vabsmax=vabsmax)
@@ -98,6 +100,9 @@ class FitGauss2DRFTemplate(dj.Computed):
         ax = axs[2]
         plot_srf(srf - srf_fit, ax=ax, vabsmax=vabsmax)
         ax.set_title(f'Difference: QI={rf_qidx:.2f}')
+
+        ax = axs[3]
+        plot_srf_gauss_fit(ax, srf=srf, srf_params=srf_params, vabsmax=vabsmax, plot_cb=True)
 
         plt.tight_layout()
         plt.show()
