@@ -1,5 +1,6 @@
 import warnings
 
+import matplotlib.pyplot as plt
 import numpy as np
 from astropy.modeling.fitting import SLSQPLSQFitter
 from astropy.modeling.functional_models import Gaussian2D
@@ -67,7 +68,7 @@ def fit_rf_model(srf, kind='gaussian', polarity=None, center=None):
         return model_fit, model_c_fit, model_s_fit, model_params, eff_polarity, qi
 
 
-def estimate_srf_center_model_init_params(srf, polarity=None, amplimscale=2.):
+def estimate_srf_center_model_init_params(srf, polarity=None, amplimscale=2., plot=False):
     assert srf.ndim == 2, 'Provide 2d RF'
 
     if polarity is None:
@@ -79,9 +80,31 @@ def estimate_srf_center_model_init_params(srf, polarity=None, amplimscale=2.):
     else:
         raise NotImplementedError(polarity)
 
-    srf_cut = np.abs(srf[:, int(x0)] - np.min(srf[:, int(x0)]))
-    srf_cut_profile = np.cumsum(srf_cut) / np.sum(srf_cut)
-    std0 = np.maximum(1, 0.5 * (np.argmin(np.abs(srf_cut_profile - 0.7)) - np.argmin(np.abs(srf_cut_profile - 0.3))))
+    x0 = int(x0)
+    y0 = int(y0)
+
+    pol = np.sign(srf[y0, x0])
+    assert pol == polarity
+
+    srf_cut = np.clip(srf[y0] * pol, 0, None)
+
+    std_left = np.append(np.where((srf_cut[:x0 + 1][::-1]) < (0.35 * srf_cut[x0]))[0], 1)[0]
+    std_right = np.append(np.where((srf_cut[x0:]) < (0.35 * srf_cut[x0]))[0], 1)[0]
+
+    if plot:
+        fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+        fig.suptitle(f"polarity={pol}")
+        im = axs[0].imshow(srf, vmin=-np.max(np.abs(srf)), vmax=np.max(np.abs(srf)), cmap='coolwarm')
+        plt.colorbar(im, ax=axs[0])
+        axs[0].plot(x0, y0, 'kX')
+        axs[1].plot(srf_cut)
+        axs[1].axhline(pol * srf[y0, x0], c='k')
+        plt.axvline(x=x0 - std_left, c='r')
+        plt.axvline(x=x0, c='k')
+        plt.axvline(x=x0 + std_right, c='r')
+        plt.show()
+
+    std0 = np.mean([std_left, std_right])
 
     xlim = (0, srf.shape[1])
     ylim = (0, srf.shape[0])

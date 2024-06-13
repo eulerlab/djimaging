@@ -15,7 +15,7 @@ from djimaging.utils.receptive_fields.plot_rf_utils import plot_srf_gauss_fit
 from djimaging.utils.receptive_fields.spatial_rf_utils import compute_gauss_srf_area, compute_surround_index, \
     compute_center_index, fit_rf_model
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.plot_utils import plot_srf
+from djimaging.utils.plot_utils import plot_srf, prep_long_title
 
 
 class FitGauss2DRFTemplate(dj.Computed):
@@ -158,7 +158,7 @@ class FitDoG2DRFTemplate(dj.Computed):
     def stimulus_table(self):
         pass
 
-    def make(self, key):
+    def make(self, key, plot=False):
         srf = (self.split_rf_table() & key).fetch1("srf")
         stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
 
@@ -204,18 +204,23 @@ class FitDoG2DRFTemplate(dj.Computed):
 
         self.insert1(fit_key)
 
+        if plot:
+            self.plot1(key)
+
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
         srf = (self.split_rf_table() & key).fetch1("srf")
-        srf_fit, srf_center_fit, srf_surround_fit, srf_eff_center, rf_qidx = (self & key).fetch1(
-            "srf_fit", 'srf_center_fit', 'srf_surround_fit', 'srf_eff_center', 'rf_qidx')
+        srf_fit, srf_center_fit, srf_surround_fit, srf_eff_center, rf_qidx, srf_ec_params = (self & key).fetch1(
+            "srf_fit", 'srf_center_fit', 'srf_surround_fit', 'srf_eff_center', 'rf_qidx', 'srf_eff_center_params')
 
         vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
 
         fig, axs = plt.subplots(2, 3, figsize=(10, 6))
 
+        fig.suptitle(prep_long_title(key))
+
         ax = axs[0, 0]
-        plot_srf(srf, ax=ax, vabsmax=vabsmax)
+        plot_srf_gauss_fit(ax, srf=srf, srf_params=srf_ec_params, vabsmax=vabsmax, plot_cb=True)
         ax.set_title('sRF')
 
         ax = axs[0, 1]
