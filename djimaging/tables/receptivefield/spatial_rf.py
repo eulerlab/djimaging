@@ -236,7 +236,7 @@ class FitDoG2DRFTemplate(dj.Computed):
         ax.set_title('sRF center fit')
 
         ax = axs[1, 1]
-        plot_srf(srf_surround_fit, ax=ax, vabsmax=vabsmax)
+        plot_srf(srf_surround_fit, ax=ax, vabsmax=np.minimum(0.1 * vabsmax, np.abs(np.max(srf_surround_fit))))
         ax.set_title('sRF surround fit')
 
         ax = axs[1, 2]

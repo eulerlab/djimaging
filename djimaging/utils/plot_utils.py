@@ -143,14 +143,18 @@ def plot_srf(srf, ax=None, vabsmax=None, pixelsize=None, extent=None):
     if vabsmax is None:
         vabsmax = np.nanmax(np.abs(srf))
 
-    if np.any(srf < 0):
-        vmin = -vabsmax
-        vmax = vabsmax
-        cmap = 'bwr'
-    else:
+    if np.all(srf >= 0):
         vmin = 0
         vmax = vabsmax
         cmap = 'viridis'
+    elif np.all(srf <= 0):
+        vmin = -vabsmax
+        vmax = 0
+        cmap = 'viridis_r'
+    else:
+        vmin = -vabsmax
+        vmax = vabsmax
+        cmap = 'bwr'
 
     if extent is None and pixelsize is not None:
         extent = srf_extent(srf_shape=srf.shape, pixelsize=pixelsize)
