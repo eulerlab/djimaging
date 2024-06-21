@@ -119,13 +119,16 @@ class RoiMaskTemplate(dj.Manual):
         from_raw_data = (self.raw_params_table & field_key).fetch1("from_raw_data")
 
         field_file_info_df = self.load_field_file_info_df(field_key)
-        filepaths = field_file_info_df[field_file_info_df['kind'] == 'response']['filepath'].values
+        all_filepaths = field_file_info_df[field_file_info_df['kind'] == 'response']['filepath'].values
 
         pres_keys = []
-        for f in filepaths:
+        filepaths = []
+
+        for f in all_filepaths:
             pres_key_list = ((self.presentation_table & field_key) & dict(pres_data_file=f)).proj().fetch(as_dict=True)
             if len(pres_key_list) == 1:
                 pres_keys.append(pres_key_list[0])
+                filepaths.append(f)
             elif len(pres_key_list) > 1:
                 raise ValueError(f'Found multiple presentation keys for filepath={f}:\n{pres_key_list}')
 
@@ -138,6 +141,14 @@ class RoiMaskTemplate(dj.Manual):
             files=filepaths, data_name=data_name, alt_name=alt_name, from_raw_data=from_raw_data,
             roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
 
+        # Some sanity checks
+        assert len(pres_names) == len(pres_keys)
+        assert len(filepaths) == len(pres_keys)
+        assert len(ch0_stacks) == len(pres_keys)
+        assert len(ch1_stacks) == len(pres_keys)
+        assert len(output_files) == len(pres_keys)
+
+        # Load pixel size and scan type
         n_artifact, pixel_size_um, scan_type = (self.presentation_table() & pres_keys).fetch(
             'npixartifact', 'pixel_size_um', 'scan_type')
         n_artifact = check_unique_one(n_artifact, name='n_artifact')
@@ -153,10 +164,11 @@ class RoiMaskTemplate(dj.Manual):
         else:
             raise NotImplementedError(scan_type)
 
-        triggertimes = (self.presentation_table & pres_keys).fetch('triggertimes')
-        scan_frequencies = (self.presentation_table.ScanInfo() & pres_keys).fetch('scan_frequency')
-
+        # Reduce stacks to after stimulus onset?
         if use_stim_onset:
+            triggertimes = (self.presentation_table & pres_keys).fetch('triggertimes')
+            scan_frequencies = (self.presentation_table.ScanInfo() & pres_keys).fetch('scan_frequency')
+
             stim_onset_idxs = [int(np.floor(tt[0] * fs)) if len(tt) > 0 else 0
                                for tt, fs in zip(triggertimes, scan_frequencies)]
             ch0_stacks = [stack[:, :, stim_onset_idx:] for stack, stim_onset_idx in zip(ch0_stacks, stim_onset_idxs)]
