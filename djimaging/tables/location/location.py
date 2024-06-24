@@ -22,7 +22,6 @@ class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
 class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
     relativefieldlocation_table = RelativeFieldLocation
     expinfo_table = Experiment.ExpInfo
-
 """
 
 import warnings
