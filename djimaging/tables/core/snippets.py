@@ -194,6 +194,7 @@ class GroupSnippetsTemplate(dj.Computed):
     """
 
     database = ""
+    _pad_trace = False  # If True, chose snippet times always contain the trigger times
 
     @property
     def definition(self):
@@ -236,8 +237,8 @@ class GroupSnippetsTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key):
-        trial_info = (self.stimulus_table() & key).fetch1('trial_info')
+    def make(self, key, allow_incomplete=True):
+        trial_info, stim_dict = (self.stimulus_table() & key).fetch1('trial_info', 'stim_dict')
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
         pp_trace_t0, pp_trace_dt, pp_trace = (self.preprocesstraces_table() & key).fetch1(
             'pp_trace_t0', 'pp_trace_dt', 'pp_trace')
@@ -247,14 +248,18 @@ class GroupSnippetsTemplate(dj.Computed):
         if not isinstance(trial_info[0], dict):
             trial_info = reformat_numerical_trial_info(trial_info)
 
+        delay = stim_dict.get('trigger_delay', 0.)
+
         snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_group_reps(
-            pp_trace, pp_trace_times, triggertimes, trial_info=trial_info, allow_drop_last=True,
-            stack_kind='pad')
+            pp_trace, pp_trace_times, triggertimes, trial_info=trial_info, delay=delay,
+            allow_incomplete=allow_incomplete, pad_trace=self._pad_trace, stack_kind='pad')
+
+        snippets_t0 = {k: v[0, :] for k, v in snippets_times.items()}
 
         self.insert1(dict(
             **key,
             snippets=snippets,
-            snippets_t0={v[0, :] for k, v in snippets_times.items()},
+            snippets_t0=snippets_t0,
             snippets_dt=pp_trace_dt,
             triggertimes_snippets=triggertimes_snippets,
             droppedlastrep_flag=droppedlastrep_flag,
@@ -280,7 +285,7 @@ class GroupSnippetsTemplate(dj.Computed):
         for i, name in enumerate(names):
             snippets_times = (
                     np.tile(np.arange(snippets[name].shape[0]) * snippets_dt, (len(snippets_t0[name]), 1)).T
-                    + snippets_t0[name][0])
+                    + snippets_t0[name])
 
             axs['all'].vlines(triggertimes_snippets[name], tt_min, tt_max, color='k', zorder=-100, lw=0.5, alpha=0.5,
                               label='trigger' if name == names[0] else '_')
