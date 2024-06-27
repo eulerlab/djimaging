@@ -103,7 +103,7 @@ class RoiMaskTemplate(dj.Manual):
 
     def draw_roi_mask(self, field_key=None, pres_key=None, canvas_width=20, autorois_models='default_rgc',
                       show_diagnostics=True, load_high_res=True,
-                      roi_mask_dir=None, old_prefix=None, new_prefix=None, use_stim_onset=True, **kwargs):
+                      roi_mask_dir='ROIs', old_prefix=None, new_prefix=None, use_stim_onset=True, **kwargs):
         if canvas_width <= 0 or canvas_width >= 100:
             raise ValueError(f'canvas_width={canvas_width} must be in (0, 100)%')
 
@@ -235,7 +235,8 @@ class RoiMaskTemplate(dj.Manual):
                 shifts.append((0, 0))
         return shifts
 
-    def load_initial_roi_mask(self, field_key, igor_roi_masks=str, roi_mask_dir=None, old_prefix=None, new_prefix=None):
+    def load_initial_roi_mask(self, field_key, igor_roi_masks=str, roi_mask_dir='ROIs', old_prefix=None,
+                              new_prefix=None):
         """
         Load initial ROI mask for field.
         First try to load from database.
@@ -274,7 +275,7 @@ class RoiMaskTemplate(dj.Manual):
 
         return database_roi_mask
 
-    def load_field_roi_mask_pickle(self, field_key, roi_mask_dir=None, old_prefix=None, new_prefix=None) -> (
+    def load_field_roi_mask_pickle(self, field_key, roi_mask_dir='ROIs', old_prefix=None, new_prefix=None) -> (
             np.ndarray, str):
         mask_alias, highres_alias = (self.userinfo_table() & field_key).fetch1("mask_alias", "highres_alias")
         files = (self.presentation_table() & field_key).fetch("pres_data_file")
@@ -301,7 +302,7 @@ class RoiMaskTemplate(dj.Manual):
         return roi_mask, src_file
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
-                          only_new_fields: bool = True, roi_mask_dir=None, old_prefix=None, new_prefix=None,
+                          only_new_fields: bool = True, roi_mask_dir='ROIs', old_prefix=None, new_prefix=None,
                           auto_fill_pres_keys: bool = False):
         """Scan filesystem for new ROI masks and add them to the database.
         :param restrictions: Restrictions for field_table
@@ -336,7 +337,7 @@ class RoiMaskTemplate(dj.Manual):
         return err_list
 
     def _add_field_roi_masks(self, field_key, auto_fill_pres_keys=False,
-                             roi_mask_dir=None, old_prefix=None, new_prefix=None, verboselvl=0):
+                             roi_mask_dir='ROIs', old_prefix=None, new_prefix=None, verboselvl=0):
         pres_keys = (self.presentation_table & field_key).fetch('KEY')
 
         if verboselvl > 2:
@@ -408,7 +409,7 @@ class RoiMaskTemplate(dj.Manual):
             else:
                 raise ValueError(f'No ROI mask found for key={pres_key} but `auto_fill_pres_keys` is False')
 
-    def _load_presentation_roi_mask(self, key, roi_mask_dir=None, old_prefix=None, new_prefix=None):
+    def _load_presentation_roi_mask(self, key, roi_mask_dir='ROIs', old_prefix=None, new_prefix=None):
         igor_roi_masks, from_raw_data = (self.raw_params_table & key).fetch1('igor_roi_masks', 'from_raw_data')
         input_file = (self.presentation_table & key).fetch1("pres_data_file")
 
@@ -465,7 +466,7 @@ class RoiMaskTemplate(dj.Manual):
 
 
 def load_stack_data(files, data_name, alt_name, from_raw_data,
-                    roi_mask_dir=None, old_prefix=None, new_prefix=None):
+                    roi_mask_dir='ROIs', old_prefix=None, new_prefix=None):
     ch0_stacks, ch1_stacks, output_files = [], [], []
     for data_file in files:
         ch_stacks, wparams = read_utils.load_stacks(
