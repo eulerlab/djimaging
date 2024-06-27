@@ -1,3 +1,4 @@
+import warnings
 from abc import abstractmethod
 
 import datajoint as dj
@@ -58,7 +59,10 @@ class AveragesTemplate(dj.Computed):
             'snippets_t0', 'snippets_dt', 'snippets')
         triggertimes_snippets = (self.snippets_table() & key).fetch1('triggertimes_snippets')
 
-        # TODO: make more efficient
+        if snippets.shape[1] <= 1:
+            warnings.warn(f"Skipping {key} because it has only one repetition.")
+            return
+
         snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
                           + snippets_t0)
         average_times = get_aligned_snippets_times(snippets_times=snippets_times)
@@ -154,6 +158,11 @@ class ResampledAveragesTemplate(AveragesTemplate):
     def make(self, key):
         snippets_t0, snippets_dt, snippets = (self.snippets_table() & key).fetch1(
             'snippets_t0', 'snippets_dt', 'snippets')
+
+        if snippets.shape[1] <= 1:
+            warnings.warn(f"Skipping {key} because it has only one repetition.")
+            return
+
         triggertimes_snippets = (self.snippets_table() & key).fetch1('triggertimes_snippets')
 
         snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
