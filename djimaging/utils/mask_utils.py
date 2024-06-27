@@ -448,7 +448,7 @@ def as_igor_format(roi_mask):
 
 def to_igor_format(roi_mask):
     if not is_python_format(roi_mask):
-        raise ValueError('ROI mask is not in python format.')
+        raise ValueError(f'ROI mask is not in python format; unique values in mask: {np.unique(roi_mask)}')
 
     roi_mask = roi_mask.copy()
     roi_mask[roi_mask == 0] = -1

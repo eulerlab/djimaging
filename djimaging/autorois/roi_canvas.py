@@ -1170,6 +1170,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         return self.get_current_stack()[self.current_mask]
 
     def _compute_cc(self, traces):
+        if len(traces) <= 1:
+            return None
         return np.corrcoef(traces)
 
     def update_diagnostics(self, update=True):
