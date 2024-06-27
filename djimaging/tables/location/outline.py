@@ -286,6 +286,8 @@ class OutlineRelTemplate(dj.Computed):
         outline_rel_xy = (self & key).fetch1('outline_rel_xy')
         outline_retina_xy = (self & key).fetch1('outline_retina_xy')
 
+        fields, relxs, relys = (self.OutlineRelField & key).fetch('field', 'relx', 'rely')
+
         fig, axs = plt.subplots(1, 3, figsize=(12, 3))
 
         ax = axs[0]
@@ -297,6 +299,9 @@ class OutlineRelTemplate(dj.Computed):
         ax.plot(*np.array(outline_rel_xy).T, '.-')
         ax.set(title='Relative', xlabel='relx_um', ylabel='rely_um')
         ax.set_aspect(aspect="equal", adjustable="datalim")
+
+        for field, relx, rely in zip(fields, relxs, relys):
+            ax.text(relx, rely, field)
 
         ax = axs[2]
         ax.plot(*np.array(outline_retina_xy).T, '.-')
