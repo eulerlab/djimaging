@@ -114,7 +114,8 @@ class OutlineAbsTemplate(dj.Computed):
 
         file_info_df = self.load_exp_file_info_df(key)
         if len(file_info_df) == 0:
-            raise FileNotFoundError(f'No outline files found for field:\n\t{key}')
+            warnings.warn(f'No outline files found for field:\n\t{key}')
+            return
 
         outline_abs_xy = []
         field_entries = []

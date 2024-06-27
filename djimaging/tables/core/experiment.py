@@ -130,11 +130,12 @@ class ExperimentTemplate(dj.Computed):
                 return
 
         pre_data_path = header_path + "/" + pre_data_dir + "/"
-        assert os.path.isdir(pre_data_path), f"{pre_data_dir} not found {header_path}"
+        if not os.path.isdir(pre_data_path):
+            warnings.warn(f"Folder `{pre_data_dir}` not found in {header_path}")
 
         raw_data_path = header_path + "/" + raw_data_dir + "/"
         if not os.path.isdir(raw_data_path):
-            warnings.warn(f"Folder {raw_data_dir} not found in {header_path}")
+            warnings.warn(f"Folder `{raw_data_dir}` not found in {header_path}")
 
         exp_key = deepcopy(primary_key)
         exp_key["header_path"] = header_path + "/"
