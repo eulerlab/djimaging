@@ -80,8 +80,8 @@ class Baden16TracesTemplate(dj.Computed):
         """
         return definition
 
-    _shift_chirp = 2
-    _shift_bar = -3
+    _shift_chirp = 1
+    _shift_bar = -4
     _chirp_n_int = 249
 
     _stim_name_chirp = 'gChirp'
