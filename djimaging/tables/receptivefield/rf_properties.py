@@ -5,6 +5,7 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 from djimaging.utils import math_utils
+from djimaging.utils.receptive_fields.plot_rf_utils import plot_srf_gauss_fit
 
 from djimaging.utils.trace_utils import sort_traces
 from matplotlib import pyplot as plt
@@ -14,7 +15,7 @@ from djimaging.tables.receptivefield.rf_properties_utils import compute_gauss_sr
 from djimaging.tables.receptivefield.rf_utils import compute_explained_rf, resize_srf, split_strf, \
     compute_polarity_and_peak_idxs, merge_strf
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.plot_utils import plot_srf, plot_trf, plot_signals_heatmap, set_long_title
+from djimaging.utils.plot_utils import plot_srf, plot_trf, plot_signals_heatmap, set_long_title, prep_long_title
 
 
 class SplitRFParamsTemplate(dj.Lookup):
@@ -200,7 +201,6 @@ class FitGauss2DRFTemplate(dj.Computed):
 
     def make(self, key):
         srf = (self.split_rf_table() & key).fetch1("srf")
-        stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
 
         # Fit RF model
         srf_fit, srf_params, qi = fit_rf_model(srf, kind='gauss', polarity=self._polarity)
@@ -229,10 +229,13 @@ class FitGauss2DRFTemplate(dj.Computed):
         key = get_primary_key(table=self, key=key)
         srf = (self.split_rf_table() & key).fetch1("srf")
         srf_fit, rf_qidx = (self & key).fetch1("srf_fit", 'rf_qidx')
+        srf_params = (self & key).fetch1("srf_params")
 
         vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
 
-        fig, axs = plt.subplots(1, 3, figsize=(10, 3))
+        fig, axs = plt.subplots(1, 4, figsize=(12, 3))
+
+        fig.suptitle(prep_long_title(key))
 
         ax = axs[0]
         plot_srf(srf, ax=ax, vabsmax=vabsmax)
@@ -245,6 +248,9 @@ class FitGauss2DRFTemplate(dj.Computed):
         ax = axs[2]
         plot_srf(srf - srf_fit, ax=ax, vabsmax=vabsmax)
         ax.set_title(f'Difference: QI={rf_qidx:.2f}')
+
+        ax = axs[3]
+        plot_srf_gauss_fit(ax, srf=srf, srf_params=srf_params, vabsmax=vabsmax, plot_cb=True)
 
         plt.tight_layout()
         plt.show()
@@ -312,7 +318,6 @@ class FitDoG2DRFTemplate(dj.Computed):
 
     def make(self, key):
         srf = (self.split_rf_table() & key).fetch1("srf")
-        stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
 
         srf_fit, srf_center_fit, srf_surround_fit, srf_params, eff_polarity, qi = fit_rf_model(
             srf, kind='dog', polarity=self._polarity)
@@ -361,15 +366,17 @@ class FitDoG2DRFTemplate(dj.Computed):
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
         srf = (self.split_rf_table() & key).fetch1("srf")
-        srf_fit, srf_center_fit, srf_surround_fit, srf_eff_center, rf_qidx = (self & key).fetch1(
-            "srf_fit", 'srf_center_fit', 'srf_surround_fit', 'srf_eff_center', 'rf_qidx')
+        srf_fit, srf_center_fit, srf_surround_fit, srf_eff_center, rf_qidx, srf_ec_params = (self & key).fetch1(
+            "srf_fit", 'srf_center_fit', 'srf_surround_fit', 'srf_eff_center', 'rf_qidx', 'srf_eff_center_params')
 
         vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
 
         fig, axs = plt.subplots(2, 3, figsize=(10, 6))
 
+        fig.suptitle(prep_long_title(key))
+
         ax = axs[0, 0]
-        plot_srf(srf, ax=ax, vabsmax=vabsmax)
+        plot_srf_gauss_fit(ax, srf=srf, srf_params=srf_ec_params, vabsmax=vabsmax, plot_cb=True)
         ax.set_title('sRF')
 
         ax = axs[0, 1]
@@ -385,7 +392,7 @@ class FitDoG2DRFTemplate(dj.Computed):
         ax.set_title('sRF center fit')
 
         ax = axs[1, 1]
-        plot_srf(srf_surround_fit, ax=ax, vabsmax=vabsmax)
+        plot_srf(srf_surround_fit, ax=ax, vabsmax=np.minimum(0.1 * vabsmax, np.abs(np.max(srf_surround_fit))))
         ax.set_title('sRF surround fit')
 
         ax = axs[1, 2]
