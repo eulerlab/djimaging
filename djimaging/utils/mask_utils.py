@@ -432,7 +432,7 @@ def is_igor_format(roi_mask):
     vmin = np.min(roi_mask)
     vmax = np.max(roi_mask)
 
-    if vmax in [0, 1] and vmin < 0:
+    if vmax in [0, 1] and vmin <= 1:
         return True
     else:
         return False
@@ -461,7 +461,7 @@ def is_python_format(roi_mask):
     vmin = np.min(roi_mask)
     vmax = np.max(roi_mask)
 
-    if vmin == 0 and vmax > 0:
+    if vmin == 0 and vmax >= 0:
         return True
     else:
         return False
@@ -477,7 +477,7 @@ def as_python_format(roi_mask):
 
 def to_python_format(roi_mask):
     if not is_igor_format(roi_mask):
-        raise ValueError('ROI mask is not in IGOR format.')
+        raise ValueError(f'ROI mask is not in IGOR format. Unique values in mask: {np.unique(roi_mask)}')
 
     vmax = np.max(roi_mask)
 

@@ -102,7 +102,7 @@ class RoiMaskTemplate(dj.Manual):
         return file_info_df
 
     def draw_roi_mask(self, field_key=None, pres_key=None, canvas_width=20, autorois_models='default_rgc',
-                      show_diagnostics=True, load_high_res=True,
+                      show_diagnostics=True, load_high_res=True, max_shift=None,
                       roi_mask_dir='ROIs', old_prefix=None, new_prefix=None, use_stim_onset=True,
                       verbose=True, **kwargs):
         if canvas_width <= 0 or canvas_width >= 100:
@@ -199,7 +199,8 @@ class RoiMaskTemplate(dj.Manual):
             ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
             main_stim_idx=0, initial_roi_mask=initial_roi_mask, shifts=shifts,
             canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
-            pixel_size_um=pixel_size_d1_d2, show_diagnostics=show_diagnostics, max_shift=self._max_shift,
+            pixel_size_um=pixel_size_d1_d2, show_diagnostics=show_diagnostics,
+            max_shift=self._max_shift if max_shift is None else max_shift,
             **kwargs,
         )
         if verbose:
@@ -306,7 +307,7 @@ class RoiMaskTemplate(dj.Manual):
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
                           only_new_fields: bool = True, roi_mask_dir='ROIs', old_prefix=None, new_prefix=None,
-                          auto_fill_pres_keys: bool = False):
+                          max_shift=None, auto_fill_pres_keys: bool = False):
         """Scan filesystem for new ROI masks and add them to the database.
         :param restrictions: Restrictions for field_table
         :param verboselvl: Verbosity level
@@ -315,6 +316,7 @@ class RoiMaskTemplate(dj.Manual):
         :param roi_mask_dir: Directory where ROI masks are stored, typically Raw, Pre or AutoROIs
         :param old_prefix: Prefix that should be replaced in file names
         :param new_prefix: Prefix that should replace old_prefix in file names
+        :param max_shift: Maximum allowed shift between Presentations, defaults to Table value
         :param auto_fill_pres_keys: Automatically fill presentation keys with zero shift if they are missing as files
         """
         if restrictions is None:
@@ -329,7 +331,8 @@ class RoiMaskTemplate(dj.Manual):
             try:
                 self._add_field_roi_masks(
                     key, auto_fill_pres_keys=auto_fill_pres_keys,
-                    roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix, verboselvl=verboselvl)
+                    roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+                    max_shift=max_shift, verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
                     warnings.warn(f'Error for key={key}:\n{e}')
@@ -340,7 +343,7 @@ class RoiMaskTemplate(dj.Manual):
         return err_list
 
     def _add_field_roi_masks(self, field_key, auto_fill_pres_keys=False,
-                             roi_mask_dir='ROIs', old_prefix=None, new_prefix=None, verboselvl=0):
+                             roi_mask_dir='ROIs', old_prefix=None, new_prefix=None, max_shift=None, verboselvl=0):
         pres_keys = (self.presentation_table & field_key).fetch('KEY')
 
         if verboselvl > 2:
@@ -398,7 +401,7 @@ class RoiMaskTemplate(dj.Manual):
         for pres_key, roi_mask in data_pairs:
             if roi_mask is not None:
                 as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(
-                    roi_mask, main_roi_mask, max_shift=self._max_shift)
+                    roi_mask, main_roi_mask, max_shift=self._max_shift if max_shift is None else max_shift)
                 self.RoiMaskPresentation().insert1(
                     {**pres_key, "roi_mask": roi_mask, "as_field_mask": as_field_mask,
                      "shift_dx": shift_dx, "shift_dy": shift_dy},

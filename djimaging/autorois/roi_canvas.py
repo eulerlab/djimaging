@@ -281,8 +281,11 @@ class RoiCanvas:
 
     def remove_current_delete_mask_from_roi_masks(self):
         """Remove the current delete mask from all masks and reset current delete mask"""
+        self.current_mask[self.current_delete_mask] = False
+
         roi_masks = self.roi_masks.copy()
         roi_masks[self.current_delete_mask] = 0
+
         self.set_roi_masks(roi_masks)
         self.reset_current_delete_mask()
 
