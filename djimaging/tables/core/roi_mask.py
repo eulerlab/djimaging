@@ -103,7 +103,8 @@ class RoiMaskTemplate(dj.Manual):
 
     def draw_roi_mask(self, field_key=None, pres_key=None, canvas_width=20, autorois_models='default_rgc',
                       show_diagnostics=True, load_high_res=True,
-                      roi_mask_dir='ROIs', old_prefix=None, new_prefix=None, use_stim_onset=True, **kwargs):
+                      roi_mask_dir='ROIs', old_prefix=None, new_prefix=None, use_stim_onset=True,
+                      verbose=True, **kwargs):
         if canvas_width <= 0 or canvas_width >= 100:
             raise ValueError(f'canvas_width={canvas_width} must be in (0, 100)%')
 
@@ -175,13 +176,13 @@ class RoiMaskTemplate(dj.Manual):
             ch1_stacks = [stack[:, :, stim_onset_idx:] for stack, stim_onset_idx in zip(ch1_stacks, stim_onset_idxs)]
 
         # Load high resolution data is possible
-        high_res_bg_dict = self.load_high_res_bg_dict(field_key) if load_high_res else dict()
+        high_res_bg_dict = self.load_high_res_bg_dict(field_key, verbose=verbose) if load_high_res else dict()
 
         # Load initial ROI masks
         igor_roi_masks = (self.raw_params_table & field_key).fetch1('igor_roi_masks')
         initial_roi_mask, _ = self.load_initial_roi_mask(
             field_key=field_key, igor_roi_masks=igor_roi_masks,
-            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix, verbose=verbose)
 
         if initial_roi_mask is not None:
             initial_roi_mask = to_python_format(initial_roi_mask)
@@ -201,7 +202,8 @@ class RoiMaskTemplate(dj.Manual):
             pixel_size_um=pixel_size_d1_d2, show_diagnostics=show_diagnostics, max_shift=self._max_shift,
             **kwargs,
         )
-        print(f"Returned InteractiveRoiCanvas object. To start GUI, call <enter_object_name>.start_gui().")
+        if verbose:
+            print(f"Returned InteractiveRoiCanvas object. To start GUI, call <enter_object_name>.start_gui().")
         return roi_canvas
 
     def init_shifts(self, field_key, pres_keys):
@@ -236,7 +238,7 @@ class RoiMaskTemplate(dj.Manual):
         return shifts
 
     def load_initial_roi_mask(self, field_key, igor_roi_masks=str, roi_mask_dir='ROIs', old_prefix=None,
-                              new_prefix=None):
+                              new_prefix=None, verbose=True):
         """
         Load initial ROI mask for field.
         First try to load from database.
@@ -251,12 +253,13 @@ class RoiMaskTemplate(dj.Manual):
 
         if igor_roi_masks != 'yes':
             roi_mask, src_file = self.load_field_roi_mask_pickle(
-                field_key=field_key, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+                field_key=field_key, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+                verbose=verbose)
             if roi_mask is not None:
                 return roi_mask, src_file
 
         if igor_roi_masks != 'no':
-            roi_mask, src_file = self.load_field_roi_mask_igor(field_key=field_key)
+            roi_mask, src_file = self.load_field_roi_mask_igor(field_key=field_key, verbose=verbose)
             if roi_mask is not None:
                 return roi_mask, src_file
 
@@ -275,20 +278,20 @@ class RoiMaskTemplate(dj.Manual):
 
         return database_roi_mask
 
-    def load_field_roi_mask_pickle(self, field_key, roi_mask_dir='ROIs', old_prefix=None, new_prefix=None) -> (
-            np.ndarray, str):
+    def load_field_roi_mask_pickle(self, field_key, roi_mask_dir='ROIs', old_prefix=None, new_prefix=None,
+                                   verbose=True) -> (np.ndarray, str):
         mask_alias, highres_alias = (self.userinfo_table() & field_key).fetch1("mask_alias", "highres_alias")
         files = (self.presentation_table() & field_key).fetch("pres_data_file")
 
         roi_mask, src_file = load_preferred_roi_mask_pickle(
             files, mask_alias=mask_alias, highres_alias=highres_alias,
             roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
-        if roi_mask is not None:
+        if roi_mask is not None and verbose:
             print(f'Loaded ROI mask from file={src_file} for files=\n{files}\nfor mask_alias={mask_alias}')
 
         return roi_mask, src_file
 
-    def load_field_roi_mask_igor(self, field_key) -> (np.ndarray, str):
+    def load_field_roi_mask_igor(self, field_key, verbose=True) -> (np.ndarray, str):
         mask_alias, highres_alias, raw_data_dir, pre_data_dir = (self.userinfo_table() & field_key).fetch1(
             "mask_alias", "highres_alias", "raw_data_dir", "pre_data_dir")
         files = (self.presentation_table() & field_key).fetch("pres_data_file")
@@ -296,7 +299,7 @@ class RoiMaskTemplate(dj.Manual):
         files = [as_pre_filepath(f, raw_data_dir=raw_data_dir, pre_data_dir=pre_data_dir) for f in files]
 
         roi_mask, src_file = load_preferred_roi_mask_igor(files, mask_alias=mask_alias, highres_alias=highres_alias)
-        if roi_mask is not None:
+        if roi_mask is not None and verbose:
             print(f'Loaded ROI mask from file={src_file} for files=\n{files}\nfor mask_alias={mask_alias}')
 
         return roi_mask, src_file
@@ -361,8 +364,6 @@ class RoiMaskTemplate(dj.Manual):
             if verboselvl > 2:
                 print('pres_keys:', [k for k in pres_keys])
             return
-
-        print(data_pairs)
 
         # Filter out keys that are already present
         data_pairs = [(pres_key, roi_mask) for pres_key, roi_mask in data_pairs
@@ -451,7 +452,7 @@ class RoiMaskTemplate(dj.Manual):
         plot_field(main_ch_average, alt_ch_average, roi_mask=roi_mask, title=key, npixartifact=npixartifact,
                    gamma=gamma)
 
-    def load_high_res_bg_dict(self, key):
+    def load_high_res_bg_dict(self, key, verbose=True):
         try:
             ch_names, ch_averages = (self.highres_table().StackAverages & key).fetch1('ch_name', 'ch_average')
             bg_dict = dict()
@@ -459,7 +460,8 @@ class RoiMaskTemplate(dj.Manual):
                 bg_dict[f'HR[{name}]'] = avg
 
         except Exception as e:
-            warnings.warn(f'Failed to load high resolution data because of error:\n{e}')
+            if verbose:
+                warnings.warn(f'Failed to load high resolution data because of error:\n{e}')
             return dict()
 
         return bg_dict
