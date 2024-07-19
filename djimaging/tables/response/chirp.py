@@ -20,7 +20,7 @@ class ChirpFeatures(response.ChirpFeaturesTemplate):
     snippets_table = Snippets
     presentation_table = Presentation
 """
-
+import warnings
 from abc import abstractmethod
 
 import datajoint as dj
@@ -265,7 +265,60 @@ def compute_polarity_index(average, fs, alpha=2, t_on_step=2, t_off_step=5, plot
     return polarity_index
 
 
-def compute_transience_index(average, fs, alpha=0.4, t_on_step=2, t_max=6, plot=None):
+def compute_peak_to_post_peak_ratio(average, fs, alpha, alpha_dt, t_on_step=2, t_max=6, plot=None, title=""):
+    """
+    :param average: A 1d numpy array of trace
+    :param fs: Sampling rate of the data in Hz.
+    :param alpha: Duration of the response delay in seconds.
+    :param alpha_dt: Plus-minus response window in seconds.
+    :param t_on_step: Time of the on-step of the stimulus in seconds.
+    :param t_max: Time of the offset of the response window in seconds.
+    :param plot: If True, plot the average trace and the response window.
+
+    :return: Peak-Response / Post-Peak-Response.
+    """
+    if alpha_dt >= alpha:
+        raise ValueError(f"alpha_dt must be smaller than alpha, but is {alpha_dt} >= {alpha}")
+
+    idx_start = int(t_on_step * fs)
+    idx_end = int(t_max * fs)
+
+    idx_peak = idx_start + np.argmax(average[idx_start:idx_end])
+    idx_post_peak = idx_peak + int(alpha * fs)
+    didx = int(alpha_dt * fs)
+
+    baseline = np.mean(average[:idx_start])
+
+    average_norm = average - baseline
+    peak_response = np.maximum(0, average_norm[idx_peak])
+    post_peak_response = np.maximum(0, np.mean(average_norm[idx_post_peak - didx:idx_post_peak + didx + 1]))
+
+    if peak_response <= 1e-9:
+        warnings.warn("Peak response can not be computed for <= 0 peaks, setting response index to -1.")
+        response_index = -1
+    else:
+        response_index = np.minimum(1, post_peak_response / peak_response)
+
+    if plot:
+        if isinstance(plot, plt.Axes):
+            ax = plot
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+        ax.set_title(f"{title}: {response_index:.2f}")
+        ax.plot(average_norm)
+        ax.axvline(idx_peak, c='r')
+        ax.plot(idx_peak, peak_response, 'rX')
+        ax.axvline(idx_post_peak, c='r', alpha=0.7)
+        ax.fill_between([idx_post_peak - didx, idx_post_peak + didx], [np.min(average_norm), np.min(average_norm)],
+                        [peak_response, peak_response], color='orange', alpha=0.45)
+        ax.plot(idx_post_peak, post_peak_response, 'rX')
+        ax.set_xlim(0, fs * (t_max + 2 * alpha))
+        ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
+
+    return response_index
+
+
+def compute_transience_index(average, fs, alpha=0.4, alpha_dt=0.15, t_on_step=2, t_max=6, plot=None):
     """
     Calculate the response transience index (RTi) from Franke et al. 2017.
 
@@ -273,7 +326,8 @@ def compute_transience_index(average, fs, alpha=0.4, t_on_step=2, t_max=6, plot=
 
     :param average: A 1d numpy array of trace
     :param fs: Sampling rate of the data in Hz.
-    :param alpha: Duration of the response window in seconds.
+    :param alpha: Duration of the response delay in seconds.
+    :param alpha_dt: Plus-minus response window in seconds.
     :param t_on_step: Time of the on-step of the stimulus in seconds.
     :param t_max: Time of the offset of the response window in seconds.
     :param plot: If True, plot the average trace and the response window.
@@ -281,33 +335,13 @@ def compute_transience_index(average, fs, alpha=0.4, t_on_step=2, t_max=6, plot=
     :return: Response transience index (RTi).
     """
 
-    idx_start = int(t_on_step * fs)
-    idx_end = int(t_max * fs)
-
-    average_shifted = average - np.median(average[:idx_start])
-
-    idx_max = idx_start + np.argmax(average_shifted[idx_start:idx_end])
-    idx_max_alpha = idx_max + int(alpha * fs)
-    transience_index = 1 - (average_shifted[idx_max_alpha] / average_shifted[idx_max])
-
-    if plot:
-        if isinstance(plot, plt.Axes):
-            ax = plot
-        else:
-            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
-        ax.set_title(f"RTi: {transience_index:.2f}")
-        ax.plot(average_shifted)
-        ax.axvline(idx_max, c='r')
-        ax.plot(idx_max, average_shifted[idx_max], 'rX')
-        ax.axvline(idx_max_alpha, c='r')
-        ax.plot(idx_max_alpha, average_shifted[idx_max_alpha], 'rX')
-        ax.set_xlim(0, fs * (t_max + 3))
-        ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
-
-    return transience_index
+    rti = compute_peak_to_post_peak_ratio(
+        average=average, fs=fs, alpha=alpha, alpha_dt=alpha_dt,
+        t_on_step=t_on_step, t_max=t_max, plot=plot, title="RTi")
+    return rti
 
 
-def compute_plateau_index(average, fs, alpha=2., t_on_step=2, t_max=6, plot=None):
+def compute_plateau_index(average, fs, alpha=2., alpha_dt=0.15, t_on_step=2, t_max=6, plot=None):
     """
     Calculate the response plateau index (RPi) from Franke et al. 2017.
 
@@ -315,36 +349,18 @@ def compute_plateau_index(average, fs, alpha=2., t_on_step=2, t_max=6, plot=None
 
     :param average: A 1d numpy array of trace
     :param fs: Sampling rate of the data in Hz.
-    :param alpha: Duration of the response window in seconds.
+    :param alpha: Duration of the response delay in seconds.
+    :param alpha_dt: Plus-minus response window in seconds.
     :param t_on_step: Time of the on-step of the stimulus in seconds.
     :param t_max: Time of the offset of the response window in seconds.
     :param plot: If True, plot the average trace and the response window.
 
     :return: Response plateau index (RPi).
     """
-
-    idx_start = int(t_on_step * fs)
-    idx_end = int(t_max * fs)
-
-    idx_max = idx_start + np.argmax(average[idx_start:idx_end])
-    idx_max_alpha = idx_max + int(alpha * fs)
-    plateau_index = average[idx_max_alpha] / average[idx_max]
-
-    if plot:
-        if isinstance(plot, plt.Axes):
-            ax = plot
-        else:
-            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
-        ax.set_title(f"RPi: {plateau_index:.2f}")
-        ax.plot(average)
-        ax.axvline(idx_max, c='r')
-        ax.plot(idx_max, average[idx_max], 'rX')
-        ax.axvline(idx_max_alpha, c='r')
-        ax.plot(idx_max_alpha, average[idx_max_alpha], 'rX')
-        ax.set_xlim(0, fs * (t_max + 2 * alpha))
-        ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
-
-    return plateau_index
+    rpi = compute_peak_to_post_peak_ratio(
+        average=average, fs=fs, alpha=alpha, alpha_dt=alpha_dt,
+        t_on_step=t_on_step, t_max=t_max, plot=plot, title="RPi")
+    return rpi
 
 
 def compute_tonic_release_index(average, fs, t_flicker_start=10, t_flicker_end=29, dt_baseline=1, plot=None):
