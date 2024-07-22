@@ -1,5 +1,6 @@
 import numpy as np
 
+from djimaging.utils.mask_utils import assert_igor_format
 from djimaging.utils.scanm import read_smp_utils, read_h5_utils, roi_utils, wparams_utils
 
 
@@ -72,7 +73,9 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, preci
 
     if stack.ndim != 3:
         raise ValueError(f"stack must be 3d but ndim={stack.ndim}")
-    roi_utils.check_if_scanm_roi_mask(roi_mask=roi_mask)
+
+    assert_igor_format(roi_mask)
+
     if stack.shape[:2] != roi_mask.shape:
         raise ValueError(f"xy-dim of stack roi_mask must match but shapes are {stack.shape} and {roi_mask.shape}")
 

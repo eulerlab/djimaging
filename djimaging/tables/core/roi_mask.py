@@ -397,21 +397,25 @@ class RoiMaskTemplate(dj.Manual):
         else:
             main_pres_key, main_roi_mask = (self.RoiMaskPresentation & field_key).fetch1('KEY', 'roi_mask')
 
-        self.insert1({**field_key, **main_pres_key, "roi_mask": main_roi_mask}, skip_duplicates=True)
+        roi_mask_pres_keys = []
+
         for pres_key, roi_mask in data_pairs:
             if roi_mask is not None:
                 as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(
                     roi_mask, main_roi_mask, max_shift=self._max_shift if max_shift is None else max_shift)
-                self.RoiMaskPresentation().insert1(
+                roi_mask_pres_keys.append(
                     {**pres_key, "roi_mask": roi_mask, "as_field_mask": as_field_mask,
-                     "shift_dx": shift_dx, "shift_dy": shift_dy},
-                    skip_duplicates=True)
+                     "shift_dx": shift_dx, "shift_dy": shift_dy})
             elif auto_fill_pres_keys:
-                self.RoiMaskPresentation().insert1(
-                    {**pres_key, "roi_mask": main_roi_mask, "as_field_mask": "same", "shift_dx": 0, "shift_dy": 0},
-                    skip_duplicates=True)
+                roi_mask_pres_keys.append(
+                    {**pres_key, "roi_mask": main_roi_mask, "as_field_mask": 'different',
+                     "shift_dx": 0, "shift_dy": 0})
             else:
                 raise ValueError(f'No ROI mask found for key={pres_key} but `auto_fill_pres_keys` is False')
+
+        self.insert1({**field_key, **main_pres_key, "roi_mask": main_roi_mask}, skip_duplicates=True)
+        for roi_mask_pres_key in roi_mask_pres_keys:
+            self.RoiMaskPresentation().insert1(roi_mask_pres_key, skip_duplicates=True)
 
     def _load_presentation_roi_mask(self, key, roi_mask_dir='ROIs', old_prefix=None, new_prefix=None):
         igor_roi_masks, from_raw_data = (self.raw_params_table & key).fetch1('igor_roi_masks', 'from_raw_data')
