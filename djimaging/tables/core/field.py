@@ -117,15 +117,21 @@ class FieldTemplate(dj.Computed):
             self.add_experiment_fields(
                 key, restr_headers=restr_headers, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def load_exp_file_info_df(self, exp_key):
+    def load_exp_file_info_df(self, exp_key, filter_kind='response'):
         from_raw_data = (self.raw_params_table & exp_key).fetch1('from_raw_data')
         header_path = (self.experiment_table & exp_key).fetch1('header_path')
         data_folder = (self.userinfo_table & exp_key).fetch1("raw_data_dir" if from_raw_data else "pre_data_dir")
         user_dict = (self.userinfo_table & exp_key).fetch1()
 
         file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
+
         if len(file_info_df) > 0:
-            file_info_df = file_info_df[file_info_df['field'].notnull() & (file_info_df['kind'] == 'response')]
+            file_info_df = file_info_df[file_info_df['field'].notnull()]
+            if filter_kind is not None:
+                if isinstance(filter_kind, str):
+                    filter_kind = [filter_kind]
+                file_info_df = file_info_df[file_info_df['kind'].isin(filter_kind)]
+
             file_info_df.sort_values('mask_order', inplace=True, ascending=True)
 
             # Set defaults

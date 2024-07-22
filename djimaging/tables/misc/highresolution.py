@@ -86,9 +86,11 @@ class HighResTemplate(dj.Computed):
             """
             return definition
 
-    def load_field_stim_file_info_df(self, field_key):
-        file_info_df = self.field_table().load_exp_file_info_df(field_key)
-        file_info_df = file_info_df[file_info_df['kind'] == 'hr']
+    def load_field_stim_file_info_df(self, field_stim_key):
+        file_info_df = self.field_table().load_exp_file_info_df(field_stim_key, filter_kind='hr')
+
+        for new_key in self.field_table().new_primary_keys:
+            file_info_df = file_info_df[file_info_df[new_key] == field_stim_key[new_key]]
         return file_info_df
 
     def make(self, key):
@@ -96,11 +98,14 @@ class HighResTemplate(dj.Computed):
 
         file_info_df = self.load_field_stim_file_info_df(key)
         if len(file_info_df) == 0:
-            raise FileNotFoundError(f'No highres files found for field {key}')
+            warnings.warn(f'No highres files found for field {key}. Skipping.')
+            return
         elif len(file_info_df) > 1:
             warnings.warn(f'Multiple highres files found for field {key}. Using first one.')
 
-        rec = ScanMRecording(filepath=file_info_df.filepath, setup_id=setupid, date=key['date'])
+        filepath = file_info_df.iloc[0].filepath
+
+        rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=key['date'])
         hr_entry, avg_entries = self.complete_keys(key, rec)
 
         self.insert1(hr_entry)

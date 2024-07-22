@@ -143,8 +143,7 @@ class PresentationTemplate(dj.Computed):
             self.add_field_presentations(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
     def load_field_stim_file_info_df(self, field_stim_key):
-        file_info_df = self.field_table().load_exp_file_info_df(field_stim_key)
-        file_info_df = file_info_df[file_info_df['kind'] == 'response']
+        file_info_df = self.field_table().load_exp_file_info_df(field_stim_key, filter_kind='response')
 
         for new_key in self.field_table().new_primary_keys:
             file_info_df = file_info_df[file_info_df[new_key] == field_stim_key[new_key]]

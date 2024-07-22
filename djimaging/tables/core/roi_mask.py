@@ -95,8 +95,7 @@ class RoiMaskTemplate(dj.Manual):
         return missing_keys
 
     def load_field_file_info_df(self, field_key):
-        file_info_df = self.field_table().load_exp_file_info_df(field_key)
-        file_info_df = file_info_df[(file_info_df['kind'] == 'response') | (file_info_df['kind'] == 'hr')]
+        file_info_df = self.field_table().load_exp_file_info_df(field_key, filter_kind=['hr', 'response'])
         for new_key in self.field_table().new_primary_keys:
             file_info_df = file_info_df[file_info_df[new_key] == field_key[new_key]]
         return file_info_df
@@ -109,13 +108,13 @@ class RoiMaskTemplate(dj.Manual):
             raise ValueError(f'canvas_width={canvas_width} must be in (0, 100)%')
 
         if pres_key is not None:
-            field_key = (self.field_table & pres_key).proj().fetch1()
+            field_key = (self.field_table & pres_key).fetch1('KEY')
         elif field_key is None:
             field_key = np.random.choice(self.list_missing_field())
 
-        assert field_key is not None, 'No field_key provided and no missing field found.'
-
-        field_key = (self.field_table & field_key).proj().fetch1()  # Make sure it's a dict
+        if field_key is None:
+            raise ValueError('No field_key provided and no missing field found.')
+        field_key = (self.field_table & field_key).fetch1('KEY')
 
         from_raw_data = (self.raw_params_table & field_key).fetch1("from_raw_data")
 
@@ -176,7 +175,8 @@ class RoiMaskTemplate(dj.Manual):
             ch1_stacks = [stack[:, :, stim_onset_idx:] for stack, stim_onset_idx in zip(ch1_stacks, stim_onset_idxs)]
 
         # Load high resolution data is possible
-        high_res_bg_dict = self.load_high_res_bg_dict(field_key, verbose=verbose) if load_high_res else dict()
+        high_res_bg_dict = self.load_high_res_bg_dict(
+            field_key, ch_names=[data_name, alt_name], verbose=verbose) if load_high_res else dict()
 
         # Load initial ROI masks
         igor_roi_masks = (self.raw_params_table & field_key).fetch1('igor_roi_masks')
@@ -455,16 +455,17 @@ class RoiMaskTemplate(dj.Manual):
         plot_field(main_ch_average, alt_ch_average, roi_mask=roi_mask, title=key, npixartifact=npixartifact,
                    gamma=gamma)
 
-    def load_high_res_bg_dict(self, key, verbose=True):
+    def load_high_res_bg_dict(self, key, ch_names, verbose=True):
         try:
-            ch_names, ch_averages = (self.highres_table().StackAverages & key).fetch1('ch_name', 'ch_average')
+            ch_names, ch_averages = (self.highres_table().StackAverages & key
+                                     & [f"ch_name='{cn}'" for cn in ch_names]).fetch('ch_name', 'ch_average')
             bg_dict = dict()
             for name, avg in zip(ch_names, ch_averages):
                 bg_dict[f'HR[{name}]'] = avg
 
         except Exception as e:
             if verbose:
-                warnings.warn(f'Failed to load high resolution data because of error:\n{e}')
+                warnings.warn(f'Failed to load high resolution data for key\n{key}\nbecause of error:\n{e}')
             return dict()
 
         return bg_dict
