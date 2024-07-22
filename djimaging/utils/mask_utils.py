@@ -8,7 +8,6 @@ from matplotlib import pyplot as plt
 
 from djimaging.utils import scanm_utils
 from djimaging.utils.alias_utils import check_shared_alias_str
-from djimaging.utils.scanm_utils import check_if_scanm_roi_mask
 
 
 def create_circular_mask(h, w, center, radius):
@@ -162,7 +161,7 @@ def get_mask_by_bg(seed_ix, seed_iy, data, ref_value=None, thresh=0.2, max_pixel
 
 def relabel_mask(mask, connectivity, return_num=False):
     from skimage.measure import label
-    
+
     if return_num:
         new_mask, num = label(mask.T, connectivity=connectivity, return_num=True)
         return new_mask.T, num
@@ -427,12 +426,34 @@ def generate_roi_suggestions(mask_pred, mask_true, n_artifact, threshold=0.1, ve
     return rois_to_add
 
 
+def assert_igor_format(roi_mask):
+    roi_mask = np.asarray(roi_mask)
+
+    vmin = np.min(roi_mask)
+    vmax = np.max(roi_mask)
+
+    if roi_mask.ndim != 2:
+        raise ValueError(f'ROI mask must be 2D, but has shape {roi_mask.shape}')
+
+    if np.any(roi_mask != roi_mask.astype(int)):
+        raise ValueError(f'ROI mask must be integer, but has non-integer values')
+
+    if not ((vmax in [0, 1]) and vmin <= 1):
+        raise ValueError(f'ROI mask has unexpected values: vmin={vmin}, vmax={vmax}, value={np.unique(roi_mask)}')
+
+
 def is_igor_format(roi_mask):
     """This method can fail if the igor format is not used consistently."""
     vmin = np.min(roi_mask)
     vmax = np.max(roi_mask)
 
-    if vmax in [0, 1] and vmin < 0:
+    if roi_mask.ndim != 2:
+        return False
+
+    if np.any(roi_mask != roi_mask.astype(int)):
+        return False
+
+    if vmax in [0, 1] and vmin <= 1:
         return True
     else:
         return False
@@ -448,7 +469,7 @@ def as_igor_format(roi_mask):
 
 def to_igor_format(roi_mask):
     if not is_python_format(roi_mask):
-        raise ValueError('ROI mask is not in python format.')
+        raise ValueError(f'ROI mask is not in python format; unique values in mask: {np.unique(roi_mask)}')
 
     roi_mask = roi_mask.copy()
     roi_mask[roi_mask == 0] = -1
@@ -461,7 +482,13 @@ def is_python_format(roi_mask):
     vmin = np.min(roi_mask)
     vmax = np.max(roi_mask)
 
-    if vmin == 0 and vmax > 0:
+    if roi_mask.ndim != 2:
+        return False
+
+    if np.any(roi_mask != roi_mask.astype(int)):
+        return False
+
+    if vmin == 0 and vmax >= 0:
         return True
     else:
         return False
@@ -476,8 +503,7 @@ def as_python_format(roi_mask):
 
 
 def to_python_format(roi_mask):
-    if not is_igor_format(roi_mask):
-        raise ValueError('ROI mask is not in IGOR format.')
+    assert_igor_format(roi_mask)
 
     vmax = np.max(roi_mask)
 
@@ -606,8 +632,8 @@ def shift_array(img, shift, inplace=False, cval=np.min, n_artifact=0):
 
 def compare_roi_masks(roi_mask: np.ndarray, ref_roi_mask: np.ndarray, max_shift=5, bg_val=1) -> (str, tuple):
     """Test if two roi masks are the same"""
-    check_if_scanm_roi_mask(roi_mask)
-    check_if_scanm_roi_mask(ref_roi_mask)
+    assert_igor_format(roi_mask)
+    assert_igor_format(ref_roi_mask)
 
     if roi_mask.shape != ref_roi_mask.shape:
         return 'different', (0, 0)

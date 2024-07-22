@@ -4,6 +4,8 @@ import os
 import h5py
 import numpy as np
 import pandas as pd
+
+from djimaging.utils.mask_utils import assert_igor_format
 from djimaging.utils.math_utils import truncated_vstack, padded_vstack
 
 from djimaging.utils.data_utils import extract_h5_table
@@ -648,7 +650,7 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, preci
 
     if stack.ndim != 3:
         raise ValueError(f"stack must be 3d but ndim={stack.ndim}")
-    check_if_scanm_roi_mask(roi_mask=roi_mask)
+    assert_igor_format(roi_mask=roi_mask)
     if stack.shape[:2] != roi_mask.shape:
         raise ValueError(f"xy-dim of stack roi_mask must match but shapes are {stack.shape} and {roi_mask.shape}")
 
@@ -669,30 +671,10 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, preci
     return traces, traces_times
 
 
-def check_if_scanm_roi_mask(roi_mask: np.ndarray):
-    """Test if ROI mask is in ScanM format, raise error otherwise"""
-    roi_mask = np.asarray(roi_mask)
-
-    if roi_mask.ndim != 2:
-        raise ValueError(f"roi_mask must be 2d but ndim={roi_mask.ndim}")
-
-    if np.any(roi_mask != roi_mask.astype(int)):
-        raise ValueError(f'ROI mask contains non-integers: {np.unique(roi_mask)}')
-
-    if np.max(roi_mask) == 0 and not np.any(roi_mask > 0) and np.any(roi_mask < 0):
-        # Allow zero background mask
-        return
-    elif np.max(roi_mask) == 1 and not np.any(roi_mask == 0) and np.any(roi_mask < 0):
-        # Allow one background mask, then zero should not be used
-        return
-    else:
-        raise ValueError(f'ROI mask contains unexpected values {np.unique(roi_mask)}')
-
-
 def compare_roi_masks(roi_mask1: np.ndarray, roi_mask2: np.ndarray, max_shift=4) -> str:
     """Test if two roi masks are the same"""
-    check_if_scanm_roi_mask(roi_mask1)
-    check_if_scanm_roi_mask(roi_mask2)
+    assert_igor_format(roi_mask1)
+    assert_igor_format(roi_mask2)
 
     if roi_mask1.shape != roi_mask2.shape:
         return 'different'
