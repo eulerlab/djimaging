@@ -120,7 +120,8 @@ class ExperimentTemplate(dj.Computed):
                 warnings.warn(f'Failed to convert `{header_path.split("/")[-2]}` to date. Skip this folder.')
             return
 
-        primary_key["exp_num"] = int(header_path.split("/")[-1])
+        exp_num = int(header_path.split("/")[-1])
+        primary_key["exp_num"] = exp_num
 
         if only_new:
             search = (self & restrictions & primary_key)
@@ -143,7 +144,19 @@ class ExperimentTemplate(dj.Computed):
 
         # Populate ExpInfo table for this experiment
         expinfo_key = deepcopy(primary_key)
-        expinfo_key["eye"] = header_dict["eye"] if header_dict["eye"] != "" else "unknown"
+
+        eye = header_dict["eye"] if header_dict["eye"] != "" else "unknown"
+
+        if (
+                (eye in ["Right", "right"] and (exp_num == 1 or 'left' in header_name.lower())) or
+                (eye in ["Left", "left"] and (exp_num == 2 or 'right' in header_name.lower()))
+        ):
+            raise ValueError(f"Eye is set to {eye} in .ini file, "
+                             f"but exp_num is {exp_num} and header_file_name is '{header_name}'. "
+                             f"Use exp_num=1 for left eye and exp_num=2 for right eye. "
+                             f"To overwrite this, use all-caps in .ini file which is then used.")
+
+        expinfo_key["eye"] = eye.lower()
         expinfo_key["projname"] = header_dict["projname"]
         expinfo_key["setupid"] = header_dict["setupid"]
         expinfo_key["prep"] = header_dict["prep"]
