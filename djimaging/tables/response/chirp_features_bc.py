@@ -1,25 +1,17 @@
 """
-Tables for Chirp response quality index (QI) and features.
+Tables for Chirp Bipolar Cell (BC) features.
 
 Example usage:
 
 from djimaging.tables import response
 
 @schema
-class ChirpQI(response.ChirpQITemplate):
-    _stim_family = "chirp"
-    _stim_name = "chirp"
-
-    stimulus_table = Stimulus
-    snippets_table = Snippets
-
-
-@schema
-class ChirpFeatures(response.ChirpFeaturesTemplate):
+class ChirpFeatures(response.ChirpFeaturesBcTemplate):
     stimulus_table = Stimulus
     snippets_table = Snippets
     presentation_table = Presentation
 """
+
 import warnings
 from abc import abstractmethod
 
@@ -27,27 +19,11 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.response.response_quality import RepeatQITemplate
-from djimaging.utils.dj_utils import get_primary_key
 from djimaging.tables.core.averages import compute_upsampled_average
+from djimaging.utils.dj_utils import get_primary_key
 
 
-class ChirpQITemplate(RepeatQITemplate):
-    _stim_family = "chirp"
-    _stim_name = "chirp"
-
-    @property
-    @abstractmethod
-    def stimulus_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def snippets_table(self):
-        pass
-
-
-class ChirpFeaturesTemplate(dj.Computed):
+class ChirpFeaturesBcTemplate(dj.Computed):
     database = ""
 
     _fs_resample = 500

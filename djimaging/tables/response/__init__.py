@@ -1,4 +1,6 @@
-from .chirp import ChirpQITemplate, ChirpFeaturesTemplate
+from .chirp_qi import ChirpQITemplate
+from .chirp_features_bc import ChirpFeaturesBcTemplate
+from .chirp_features_rgc import ChirpFeaturesRgcTemplate
 from .orientation import OsDsIndexesTemplate
 from .sinespot import SineSpotQITemplate, SineSpotFeaturesTemplate
 from .csl import CslMetricsTemplate

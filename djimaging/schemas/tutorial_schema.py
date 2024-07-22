@@ -1,3 +1,4 @@
+import djimaging.tables.response.chirp_features_bc
 from djimaging.schemas.core_schema import *
 from djimaging.tables import misc, response, location
 
@@ -28,7 +29,7 @@ class ChirpQI(response.ChirpQITemplate):
 
 
 @schema
-class ChirpFeatures(response.ChirpFeaturesTemplate):
+class ChirpFeatures(response.ChirpFeaturesBcTemplate):
     stimulus_table = Stimulus
     snippets_table = Snippets
     presentation_table = Presentation
