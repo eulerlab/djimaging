@@ -107,6 +107,12 @@ class OutlineAbsTemplate(dj.Computed):
         file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
         file_info_df = file_info_df[file_info_df['kind'] == 'outline']
 
+        if len(file_info_df) == 0:
+            warnings.warn(
+                f'No outline files found for field:\n\t{exp_key}.\n'
+                f'Found files {os.listdir(os.path.join(header_path, data_folder))}'
+            )
+
         return file_info_df
 
     def make(self, key):
@@ -114,7 +120,6 @@ class OutlineAbsTemplate(dj.Computed):
 
         file_info_df = self.load_exp_file_info_df(key)
         if len(file_info_df) == 0:
-            warnings.warn(f'No outline files found for field:\n\t{key}')
             return
 
         outline_abs_xy = []
@@ -127,8 +132,13 @@ class OutlineAbsTemplate(dj.Computed):
             field_key['field'] = row['field']
 
             if self._num_loc is not None:
-                num = str(os.path.splitext(os.path.basename(row['filepath']))[0].split('_')[self._num_loc])
-                nums.append(int(''.join(filter(str.isdigit, num))))
+                try:
+                    num = str(os.path.splitext(os.path.basename(row['filepath']))[0].split('_')[self._num_loc])
+                    num = ''.join(filter(str.isdigit, num))
+                    num = int(num)
+                except ValueError:
+                    raise ValueError(f'Could not extract number from {row["filepath"]}')
+                nums.append(num)
 
             field_entry = self.complete_key(field_key, rec)
             field_entries.append(field_entry)
