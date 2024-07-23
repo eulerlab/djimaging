@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 
 from djimaging.utils.math_utils import truncated_vstack, padded_vstack
@@ -127,8 +129,15 @@ def split_trace_by_group_reps(
             if allow_incomplete and trg_count >= len(triggertimes):
                 break
 
-            idx_start = find_closest(
-                target=triggertimes[trg_count] + delay, data=times, atol=atol, as_index=True)
+            try:
+                idx_start = find_closest(
+                    target=triggertimes[trg_count] + delay, data=times, atol=atol, as_index=True)
+            except ValueError:
+                if allow_incomplete:
+                    warnings.warn('Data incomplete')
+                    break
+                else:
+                    raise IndexError('Data incomplete')
 
             try:
                 idx_end = find_closest(
