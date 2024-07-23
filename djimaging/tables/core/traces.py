@@ -4,11 +4,12 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.tables.core.preprocesstraces import plot_left_right_clipping
 from djimaging.utils.scanm.traces_and_triggers_utils import roi2trace_from_stack, check_valid_triggers_rel_to_tracetime
 from djimaging.utils.scanm.read_h5_utils import load_roi2trace
 from djimaging.utils import plot_utils, math_utils, trace_utils
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.plot_utils import plot_trace_and_trigger
+from djimaging.utils.plot_utils import plot_trace_and_trigger, prep_long_title
 
 
 class TracesTemplate(dj.Computed):
@@ -115,6 +116,41 @@ class TracesTemplate(dj.Computed):
                     raise e
                 else:
                     print(f"Skipping invalid trace for {key} and roi_id={roi_id}")
+
+    def gui_clip_trace(self, key):
+        """GUI to clip traces. Note that this can not be easily undone for now."""
+        trace, trace_t0, trace_dt, valid_trace, valid_trigger = (self & key).fetch1(
+            'trace', 'trace_t0', 'trace_dt', 'trace_valid', 'trigger_valid')
+        trace_t = np.arange(trace.size) * trace_dt + trace_t0
+
+        import ipywidgets as widgets
+
+        w_left = widgets.IntSlider(0, min=0, max=trace.size - 1, step=1,
+                                   layout=widgets.Layout(width='800px'))
+        w_right = widgets.IntSlider(trace.size - 1, min=0, max=trace.size - 1, step=1,
+                                    layout=widgets.Layout(width='800px'))
+        w_save = widgets.Checkbox(False)
+
+        title = 'Not saved\n' + prep_long_title(key)
+
+        @widgets.interact(left=w_left, right=w_right, save=w_save)
+        def plot_fit(left=0, right=trace.size - 1, save=False):
+            nonlocal title, key
+
+            plot_left_right_clipping(trace, trace_t, left, right, title)
+
+            if save:
+                i0, i1 = (right, left + 1) if right < left else (left, right + 1)
+                self.add_or_update(
+                    key, trace=trace[i0:i1], trace_t0=trace_t0 + left * trace_dt, trace_dt=trace_dt,
+                    valid_trace=valid_trace, valid_trigger=valid_trigger)
+                title = f'SAVED: left={left}, right={right}\n{prep_long_title(key)}'
+                w_save.value = False
+
+    def add_or_update(self, key, trace, trace_t0, trace_dt, valid_trace, valid_trigger):
+        entry = dict(**key, trace=trace, trace_t0=trace_t0, trace_dt=trace_dt,
+                     trace_valid=valid_trace, trigger_valid=valid_trigger)
+        self.update1(entry)
 
     def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(table=self, key=key)

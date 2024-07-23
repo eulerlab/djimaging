@@ -1,3 +1,4 @@
+import warnings
 from abc import abstractmethod
 
 import datajoint as dj
@@ -8,7 +9,7 @@ from scipy import signal
 from djimaging.utils import filter_utils, math_utils, plot_utils, trace_utils
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.filter_utils import lowpass_filter_trace
-from djimaging.utils.plot_utils import plot_trace_and_trigger
+from djimaging.utils.plot_utils import plot_trace_and_trigger, prep_long_title
 
 
 class PreprocessParamsTemplate(dj.Lookup):
@@ -123,6 +124,41 @@ class PreprocessTracesTemplate(dj.Computed):
             pp_trace=pp_trace.astype(np.float32),
             smoothed_trace=smoothed_trace.astype(np.float32)
         ))
+
+    def gui_clip_trace(self, key):
+        """GUI to clip traces. Note that this can not be easily undone for now."""
+
+        trace, smoothed_trace, trace_t0, trace_dt = (self & key).fetch1(
+            'pp_trace', 'smoothed_trace', 'pp_trace_t0', 'pp_trace_dt')
+        trace_t = np.arange(trace.size) * trace_dt + trace_t0
+
+        import ipywidgets as widgets
+
+        w_left = widgets.IntSlider(0, min=0, max=trace.size - 1, step=1,
+                                   layout=widgets.Layout(width='800px'))
+        w_right = widgets.IntSlider(trace.size - 1, min=0, max=trace.size - 1, step=1,
+                                    layout=widgets.Layout(width='800px'))
+        w_save = widgets.Checkbox(False)
+
+        title = 'Not saved\n' + prep_long_title(key)
+
+        @widgets.interact(left=w_left, right=w_right, save=w_save)
+        def plot_fit(left=0, right=trace.size - 1, save=False):
+            nonlocal title, key
+
+            plot_left_right_clipping(trace, trace_t, left, right, title)
+
+            if save:
+                i0, i1 = (right, left + 1) if right < left else (left, right + 1)
+                self.update_key_from_gui(
+                    key, trace=trace[i0:i1], smoothed_trace=smoothed_trace[i0:i1],
+                    trace_t0=trace_t0 + left * trace_dt, trace_dt=trace_dt)
+                title = f'SAVED: left={left}, right={right}\n{prep_long_title(key)}'
+                w_save.value = False
+
+    def update_key_from_gui(self, key, trace, smoothed_trace, trace_t0, trace_dt):
+        entry = dict(**key, pp_trace=trace, smoothed_trace=smoothed_trace, pp_trace_t0=trace_t0, pp_trace_dt=trace_dt)
+        self.update1(entry)
 
     def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(self, key)
@@ -316,3 +352,14 @@ def process_trace(trace, trace_t0, trace_dt,
         trace_dt_new = trace_dt
 
     return trace, smoothed_trace, trace_dt_new
+
+
+def plot_left_right_clipping(trace_, trace_t_, left_, right_, title_):
+    fig, ax = plt.subplots(figsize=(12, 3))
+    ax.set_title(title_)
+    ax.plot(trace_t_, trace_)
+    ax.axvline(trace_t_[left_], c='r', ls='--')
+    ax.axvline(trace_t_[right_], c='r', ls='--')
+    ax.set_xlabel('Time (s)')
+    ax.set_ylabel('Trace')
+    plt.show()
