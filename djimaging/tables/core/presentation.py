@@ -131,18 +131,8 @@ class PresentationTemplate(dj.Computed):
             """
             return definition
 
-    def make(self, key, verboselvl: int = 0):
-        self.add_field_presentations(key, only_new=False, verboselvl=verboselvl, suppress_errors=False)
-
-    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False):
-        """Scan filesystem for new fields and add them to the database."""
-        if restrictions is None:
-            restrictions = dict()
-
-        for key in (self.key_source & restrictions):
-            self.add_field_presentations(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
-
     def load_field_stim_file_info_df(self, field_stim_key):
+        """Load file info for a given field into a dataframe."""
         file_info_df = self.field_table().load_exp_file_info_df(field_stim_key, filter_kind='response')
 
         for new_key in self.field_table().new_primary_keys:
@@ -177,7 +167,22 @@ class PresentationTemplate(dj.Computed):
 
         return file_info_df
 
-    def add_field_presentations(self, field_stim_key, only_new: bool, verboselvl: int, suppress_errors: bool):
+    def make(self, key, verboselvl: int = 0):
+        self._add_entries(key, only_new=False, verboselvl=verboselvl, suppress_errors=False)
+
+    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False):
+        """Scan filesystem for new fields and add them to the database."""
+        if restrictions is None:
+            restrictions = dict()
+
+        for key in (self.key_source & restrictions):
+            self._add_entries(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
+
+    def _add_entries(self, field_stim_key, only_new: bool, verboselvl: int, suppress_errors: bool):
+        """
+        Add entries for a given Field + Stimulus combination.
+        This can be multiple presentations due to different conditions.
+        """
         if verboselvl > 2:
             print('\nProcessing key:', field_stim_key)
 
@@ -208,7 +213,7 @@ class PresentationTemplate(dj.Computed):
                 print(f"\tAdding presentation: `{pres_key}`")
 
             try:
-                self.add_presentation(
+                self._add_entry(
                     pres_key=pres_key, filepath=pres_df.iloc[0]['filepath'], verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
@@ -216,7 +221,10 @@ class PresentationTemplate(dj.Computed):
                 else:
                     raise e
 
-    def add_presentation(self, pres_key, filepath: str, verboselvl=0):
+    def _add_entry(self, pres_key, filepath: str, verboselvl=0):
+        """
+        Add presentation for Field + Stimulus + Conditions combination.
+        """
 
         if verboselvl > 4:
             print('\t\tAdd presentation with file:', filepath)
@@ -254,7 +262,7 @@ class PresentationTemplate(dj.Computed):
             if i > 0 and verboselvl > 0:
                 print(f"Reduced trigger threshold to {rec.trigger_threshold:.3g} for {filepath}")
 
-        pres_entry, scaninfo_entry, avg_entries = self.complete_keys(pres_key, rec)
+        pres_entry, scaninfo_entry, avg_entries = self._complete_keys(pres_key, rec)
 
         # Sanity checks
         field_pixel_size_um = (self.field_table & pres_key).fetch1("pixel_size_um")
@@ -275,19 +283,8 @@ class PresentationTemplate(dj.Computed):
         for avg_entry in avg_entries:
             self.StackAverages().insert1(avg_entry, allow_direct_insert=True)
 
-    def plot1(self, key=None, gamma=0.7):
-        key = get_primary_key(table=self, key=key)
-        npixartifact = (self.field_table & key).fetch1('npixartifact')
-        data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
-        try:
-            alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
-        except dj.DataJointError:
-            alt_ch_average = np.full_like(main_ch_average, np.nan)
-        plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4), gamma=gamma)
-
     @staticmethod
-    def complete_keys(base_key, rec) -> (dict, dict, list):
+    def _complete_keys(base_key, rec) -> (dict, dict, list):
 
         pres_entry = deepcopy(base_key)
         pres_entry["pres_data_file"] = rec.filepath
@@ -329,3 +326,14 @@ class PresentationTemplate(dj.Computed):
         scaninfo_entry["scan_params_dict"] = rec.wparams_other
 
         return pres_entry, scaninfo_entry, avg_entries
+
+    def plot1(self, key=None, gamma=0.7):
+        key = get_primary_key(table=self, key=key)
+        npixartifact = (self.field_table & key).fetch1('npixartifact')
+        data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
+        main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        try:
+            alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+        except dj.DataJointError:
+            alt_ch_average = np.full_like(main_ch_average, np.nan)
+        plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4), gamma=gamma)

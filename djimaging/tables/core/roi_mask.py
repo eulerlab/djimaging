@@ -461,11 +461,16 @@ class RoiMaskTemplate(dj.Manual):
 
     def load_high_res_bg_dict(self, key, ch_names, verbose=True):
         try:
-            ch_names, ch_averages = (self.highres_table().StackAverages & key
-                                     & [f"ch_name='{cn}'" for cn in ch_names]).fetch('ch_name', 'ch_average')
+            ch_names, ch_averages, *conds = (
+                    self.highres_table().StackAverages & key & [f"ch_name='{cn}'" for cn in ch_names]).fetch(
+                'ch_name', 'ch_average', *self.highres_table().new_primary_keys)
             bg_dict = dict()
-            for name, avg in zip(ch_names, ch_averages):
-                bg_dict[f'HR[{name}]'] = avg
+
+            for name, ch_average, *cond_123 in zip(ch_names, ch_averages, *conds):
+                dict_name = f'HR-{name}'
+                for cond in cond_123:
+                    dict_name += f'-{cond}'
+                bg_dict[dict_name] = ch_average
 
         except Exception as e:
             if verbose:

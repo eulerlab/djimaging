@@ -102,22 +102,8 @@ class FieldTemplate(dj.Computed):
             """
             return definition
 
-    def make(self, key, verboselvl=0):
-        self.add_experiment_fields(
-            key, only_new=False, verboselvl=verboselvl, suppress_errors=False, restr_headers=None,
-            allow_user_input=False)
-
-    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
-                          allow_user_input: bool = True, restr_headers: Optional[list] = None):
-        """Scan filesystem for new fields and add them to the database."""
-        if restrictions is None:
-            restrictions = dict()
-
-        for key in (self.key_source & restrictions):
-            self.add_experiment_fields(
-                key, restr_headers=restr_headers, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
-
     def load_exp_file_info_df(self, exp_key, filter_kind='response'):
+        """Load file info dataframe for a given experiment key."""
         from_raw_data = (self.raw_params_table & exp_key).fetch1('from_raw_data')
         header_path = (self.experiment_table & exp_key).fetch1('header_path')
         data_folder = (self.userinfo_table & exp_key).fetch1("raw_data_dir" if from_raw_data else "pre_data_dir")
@@ -146,10 +132,25 @@ class FieldTemplate(dj.Computed):
 
         return file_info_df
 
-    def add_experiment_fields(
+    def make(self, key, verboselvl=0):
+        self._add_entries(
+            key, only_new=False, verboselvl=verboselvl, suppress_errors=False, restr_headers=None,
+            allow_user_input=False)
+
+    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
+                          allow_user_input: bool = True, restr_headers: Optional[list] = None):
+        """Scan filesystem for new fields and add them to the database."""
+        if restrictions is None:
+            restrictions = dict()
+
+        for key in (self.key_source & restrictions):
+            self._add_entries(
+                key, restr_headers=restr_headers, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
+
+    def _add_entries(
             self, exp_key, only_new: bool, verboselvl: int, suppress_errors: bool, allow_user_input: bool = False,
             restr_headers: Optional[list] = None):
-
+        """Add all fields for a given Experiment"""
         if verboselvl > 5:
             print(f"add_experiment_fields for key =\n{exp_key}")
 
@@ -190,45 +191,32 @@ class FieldTemplate(dj.Computed):
                 print(f"\tAdding field: `{field_key}`")
 
             try:
-                self.add_field(field_key=field_key, filepaths=field_df['filepath'].values,
-                               allow_user_input=allow_user_input, verboselvl=verboselvl)
+                self._add_entry(field_key=field_key, filepaths=field_df['filepath'].values,
+                                allow_user_input=allow_user_input, verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
                     print("Suppressed Error:", e, '\n\tfor key:\n', field_key, '\n\t', field_df['filepath'])
                 else:
                     raise e
 
-    def add_field(self, field_key, filepaths, verboselvl=0, allow_user_input=False):
+    def _add_entry(self, field_key, filepaths, verboselvl=0, allow_user_input=False):
+        """Adds a field"""
         if verboselvl > 4:
             print('\t\tAdd field with files:', filepaths)
 
         setupid = (self.experiment_table().ExpInfo & field_key).fetch1("setupid")
 
-        rec = self.load_first_file_wo_error(filepaths=filepaths, setupid=setupid, date=field_key['date'],
-                                            allow_user_input=allow_user_input)
+        rec = self._load_first_file_wo_error(
+            filepaths=filepaths, setupid=setupid, date=field_key['date'], allow_user_input=allow_user_input)
         field_entry, avg_entries = self.complete_keys(base_key=field_key, rec=rec)
 
         self.insert1(field_entry, allow_direct_insert=True)
         for avg_entry in avg_entries:
             self.StackAverages().insert1(avg_entry, allow_direct_insert=True)
 
-    def plot1(self, key=None, gamma=0.7):
-        key = get_primary_key(table=self, key=key)
-        data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
-        try:
-            alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
-        except dj.DataJointError:
-            alt_ch_average = np.full_like(main_ch_average, np.nan)
-
-        npixartifact = (self & key).fetch1('npixartifact')
-
-        plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4),
-                   gamma=gamma)
-
     @staticmethod
-    def load_first_file_wo_error(filepaths, setupid, date, allow_user_input=False):
-        """Load first file from filepaths and return recording and filepath. Skip all files causes errors."""
+    def _load_first_file_wo_error(filepaths, setupid, date, allow_user_input=False):
+        """Load first file from filepaths and return recording and filepath. Skip all files causing errors."""
         for i, filepath in enumerate(filepaths):
             try:
                 rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=date)
@@ -274,3 +262,17 @@ class FieldTemplate(dj.Computed):
             avg_entries.append(avg_entry)
 
         return field_entry, avg_entries
+
+    def plot1(self, key=None, gamma=0.7):
+        key = get_primary_key(table=self, key=key)
+        data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
+        main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        try:
+            alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+        except dj.DataJointError:
+            alt_ch_average = np.full_like(main_ch_average, np.nan)
+
+        npixartifact = (self & key).fetch1('npixartifact')
+
+        plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4),
+                   gamma=gamma)
