@@ -30,8 +30,9 @@ class ChirpFeaturesBcTemplate(dj.Computed):
     _t_on_step = 2
     _t_off_step = 5
     _t_max = 6
-    _t_flicker_start = 10
-    _t_flicker_end = 29
+    _t_flicker_start = 10  # Start of first flicker
+    _t_flicker_pause = 17  # End of first flicker
+    _t_flicker_end = 29  # End of second flicker
 
     _hfi_constant = 1e4  # See Baden et al 2013
 
@@ -47,6 +48,9 @@ class ChirpFeaturesBcTemplate(dj.Computed):
         transience_index: float # Response transience index (RTi) from Franke et al. 2017
         plateau_index: float # Response plateau index (RPi) from Franke et al. 2017
         tonic_release_index: float # Tonic release index (TRi) from Franke et al. 2017
+        l_freq_response : float # Low frequency response
+        h_freq_response : float # High frequency response
+        lh_freq_index : float # Ratio of high to low frequency response
         '''
         return definition
 
@@ -83,14 +87,15 @@ class ChirpFeaturesBcTemplate(dj.Computed):
         average, average_times, _ = compute_upsampled_average(
             snippets, snippets_times, triggertimes_snippets, f_resample=self._fs_resample)
 
+        n_plots = 7
         if plot:
-            fig, axs = plt.subplots(1, 6, figsize=(15, 2))
+            fig, axs = plt.subplots(1, n_plots, figsize=(15, 2))
             ax = axs[0]
             ax.set_title(f"Average trace; fs={self._fs_resample} Hz")
             ax.plot(average)
             ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / self._fs_resample}s")
         else:
-            axs = [None] * 6
+            axs = [None] * n_plots
 
         mean_dt = np.mean(np.diff(snippets_times, axis=0))
         high_frequency_index = compute_high_frequency_index(
@@ -113,15 +118,20 @@ class ChirpFeaturesBcTemplate(dj.Computed):
             average=average, fs=self._fs_resample,
             t_flicker_start=self._t_flicker_start, t_flicker_end=self._t_flicker_end, plot=axs[5])
 
+        l_freq_response, h_freq_response, lh_freq_index = compute_freq_response(
+            average=average, fs=self._fs_resample,
+            t_flicker_start=self._t_flicker_start, t_flicker_pause=self._t_flicker_pause, plot=axs[6])
+
         if plot:
             plt.tight_layout()
             plt.show()
 
-        return polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index
+        return (polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index,
+                l_freq_response, h_freq_response, lh_freq_index)
 
     def make(self, key, plot=False):
-        polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index = \
-            self.compute_entry(key, plot=plot)
+        (polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index, l_freq_response,
+         h_freq_response, lh_freq_index) = self.compute_entry(key, plot=plot)
 
         self.insert1(dict(
             key,
@@ -130,17 +140,24 @@ class ChirpFeaturesBcTemplate(dj.Computed):
             transience_index=transience_index,
             plateau_index=plateau_index,
             tonic_release_index=tonic_release_index,
+            l_freq_response=l_freq_response,
+            h_freq_response=h_freq_response,
+            lh_freq_index=lh_freq_index,
         ))
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
-        polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index = \
-            (self & key).fetch1(
-                'polarity_index', 'high_frequency_index', 'transience_index', 'plateau_index', 'tonic_release_index')
+        (
+            polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index,
+            l_freq_response, h_freq_response, lh_freq_index
+        ) = (self & key).fetch1(
+            'polarity_index', 'high_frequency_index', 'transience_index', 'plateau_index', 'tonic_release_index',
+            'l_freq_response', 'h_freq_response', 'lh_freq_index')
 
         plot_values = np.array(self.compute_entry(key, plot=True))
-        db_values = np.array(
-            [polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index])
+        db_values = np.array([
+            polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index,
+            l_freq_response, h_freq_response, lh_freq_index])
 
         if not np.all(plot_values == db_values):
             raise ValueError("Computed values do not match stored values")
@@ -250,6 +267,7 @@ def compute_peak_to_post_peak_ratio(average, fs, alpha, alpha_dt, t_on_step=2, t
     :param t_on_step: Time of the on-step of the stimulus in seconds.
     :param t_max: Time of the offset of the response window in seconds.
     :param plot: If True, plot the average trace and the response window.
+    :param title: Title of the plot.
 
     :return: Peak-Response / Post-Peak-Response.
     """
@@ -387,3 +405,57 @@ def compute_tonic_release_index(average, fs, t_flicker_start=10, t_flicker_end=2
         ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
 
     return tonic_release_index
+
+
+def compute_freq_response(average, fs, t_flicker_start=10, t_flicker_pause=17, plot=None):
+    """
+    Calculate the low and high frequency response and the ratio of high to low frequency response.
+
+    :param average: A 1d numpy array of trace
+    :param fs: Sampling rate of the data in Hz.
+    :param t_flicker_start: Time of the onset of the flicker in seconds.
+    :param t_flicker_pause: Time of the pause of the flicker in seconds.
+    :param plot: If True, plot the average trace and the response window.
+
+    :return: Low frequency response, high frequency response, ratio of high to low frequency response.
+    """
+
+    idx_l_start = int(fs * t_flicker_start)
+    idx_h_end = int(fs * t_flicker_pause)
+
+    # Split into three parts
+    didxs = idx_h_end - idx_l_start
+    idx_l_end = idx_l_start + didxs // 3
+    idx_h_start = idx_h_end - didxs // 3
+
+    low_freq_response = np.max(average[idx_l_start:idx_l_end])
+    high_freq_response = np.max(average[idx_h_start:idx_h_end])
+
+    if low_freq_response < 1e-9:
+        warnings.warn("Low frequency response can not be computed for <= 0 peaks, setting response index to -1.")
+        lh_freq_index = -1
+    else:
+        lh_freq_index = high_freq_response / low_freq_response
+
+    if plot:
+        if isinstance(plot, plt.Axes):
+            ax = plot
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+        ax.set_title(f"H/L: {lh_freq_index:.2f}")
+
+        plot_idxs = np.arange(idx_l_start - didxs // 10, idx_h_end + didxs // 10)
+        vmin = np.min(average[plot_idxs])
+        vmax = np.max(average[plot_idxs])
+
+        ax.plot(plot_idxs, average[plot_idxs])
+
+        ax.fill_between([idx_l_start, idx_l_end], [vmin, vmin], [vmax, vmax], color='r', alpha=0.5)
+        ax.fill_between([idx_h_start, idx_h_end], [vmin, vmin], [vmax, vmax], color='g', alpha=0.5)
+
+        ax.plot([idx_l_start, idx_l_end], [low_freq_response, low_freq_response], c='k')
+        ax.plot([idx_h_start, idx_h_end], [high_freq_response, high_freq_response], c='k')
+
+        ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
+
+    return low_freq_response, high_freq_response, lh_freq_index

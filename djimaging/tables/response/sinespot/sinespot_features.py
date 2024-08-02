@@ -1,17 +1,9 @@
 """
-Tables for Sinespot response quality index (QI) and features.
+Features for the sinespot stimulus.
 
 Example usage:
 
 from djimaging.tables import response
-
-@schema
-class SineSpotQI(response.SineSpotQITemplate):
-    _stim_family = "sinespot"
-    _stim_name = "sinespot"
-
-    stimulus_table = Stimulus
-    snippets_table = Snippets
 
 @schema
 class SineSpotFeatures(response.SineSpotFeaturesTemplate):
@@ -26,24 +18,8 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.response.response_quality import RepeatQITemplate
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.trace_utils import get_mean_dt
-
-
-class SineSpotQITemplate(RepeatQITemplate):
-    _stim_family = "sinespot"
-    _stim_name = "sinespot"
-
-    @property
-    @abstractmethod
-    def stimulus_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def snippets_table(self):
-        pass
 
 
 class SineSpotFeaturesTemplate(dj.Computed):

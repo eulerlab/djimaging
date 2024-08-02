@@ -145,6 +145,7 @@ def compute_step_response_index(average, fs, alpha=2, t_on_step=2, t_off_step=5,
     :param alpha: Duration of the response window in seconds.
     :param t_on_step: Time of the on-step of the stimulus in seconds.
     :param t_off_step: Time of the off-step of the stimulus in seconds.
+    :param color: Color of the plot.
     :param plot: If True, plot the average trace and the response window.
 
     :return: Polarity index (POi) for each ROI.
@@ -193,6 +194,7 @@ def compute_surround_strength(lchirp_on, gchirp_on, lchirp_off, gchirp_off,
     :param gchirp_off: Light decrement response of the global chirp stimulus.
     :param lchirp_polarity_index: Polarity index of the local chirp stimulus.
     :param gchirp_polarity_index: Polarity index of the global chirp stimulus.
+    :param plot: If True, plot the responses. Can be a matplotlib axis.
 
     :return: Surround strength (SSt) for each ROI.
     """

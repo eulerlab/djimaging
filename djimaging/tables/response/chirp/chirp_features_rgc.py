@@ -25,8 +25,6 @@ from djimaging.utils.trace_utils import get_mean_dt, find_closest
 
 
 class ChirpFeaturesRgcTemplate(dj.Computed):
-    # TODO: Add more features
-
     database = ""
 
     @property

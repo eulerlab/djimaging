@@ -1,5 +1,3 @@
-import djimaging.tables.receptivefield.split_strf
-import djimaging.tables.response.chirp_features_bc
 from djimaging.schemas.core_schema import *
 from djimaging.tables import response, classifier, receptivefield, location
 
@@ -91,12 +89,12 @@ class STA(receptivefield.STATemplate):
 
 
 @schema
-class SplitRFParams(djimaging.tables.receptivefield.split_strf.SplitRFParamsTemplate):
+class SplitRFParams(receptivefield.SplitRFParamsTemplate):
     pass
 
 
 @schema
-class SplitRF(djimaging.tables.receptivefield.split_strf.SplitRFTemplate):
+class SplitRF(receptivefield.SplitRFTemplate):
     rf_table = STA
     split_rf_params_table = SplitRFParams
 
