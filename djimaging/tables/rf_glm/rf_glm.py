@@ -61,8 +61,7 @@ class RFGLMParamsTemplate(dj.Lookup):
 
 class RFGLMTemplate(dj.Computed):
     database = ""
-
-    # TODO: Make definition as in STA, i.e. add shift and rf_time
+    __def_sta = True  # If True, the definition includes rf_time
 
     @property
     def definition(self):
@@ -73,9 +72,19 @@ class RFGLMTemplate(dj.Computed):
         ---
         rf: longblob  # spatio-temporal receptive field
         dt: float
+        '''
+
+        if self.__def_sta:
+            definition += '''
+            rf_time: longblob
+            shift: int
+            '''
+
+        definition += '''
         model_dict: longblob
         quality_dict: longblob
         '''
+
         return definition
 
     @property
@@ -124,6 +133,11 @@ class RFGLMTemplate(dj.Computed):
         rf_key = deepcopy(key)
         rf_key['rf'] = rf.astype(np.float32)
         rf_key['dt'] = model_dict.pop('dt')
+
+        if self.__def_sta:
+            rf_key['rf_time'] = model_dict.pop('rf_time')
+            rf_key['shift'] = model_dict['shift']['stimulus']  # There may be other shifts
+
         rf_key['model_dict'] = model_dict
         rf_key['quality_dict'] = quality_dict
 
