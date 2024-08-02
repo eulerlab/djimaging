@@ -1,6 +1,6 @@
 import numpy as np
 
-from djimaging.tables.response.chirp import compute_on_off_index
+from djimaging.tables.response.chirp.chirp_features_rgc import compute_on_off_index
 
 
 def test_compute_on_off_index_on_response():

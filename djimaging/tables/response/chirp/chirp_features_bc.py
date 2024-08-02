@@ -144,13 +144,17 @@ class ChirpFeaturesBcTemplate(dj.Computed):
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
-        polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index = \
-            (self & key).fetch1(
-                'polarity_index', 'high_frequency_index', 'transience_index', 'plateau_index', 'tonic_release_index')
+        (
+            polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index,
+            l_freq_response, h_freq_response, lh_freq_index
+        ) = (self & key).fetch1(
+            'polarity_index', 'high_frequency_index', 'transience_index', 'plateau_index', 'tonic_release_index',
+            'l_freq_response', 'h_freq_response', 'lh_freq_index')
 
         plot_values = np.array(self.compute_entry(key, plot=True))
-        db_values = np.array(
-            [polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index])
+        db_values = np.array([
+            polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index,
+            l_freq_response, h_freq_response, lh_freq_index])
 
         if not np.all(plot_values == db_values):
             raise ValueError("Computed values do not match stored values")
@@ -260,6 +264,7 @@ def compute_peak_to_post_peak_ratio(average, fs, alpha, alpha_dt, t_on_step=2, t
     :param t_on_step: Time of the on-step of the stimulus in seconds.
     :param t_max: Time of the offset of the response window in seconds.
     :param plot: If True, plot the average trace and the response window.
+    :param title: Title of the plot.
 
     :return: Peak-Response / Post-Peak-Response.
     """

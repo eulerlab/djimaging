@@ -5,23 +5,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.receptivefield.rf_utils import get_mean_dt
-from djimaging.tables.response.response_quality import RepeatQITemplate
 from djimaging.utils.dj_utils import get_primary_key
-
-
-class SineSpotQITemplate(RepeatQITemplate):
-    _stim_family = "sinespot"
-    _stim_name = "sinespot"
-
-    @property
-    @abstractmethod
-    def stimulus_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def snippets_table(self):
-        pass
 
 
 class SineSpotFeaturesTemplate(dj.Computed):

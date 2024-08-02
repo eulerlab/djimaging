@@ -5,28 +5,12 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy import signal
 
-from djimaging.tables.response.response_quality import RepeatQITemplate
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 from djimaging.utils.trace_utils import get_mean_dt, find_closest
 
 
-class ChirpQITemplate(RepeatQITemplate):
-    _stim_family = "chirp"
-    _stim_name = "chirp"
-
-    @property
-    @abstractmethod
-    def stimulus_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def snippets_table(self):
-        pass
-
-
-class ChirpFeaturesTemplate(dj.Computed):
+class ChirpFeaturesRgcTemplate(dj.Computed):
     # TODO: Add more features
 
     database = ""

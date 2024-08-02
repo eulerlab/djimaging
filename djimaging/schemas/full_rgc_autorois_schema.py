@@ -10,7 +10,7 @@ class ChirpQI(response.ChirpQITemplate):
 
 
 @schema
-class ChirpFeatures(response.ChirpFeaturesTemplate):
+class ChirpFeatures(response.ChirpFeaturesRgcTemplate):
     stimulus_table = Stimulus
     snippets_table = Snippets
     presentation_table = Presentation
