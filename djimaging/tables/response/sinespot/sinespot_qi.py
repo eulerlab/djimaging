@@ -1,6 +1,6 @@
 from abc import abstractmethod
 
-from djimaging.tables.response import RepeatQITemplate
+from djimaging.tables.response.response_quality import RepeatQITemplate
 
 
 class SineSpotQITemplate(RepeatQITemplate):
