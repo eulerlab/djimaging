@@ -46,7 +46,7 @@ class ChirpFeaturesBcTemplate(dj.Computed):
         polarity_index: float # Polarity index (POi) from Franke et al. 2017
         high_frequency_index: float # High Frequency Index (HFi) from Baden et al. 2013 and Franke et al. 2017
         transience_index: float # Response transience index (RTi) from Franke et al. 2017
-        plateau_index: float # Response plateau index (RPi) from Franke et al. 2017
+        plateau_index: float # Response plateau index (RPi) from Franke et al. 2017 (corrected equation!)
         tonic_release_index: float # Tonic release index (TRi) from Franke et al. 2017
         l_freq_response : float # Low frequency response
         h_freq_response : float # High frequency response
@@ -255,7 +255,8 @@ def compute_polarity_index(average, fs, alpha=2, t_on_step=2, t_off_step=5, plot
     return polarity_index
 
 
-def compute_peak_to_post_peak_ratio(average, fs, alpha, alpha_dt, t_on_step=2, t_max=6, plot=None, title=""):
+def compute_peak_to_post_peak_ratio(average, fs, alpha, alpha_dt, t_on_step=2, t_max=6, invert=False,
+                                    plot=None, title=""):
     """
     :param average: A 1d numpy array of trace
     :param fs: Sampling rate of the data in Hz.
@@ -263,10 +264,11 @@ def compute_peak_to_post_peak_ratio(average, fs, alpha, alpha_dt, t_on_step=2, t
     :param alpha_dt: Plus-minus response window in seconds.
     :param t_on_step: Time of the on-step of the stimulus in seconds.
     :param t_max: Time of the offset of the response window in seconds.
+    :param invert: If True, use "1 - ratio" instead of "ratio"
     :param plot: If True, plot the average trace and the response window.
     :param title: Title of the plot.
 
-    :return: Peak-Response / Post-Peak-Response.
+    :return: ratio = Post-Peak-Response / Peak-Response. (see also invert)
     """
     if alpha_dt >= alpha:
         raise ValueError(f"alpha_dt must be smaller than alpha, but is {alpha_dt} >= {alpha}")
@@ -285,10 +287,12 @@ def compute_peak_to_post_peak_ratio(average, fs, alpha, alpha_dt, t_on_step=2, t
     post_peak_response = np.maximum(0, np.mean(average_norm[idx_post_peak - didx:idx_post_peak + didx + 1]))
 
     if peak_response <= 1e-9:
-        warnings.warn("Peak response can not be computed for <= 0 peaks, setting response index to -1.")
+        warnings.warn("Peak response can not be computed for <= 0 peak.")
         response_index = -1
     else:
         response_index = np.minimum(1, post_peak_response / peak_response)
+        if invert:
+            response_index = 1 - response_index
 
     if plot:
         if isinstance(plot, plt.Axes):
@@ -328,7 +332,7 @@ def compute_transience_index(average, fs, alpha=0.4, alpha_dt=0.15, t_on_step=2,
 
     rti = compute_peak_to_post_peak_ratio(
         average=average, fs=fs, alpha=alpha, alpha_dt=alpha_dt,
-        t_on_step=t_on_step, t_max=t_max, plot=plot, title="RTi")
+        t_on_step=t_on_step, t_max=t_max, invert=True, plot=plot, title="RTi")
     return rti
 
 
@@ -336,7 +340,8 @@ def compute_plateau_index(average, fs, alpha=2., alpha_dt=0.15, t_on_step=2, t_m
     """
     Calculate the response plateau index (RPi) from Franke et al. 2017.
 
-    Note: In the paper it's not clear how they treated negative values.
+    Note 1: The sign is as in the figure, but not as in the equation of Franke et al.
+    Note 2: In the paper it's not clear how they treated negative values.
 
     :param average: A 1d numpy array of trace
     :param fs: Sampling rate of the data in Hz.
