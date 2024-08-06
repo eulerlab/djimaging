@@ -15,6 +15,7 @@ class OpticDisk(location.OpticDiskTemplate):
 @schema
 class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
     field_table = Field
+    presentation_table = Presentation
     opticdisk_table = OpticDisk
 
 
@@ -28,6 +29,7 @@ import warnings
 from abc import abstractmethod
 
 import datajoint as dj
+import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
@@ -71,12 +73,36 @@ class RelativeFieldLocationTemplate(dj.Computed):
     def field_table(self):
         pass
 
+    @property
+    def presentation_table(self):  # Optional table
+        return None
+
     def make(self, key):
         od_key = key.copy()
         od_key.pop('field', None)
 
         odx, ody, odz = (self.opticdisk_table() & od_key).fetch1("odx", "ody", "odz")
         absx, absy, absz = (self.field_table() & key).fetch1('absx', 'absy', 'absz')
+
+        if self.presentation_table is not None:
+            pres_absx, pres_absy, pres_absz = (self.presentation_table() & key).fetch('absx', 'absy', 'absz')
+            if np.abs(np.median(pres_absx) - absx) > 200 or np.abs(np.median(pres_absy) - absy) > 200:
+                warnings.warn(f"Position is different from the presentation table for {key}. "
+                              f"Using heuristic to determine location.")
+                outlier_x = np.abs(pres_absx) > 20_000
+                outlier_y = np.abs(pres_absy) > 20_000
+                outlier_xy = np.logical_or(outlier_x, outlier_y)
+
+                if np.all(outlier_xy):
+                    # All values are extremely high, use median and hope for the best
+                    absx = np.median(pres_absx)
+                    absy = np.median(pres_absy)
+                    absz = np.median(pres_absz)
+                else:
+                    # Use the median of the non-outliers
+                    absx = np.median(pres_absx[~outlier_xy])
+                    absy = np.median(pres_absy[~outlier_xy])
+                    absz = np.median(pres_absz[~outlier_xy])
 
         loc_key = key.copy()
         loc_key["relx"] = absx - odx
