@@ -1,8 +1,35 @@
+"""
+Tables for location of the recorded fields relative to the optic disk.
+
+Example usage:
+
+from djimaging.tables import location
+
+@schema
+class OpticDisk(location.OpticDiskTemplate):
+    userinfo_table = UserInfo
+    experiment_table = Experiment
+    raw_params_table = RawDataParams
+
+
+@schema
+class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
+    field_table = Field
+    presentation_table = Presentation
+    opticdisk_table = OpticDisk
+
+
+@schema
+class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
+    relativefieldlocation_table = RelativeFieldLocation
+    expinfo_table = Experiment.ExpInfo
+"""
 import os
 import warnings
 from abc import abstractmethod
 
 import datajoint as dj
+import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
@@ -47,23 +74,6 @@ def load_od_pos_from_h5_file(pre_data_path, user_dict):
         return odx, ody, odz, fromfile
     else:
         return None, None, None, None
-
-
-def plot_rel_xy_pos(relx, rely, view='igor_local'):
-    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-    ax.scatter(rely, relx, label='all', s=1, alpha=0.5)
-    ax.set(xlabel="rely", ylabel="relx")
-
-    if view == 'igor_local':
-        pass
-    elif view == 'igor_setup':
-        ax.invert_xaxis()
-    else:
-        raise NotImplementedError(view)
-
-    ax.set_aspect(aspect="equal", adjustable="datalim")
-
-    plt.show()
 
 
 def load_od_pos_from_smp_file(raw_data_path, user_dict):
@@ -193,12 +203,36 @@ class RelativeFieldLocationTemplate(dj.Computed):
     def field_table(self):
         pass
 
+    @property
+    def presentation_table(self):  # Optional table
+        return None
+
     def make(self, key):
         od_key = key.copy()
         od_key.pop('field', None)
 
         odx, ody, odz = (self.opticdisk_table() & od_key).fetch1("odx", "ody", "odz")
         absx, absy, absz = (self.field_table() & key).fetch1('absx', 'absy', 'absz')
+
+        if self.presentation_table is not None:
+            pres_absx, pres_absy, pres_absz = (self.presentation_table() & key).fetch('absx', 'absy', 'absz')
+            if np.abs(np.median(pres_absx) - absx) > 200 or np.abs(np.median(pres_absy) - absy) > 200:
+                warnings.warn(f"Position is different from the presentation table for {key}. "
+                              f"Using heuristic to determine location.")
+                outlier_x = np.abs(pres_absx) > 20_000
+                outlier_y = np.abs(pres_absy) > 20_000
+                outlier_xy = np.logical_or(outlier_x, outlier_y)
+
+                if np.all(outlier_xy):
+                    # All values are extremely high, use median and hope for the best
+                    absx = np.median(pres_absx)
+                    absy = np.median(pres_absy)
+                    absz = np.median(pres_absz)
+                else:
+                    # Use the median of the non-outliers
+                    absx = np.median(pres_absx[~outlier_xy])
+                    absy = np.median(pres_absy[~outlier_xy])
+                    absz = np.median(pres_absz[~outlier_xy])
 
         loc_key = key.copy()
         loc_key["relx"] = absx - odx
@@ -279,6 +313,10 @@ class RetinalFieldLocationTemplate(dj.Computed):
 class RetinalFieldLocationCatTemplate(dj.Computed):
     database = ""
 
+    _ventral_dorsal_key = 'ventral_dorsal_pos_um'
+    _temporal_nasal_key = 'temporal_nasal_pos_um'
+    _center_dist = 0.
+
     @property
     def definition(self):
         definition = """
@@ -303,10 +341,6 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
     @abstractmethod
     def retinalfieldlocation_table(self):
         pass
-
-    _ventral_dorsal_key = 'ventral_dorsal_pos_um'
-    _temporal_nasal_key = 'temporal_nasal_pos_um'
-    _center_dist = 0.
 
     def make(self, key):
         ventral_dorsal, temporal_nasal = (self.retinalfieldlocation_table() & key).fetch1(
@@ -349,3 +383,20 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
         ax.set(xlabel="temporal_nasal", ylabel="ventral_dorsal")
         ax.set_aspect(aspect="equal", adjustable="datalim")
         plt.show()
+
+
+def plot_rel_xy_pos(relx, rely, view='igor_local'):
+    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+    ax.scatter(rely, relx, label='all', s=1, alpha=0.5)
+    ax.set(xlabel="rely", ylabel="relx")
+
+    if view == 'igor_local':
+        pass
+    elif view == 'igor_setup':
+        ax.invert_xaxis()
+    else:
+        raise NotImplementedError(view)
+
+    ax.set_aspect(aspect="equal", adjustable="datalim")
+
+    plt.show()
