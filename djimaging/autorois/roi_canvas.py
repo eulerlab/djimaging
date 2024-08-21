@@ -1098,6 +1098,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def prep_roi_mask_for_file(self):
+        self.exec_save_current_roi()
         roi_mask = self.roi_masks.copy()
         roi_shift = self.shifts[self._selected_stim_idx]
         roi_shift = np.array([-roi_shift[0], -roi_shift[1]])
