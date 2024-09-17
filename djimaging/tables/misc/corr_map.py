@@ -36,8 +36,10 @@ class CorrMapTemplate(dj.Computed):
         definition = """
         -> self.presentation_table
         ---
-        corr_map_pre_stim : longblob  # Correlation mask for stack before stimulus
-        corr_map : longblob  # Correlation mask for stack, after stimulus onset
+        corr_map_pre_stim : blob  # Correlation mask for stack before stimulus
+        corr_map : blob  # Correlation mask for stack, after stimulus onset
+        corr_map_max : float  # Maximum correlation
+        corr_map_mean : float  # Mean correlation
         """
         return definition
 
@@ -78,12 +80,20 @@ class CorrMapTemplate(dj.Computed):
         fs = (self.presentation_table.ScanInfo & key).fetch1('scan_frequency')
         stack = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_name,))[0][data_name]
 
-        idx_start = int(triggertimes[0] * fs)
-        idx_end = int(triggertimes[-1] * fs)
+        if len(triggertimes) > 0:
+            idx_start = int(triggertimes[0] * fs)
+            idx_end = int(triggertimes[-1] * fs)
+        else:
+            idx_start = 0
+            idx_end = stack.shape[2]
 
         corr_map = stack_corr_image(stack[:, :, idx_start:idx_end], cut_x=self._cut_x, cut_z=self._cut_z[::-1])
-        corr_map_pre_stim = stack_corr_image(stack[:, :, :idx_start], cut_x=self._cut_x, cut_z=self._cut_z[::-1])
-        self.insert1(dict(key, corr_map=corr_map, corr_map_pre_stim=corr_map_pre_stim))
+        if idx_start < 2:
+            corr_map_pre_stim = np.full_like(corr_map, np.nan)
+        else:
+            corr_map_pre_stim = stack_corr_image(stack[:, :, :idx_start], cut_x=self._cut_x, cut_z=self._cut_z[::-1])
+        self.insert1(dict(key, corr_map=corr_map, corr_map_pre_stim=corr_map_pre_stim,
+                          corr_map_max=np.max(corr_map), corr_map_mean=np.mean(corr_map)))
 
     def plot1(self, key=None, gamma=0.7):
         key = get_primary_key(self, key=key)
@@ -133,7 +143,7 @@ class CrossCondCorrMapTemplate(dj.Computed):
         -> self.corr_map_table.proj(cond1_A='{self._split_cond}')
         -> self.corr_map_table.proj(cond1_B='{self._split_cond}')
         ---
-        cross_corr_map : longblob  # Cross correlation between stacks of same stimulus but different conditions
+        cross_corr_map : blob  # Cross correlation between stacks of same stimulus but different conditions
         shift_x : int  # Shift in pixels
         shift_z : int  # Shift in pixels
         max_corr : float  # Maximum correlation
@@ -195,7 +205,7 @@ class CrossStimCorrMapTemplate(dj.Computed):
         -> self.corr_map_table.proj(stim_A='stim_name')
         -> self.corr_map_table.proj(stim_B='stim_name')
         ---
-        cross_corr_map : longblob  # Cross correlation between stacks of same stimulus but different conditions
+        cross_corr_map : blob  # Cross correlation between stacks of same stimulus but different conditions
         shift_x : int  # Shift in pixels
         shift_z : int  # Shift in pixels
         max_corr : float  # Maximum correlation
