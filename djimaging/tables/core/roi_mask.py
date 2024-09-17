@@ -307,7 +307,7 @@ class RoiMaskTemplate(dj.Manual):
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
                           only_new_fields: bool = True, roi_mask_dir='ROIs', old_prefix=None, new_prefix=None,
-                          max_shift=None, auto_fill_pres_keys: bool = False):
+                          max_shift=None, auto_fill_pres_keys: bool = False, add_primary_keys=None):
         """Scan filesystem for new ROI masks and add them to the database.
         :param restrictions: Restrictions for field_table
         :param verboselvl: Verbosity level
@@ -318,6 +318,7 @@ class RoiMaskTemplate(dj.Manual):
         :param new_prefix: Prefix that should replace old_prefix in file names
         :param max_shift: Maximum allowed shift between Presentations, defaults to Table value
         :param auto_fill_pres_keys: Automatically fill presentation keys with zero shift if they are missing as files
+        :param add_primary_keys: Additional primary keys to add to keys. Still experimental!
         """
         if restrictions is None:
             restrictions = dict()
@@ -332,7 +333,7 @@ class RoiMaskTemplate(dj.Manual):
                 self._add_field_roi_masks(
                     key, auto_fill_pres_keys=auto_fill_pres_keys,
                     roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
-                    max_shift=max_shift, verboselvl=verboselvl)
+                    max_shift=max_shift, add_primary_keys=add_primary_keys, verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
                     warnings.warn(f'Error for key={key}:\n{e}')
@@ -342,7 +343,7 @@ class RoiMaskTemplate(dj.Manual):
 
         return err_list
 
-    def _add_field_roi_masks(self, field_key, auto_fill_pres_keys=False,
+    def _add_field_roi_masks(self, field_key, auto_fill_pres_keys=False, add_primary_keys=None,
                              roi_mask_dir='ROIs', old_prefix=None, new_prefix=None, max_shift=None, verboselvl=0):
         pres_keys = (self.presentation_table & field_key).fetch('KEY')
 
@@ -413,8 +414,20 @@ class RoiMaskTemplate(dj.Manual):
             else:
                 raise ValueError(f'No ROI mask found for key={pres_key} but `auto_fill_pres_keys` is False')
 
-        self.insert1({**field_key, **main_pres_key, "roi_mask": main_roi_mask}, skip_duplicates=True)
+        main_key = {**field_key, **main_pres_key, "roi_mask": main_roi_mask}
+
+        self.insert_new_keys(main_key, roi_mask_pres_keys, add_primary_keys=add_primary_keys)
+
+    def insert_new_keys(self, main_key, roi_mask_pres_keys, add_primary_keys=None):
+        if add_primary_keys is not None:
+            main_key = {**main_key, **add_primary_keys}
+        self.insert1(main_key, skip_duplicates=True)
+
         for roi_mask_pres_key in roi_mask_pres_keys:
+            if add_primary_keys is not None:
+                main_key = {**main_key, **add_primary_keys}
+                roi_mask_pres_key = {**roi_mask_pres_key, **add_primary_keys}
+
             self.RoiMaskPresentation().insert1(roi_mask_pres_key, skip_duplicates=True)
 
     def _load_presentation_roi_mask(self, key, roi_mask_dir='ROIs', old_prefix=None, new_prefix=None):

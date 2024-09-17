@@ -186,7 +186,7 @@ def corr_map_rois(stack, cut_x, cut_z, n_pix_max_x=5, n_pix_max_z=5, n_pix_max=2
         axs[0, 3].set_ylim(0, line_threshold.size - 1)
         axs[1, 3].axis('off')
 
-        im = axs[0, 4].imshow(seed_pixels.T, cmap='viridis', origin='lower', interpolation='none')
+        im = axs[0, 4].imshow(corr_map_nan.T, cmap='viridis', origin='lower', interpolation='none')
         axs[0, 4].set_title('Seed pixels')
         plt.colorbar(im, ax=axs[0, 4], cax=axs[1, 4], orientation='horizontal')
 

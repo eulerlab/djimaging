@@ -1133,7 +1133,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         widget.on_click(self.exec_save_all_to_file)
         return widget
 
-    def exec_save_all_to_file(self, button=None):
+    def exec_save_all_to_file(self, button=None, raise_error=False):
         self.log('Saving all to file')
         import time
         self.update_progress(0)
@@ -1142,6 +1142,8 @@ class InteractiveRoiCanvas(RoiCanvas):
             try:
                 self.exec_save_to_file()
             except (OSError, FileNotFoundError) as e:
+                if raise_error:
+                    raise e
                 self.widget_save_info.description = 'Error!'.ljust(20)
                 warnings.warn(f'Error saving {stim}: {e}')
             time.sleep(0.5)
@@ -1158,6 +1160,9 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         return current_stack
 
+    def get_current_selected_roi_mask(self):
+        return (self.roi_masks == self._selected_roi) | (self.current_mask > 0)
+
     def update_info(self):
         self.log('Updating info')
         self.update_npix()
@@ -1171,7 +1176,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.update_diagnostics(update=False)
 
     def _compute_traces(self):
-        return self.get_current_stack()[self.current_mask]
+        return self.get_current_stack()[self.get_current_selected_roi_mask()]
 
     def _compute_cc(self, traces):
         if len(traces) <= 1:
@@ -1189,7 +1194,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             if self.diagnostics_fig is not None:
                 plt.close(self.diagnostics_fig)
 
-            mask = self.current_mask
+            mask = self.get_current_selected_roi_mask()
 
             if np.any(self.current_mask):
                 traces = self._compute_traces() if update else self.current_traces
