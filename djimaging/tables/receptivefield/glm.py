@@ -137,7 +137,7 @@ class RfGlmParamsTemplate(dj.Lookup):
 
 class RfGlmTemplate(dj.Computed):
     database = ""
-    __def_sta = True  # If True, the definition includes rf_time
+    _def_sta = True  # If True, the definition includes rf_time
 
     @property
     def definition(self):
@@ -150,7 +150,7 @@ class RfGlmTemplate(dj.Computed):
         dt: float
         '''
 
-        if self.__def_sta:
+        if self._def_sta:
             definition += '''
             rf_time: longblob
             shift: int
@@ -215,7 +215,7 @@ class RfGlmTemplate(dj.Computed):
         rf_key['rf'] = rf.astype(np.float32)
         rf_key['dt'] = model_dict.pop('dt')
 
-        if self.__def_sta:
+        if self._def_sta:
             rf_key['rf_time'] = model_dict.pop('rf_time')
             rf_key['shift'] = model_dict['shift']['stimulus']  # There may be other shifts
 
