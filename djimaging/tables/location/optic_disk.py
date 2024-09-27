@@ -62,7 +62,9 @@ class OpticDiskTemplate(dj.Computed):
         user_dict = (self.userinfo_table & exp_key).fetch1()
 
         file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
-        file_info_df = file_info_df[file_info_df['kind'] == 'od']
+
+        if len(file_info_df) > 0:
+            file_info_df = file_info_df[file_info_df['kind'] == 'od']
 
         return file_info_df, from_raw_data
 
@@ -74,10 +76,9 @@ class OpticDiskTemplate(dj.Computed):
             fromfile = file_info_df['filepath'].iloc[0]
 
         if fromfile is not None:
-            if from_raw_data:
-                odx, ody, odz = load_od_pos_from_smp_file(fromfile)
-            else:
-                odx, ody, odz = load_od_pos_from_h5_file(fromfile)
+            pre_data_dir, raw_data_dir = (self.userinfo_table & key).fetch1("pre_data_dir", "raw_data_dir")
+            odx, ody, odz = load_od_pos_from_file(
+                fromfile, from_raw_data, fallback_raw=True, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir)
         else:
             if (self.experiment_table().ExpInfo & key).fetch1("od_ini_flag") == 1:
                 odx, ody, odz = (self.experiment_table().ExpInfo & key).fetch1("odx", "ody", "odz")
@@ -95,6 +96,22 @@ class OpticDiskTemplate(dj.Computed):
 
         self.insert1(loc_key)
 
+def load_od_pos_from_file(filepath, from_raw_data, fallback_raw=True, raw_data_dir='Raw', pre_data_dir='Pre'):
+    if from_raw_data:
+        odx, ody, odz = load_od_pos_from_smp_file(filepath)
+    else:
+        try:
+            odx, ody, odz = load_od_pos_from_h5_file(filepath)
+        except OSError as e:
+            if fallback_raw:
+                try:
+                    filepath_raw = os.path.splitext(filepath.replace(f'/{pre_data_dir}/', f'/{raw_data_dir}/'))[0] + '.smp'
+                    odx, ody, odz = load_od_pos_from_smp_file(filepath_raw)
+                except:
+                    raise e
+            else:
+                raise e
+    return odx, ody, odz
 
 def load_od_pos_from_h5_file(filepath):
     wparams = load_h5_table('wParamsNum', filename=filepath, lower_keys=True)
