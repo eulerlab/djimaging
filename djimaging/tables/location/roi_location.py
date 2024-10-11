@@ -129,7 +129,7 @@ class RelativeRoiLocationTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.relative_field_location_wrt_field_table.proj()
+            return self.relative_field_location_wrt_field_table.proj() & self.relative_field_location_table.proj()
         except (AttributeError, TypeError):
             pass
 

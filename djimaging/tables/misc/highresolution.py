@@ -10,6 +10,7 @@ class HighRes(misc.HighResTemplate):
     field_table = Field
     experiment_table = Experiment
     userinfo_table = UserInfo
+    raw_params_table = RawDataParams
 
     class StackAverages(misc.HighResTemplate.StackAverages):
         pass
@@ -28,6 +29,8 @@ from djimaging.utils.scanm.recording import ScanMRecording
 
 class HighResTemplate(dj.Computed):
     database = ""
+    _fallback_to_raw = True  # If h5 not available, try to load from raw data
+
     incl_region = True  # Include region as primary key?
     incl_cond1 = True  # Include condition 1 as primary key?
     incl_cond2 = False  # Include condition 2 as primary key?
@@ -104,6 +107,11 @@ class HighResTemplate(dj.Computed):
     def userinfo_table(self):
         pass
 
+    @property
+    @abstractmethod
+    def raw_params_table(self):
+        pass
+
     class StackAverages(dj.Part):
         @property
         def definition(self):
@@ -118,7 +126,11 @@ class HighResTemplate(dj.Computed):
 
     def load_field_stim_file_info_df(self, field_key):
         """Load file info for a given field + stimulus combination."""
+        from_raw_data = (self.raw_params_table & field_key).fetch1('from_raw_data')
         file_info_df = self.field_table().load_exp_file_info_df(field_key, filter_kind='hr')
+
+        if len(file_info_df) == 0 and (not from_raw_data) and self._fallback_to_raw:
+            file_info_df = self.field_table().load_exp_file_info_df(field_key, filter_kind='hr', from_raw_data=True)
 
         for new_key in self.field_table().new_primary_keys:
             file_info_df = file_info_df[file_info_df[new_key] == field_key[new_key]]
@@ -147,17 +159,32 @@ class HighResTemplate(dj.Computed):
 
         return file_info_df
 
-    def make(self, key):
+    def make(self, key, verboselvl=0):
         setupid = (self.experiment_table().ExpInfo & key).fetch1("setupid")
 
         file_info_df = self.load_field_stim_file_info_df(field_key=key)
-        pres_dfs = file_info_df.groupby(self.new_primary_keys)
+        if len(self.new_primary_keys) > 0:
+            pres_dfs = file_info_df.groupby(self.new_primary_keys)
+        else:
+            pres_dfs = [(None, file_info_df)]
+
+        if verboselvl > 0:
+            print(f"Processing {len(pres_dfs)} highres files for {key}")
 
         for pres_info, pres_df in pres_dfs:
-            pres_key = {**dict(zip(self.new_primary_keys, pres_info)), **key}
+            if len(pres_df) == 0:
+                if verboselvl > 1:
+                    print(f"No highres files found in {pres_df}.")
+                continue
+
+            if len(self.new_primary_keys) > 0:
+                pres_key = {**dict(zip(self.new_primary_keys, pres_info)), **key}
+            else:
+                pres_key = key
 
             if len(pres_df) > 1:
-                warnings.warn(f"More than one highres file found for {pres_key}. Using the first one.")
+                if verboselvl >= 0:
+                    warnings.warn(f"More than one highres file found for {pres_key}. Using the first one.")
             filepath = pres_df.iloc[0].filepath
             self._add_entry(pres_key, filepath=filepath, setupid=setupid)
 

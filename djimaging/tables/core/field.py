@@ -102,17 +102,20 @@ class FieldTemplate(dj.Computed):
             """
             return definition
 
-    def load_exp_file_info_df(self, exp_key, filter_kind='response'):
+    def load_exp_file_info_df(self, exp_key, filter_kind='response', with_field_only=True, from_raw_data=None):
         """Load file info dataframe for a given experiment key."""
-        from_raw_data = (self.raw_params_table & exp_key).fetch1('from_raw_data')
+        if from_raw_data is None:
+            from_raw_data = (self.raw_params_table & exp_key).fetch1('from_raw_data')
         header_path = (self.experiment_table & exp_key).fetch1('header_path')
         data_folder = (self.userinfo_table & exp_key).fetch1("raw_data_dir" if from_raw_data else "pre_data_dir")
         user_dict = (self.userinfo_table & exp_key).fetch1()
 
         file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
 
-        if len(file_info_df) > 0:
+        if with_field_only:
             file_info_df = file_info_df[file_info_df['field'].notnull()]
+
+        if len(file_info_df) > 0:
             if filter_kind is not None:
                 if isinstance(filter_kind, str):
                     filter_kind = [filter_kind]
@@ -167,7 +170,10 @@ class FieldTemplate(dj.Computed):
                 print(f"\tSkipping because no files found for key={exp_key}")
             return
 
-        field_dfs = file_info_df.groupby(self.new_primary_keys)
+        if len(self.new_primary_keys) > 0:
+            field_dfs = file_info_df.groupby(self.new_primary_keys)
+        else:
+            field_dfs = [(None, file_info_df)]
 
         if verboselvl > 0:
             print(f"Found {len(file_info_df)} files in {len(field_dfs)} for key={exp_key}")
@@ -177,7 +183,10 @@ class FieldTemplate(dj.Computed):
             if verboselvl > 5:
                 print(f"Checking field: {field_info} ({i + 1}/{len(field_dfs)})")
 
-            field_key = {**dict(zip(self.new_primary_keys, field_info)), **exp_key}
+            if len(self.new_primary_keys) > 0:
+                field_key = {**dict(zip(self.new_primary_keys, field_info)), **exp_key}
+            else:
+                field_key = exp_key
 
             if verboselvl > 5:
                 print(f"checking field: {field_key}")

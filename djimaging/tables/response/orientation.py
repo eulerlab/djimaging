@@ -25,6 +25,10 @@ from scipy import stats
 from djimaging.utils import math_utils
 from djimaging.utils.dj_utils import get_primary_key
 
+T_START = 1.152
+T_CHANGE = 2.432
+T_END = 3.712
+
 
 class OsDsIndexesTemplate(dj.Computed):
     database = ""
@@ -112,10 +116,14 @@ class OsDsIndexesTemplate(dj.Computed):
         dir_order = (self.stimulus_table() & key).fetch1('trial_info')
         sorted_directions_rad = np.deg2rad(np.sort(dir_order))
 
-        dir_component, ds_index, pref_dir, avg_sorted_resp = \
-            (self & key).fetch1('dir_component', 'ds_index', 'pref_dir', 'avg_sorted_resp')
+        time_component_dt, dir_component, ds_index, pref_dir = (self & key).fetch1(
+            'time_component_dt', 'dir_component', 'ds_index', 'pref_dir')
 
-        fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor='w', subplot_kw=dict(frameon=False))
+        fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor='w', sharex=True, sharey=True)
+
+        fig.suptitle(f"DSI: {ds_index:.2f}, Pref-Dir: {(360 + np.rad2deg(pref_dir)) % 360:.0f}")
+
+        # Polar plot in center
         axs[1, 1].remove()
         ax = fig.add_subplot(3, 3, 5, projection='polar', frameon=False)
         temp = np.max(np.append(dir_component, ds_index))
@@ -127,19 +135,29 @@ class OsDsIndexesTemplate(dj.Computed):
         ax.set_rmin(0)
         ax.set_thetalim([0, 2 * np.pi])
         ax.set_yticks([])
-        ax.set_xticks([])
         ax_idxs = [0, 1, 2, 3, 5, 6, 7, 8]
         dir_idxs = [3, 2, 1, 4, 0, 5, 6, 7]
-        vmin, vmax = avg_sorted_resp.min(), avg_sorted_resp.max()
 
-        for ax_idx, dir_idx in zip(ax_idxs, dir_idxs):
+        if not self._reduced_storage:
+            avg_sorted_resp = (self & key).fetch1('avg_sorted_resp')
+        else:
+            snippets = (self.snippets_table() & key).fetch1('snippets')
+            sorted_directions, sorted_responses, avg_sorted_resp = preprocess_mb_snippets(snippets, dir_order)
+
+        for idx, (ax_idx, dir_idx) in enumerate(zip(ax_idxs, dir_idxs)):
             ax = axs.flat[ax_idx]
-            ax.plot(avg_sorted_resp[:, dir_idx], color='k')
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax.set_ylim([vmin - vmax * 0.2, vmax * 1.2])
-            ax.set_xlim([-len(avg_sorted_resp) * 0.2, len(avg_sorted_resp) * 1.2])
-        return None
+            ax.fill_between(np.arange(avg_sorted_resp.shape[0]) * time_component_dt,
+                            avg_sorted_resp[:, dir_idx], color='red', alpha=0.5)
+            ax.axvline(x=T_START, color='gray', linestyle='--')
+            ax.axvline(x=T_CHANGE, color='gray', linestyle='--')
+            ax.axvline(x=T_END, color='gray', linestyle='--')
+
+            ax.spines['left'].set_visible(True)
+            # Remove all other spines
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
+        plt.tight_layout()
 
     def plot(self, restriction=None):
         if restriction is None:
@@ -294,7 +312,7 @@ def compute_null_dist(rep_dir_resps, dirs, per, iters=1000):
     return null_dist
 
 
-def get_on_off_index(time_kernel, dt, t_start=1.152, t_change=2.432, t_end=3.712):
+def get_on_off_index(time_kernel, dt, t_start=T_START, t_change=T_CHANGE, t_end=T_END):
     """
     Computes a preliminary On-Off Index based on the responses to the On (first half) and the OFF (2nd half) part of
     the responses to the moving bars stimulus
@@ -350,15 +368,21 @@ def compute_mb_qi(snippets, dir_order):
     return d_qi
 
 
+def preprocess_mb_snippets(snippets, dir_order):
+    dir_idx, dir_rad = get_dir_idx(snippets, dir_order)
+
+    sorted_responses, sorted_directions = sort_response_matrix(snippets, dir_idx, dir_rad)
+    sorted_averages = np.mean(sorted_responses, axis=-1)
+    return sorted_directions, sorted_responses, sorted_averages
+
+
 def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n_shuffles: int = 100):
     assert snippets.ndim == 2
     assert np.asarray(dir_order).ndim == 1
 
-    dir_idx, dir_rad = get_dir_idx(snippets, dir_order)
+    sorted_directions, sorted_responses, sorted_averages = preprocess_mb_snippets(snippets, dir_order)
 
-    sorted_responses, sorted_directions = sort_response_matrix(snippets, dir_idx, dir_rad)
-    avg_sorted_responses = np.mean(sorted_responses, axis=-1)
-    time_component, dir_component = get_time_dir_kernels(avg_sorted_responses, dt=dt)
+    time_component, dir_component = get_time_dir_kernels(sorted_averages, dt=dt)
 
     dsi, pref_dir = get_si(dir_component, sorted_directions, 1)
     osi, pref_or = get_si(dir_component, sorted_directions, 2)
@@ -380,4 +404,4 @@ def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n
     on_off = get_on_off_index(time_component, dt=dt)
 
     return dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
-        on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses
+        on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, sorted_averages

@@ -187,7 +187,11 @@ class PresentationTemplate(dj.Computed):
             print('\nProcessing key:', field_stim_key)
 
         file_info_df = self.load_field_stim_file_info_df(field_stim_key)
-        pres_dfs = file_info_df.groupby(self.new_primary_keys)
+
+        if len(self.new_primary_keys) > 0:
+            pres_dfs = file_info_df.groupby(self.new_primary_keys)
+        else:
+            pres_dfs = [(None, file_info_df)]
 
         if (verboselvl > 0 and len(file_info_df) > 0) or verboselvl > 3:
             print(f"Found {len(file_info_df)} files for key={field_stim_key}")
@@ -196,7 +200,10 @@ class PresentationTemplate(dj.Computed):
             print(file_info_df['filepath'].values)
 
         for pres_info, pres_df in pres_dfs:
-            pres_key = {**dict(zip(self.new_primary_keys, pres_info)), **field_stim_key}
+            if len(self.new_primary_keys) > 0:
+                pres_key = {**dict(zip(self.new_primary_keys, pres_info)), **field_stim_key}
+            else:
+                pres_key = field_stim_key
 
             if len(pres_df) > 1:
                 raise ValueError(f"Found multiple files for key={pres_key}:\n{pres_df['filepath'].values}\n"
