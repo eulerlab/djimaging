@@ -62,19 +62,35 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
             pass
 
     def make(self, key):
-        snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
-        trigger_times = (self.presentation_table() & key).fetch1('triggertimes')
+        try:
+            # Deprecated
+            snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
+                "snippets", "snippets_times", "triggertimes_snippets")
+        except dj.DataJointError:
+            snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
+                "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
 
-        on_off_index = compute_on_off_index(snippets, snippets_times, trigger_times)
-        transience_index = compute_transience_index(snippets, snippets_times, trigger_times)
+            snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
+                              + snippets_t0)
+
+        on_off_index = compute_on_off_index(snippets, snippets_times, triggertimes_snippets[0])
+        transience_index = compute_transience_index(snippets, snippets_times, triggertimes_snippets[0])
 
         self.insert1(dict(key, on_off_index=on_off_index, transience_index=transience_index))
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
-        snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-            "snippets", "snippets_times", "triggertimes_snippets")
+        try:
+            # Deprecated
+            snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
+                "snippets", "snippets_times", "triggertimes_snippets")
+        except dj.DataJointError:
+            snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
+                "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
+
+            snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
+                              + snippets_t0)
 
         on_off_index, transience_index = (self & key).fetch1('on_off_index', 'transience_index')
 
@@ -105,20 +121,19 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         plt.show()
 
 
-def compute_on_off_index(snippets, snippets_times, trigger_times, light_step_duration=1):
+def compute_on_off_index(snippets, snippets_times, start_triggertimes, light_step_duration=1):
     # TODO: Reimplement cleaner
     dts = [get_mean_dt(tracetime=snippets_times_i)[0] for snippets_times_i in snippets_times.T]
     fs = 1. / np.mean(dts)
 
-    start_trigs = trigger_times[::2]
     light_step_frames = int(light_step_duration * fs)
 
     on_responses = np.zeros((light_step_frames, snippets.shape[1]))
     off_responses = np.zeros((light_step_frames, snippets.shape[1]))
 
     for i in range(snippets.shape[1]):
-        step_up = start_trigs[i] + 2
-        step_down = start_trigs[i] + 5
+        step_up = start_triggertimes[i] + 2
+        step_down = start_triggertimes[i] + 5
 
         snip_times = snippets_times[:, i]
         snip = snippets[:, i]
@@ -149,7 +164,7 @@ def compute_on_off_index(snippets, snippets_times, trigger_times, light_step_dur
     return on_off_index
 
 
-def compute_transience_index(snippets, snippets_times, trigger_times, upsam_fre=500):
+def compute_transience_index(snippets, snippets_times, start_triggertimes, upsam_fre=500):
     # TODO: Reimplement cleaner
     dts = [get_mean_dt(tracetime=snippets_times_i)[0] for snippets_times_i in snippets_times.T]
     fs = 1. / np.mean(dts)
@@ -166,12 +181,10 @@ def compute_transience_index(snippets, snippets_times, trigger_times, upsam_fre=
         end_time = snippets_times[-1, i]
         resampled_snippets_times[:, i] = np.linspace(start_time, end_time, upsampling_factor)
 
-    start_trigs_local = trigger_times[::2]
-
     transience_indexes = np.zeros(snippets.shape[1])
     for i in range(snippets.shape[1]):
-        stim_start = start_trigs_local[i]
-        stim_end = start_trigs_local[i] + 6
+        stim_start = start_triggertimes[i]
+        stim_end = start_triggertimes[i] + 6
         snip_times = resampled_snippets_times[:, i]
         snip = resampled_snippets[:, i]
         snip = snip - snip.min()
