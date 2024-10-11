@@ -1105,8 +1105,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         roi_mask = mask_utils.shift_array(img=roi_mask, shift=roi_shift, inplace=True, cval=0)
         return roi_mask
 
-    def exec_save_to_file(self, botton=None):
-        self.log(f'Saving to file: {self.output_file}')
+    def _prep_save_to_file(self):
         roi_mask = self.prep_roi_mask_for_file()
 
         # Never create root dir, but create sub dir if necessary
@@ -1118,6 +1117,13 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         if not os.path.isdir(os.path.join(f_root, f_dir)):
             os.mkdir(os.path.join(f_root, f_dir))
+
+        return roi_mask, self.output_file
+
+    def exec_save_to_file(self, botton=None):
+        self.log(f'Saving to file: {self.output_file}')
+
+        roi_mask, output_file = self._prep_save_to_file()
 
         with open(self.output_file, 'wb') as f:
             pickle.dump(roi_mask, f)
@@ -1137,17 +1143,33 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.log('Saving all to file')
         import time
         self.update_progress(0)
+
+        roi_masks, output_files = [], []
+
         for i, stim in enumerate(self.pres_names, start=1):
             self.set_selected_stim(stim)
             try:
-                self.exec_save_to_file()
+                roi_mask, output_file = self._prep_save_to_file()
+                roi_masks.append(roi_mask)
+                output_files.append(output_file)
             except (OSError, FileNotFoundError) as e:
                 if raise_error:
                     raise e
                 self.widget_save_info.description = 'Error!'.ljust(20)
                 warnings.warn(f'Error saving {stim}: {e}')
             time.sleep(0.5)
+
+            for roi_mask, output_file in zip(roi_masks, output_files):
+                with open(output_file, 'wb') as f:
+                    pickle.dump(roi_mask, f)
+
             self.update_progress(100 * i / len(self.pres_names))
+
+            success = all([os.path.isfile(output_file) for output_file in output_files])
+            if success:
+                self.widget_save_info.description = 'Success!'.ljust(20)
+            else:
+                self.widget_save_info.description = 'Error!'.ljust(20)
 
     def create_widget_save_info(self):
         widget = HTML(value=f'{self.output_file}', placeholder='output_file', description=''.ljust(20))
