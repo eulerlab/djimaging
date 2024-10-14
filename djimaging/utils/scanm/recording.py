@@ -211,6 +211,15 @@ class ScanMRecording:
             npix_x_offset_right=self.pix_n_retrace,
             precision=self.time_precision)
 
+    def set_auto_trigger_threshold(self):
+        vmin = self.ch_stacks[self.trigger_ch_name].min()
+        vmax = self.ch_stacks[self.trigger_ch_name].max()
+
+        if vmin < 25_000 and vmax > 35_000:
+            self.trigger_threshold = 30_000
+        else:
+            self.trigger_threshold = 0.5 * (vmin + vmax)
+
     def compute_triggers(self, trigger_threshold=None, time_precision=None, repeated_stim=None, ntrigger_rep=None):
         if trigger_threshold is not None:
             self.trigger_threshold = trigger_threshold
@@ -230,13 +239,7 @@ class ScanMRecording:
             self.compute_frame_times(time_precision=time_precision)
 
         if trigger_threshold == 'auto':
-            vmin = self.ch_stacks[self.trigger_ch_name].min()
-            vmax = self.ch_stacks[self.trigger_ch_name].max()
-
-            if vmin < 25_000 and vmax > 35_000:
-                self.trigger_threshold = 30_000
-            else:
-                self.trigger_threshold = 0.5 * (vmin + vmax)
+            self.set_auto_trigger_threshold()
 
         if self.ntrigger_rep is None or self.ntrigger_rep > 0:
             self.trigger_times, self.trigger_values = traces_and_triggers_utils.compute_triggers(

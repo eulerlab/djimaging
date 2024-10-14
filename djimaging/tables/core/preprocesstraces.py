@@ -111,6 +111,11 @@ class PreprocessTracesTemplate(dj.Computed):
 
         stim_start = triggertimes[0] if len(triggertimes) > 0 else None
 
+        if stim_start is None and (subtract_baseline or standardize):
+            raise ValueError(
+                f"No triggers found for {key}, cannot compute baseline. "
+                f"Use preprocessing without baseline or fix triggers.")
+
         pp_trace, smoothed_trace, pp_trace_dt = process_trace(
             trace=trace, trace_t0=trace_t0, trace_dt=trace_dt,
             stim_start=stim_start, poly_order=poly_order, window_len_seconds=window_len_seconds,
@@ -328,12 +333,16 @@ def process_trace(trace, trace_t0, trace_dt,
             raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
 
     if subtract_baseline:
+        if stim_start is None:
+            raise ValueError("stim_start must be provided to subtract baseline. probably there are no triggers")
         trace = subtract_baseline_trace(trace, trace_times, stim_start, max_dt=baseline_max_dt, inplace=True)
 
     if non_negative:
         trace = non_negative_trace(trace, inplace=True)
 
     if standardize == 1:
+        if stim_start is None:
+            raise ValueError("stim_start must be provided to standardize. probably there are no triggers")
         baseline = extract_baseline(trace, trace_times, stim_start)
         trace /= np.std(baseline)
     elif standardize == 2:
