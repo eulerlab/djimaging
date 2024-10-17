@@ -21,7 +21,7 @@ from scipy import signal
 from djimaging.autorois.autoshift_utils import shift_img
 from djimaging.autorois.corr_roi_mask_utils import stack_corr_image
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.math_utils import normalize, normalize_zscore
+from djimaging.utils.math_utils import normalize_zscore
 from djimaging.utils.plot_utils import prep_long_title
 from djimaging.utils.scanm import read_utils
 
@@ -30,17 +30,23 @@ class CorrMapTemplate(dj.Computed):
     database = ""
     _cut_x = (1, 1)
     _cut_z = (1, 1)
+    _include_prestim = False
 
     @property
     def definition(self):
         definition = """
         -> self.presentation_table
         ---
-        corr_map_pre_stim : blob  # Correlation mask for stack before stimulus
-        corr_map : blob  # Correlation mask for stack, after stimulus onset
+        corr_map : longblob  # Correlation mask for stack, after stimulus onset
         corr_map_max : float  # Maximum correlation
         corr_map_mean : float  # Mean correlation
         """
+
+        if self._include_prestim:
+            definition += """
+            corr_map_pre_stim : longblob  # Correlation mask for stack before stimulus
+            """
+
         return definition
 
     @property
@@ -88,12 +94,18 @@ class CorrMapTemplate(dj.Computed):
             idx_end = stack.shape[2]
 
         corr_map = stack_corr_image(stack[:, :, idx_start:idx_end], cut_x=self._cut_x, cut_z=self._cut_z[::-1])
-        if idx_start < 2:
-            corr_map_pre_stim = np.full_like(corr_map, np.nan)
+
+        entry = dict(key, corr_map=corr_map, corr_map_max=np.max(corr_map), corr_map_mean=np.mean(corr_map))
+
+        if self._include_prestim:
+            if idx_start < 2:
+                corr_map_pre_stim = np.full_like(corr_map, np.nan)
+            else:
+                corr_map_pre_stim = stack_corr_image(
+                    stack[:, :, :idx_start], cut_x=self._cut_x, cut_z=self._cut_z[::-1])
+            self.insert1({**entry, 'corr_map_pre_stim': corr_map_pre_stim})
         else:
-            corr_map_pre_stim = stack_corr_image(stack[:, :, :idx_start], cut_x=self._cut_x, cut_z=self._cut_z[::-1])
-        self.insert1(dict(key, corr_map=corr_map, corr_map_pre_stim=corr_map_pre_stim,
-                          corr_map_max=np.max(corr_map), corr_map_mean=np.mean(corr_map)))
+            self.insert1(entry)
 
     def plot1(self, key=None, gamma=0.7):
         key = get_primary_key(self, key=key)
@@ -101,7 +113,10 @@ class CorrMapTemplate(dj.Computed):
         data_name = (self.userinfo_table & key).fetch1('data_stack_name')
         main_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
 
-        corr_map, corr_map_pre_stim = (self & key).fetch1('corr_map', 'corr_map_pre_stim')
+        corr_map = (self & key).fetch1('corr_map')
+        if self._include_prestim:
+            corr_map_pre_stim = (self & key).fetch1('corr_map_pre_stim')
+
         vabsmax = np.max(np.abs(corr_map))
 
         extent = (0, main_ch_average.shape[0], 0, main_ch_average.shape[1])
@@ -111,6 +126,9 @@ class CorrMapTemplate(dj.Computed):
         fig, axs = plt.subplots(1, 4, figsize=(16, 3))
         fig.suptitle(prep_long_title(key))
 
+        for ax in axs:
+            ax.grid(True)
+
         for ax in [axs[0], axs[3]]:
             im = ax.imshow(main_ch_average.T ** gamma, cmap='viridis', origin='lower', extent=extent)
             plt.colorbar(im, ax=ax, label='Brightness')
@@ -119,9 +137,11 @@ class CorrMapTemplate(dj.Computed):
             im = ax.imshow(corr_map.T, vmin=-vabsmax, vmax=+vabsmax, cmap='bwr', origin='lower', extent=extent)
             plt.colorbar(im, ax=ax, label='Correlation')
 
-        for ax in [axs[2]]:
-            im = ax.imshow(corr_map_pre_stim.T, vmin=-vabsmax, vmax=+vabsmax, cmap='bwr', origin='lower', extent=extent)
-            plt.colorbar(im, ax=ax, label='Pre-Stim-Correlation')
+        if self._include_prestim:
+            for ax in [axs[2]]:
+                im = ax.imshow(corr_map_pre_stim.T, vmin=-vabsmax, vmax=+vabsmax, cmap='bwr', origin='lower',
+                               extent=extent)
+                plt.colorbar(im, ax=ax, label='Pre-Stim-Correlation')
 
         for ax in [axs[1], axs[2], axs[3]]:
             ax.contour(corr_map.T, levels=[np.percentile(corr_map, 90), np.percentile(corr_map, 95)],
@@ -284,7 +304,11 @@ def cross_correlate_images(image1, image2, plot=False, max_shift=None):
 
     # Visualize the correlation
     if plot:
-        fig, axs = plt.subplots(1, 4, figsize=(12, 3), sharex=True, sharey=True)
+        fig, axs = plt.subplots(1, 4, figsize=(16, 4), sharex=True, sharey=True)
+
+        for ax in axs:
+            ax.grid(True)
+
         ax = axs[0]
         im = ax.imshow(correlation.T, cmap='viridis', origin='lower')
         ax.plot(x, z, 'rx')

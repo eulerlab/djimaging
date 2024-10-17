@@ -170,7 +170,7 @@ class FieldTemplate(dj.Computed):
         field_dfs = file_info_df.groupby(self.new_primary_keys)
 
         if verboselvl > 0:
-            print(f"Found {len(file_info_df)} files in {len(field_dfs)} for key={exp_key}")
+            print(f"Found {len(file_info_df)} files in {len(field_dfs)} fields for key={exp_key}")
 
         for i, (field_info, field_df) in enumerate(field_dfs):
 

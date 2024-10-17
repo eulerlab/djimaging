@@ -246,6 +246,8 @@ class PresentationTemplate(dj.Computed):
             found_triggers = rec.trigger_times.size
             min_expected_triggers = 2 * ntrigger_rep if isrepeated else int(0.8 * ntrigger_rep)
 
+            original_threshold = rec.trigger_threshold
+
             # If expects triggers and way too few found repeat
             while (found_triggers < min_expected_triggers) and i < 5:
                 if verboselvl > 1:
@@ -257,7 +259,10 @@ class PresentationTemplate(dj.Computed):
                 i += 1
 
             if found_triggers < min_expected_triggers:
-                raise ValueError(
+                rec.trigger_threshold = original_threshold
+                rec.compute_triggers()
+
+                warnings.warn(
                     f"Found {found_triggers} triggers, expected more than {min_expected_triggers} triggers. \n"
                     f"Trying to reduce trigger threshold for {filepath}")
 
