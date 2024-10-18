@@ -1,3 +1,12 @@
+"""
+Example usage:
+
+class RoiBrightness(misc.RoiBrightnessTemplate):
+    presentation_table = Presentation
+    roimask_table = RoiMask
+    roi_table = Roi
+"""
+
 from abc import abstractmethod
 
 import datajoint as dj
@@ -16,25 +25,46 @@ class RoiBrightnessTemplate(dj.Computed):
         -> self.presentation_table
         -> self.roi_table
         ---
-        brightness  :float  # Mean brightness in [0, 1] of ROI normalized to min and max of stack average
+        brightness_rel2all  : float  # Mean brightness in [0, 1] of ROI normalized to min and max of all pixels in field
+        brightness_rel2cells : float  # Mean brightness in [0, 1] of ROI normalized to min and max of all cells in field
         """
         return definition
 
     @property
     @abstractmethod
-    def field_table(self): pass
+    def presentation_table(self):
+        pass
 
     @property
     @abstractmethod
-    def presentation_table(self): pass
+    def roimask_table(self):
+        pass
 
     @property
     @abstractmethod
-    def roi_table(self): pass
+    def roi_table(self):
+        pass
+
+    @property
+    def key_source(self):
+        try:
+            return self.presentation_table.proj()
+        except (AttributeError, TypeError):
+            pass
 
     def make(self, key):
-        roi_mask = (self.field_table().RoiMask() & key).fetch1('roi_mask')
-        stack_average = math_utils.normalize_zero_one((self.presentation_table() & key).fetch1('stack_average'))
-        brightness = np.mean(stack_average[roi_mask == -key['roi_id']])
+        stack_average = math_utils.normalize_zero_one((self.presentation_table & key).fetch1('stack_average'))
+        roi_mask = (self.roimask_table & key).fetch1('roi_mask')
 
-        self.insert1(dict(key, brightness=brightness))
+        roi_ids = (self.roi_table & key).fetch('roi_id')
+
+        brightness_rel2all = np.full(len(roi_ids), np.nan)
+        for i, roi_id in enumerate(roi_ids):
+            brightness_rel2all[i] = np.mean(stack_average[roi_mask == roi_id])
+
+        brightness_rel2cells = math_utils.normalize_zero_one(brightness_rel2all)
+
+        entries = [dict(**key, roi_id=roi_id, brightness=brightness)
+                   for roi_id, brightness in zip(roi_ids, brightness_rel2cells)]
+
+        self.insert(entries)
