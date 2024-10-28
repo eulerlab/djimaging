@@ -59,7 +59,8 @@ from djimaging.utils.import_helpers import dynamic_import, split_module_name
 Key = Dict[str, Any]
 
 
-def prepare_dj_config_rgc_classifier(output_folder, input_folder="/gpfs01/euler/data/Resources/Classifier"):
+def prepare_dj_config_rgc_classifier(output_folder,
+                                     input_folder="/gpfs01/euler/data/Resources/Classifier/rgc_classifier_v1"):
     stores_dict = {
         "classifier_input": {"protocol": "file", "location": input_folder, "stage": input_folder},
         "classifier_output": {"protocol": "file", "location": output_folder, "stage": output_folder},
@@ -98,7 +99,7 @@ class ClassifierTrainingDataTemplate(dj.Manual):
         """.format(store=self._store)
         return definition
 
-    def add_default(self, skip_duplicates=False):
+    def add_default(self, training_data_file='training_all.pkl', skip_duplicates=False):
         ipath = dj.config['stores']["classifier_input"]["location"] + '/'
         opath = dj.config['stores']["classifier_output"]["location"] + '/'
 
@@ -108,7 +109,7 @@ class ClassifierTrainingDataTemplate(dj.Manual):
             chirp_feats_file=ipath + 'chirp_feats.npz',
             bar_feats_file=ipath + 'bar_feats.npz',
             baden_data_file=ipath + 'RGCData_postprocessed.mat',
-            training_data_file=ipath + 'training_all.pkl',
+            training_data_file=ipath + training_data_file,
             skip_duplicates=skip_duplicates,
         )
 
@@ -301,9 +302,9 @@ class CelltypeAssignmentTemplate(dj.Computed):
         -> self.baden_trace_table
         -> self.classifier_table
         ---
-        celltype:        int         # predicted group (1-46), without quality or confidence threshold
+        celltype:        int         # predicted group, without quality or confidence threshold
         max_confidence:  float       # confidence score for assigned celltype for easy restriction
-        confidence:      blob        # confidence score (probability) for all 46 celltypes
+        confidence:      blob        # confidence score (probability) for all celltypes
         """
         return definition
 
@@ -361,6 +362,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                 if not (self._current_model_key["training_data_hash"] == value["training_data_hash"]):
                     del self.__dict__["bar_features"]
                     del self.__dict__["chirp_features"]
+                    del self.__dict__["baden_data"]
                 self._current_model_key = value
         else:
             self._current_model_key = value
@@ -385,6 +387,11 @@ class CelltypeAssignmentTemplate(dj.Computed):
             "chirp_feats_file")
         features_chirp = np.load(features_chirp_file)
         return features_chirp
+
+    @cached_property
+    def baden_data(self):
+        baden_data_file = (self.classifier_training_data_table() & self.current_model_key).fetch1("baden_data_file")
+        return load_baden_data(baden_data_file)
 
     def populate(
             self, *restrictions, suppress_errors=False,
@@ -451,10 +458,16 @@ class CelltypeAssignmentTemplate(dj.Computed):
             celltypes = df.apply(
                 lambda row: row["celltype"] if row["max_confidence"] > threshold_confidence else -1, axis=1)
 
-            ax.hist(celltypes[celltypes > 0], bins=np.arange(1, 47, 0.5), align='left')
-            ax.set_xticks(np.arange(1, 47))
-            ax.set_xticklabels(np.arange(1, 47), rotation=90)
-            ax.set(ylabel='Count', xlabel='celltype')
+            self.current_model_key = dict(classifier_params_hash=cph, training_data_hash=tdh)
+            training_data = self.classifier_training_data_table().get_training_data(self.current_model_key)
+            group_ticks = np.unique(training_data['y'])
+            group_names = training_data.get("group_name", group_ticks)
+
+            ax.hist(celltypes[celltypes > 0], bins=np.arange(group_ticks.min(), group_ticks.max() + 1, 0.5),
+                    align='left')
+            ax.set_xticks(group_ticks)
+            ax.set_xticklabels([f"{gn} [{gt}]" for gt, gn in zip(group_ticks, group_names)], rotation=90)
+            ax.set(ylabel='Count', xlabel='Group-Name [Group-Num]')
             ax.set_title(
                 f"training_data_hash={tdh}\n"
                 f"classifier_params_hash={cph}\n"
@@ -468,18 +481,23 @@ class CelltypeAssignmentTemplate(dj.Computed):
                       key=None, celltypes=None, n_celltypes_max=3, features=None, n_features_max=5):
         key = get_primary_key(self.classifier_table, key)
 
+        # Get training data
+        self.current_model_key = dict(classifier_params_hash=key["classifier_params_hash"],
+                                      training_data_hash=key["training_data_hash"])
+        training_data = self.classifier_training_data_table().get_training_data(self.current_model_key)
+        group_ticks = np.unique(training_data['y'])
+        group_names = training_data.get("group_name", group_ticks)
+
         roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = self._fetch_data(
             key, restriction=(self & f'max_confidence>={threshold_confidence}'))
         data_celltypes = (self & roi_keys).fetch('celltype')
+        data_celltypes = [group_names[np.argmax(celltype == group_ticks)] for celltype in data_celltypes]
 
         data_features = extract_features(
             preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, self.chirp_features, self.bar_features)
 
-        # Get training data
-        training_data = self.classifier_training_data_table().get_training_data(key)
-
         if celltypes is None:
-            celltypes = np.arange(0, 46) + 1
+            celltypes = group_ticks
         if features is None:
             features = np.arange(0, training_data['X'].shape[1])
 
@@ -499,7 +517,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                                 squeeze=False)
 
         for ax_row, celltype in zip(axs, celltypes):
-            ax_row[0].set_ylabel(f"celltype={celltype}")
+            ax_row[0].set_ylabel(f"celltype={group_names[np.argmax(celltype == group_ticks)]}")
             for ax, feature_i in zip(ax_row, features):
                 ax.set_title(f"feature={feature_i}")
                 bins = np.linspace(training_data['X'][:, feature_i].min(), training_data['X'][:, feature_i].max(), 51)
@@ -525,8 +543,15 @@ class CelltypeAssignmentTemplate(dj.Computed):
             key, restriction=(self & f'max_confidence>={threshold_confidence}'))
         data_celltypes = (self & roi_keys).fetch('celltype')
 
+        # Get training data
+        self.current_model_key = dict(classifier_params_hash=key["classifier_params_hash"],
+                                      training_data_hash=key["training_data_hash"])
+        training_data = self.classifier_training_data_table().get_training_data(self.current_model_key)
+        group_ticks = np.unique(training_data['y'])
+        group_names = training_data.get("group_name", group_ticks)
+
         if celltypes is None:
-            celltypes = np.arange(0, 46) + 1
+            celltypes = group_ticks
 
         celltypes = sorted(set(celltypes).intersection(set(data_celltypes)))
 
@@ -576,7 +601,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                 ax.hist(b_soma_size_um2[b_celltypes == celltype], bins=roi_size_um2s_bins, color='gray', alpha=0.5)
 
         for ax_row, celltype in zip(axs, celltypes):
-            ax_row[0].set_ylabel(f"{celltype}")
+            ax_row[0].set_ylabel(f"celltype={group_names[np.argmax(celltype == group_ticks)]}")
 
             if not np.any(data_celltypes == celltype):
                 continue
@@ -620,6 +645,7 @@ def load_baden_data(baden_data_file, merged_celltypes=True):
     bar_dp = baden_data['ds']['dP']
 
     if merged_celltypes:
+        # TODO: Merging much come from training data; otherwise not flexible enough
         celltypes = np.array([celltype2merged_celltype(celltype) for celltype in celltypes])
 
     return celltypes, chirp_traces, chirp_qi, bar_traces, bar_qi, bar_dsi, bar_dp, roi_size_um2
@@ -674,6 +700,6 @@ def celltype2merged_celltype(celltype):
         72: 44,
         73: 45,
         74: 46, 75: 46,
-    }  # Add ACs
+    }
 
     return _celltype2merged_celltype.get(celltype, -1)

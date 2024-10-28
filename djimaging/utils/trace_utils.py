@@ -58,23 +58,17 @@ def align_stim_to_trace(stim: np.ndarray, stimtime: np.ndarray, trace: np.ndarra
     return aligned_stim, aligned_trace, dt_trace, t0, dt_rel_error
 
 
-def align_trace_to_stim(stim, stimtime, trace, tracetime):
+def align_trace_to_stim(stimtime, trace, tracetime):
     """Align stimulus and trace."""
-    assert stim.shape[0] == stimtime.shape[0], (stim.shape[0], stimtime.shape[0])
-
     dt, dt_rel_error = get_mean_dt(stimtime, rtol_error=np.inf, rtol_warning=0.5)
-
     t0 = stimtime[0]
-    aligned_stim = stim
-
+    
     aligned_trace = np.zeros(stimtime.size)
     for i, (t_a, t_b) in enumerate(zip(stimtime, np.append(stimtime[1:], stimtime[-1] + dt))):
         # Take mean to not put more weight on lagged frames
         aligned_trace[i] = np.mean(trace[(tracetime >= t_a) & (tracetime < t_b)])
 
-    assert aligned_stim.shape[0] == aligned_trace.shape[0], (aligned_stim.shape[0], aligned_trace.shape[0])
-
-    return aligned_stim, aligned_trace, dt, t0, dt_rel_error
+    return aligned_trace, dt, t0, dt_rel_error
 
 
 def find_closest(target: float, data: np.ndarray, atol=np.inf, as_index=False):

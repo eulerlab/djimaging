@@ -17,16 +17,9 @@ def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
 
     x, y = split_data(x=stim, y=trace, frac_train=frac_train, frac_dev=frac_dev, as_dict=True)
 
-    if np.product(stim.shape) <= batch_size_n:
-        rf, y_pred_train = _compute_linear_rf_single_batch(
-            x_train=x['train'], y_train=y['train'], kind=kind, dim_t=dim_t, shift=shift, burn_in=burn_in,
-            threshold_pred=threshold_pred, dtype=dtype)
-    else:
-        assert kind == 'sta', f"kind={kind} not supported for compute_per='feature'"
-        rf, y_pred_train = _compute_sta_batchwise(
-            x_train=x['train'], y_train=y['train'], kind=kind, dim_t=dim_t, shift=shift, burn_in=burn_in,
-            threshold_pred=threshold_pred, dtype=dtype,
-            batch_size=np.maximum(batch_size_n // stim.shape[0], 1), verbose=verbose)
+    rf, y_pred_train = compute_linear_rf_single_or_batch(
+        x_train=x['train'], y_train=y['train'], dim_t=dim_t, shift=shift, burn_in=burn_in, kind=kind,
+        threshold_pred=threshold_pred, batch_size_n=batch_size_n, stim_shape=stim.shape, dtype=dtype, verbose=verbose)
 
     model_eval = dict()
     model_eval['burn_in'] = burn_in
@@ -47,8 +40,30 @@ def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
     return rf, rf_time, model_eval, x, y, shift
 
 
-def _compute_linear_rf_single_batch(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred, dtype=np.float32):
-    x_train_dm = build_design_matrix(x_train, n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
+def compute_linear_rf_single_or_batch(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred,
+                                      stim_shape, batch_size_n=6_000_000, is_design_matrix=False, dtype=np.float32,
+                                      verbose=False):
+    if np.product(stim_shape) <= batch_size_n:
+        rf, y_pred_train = _compute_linear_rf_single_batch(
+            x_train=x_train, y_train=y_train, kind=kind, dim_t=dim_t, shift=shift, burn_in=burn_in,
+            is_design_matrix=is_design_matrix, threshold_pred=threshold_pred, dtype=dtype)
+    else:
+        assert kind == 'sta', f"kind={kind} not supported for compute_per='feature'"
+        rf, y_pred_train = _compute_sta_batchwise(
+            x_train=x_train, y_train=y_train, kind=kind, dim_t=dim_t, shift=shift, burn_in=burn_in,
+            threshold_pred=threshold_pred, dtype=dtype,
+            is_design_matrix=is_design_matrix, batch_size=np.maximum(batch_size_n // stim_shape[0], 1), verbose=verbose)
+
+    return rf, y_pred_train
+
+
+def _compute_linear_rf_single_batch(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred,
+                                    is_design_matrix=False, dtype=np.float32):
+    if is_design_matrix:
+        x_train_dm = x_train[burn_in:].astype(dtype)
+    else:
+        x_train_dm = build_design_matrix(x_train, n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
+
     y_train_dm = y_train[burn_in:].astype(dtype)
 
     if kind == 'sta':
@@ -56,7 +71,7 @@ def _compute_linear_rf_single_batch(x_train, y_train, dim_t, shift, burn_in, kin
     elif kind == 'mle':
         rf = compute_rf_mle(X=x_train_dm, y=y_train_dm)
     else:
-        raise NotImplementedError()
+        raise NotImplementedError(kind)
 
     y_pred_train = predict_linear_rf_response(
         rf=rf, stim_design_matrix=x_train_dm, threshold=threshold_pred, dtype=dtype)
@@ -65,7 +80,7 @@ def _compute_linear_rf_single_batch(x_train, y_train, dim_t, shift, burn_in, kin
 
 
 def _compute_sta_batchwise(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred,
-                           batch_size=400, dtype=np.float32, verbose=False):
+                           batch_size=400, is_design_matrix=False, dtype=np.float32, verbose=False):
     x_shape = x_train.shape
     n_frames = x_shape[0]
     n_features = np.product(x_shape[1:])
@@ -81,7 +96,10 @@ def _compute_sta_batchwise(x_train, y_train, dim_t, shift, burn_in, kind, thresh
     bar = tqdm(batches, desc='STA batches', leave=False) if verbose else None
 
     for i, batch in enumerate(batches):
-        x_train_dm_i = build_design_matrix(x_train[:, batch], n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
+        if is_design_matrix:
+            x_train_dm_i = x_train[burn_in:, batch]
+        else:
+            x_train_dm_i = build_design_matrix(x_train[:, batch], n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
 
         if kind == 'sta':
             rf_i = compute_rf_sta(X=x_train_dm_i, y=y_train_dm)

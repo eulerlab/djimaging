@@ -18,8 +18,9 @@ def generate_random_stimulus_and_time(shape=(100, 4, 3), tmin=0, tmax=12):
 def test_align_trace_to_stim():
     stim, stimtime = generate_random_stimulus_and_time(shape=(100, 3, 4), tmin=2, tmax=8)
     trace, tracetime = generate_random_trace_and_time(size=100, tmin=0, tmax=10)
-    aligned_stim, aligned_trace, dt, t0, dt_rel_error = trace_utils.align_trace_to_stim(
-        stim, stimtime=stimtime, trace=trace, tracetime=tracetime)
+    aligned_trace, dt, t0, dt_rel_error = trace_utils.align_trace_to_stim(
+        stimtime=stimtime, trace=trace, tracetime=tracetime)
+    aligned_stim = stim
     assert stim.shape == aligned_stim.shape
     assert np.all(stim == aligned_stim)
 
