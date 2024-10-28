@@ -14,6 +14,17 @@ def extract_roi_idxs(roi_mask, npixartifact=0):
     return roi_idxs.astype(int)
 
 
+def fix_first_or_last_n_nan(trace, n):
+    """Replace NaNs if they are at the beginning or end of the trace"""
+    if n <= 0:
+        return trace
+    if np.any(np.isnan(trace[:n])):
+        trace[:n] = trace[n]
+    if np.any(np.isnan(trace[-n:])):
+        trace[-n:] = trace[-n - 1]
+    return trace
+
+
 def get_roi2trace(traces, traces_times, roi_ids):
     """Get dict that holds traces and times accessible by roi_id"""
     assert np.all(roi_ids >= 1)
@@ -35,6 +46,9 @@ def get_roi2trace(traces, traces_times, roi_ids):
             trace_valid = 0
             trace = np.zeros(0)
             trace_times = np.zeros(0)
+
+        trace = fix_first_or_last_n_nan(trace, n=3)
+        trace_times = fix_first_or_last_n_nan(trace_times, n=3)
 
         if np.any(~np.isfinite(trace)) or np.any(~np.isfinite(trace_times)):
             warnings.warn(f'NaN trace or tracetime in for ROI{roi_id}.')

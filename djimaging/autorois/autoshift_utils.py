@@ -141,13 +141,14 @@ def extract_best_shift(match_indexes):
     return shift_x, shift_y
 
 
-def shift_img(img, shift_x, shift_y, fun_cval=np.median):
+def shift_img(img, shift_x, shift_y, fun_cval=np.median, cval=None):
     # TODO: merge with mask_utils.shift_image
 
     shifted_img = np.roll(img, shift=shift_x, axis=0)
     shifted_img = np.roll(shifted_img, shift=shift_y, axis=1)
 
-    cval = fun_cval(img)
+    if cval is None:
+        cval = fun_cval(img)
 
     if shift_x > 0:
         shifted_img[:shift_x, :] = cval

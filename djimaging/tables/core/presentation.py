@@ -3,7 +3,9 @@ from abc import abstractmethod
 from copy import deepcopy
 
 import datajoint as dj
+import matplotlib.pyplot as plt
 import numpy as np
+from IPython.core.pylabtools import figsize
 
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
@@ -251,6 +253,8 @@ class PresentationTemplate(dj.Computed):
             found_triggers = rec.trigger_times.size
             min_expected_triggers = 2 * ntrigger_rep if isrepeated else int(0.8 * ntrigger_rep)
 
+            original_threshold = rec.trigger_threshold
+
             # If expects triggers and way too few found repeat
             while (found_triggers < min_expected_triggers) and i < 5:
                 if verboselvl > 1:
@@ -262,7 +266,10 @@ class PresentationTemplate(dj.Computed):
                 i += 1
 
             if found_triggers < min_expected_triggers:
-                raise ValueError(
+                rec.trigger_threshold = original_threshold
+                rec.compute_triggers()
+
+                warnings.warn(
                     f"Found {found_triggers} triggers, expected more than {min_expected_triggers} triggers. \n"
                     f"Trying to reduce trigger threshold for {filepath}")
 
@@ -344,3 +351,24 @@ class PresentationTemplate(dj.Computed):
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
         plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4), gamma=gamma)
+
+    def plot1_triggers(self, key=None):
+        key = get_primary_key(table=self, key=key)
+        triggertimes, filepath = (self & key).fetch1('triggertimes', 'pres_data_file')
+
+        setupid = (self.experiment_table().ExpInfo & key).fetch1("setupid")
+        isrepeated, ntrigger_rep = (self.stimulus_table & key).fetch1("isrepeated", "ntrigger_rep")
+
+        rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=key['date'],
+                             repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep)
+        rec.set_auto_trigger_threshold()
+
+        trigger_trace = rec.ch_stacks[rec.trigger_ch_name].T.flatten()
+
+        fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+        ax.set_title(f"{len(triggertimes)} triggers detected")
+        ax.plot(np.arange(trigger_trace.size) * (rec.scan_line_duration / rec.pix_nx),
+                trigger_trace)
+        ax.axhline(rec.trigger_threshold, c='r')
+        ax.plot(triggertimes, np.full(len(triggertimes), rec.trigger_threshold), 'ro')
+        return fig, ax, rec

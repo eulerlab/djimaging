@@ -1098,14 +1098,14 @@ class InteractiveRoiCanvas(RoiCanvas):
         return widget
 
     def prep_roi_mask_for_file(self):
+        self.exec_save_current_roi()
         roi_mask = self.roi_masks.copy()
         roi_shift = self.shifts[self._selected_stim_idx]
         roi_shift = np.array([-roi_shift[0], -roi_shift[1]])
         roi_mask = mask_utils.shift_array(img=roi_mask, shift=roi_shift, inplace=True, cval=0)
         return roi_mask
 
-    def exec_save_to_file(self, botton=None):
-        self.log(f'Saving to file: {self.output_file}')
+    def _prep_save_to_file(self):
         roi_mask = self.prep_roi_mask_for_file()
 
         # Never create root dir, but create sub dir if necessary
@@ -1117,6 +1117,13 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         if not os.path.isdir(os.path.join(f_root, f_dir)):
             os.mkdir(os.path.join(f_root, f_dir))
+
+        return roi_mask, self.output_file
+
+    def exec_save_to_file(self, botton=None):
+        self.log(f'Saving to file: {self.output_file}')
+
+        roi_mask, output_file = self._prep_save_to_file()
 
         with open(self.output_file, 'wb') as f:
             pickle.dump(roi_mask, f)
@@ -1132,19 +1139,37 @@ class InteractiveRoiCanvas(RoiCanvas):
         widget.on_click(self.exec_save_all_to_file)
         return widget
 
-    def exec_save_all_to_file(self, button=None):
+    def exec_save_all_to_file(self, button=None, raise_error=False):
         self.log('Saving all to file')
         import time
         self.update_progress(0)
+
+        roi_masks, output_files = [], []
+
         for i, stim in enumerate(self.pres_names, start=1):
             self.set_selected_stim(stim)
             try:
-                self.exec_save_to_file()
+                roi_mask, output_file = self._prep_save_to_file()
+                roi_masks.append(roi_mask)
+                output_files.append(output_file)
             except (OSError, FileNotFoundError) as e:
+                if raise_error:
+                    raise e
                 self.widget_save_info.description = 'Error!'.ljust(20)
                 warnings.warn(f'Error saving {stim}: {e}')
             time.sleep(0.5)
+
+            for roi_mask, output_file in zip(roi_masks, output_files):
+                with open(output_file, 'wb') as f:
+                    pickle.dump(roi_mask, f)
+
             self.update_progress(100 * i / len(self.pres_names))
+
+            success = all([os.path.isfile(output_file) for output_file in output_files])
+            if success:
+                self.widget_save_info.description = 'Success!'.ljust(20)
+            else:
+                self.widget_save_info.description = 'Error!'.ljust(20)
 
     def create_widget_save_info(self):
         widget = HTML(value=f'{self.output_file}', placeholder='output_file', description=''.ljust(20))
@@ -1156,6 +1181,9 @@ class InteractiveRoiCanvas(RoiCanvas):
                                                n_artifact=self.n_artifact, cval=np.nan)
 
         return current_stack
+
+    def get_current_selected_roi_mask(self):
+        return (self.roi_masks == self._selected_roi) | (self.current_mask > 0)
 
     def update_info(self):
         self.log('Updating info')
@@ -1170,7 +1198,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.update_diagnostics(update=False)
 
     def _compute_traces(self):
-        return self.get_current_stack()[self.current_mask]
+        return self.get_current_stack()[self.get_current_selected_roi_mask()]
 
     def _compute_cc(self, traces):
         if len(traces) <= 1:
@@ -1188,7 +1216,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             if self.diagnostics_fig is not None:
                 plt.close(self.diagnostics_fig)
 
-            mask = self.current_mask
+            mask = self.get_current_selected_roi_mask()
 
             if np.any(self.current_mask):
                 traces = self._compute_traces() if update else self.current_traces

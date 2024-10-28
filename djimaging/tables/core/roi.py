@@ -53,7 +53,7 @@ class RoiTemplate(dj.Computed):
 
         scan_type = (self.field_table & key).fetch1("scan_type")
         pixel_size_um = (self.field_table & key).fetch1("pixel_size_um")
-        z_step_um = (self.field_table & key).fetch1("z_step_um")
+        z_step_um = abs((self.field_table & key).fetch1("z_step_um"))
         npixartifact = (self.field_table & key).fetch1("npixartifact")
 
         if not np.any(roi_mask):
