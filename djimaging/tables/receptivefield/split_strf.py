@@ -123,7 +123,10 @@ class SplitRFTemplate(dj.Computed):
         try:
             rf_time = (self.rf_table & key).fetch1('rf_time')
         except dj.DataJointError:
-            rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
+            try:
+                rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
+            except dj.DataJointError:
+                rf_time = (self.rf_table.params_table & key).fetch1('rf_time')
         return rf_time
 
     def plot1(self, key=None):
