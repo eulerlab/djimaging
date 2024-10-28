@@ -36,13 +36,13 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
         pass
 
     def add_default(
-            self, stim_names=None, dnoise_params_id=1, fit_kind="events", ref_time='trace',
-            fupsample_trace=1, fupsample_stim=1, lowpass_cutoff=0,
+            self, stim_names=None, dnoise_params_id=1, fit_kind="gradient", ref_time='stim',
+            fupsample_trace=10, fupsample_stim=10, lowpass_cutoff=0,
             pre_blur_sigma_s=0, post_blur_sigma_s=0, skip_duplicates=False):
         """Add default preprocess parameter to table"""
 
         if stim_names is None:
-            stim_names = (self.stimulus_table()).fetch('stim_name')
+            stim_names = (self.stimulus_table() & 'stim_family = "noise"').fetch('stim_name')
 
         key = dict(dnoise_params_id=dnoise_params_id, fit_kind=fit_kind,
                    fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,

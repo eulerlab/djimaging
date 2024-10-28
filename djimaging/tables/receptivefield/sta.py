@@ -8,7 +8,7 @@ from djimaging.tables import receptivefield
 
 @schema
 class DNoiseTraceParams(receptivefield.DNoiseTraceParamsTemplate):
-    pass
+    stimulus_table = Stimulus
 
 
 @schema
@@ -94,7 +94,7 @@ class STAParamsTemplate(dj.Lookup):
 
     def add_default(
             self, sta_params_id=1, rf_method="sta", filter_dur_s_past=1., filter_dur_s_future=0.,
-            frac_train=0.8, frac_dev=0., frac_test=0.2, store_x='shape', store_y='shape',
+            frac_train=1., frac_dev=0., frac_test=0., store_x='shape', store_y='shape',
             skip_duplicates=False):
         """Add default preprocess parameter to table"""
 
@@ -223,6 +223,9 @@ class STATemplate(dj.Computed):
 
         axs[-1].set(xlabel='Time')
         plt.tight_layout()
+
+    def plot1(self, key=None, downsample=1):
+        self.plot1_frames(key=key, downsample=downsample)
 
     def plot1_frames(self, key=None, downsample=1):
         key = get_primary_key(table=self, key=key)

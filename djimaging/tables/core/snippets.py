@@ -248,8 +248,8 @@ class GroupSnippetsTemplate(dj.Computed):
         if not isinstance(trial_info[0], dict):
             trial_info = reformat_numerical_trial_info(trial_info)
 
-        delay = stim_dict.get('trigger_delay', 0.)
-
+        delay = stim_dict.get('trigger_delay', 0.) if stim_dict is not None else 0
+        
         snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_group_reps(
             pp_trace, pp_trace_times, triggertimes, trial_info=trial_info, delay=delay,
             allow_incomplete=allow_incomplete, pad_trace=self._pad_trace, stack_kind='pad')
