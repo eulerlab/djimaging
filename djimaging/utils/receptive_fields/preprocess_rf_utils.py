@@ -139,6 +139,10 @@ def finalize_stim(stim):
     if stim.ndim > 1:  # Otherwise assume stimulus indexes have been passed
         if 'bool' in str(stim.dtype) or set(np.unique(stim).astype(float)) == {0., 1.}:
             stim = 2 * stim.astype(np.int8) - 1
+        elif set(np.unique(stim).astype(float)) == {-1, 1}:
+            pass
+        elif set(np.unique(stim).astype(float)) == {-1., 1.}:
+            stim = stim.astype(np.int8)
         else:
             stim = math_utils.normalize_zscore(stim)
     return stim
