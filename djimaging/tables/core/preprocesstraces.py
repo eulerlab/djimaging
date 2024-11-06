@@ -298,7 +298,10 @@ def subtract_baseline_trace(trace, trace_times, stim_start: float, inplace: bool
         trace = trace.copy()
 
     baseline = extract_baseline(trace, trace_times, stim_start, max_dt=max_dt)
-    trace -= np.median(baseline)
+    if len(baseline) == 0:
+        warnings.warn(f"No baseline found for stim_start={stim_start:.1f}, trace_t0={trace_times[0]:.1f}")
+    else:
+        trace -= np.median(baseline)
 
     return trace
 

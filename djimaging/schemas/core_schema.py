@@ -78,6 +78,7 @@ class HighRes(misc.HighResTemplate):
     field_table = Field
     experiment_table = Experiment
     userinfo_table = UserInfo
+    raw_params_table = RawDataParams
 
     class StackAverages(misc.HighResTemplate.StackAverages):
         pass

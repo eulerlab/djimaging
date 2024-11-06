@@ -112,7 +112,7 @@ class FieldTemplate(dj.Computed):
 
         file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
 
-        if with_field_only:
+        if with_field_only and len(file_info_df) > 0:
             file_info_df = file_info_df[file_info_df['field'].notnull()]
 
         if len(file_info_df) > 0:
