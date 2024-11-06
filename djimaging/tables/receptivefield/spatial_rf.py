@@ -116,6 +116,17 @@ class FitGauss2DRFTemplate(dj.Computed):
             group.hist(column=columns)
             plt.show()
 
+    def plot_multiple(self):
+        srf_params_list = self.fetch("srf_params")
+
+        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+
+        for srf_params in srf_params_list:
+            plot_srf_gauss_fit(ax, srf_params=srf_params)
+
+        plt.tight_layout()
+        plt.show()
+
 
 class FitDoG2DRFTemplate(dj.Computed):
     database = ""

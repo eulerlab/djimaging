@@ -167,6 +167,7 @@ class StimulusTemplate(dj.Manual):
                   alias: str = None, ntrigger_per_frame: int = 1, stim_trace=None,
                   pix_n_x: int = None, pix_n_y: int = None, pix_scale_x_um: float = None, pix_scale_y_um: float = None,
                   n_colors: int = None, locations_cats: list = None,
+                  offset_x_um: float = None, offset_y_um: float = None,
                   skip_duplicates: bool = False) -> None:
 
         if alias is None:
@@ -188,6 +189,21 @@ class StimulusTemplate(dj.Manual):
             stim_dict["pix_scale_y_um"] = pix_scale_y_um
         if locations_cats is not None:
             stim_dict["locations_cats"] = locations_cats
+        if offset_x_um is not None:
+            stim_dict["offset_x_um"] = offset_x_um
+        else:
+            warnings.warn(
+                "Stimulus offset not set. Assuming 0 offset. "
+                "This is incorrect for the standard dense noise stimulus.")
+            stim_dict["offset_x_um"] = 0
+
+        if offset_y_um is not None:
+            stim_dict["offset_y_um"] = offset_y_um
+        else:
+            warnings.warn(
+                "Stimulus offset not set. Assuming 0 offset. "
+                "This is incorrect for the standard dense noise stimulus.")
+            stim_dict["offset_y_um"] = 0
 
         self.add_stimulus(
             stim_name=stim_name,

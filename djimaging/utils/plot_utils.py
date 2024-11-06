@@ -69,6 +69,7 @@ def plot_field(main_ch_average, alt_ch_average, roi_mask=None, roi_ch_average=No
             ax.contour(_rois_us, extent=extent, vmin=vmin, vmax=vmax, levels=[roi - 1e-3], alpha=0.8, cmap='jet')
 
     plt.tight_layout()
+    return fig, axs
 
 
 def plot_field_and_traces(main_ch_average, alt_ch_average, roi_mask, title='', figsize=(16, 8), highlight_roi=None):

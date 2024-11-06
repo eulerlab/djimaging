@@ -15,11 +15,18 @@ from djimaging.utils.trace_utils import sort_traces
 
 class SplitRFParamsTemplate(dj.Lookup):
     database = ""
+    _color_idxs = None
 
     @property
     def definition(self):
         definition = """
         split_rf_params_id: tinyint unsigned # unique param set id
+        """
+        if self._color_idxs:
+            definition += """
+            color_idx: tinyint unsigned
+        """
+        definition += """
         ---
         method : varchar(63)  # Method used to split RF, currently available are SVD, STD, and MAX
         blur_std : float
@@ -28,6 +35,7 @@ class SplitRFParamsTemplate(dj.Lookup):
         peak_nstd : float  # How many standard deviations does a peak need to be considered peak?
         npeaks_max : int unsigned # Maximum number of peaks, ignored if zero
         """
+
         return definition
 
     def add_default(self, skip_duplicates=False, **params):
@@ -42,7 +50,13 @@ class SplitRFParamsTemplate(dj.Lookup):
             npeaks_max=0,
         )
         key.update(**params)
-        self.insert1(key, skip_duplicates=skip_duplicates)
+
+        if self._color_idxs:
+            for color_idx in self._color_idxs:
+                key['color_idx'] = color_idx
+                self.insert1(key, skip_duplicates=skip_duplicates)
+        else:
+            self.insert1(key, skip_duplicates=skip_duplicates)
 
 
 class SplitRFTemplate(dj.Computed):
@@ -81,15 +95,8 @@ class SplitRFTemplate(dj.Computed):
     def split_rf_params_table(self):
         pass
 
-    def make(self, key):
-        # Get data
-        strf = (self.rf_table() & key).fetch1("rf")
-        rf_time = self.fetch1_rf_time(key=key)
-
-        # Get preprocess params
-        method, blur_std, blur_npix, upsample_srf_scale, peak_nstd, npeaks_max = (
-                self.split_rf_params_table & key).fetch1(
-            'method', 'blur_std', 'blur_npix', 'upsample_srf_scale', 'peak_nstd', 'npeaks_max')
+    def _make_compute(
+            self, strf, rf_time, method, blur_std, blur_npix, upsample_srf_scale, peak_nstd, npeaks_max):
 
         # Get tRF and sRF
         srf, trf, split_qidx = split_strf(
@@ -100,24 +107,49 @@ class SplitRFTemplate(dj.Computed):
             rf_time=rf_time, trf=trf, nstd=peak_nstd, npeaks_max=npeaks_max if npeaks_max > 0 else None,
             max_dt_future=self._max_dt_future)
 
-        if method.lower() in ['svd']:
-            if polarity == -1:
-                srf *= -1
-                trf *= -1
-                polarity = 1
-
         if split_qidx is None:
             strf_fit = merge_strf(srf=resize_srf(srf, output_shape=strf.shape[1:]), trf=trf)
             split_qidx = compute_explained_rf(strf, strf_fit)
 
-        # Save
-        rf_key = deepcopy(key)
-        rf_key['srf'] = srf.astype(np.float32)
-        rf_key['trf'] = trf.astype(np.float32)
-        rf_key['polarity'] = polarity
-        rf_key['trf_peak_idxs'] = peak_idxs
-        rf_key['split_qidx'] = split_qidx
-        self.insert1(rf_key)
+        if (method.lower() in ['svd']) and (polarity == -1):
+            srf *= -1
+            trf *= -1
+            polarity = 1
+
+        return srf, trf, polarity, split_qidx, peak_idxs
+
+    def make(self, key):
+        # Get data
+        strf = (self.rf_table() & key).fetch1("rf")
+        rf_time = self.fetch1_rf_time(key=key)
+
+        # Get preprocess params
+        method, blur_std, blur_npix, upsample_srf_scale, peak_nstd, npeaks_max = (
+                self.split_rf_params_table & key).fetch1(
+            'method', 'blur_std', 'blur_npix', 'upsample_srf_scale', 'peak_nstd', 'npeaks_max')
+
+        n_colors = 1 if strf.ndim <= 3 else strf.shape[3]
+
+        entries = []
+        for i in range(n_colors):
+            srf_i, trf_i, polarity_i, split_qidx_i, peak_idxs_i = self._make_compute(
+                strf[:, :, :, i] if n_colors > 1 else strf,
+                rf_time, method, blur_std, blur_npix, upsample_srf_scale, peak_nstd, npeaks_max)
+
+            # Save
+            entry = deepcopy(key)
+            entry['srf'] = srf_i.astype(np.float32)
+            entry['trf'] = trf_i.astype(np.float32)
+            entry['polarity'] = polarity_i
+            entry['split_qidx'] = split_qidx_i
+            entry['trf_peak_idxs'] = peak_idxs_i
+
+            if n_colors > 1:
+                entry['color_idx'] = i
+
+            entries.append(entry)
+
+        self.insert(entries)
 
     def fetch1_rf_time(self, key):
         try:
@@ -135,9 +167,11 @@ class SplitRFTemplate(dj.Computed):
         rf_time = self.fetch1_rf_time(key=key)
         srf, trf, peak_idxs = (self & key).fetch1("srf", "trf", "trf_peak_idxs")
 
-        fig, axs = plt.subplots(1, 2, figsize=(8, 3))
+        fig, axs = plt.subplots(1, 2, figsize=(8, 3), sharex='col')
+
         ax = axs[0]
         plot_srf(srf, ax=ax)
+        ax.set_title(f'sRF')
 
         ax = axs[1]
         plot_trf(trf, t_trf=rf_time, peak_idxs=peak_idxs, ax=ax)

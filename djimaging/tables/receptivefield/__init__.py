@@ -7,3 +7,4 @@ from .srf_contour import RfContoursParamsTemplate, RfContoursTemplate, RfContour
 from .sta import STAParamsTemplate, STATemplate
 from .fast_sta import FastStaParamsTemplate, FastStaTemplate
 from .temporal_rf import TempRFPropertiesTemplate
+from .rf_offset import RfOffsetTemplate, RfRoiOffsetTemplate

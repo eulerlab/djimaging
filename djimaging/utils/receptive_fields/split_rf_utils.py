@@ -67,6 +67,10 @@ def split_rf_svd(strf):
         srf = vt[0].reshape(*dims_s_rf)
         trf = u[:, 0]
 
+        explained_variance = s[0] ** 2 / np.sum(s ** 2)
+
+        srf, trf = rescale_trf_srf(srf, trf, strf)
+
     elif len(dims) == 2:
         dims_t_rf = dims[0]
         dims_s_rf = dims[1]
@@ -74,12 +78,25 @@ def split_rf_svd(strf):
         srf = vt[0]
         trf = u[:, 0]
 
+        explained_variance = s[0] ** 2 / np.sum(s ** 2)
+
+        srf, trf = rescale_trf_srf(srf, trf, strf)
+
+    elif len(dims) == 4:
+        srfs, trfs, explained_variances = [], [], []
+        for i in range(dims[-1]):
+            srf, trf, explained_variance = split_rf_svd(strf[:, :, :, i])
+            srfs.append(srf)
+            trfs.append(trf)
+            explained_variances.append(explained_variance)
+
+        srf = np.stack(srfs, axis=-1)
+        trf = np.stack(trfs, axis=-1)
+        explained_variance = np.mean(explained_variances)
+
     else:
         raise NotImplementedError
 
-    explained_variance = s[0] ** 2 / np.sum(s ** 2)
-
-    srf, trf = rescale_trf_srf(srf, trf, strf)
     return srf, trf, explained_variance
 
 
