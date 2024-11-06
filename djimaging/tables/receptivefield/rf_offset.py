@@ -288,6 +288,8 @@ class RfRoiOffsetTemplate(dj.Computed):
         roi_keys = (self.rf_fit_tab & f"rf_qidx>{rf_qidx_thresh}" & key).fetch('KEY')
         colors = sns.color_palette('Spectral', len(roi_keys))
 
+        shift_dx, shift_dy = (self.roimask_tab & key).fetch1('shift_dx', 'shift_dy')
+
         for i, roi_key in enumerate(roi_keys):
             rf_dx_um, rf_dy_um = (self.rf_offset_tab & roi_key).fetch1('rf_dx_um', 'rf_dy_um')
             relx_wrt_field, rely_wrt_field = (self.roi_pos_wrt_field_tab & roi_key).fetch1(
@@ -296,9 +298,10 @@ class RfRoiOffsetTemplate(dj.Computed):
             srf_params = (self.rf_fit_tab & roi_key).fetch1("srf_params")
 
             rf_xy = rf_dx_um, -rf_dy_um
+            roi_xy = rely_wrt_field - shift_dx, relx_wrt_field - shift_dy
 
-            ax.plot(rely_wrt_field, relx_wrt_field, 'X', zorder=100, ms=3, c=colors[i])
-            ax.plot([rely_wrt_field, rf_xy[0]], [relx_wrt_field, rf_xy[1]], '-', zorder=100, ms=3, c=colors[i])
+            ax.plot(*roi_xy, 'X', zorder=100, ms=3, c=colors[i])
+            ax.plot([roi_xy[0], rf_xy[0]], [roi_xy[1], rf_xy[1]], '-', zorder=100, ms=3, c=colors[i])
 
             ax.add_patch(Ellipse(
                 xy=rf_xy,
