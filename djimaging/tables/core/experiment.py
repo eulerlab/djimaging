@@ -151,10 +151,11 @@ class ExperimentTemplate(dj.Computed):
                 (eye in ["Right", "right"] and (exp_num == 1 or 'left' in header_name.lower())) or
                 (eye in ["Left", "left"] and (exp_num == 2 or 'right' in header_name.lower()))
         ):
-            raise ValueError(f"Eye is set to {eye} in .ini file, "
-                             f"but exp_num is {exp_num} and header_file_name is '{header_name}'. "
-                             f"Use exp_num=1 for left eye and exp_num=2 for right eye. "
-                             f"To overwrite this, use all-caps in .ini file which is then used.")
+            warnings.warn(
+                f"Eye is set to {eye} in .ini file, "
+                f"but exp_num is {exp_num} and header_file_name is '{header_name}'. "
+                f"Use exp_num=1 for left eye and exp_num=2 for right eye. "
+                f"To overwrite this, use all-caps in .ini file which is then used.")
 
         expinfo_key["eye"] = eye.lower()
         expinfo_key["projname"] = header_dict["projname"]
