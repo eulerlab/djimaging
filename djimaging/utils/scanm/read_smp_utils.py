@@ -65,8 +65,10 @@ def load_all_stacks_and_wparams(raw_file, ch_name_base='wDataCh', ch_max=5, crop
     for i in range(ch_max):
         try:
             ch_stacks[f"{ch_name_base}{i}"] = raw_file.getData(ch=i, crop=crop).T
-        except IndexError:
+        except (IndexError, AttributeError):
             continue
+        except Exception as e:
+            warnings.warn(f'Failed to load channel={ch_name_base}{i} for {raw_file} with error: {e}')
 
     return ch_stacks, wparams
 
@@ -81,8 +83,8 @@ def load_stacks_and_wparams(raw_file, ch_names=('wDataCh0', 'wDataCh1')):
     for ch_name in ch_names[1:]:
         try:
             ch_stacks[ch_name] = raw_file.getData(ch=int(ch_name[-1]), crop=True).T
-        except IndexError:
-            warnings.warn(f'Failed to load channel={ch_name}. Set values to zero.')
+        except Exception as e:
+            warnings.warn(f'Failed to load channel={ch_name} for {raw_file} with error: {e}')
             ch_stacks[ch_name] = np.zeros_like(ch_stacks[ch_name_main])
 
     return ch_stacks, wparams
