@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 from djimaging.tables.core.stimulus import reformat_numerical_trial_info
 from djimaging.utils import plot_utils
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.snippet_utils import split_trace_by_reps, split_trace_by_group_reps
+from djimaging.utils.snippet_utils import split_trace_by_reps, split_trace_by_group_reps, compute_repeat_correlation
 
 
 def get_aligned_snippets_times(snippets_times, raise_error=True, tol=1e-4):
@@ -249,7 +249,7 @@ class GroupSnippetsTemplate(dj.Computed):
             trial_info = reformat_numerical_trial_info(trial_info)
 
         delay = stim_dict.get('trigger_delay', 0.) if stim_dict is not None else 0
-        
+
         snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_group_reps(
             pp_trace, pp_trace_times, triggertimes, trial_info=trial_info, delay=delay,
             allow_incomplete=allow_incomplete, pad_trace=self._pad_trace, stack_kind='pad')
@@ -265,7 +265,9 @@ class GroupSnippetsTemplate(dj.Computed):
             droppedlastrep_flag=droppedlastrep_flag,
         ))
 
-    def plot1(self, key=None, xlim=None):
+    def plot1(self, key=None, xlim=None, fig_kws=None):
+        fig_kws = {} if fig_kws is None else fig_kws
+
         key = get_primary_key(table=self, key=key)
         snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self & key).fetch1(
             "snippets_t0", "snippets_dt", "snippets", "triggertimes_snippets")
@@ -277,10 +279,15 @@ class GroupSnippetsTemplate(dj.Computed):
         colors = mpl.colormaps['jet'](np.linspace(0, 1, len(names)))
         name2color = {name: colors[i] for i, name in enumerate(names)}
 
-        fig, axs = plt.subplot_mosaic([["all"]] + [[name] for name in names], figsize=(8, 2 * (len(names) + 1)))
+        fig, axs = plt.subplot_mosaic([["all"]] + [[name] for name in names], figsize=(8, 2 * (len(names) + 1)),
+                                      **fig_kws)
 
-        tt_min = np.min([np.nanmin(snippets[name]) for name in names])
-        tt_max = np.max([np.nanmax(snippets[name]) for name in names])
+        vmin = np.nanmin([np.nanmin(snippets[name]) for name in names])
+        vmax = np.nanmax([np.nanmax(snippets[name]) for name in names])
+        vrng = vmax - vmin
+
+        tt_min = vmin - 0.22 * vrng
+        tt_max = vmin - 0.02 * vrng
 
         for i, name in enumerate(names):
             snippets_times = (
@@ -292,15 +299,15 @@ class GroupSnippetsTemplate(dj.Computed):
             axs['all'].plot(snippets_times, snippets[name], color=name2color[name],
                             label=[name] + ['_'] * (snippets[name].shape[1] - 1), alpha=0.8)
 
-            axs[name].set(title='trace', xlabel='absolute time')
+            ccs = compute_repeat_correlation(snippets[name])
             axs[name].plot(snippets_times - triggertimes_snippets[name][0], snippets[name], lw=1)
-            axs[name].set(title=name, xlabel='relative time')
+            axs[name].set(title=f'{name}: mean(cc)={np.mean(ccs):.2f}', xlabel='relative time')
             axs[name].title.set_color(name2color[name])
             axs[name].vlines(triggertimes_snippets[name] - triggertimes_snippets[name][0],
                              tt_min, tt_max, color='k', zorder=-100, lw=0.5, alpha=0.5,
                              label='trigger' if name == names[0] else '_')
 
-        axs['all'].set(xlim=xlim)
+        axs['all'].set(xlim=xlim, xlabel='absolute time')
         plt.tight_layout()
         axs['all'].legend(bbox_to_anchor=(1, 1), loc='upper left')
 

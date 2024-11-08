@@ -85,12 +85,13 @@ class RoiTemplate(dj.Computed):
     def plot1(self, key=None, gamma=0.7):
         key = get_primary_key(table=self, key=key)
 
-        npixartifact = (self.field_table & key).fetch1('npixartifact')
+        npixartifact, scan_type = (self.field_table & key).fetch1("npixartifact", "scan_type")
         roi_mask = (self.roi_mask_table & key).fetch1("roi_mask")
 
         data_name, alt_name = (self.userinfo_table() & key).fetch1('data_stack_name', 'alt_stack_name')
         main_ch_average = (self.field_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
         alt_ch_average = (self.field_table.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
 
-        plot_field(main_ch_average, alt_ch_average, roi_mask=roi_mask, roi_ch_average=main_ch_average,
+        plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
+                   roi_mask=roi_mask, roi_ch_average=main_ch_average,
                    title=key, highlight_roi=key['roi_id'], npixartifact=npixartifact, gamma=gamma)

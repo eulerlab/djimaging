@@ -186,3 +186,48 @@ def split_trace_by_group_reps(
             group_snippets_triggertimes[name] = group_snippets_triggertimes[name][0]
 
     return group_snippets, group_snippets_times, group_snippets_triggertimes, droppedlastrep_flag
+
+
+def align_reps_with_trailing_nans(reps):
+    """
+    Align reps with NaNs by cropping NaNs at the end of reps.
+
+    Parameters:
+        - reps (ndarray): The input array of reps with shape (n_frames, n_reps).
+
+    Returns:
+        - reps (ndarray): The aligned reps with NaNs removed
+    """
+    if np.all(np.isfinite(reps)):  # Snippets may not have equal length and filled with NaNs
+        return reps
+
+    n_nan = np.array([np.argmax(np.isfinite(rep[::-1])) if np.any(np.isfinite(rep)) else len(rep)
+                      for rep in reps.T])
+
+    all_nan_reps = n_nan >= reps.shape[0] - 1
+    if np.any(all_nan_reps):  # Remove reps if not at least 2 frames are present
+        reps = reps[:, ~all_nan_reps]
+        n_nan = n_nan[~all_nan_reps]
+
+    reps = reps[:-n_nan.max(), :]
+    return reps
+
+
+def compute_repeat_correlation(reps):
+    """
+    Compute repeat correlation for repetitions.
+
+    Parameters:
+        - reps (ndarray): The input array of reps with shape (n_frames, n_reps).
+
+    Returns:
+        - corrs (ndarray): The pairwise correlation coefficients between all reps.
+    """
+    reps = align_reps_with_trailing_nans(reps)
+    n_reps = reps.shape[1]
+
+    if n_reps <= 1:
+        corrs = np.array([np.nan])
+    else:
+        corrs = np.corrcoef(reps, rowvar=False)[np.triu_indices(n_reps, 1)]
+    return corrs

@@ -281,7 +281,6 @@ class FieldTemplate(dj.Computed):
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
 
-        npixartifact = (self & key).fetch1('npixartifact')
-
-        plot_field(main_ch_average, alt_ch_average, title=key, npixartifact=npixartifact, figsize=(8, 4),
-                   gamma=gamma)
+        npixartifact, scan_type = (self & key).fetch1('npixartifact', 'scan_type')
+        plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
+                   title=key, npixartifact=npixartifact, figsize=(8, 4), gamma=gamma)

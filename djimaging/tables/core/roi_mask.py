@@ -469,7 +469,7 @@ class RoiMaskTemplate(dj.Manual):
 
     def plot1(self, key=None, gamma=0.5):
         key = get_primary_key(table=self.proj() * self.presentation_table.proj(), key=key)
-        npixartifact = (self.field_table & key).fetch1('npixartifact')
+        npixartifact, scan_type = (self.field_table & key).fetch1('npixartifact', 'scan_type')
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
         main_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
         try:
@@ -479,8 +479,8 @@ class RoiMaskTemplate(dj.Manual):
             alt_ch_average = np.full_like(main_ch_average, np.nan)
 
         roi_mask = (self.RoiMaskPresentation & key).fetch1('roi_mask')
-        plot_field(main_ch_average, alt_ch_average, roi_mask=roi_mask, title=key, npixartifact=npixartifact,
-                   gamma=gamma)
+        plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
+                   roi_mask=roi_mask, title=key, npixartifact=npixartifact, gamma=gamma)
 
     def load_high_res_bg_dict(self, key, ch_names, verbose=True):
         try:
