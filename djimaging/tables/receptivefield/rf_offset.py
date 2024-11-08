@@ -141,8 +141,8 @@ class RfRoiOffsetTemplate(dj.Computed):
         -> self.rf_offset_tab
         -> self.roi_pos_wrt_field_tab
         ---
-        rf_roi_dx_um: float
-        rf_roi_dy_um: float
+        relx_rf_roi_um: float
+        rely_rf_roi_um: float
         """
         return definition
 
@@ -200,16 +200,13 @@ class RfRoiOffsetTemplate(dj.Computed):
 
         setupid = (self.experiment_tab.ExpInfo & key).fetch1('setupid')
 
-        if setupid == "1":
-            rf_roi_dx_um = relx_wrt_field - rf_dy_um
-            rf_roi_dy_um = rely_wrt_field + rf_dx_um
-        elif setupid == "3":
-            rf_roi_dx_um = relx_wrt_field - rf_dy_um
-            rf_roi_dy_um = rely_wrt_field + rf_dx_um
-        else:
-            raise NotImplementedError(setupid)
+        if str(setupid) != "1":
+            warnings.warn(f'If the Stimulus was presented at a different setupid than 1, the results might be wrong.')
 
-        self.insert1(dict(**key, rf_roi_dx_um=rf_roi_dx_um, rf_roi_dy_um=rf_roi_dy_um))
+        relx_rf_roi_um = + rf_dy_um - relx_wrt_field  # RF y is aligned with relx axis
+        rely_rf_roi_um = - rf_dx_um - rely_wrt_field  # RF x is aligned with -rely axis
+
+        self.insert1(dict(**key, relx_rf_roi_um=relx_rf_roi_um, rely_rf_roi_um=rely_rf_roi_um))
 
     def plot(self, restriction=None):
         import seaborn as sns
@@ -217,48 +214,34 @@ class RfRoiOffsetTemplate(dj.Computed):
         if restriction is None:
             restriction = {}
 
-        setupid = (self.experiment_tab().ExpInfo & restriction).fetch('setupid')
+        relx_wrt_field, rely_wrt_field, relx_rf_roi_um, rely_rf_roi_um = (
+                self * self.roi_pos_wrt_field_tab() & restriction).fetch(
+            'relx_wrt_field', 'rely_wrt_field', 'relx_rf_roi_um', 'rely_rf_roi_um')
 
-        if np.unique(setupid).size == 1:
-            setupid = setupid[0]
-        else:
-            raise NotImplementedError(f"Multiple setupids found: {np.unique(setupid)}")
-
-        rf_dx_um, rf_dy_um, relx_wrt_field, rely_wrt_field, rf_roi_dx_um, rf_roi_dy_um = (
-                self * self.rf_offset_tab() * self.roi_pos_wrt_field_tab() & restriction).fetch(
-            'rf_dx_um', 'rf_dy_um', 'relx_wrt_field', 'rely_wrt_field', 'rf_roi_dx_um', 'rf_roi_dy_um')
-
-        if setupid == "1":
-            rf_relx = -rf_dy_um
-            rf_rely = rf_dx_um
-        elif setupid == "3":
-            rf_relx = -rf_dy_um
-            rf_rely = rf_dx_um
-        else:
-            raise NotImplementedError(setupid)
-
-        fig, axs = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
+        fig, axs = plt.subplots(1, 3, figsize=(15, 5), sharex=True)
 
         scatter_kws = {'s': 1, "alpha": 0.5, "color": 'gray', 'zorder': -100}
 
         ax = axs[0]
-        sns.regplot(ax=ax, x=relx_wrt_field, y=rf_relx, scatter_kws=scatter_kws)
-        ax.set_xlabel('relx_wrt_field')
-        ax.set_ylabel('rf_relx')
+        sns.regplot(ax=ax, x=relx_wrt_field, y=relx_rf_roi_um + relx_wrt_field, scatter_kws=scatter_kws)
+        ax.set_xlabel('ROI: relx_wrt_field')
+        ax.set_ylabel('RF: relx_wrt_field')
 
         ax = axs[1]
-        sns.regplot(ax=ax, x=rely_wrt_field, y=rf_rely, scatter_kws=scatter_kws)
-        ax.set_xlabel('rely_wrt_field')
-        ax.set_ylabel('rf_rely')
+        sns.regplot(ax=ax, x=rely_wrt_field, y=rely_rf_roi_um + rely_wrt_field, scatter_kws=scatter_kws)
+        ax.set_xlabel('ROI: rely_wrt_field')
+        ax.set_ylabel('RF: rely_rf_roi_um')
 
         ax = axs[2]
-        sns.regplot(ax=ax, x=rf_roi_dx_um, y=rf_roi_dy_um, scatter_kws=scatter_kws)
-        ax.set_xlabel('rf_roi_dx_um')
-        ax.set_ylabel('rf_roi_dy_um')
+        sns.regplot(ax=ax, x=relx_rf_roi_um, y=rely_rf_roi_um, scatter_kws=scatter_kws)
+        ax.set_xlabel('RF: relx_rf_roi_um')
+        ax.set_ylabel('RF: rely_rf_roi_um')
 
         for ax in axs:
             ax.grid()
             ax.set_aspect('equal')
+
+        plt.tight_layout()
 
         return fig, ax
 
@@ -267,15 +250,26 @@ class RfRoiOffsetTemplate(dj.Computed):
         import seaborn as sns
 
         roi_mask = (self.roimask_tab & key).fetch1("roi_mask")
-        pixel_size_um, npixartifact = (self.pres_tab & key).fetch('pixel_size_um', 'npixartifact')
+        pixel_size_um, npixartifact, scan_type = (self.pres_tab & key).fetch(
+            'pixel_size_um', 'npixartifact', 'scan_type')
 
         data_name, alt_name = (self.userinfo_tab & key).fetch1('data_stack_name', 'alt_stack_name')
         main_ch_average = (self.pres_tab.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
         stim_dict = (self.stimulus_tab & key).fetch1('stim_dict')
         pix_scale_x_um, pix_scale_y_um = stim_dict['pix_scale_x_um'], stim_dict['pix_scale_y_um']
 
-        extent = np.array([-main_ch_average.shape[0] / 2, main_ch_average.shape[0] / 2,
-                           -main_ch_average.shape[1] / 2, main_ch_average.shape[1] / 2]) * pixel_size_um
+        shift_dx, shift_dy = (self.roimask_tab & key).fetch1('shift_dx', 'shift_dy')
+
+        if scan_type == 'xy':
+            extent = np.array([
+                main_ch_average.shape[0] / 2 - shift_dx, -main_ch_average.shape[0] / 2 - shift_dx,
+                main_ch_average.shape[1] / 2 - shift_dy, -main_ch_average.shape[1] / 2 - shift_dy
+            ]) * pixel_size_um
+        else:
+            extent = np.array([
+                main_ch_average.shape[0] / 2 - shift_dx, -main_ch_average.shape[0] / 2 - shift_dx,
+                main_ch_average.shape[1] / 20, -main_ch_average.shape[1] / 20
+            ]) * pixel_size_um
 
         fig, ax = plt.subplots(1, 1, figsize=(12, 12))
         ax.imshow(main_ch_average.T ** gamma, extent=extent, origin='lower', cmap='gray')
@@ -288,17 +282,20 @@ class RfRoiOffsetTemplate(dj.Computed):
         roi_keys = (self.rf_fit_tab & f"rf_qidx>{rf_qidx_thresh}" & key).fetch('KEY')
         colors = sns.color_palette('Spectral', len(roi_keys))
 
-        shift_dx, shift_dy = (self.roimask_tab & key).fetch1('shift_dx', 'shift_dy')
-
         for i, roi_key in enumerate(roi_keys):
-            rf_dx_um, rf_dy_um = (self.rf_offset_tab & roi_key).fetch1('rf_dx_um', 'rf_dy_um')
-            relx_wrt_field, rely_wrt_field = (self.roi_pos_wrt_field_tab & roi_key).fetch1(
-                'relx_wrt_field', 'rely_wrt_field')
+            relx_wrt_field, rely_wrt_field, relz_wrt_field, relx_rf_roi_um, rely_rf_roi_um = (
+                    self * self.roi_pos_wrt_field_tab() & roi_key).fetch1(
+                'relx_wrt_field', 'rely_wrt_field', 'relz_wrt_field', 'relx_rf_roi_um', 'rely_rf_roi_um')
 
             srf_params = (self.rf_fit_tab & roi_key).fetch1("srf_params")
 
-            rf_xy = rf_dx_um, -rf_dy_um
-            roi_xy = rely_wrt_field - shift_dx, relx_wrt_field - shift_dy
+            if scan_type == 'xy':
+                roi_xy = rely_wrt_field, relx_wrt_field
+            elif scan_type == 'xz':
+                roi_xy = rely_wrt_field, -relz_wrt_field / 5
+            else:
+                raise NotImplementedError(scan_type)
+            rf_xy = roi_xy[0] + rely_rf_roi_um, roi_xy[1] - relx_rf_roi_um
 
             ax.plot(*roi_xy, 'X', zorder=100, ms=3, c=colors[i])
             ax.plot([roi_xy[0], rf_xy[0]], [roi_xy[1], rf_xy[1]], '-', zorder=100, ms=3, c=colors[i])

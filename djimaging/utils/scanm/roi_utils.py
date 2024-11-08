@@ -100,20 +100,23 @@ def get_roi_centers(roi_mask: np.ndarray, roi_ids: np.ndarray) -> np.ndarray:
     return roi_centers
 
 
-def get_rel_roi_pos(roi_id, roi_mask, pixel_size_um, ang_deg=0.):
+def get_rel_roi_pos(roi_id, roi_mask, pixel_size_um, pixel_size_d2_um=None, ang_deg=0.):
     """Get position relative to plotting axis"""
     # Get relative position in pixel space
-    pix_x, pix_y = get_roi_center(roi_mask, roi_id)
+    pix_d1, pix_d2 = get_roi_center(roi_mask, roi_id)
+
+    if pixel_size_d2_um is None:
+        pixel_size_d2_um = pixel_size_um
 
     # Get offset to center in um
-    dx_um = float((pix_x - roi_mask.shape[0] / 2) * pixel_size_um)
-    dy_um = float((pix_y - roi_mask.shape[1] / 2) * pixel_size_um)
+    d1_um = float((pix_d1 - roi_mask.shape[0] / 2) * pixel_size_um)
+    d2_um = float((pix_d2 - roi_mask.shape[1] / 2) * pixel_size_d2_um)
 
     # Rotate around center
     if ang_deg != 0.:
         ang_rad = ang_deg * np.pi / 180.
-        dx_um_rot = dx_um * np.cos(ang_rad) - dy_um * np.sin(ang_rad)
-        dy_um = dx_um * np.sin(ang_rad) + dy_um * np.cos(ang_rad)
-        dx_um = dx_um_rot
+        d1_um_rot = d1_um * np.cos(ang_rad) - d2_um * np.sin(ang_rad)
+        d2_um = d1_um * np.sin(ang_rad) + d2_um * np.cos(ang_rad)
+        d1_um = d1_um_rot
 
-    return dx_um, dy_um
+    return d1_um, d2_um

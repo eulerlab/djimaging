@@ -113,7 +113,7 @@ class RelativeFieldLocationTemplate(dj.Computed):
 
     def plot(self, view='igor_local'):
         relx, rely = self.fetch("relx", "rely")
-        plot_rel_xy_pos(relx, rely, view=view)
+        plot_relxy_pos(relx, rely, view=view)
 
 
 class RetinalFieldLocationTemplate(dj.Computed):
@@ -255,18 +255,37 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
         plt.show()
 
 
-def plot_rel_xy_pos(relx, rely, view='igor_local'):
+def plot_relxy_pos(relx, rely, view='igor_local'):
+    """Plot Data in setup coordinates"""
     fig, ax = plt.subplots(1, 1, figsize=(5, 5))
     ax.scatter(rely, relx, label='all', s=1, alpha=0.5)
     ax.set(xlabel="rely", ylabel="relx")
 
     if view == 'igor_local':
-        pass
-    elif view == 'igor_setup':
         ax.invert_xaxis()
+        ax.invert_yaxis()
+    elif view == 'igor_setup':
+        ax.invert_yaxis()
     else:
         raise NotImplementedError(view)
 
     ax.set_aspect(aspect="equal", adjustable="datalim")
 
+    plt.show()
+
+
+def plot_relyz_pos(rely, relz, view='igor_local'):
+    """Plot Data in setup coordinates"""
+    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+    ax.scatter(rely, relz, label='all', s=1, alpha=0.5)
+    ax.set(xlabel="rely", ylabel="relz")
+
+    if view == 'igor_local':
+        ax.invert_xaxis()
+    elif view == 'igor_setup':
+        pass
+    else:
+        raise NotImplementedError(view)
+
+    ax.set_aspect(aspect="equal", adjustable="datalim")
     plt.show()

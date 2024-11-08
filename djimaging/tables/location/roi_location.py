@@ -32,7 +32,7 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.location.location import plot_rel_xy_pos
+from djimaging.tables.location.location import plot_relxy_pos, plot_relyz_pos
 from djimaging.utils.scanm.setup_utils import get_retinal_position
 from djimaging.utils.scanm.roi_utils import get_rel_roi_pos
 
@@ -46,12 +46,13 @@ class RelativeRoiLocationWrtFieldTemplate(dj.Computed):
         # location of ROIs wrt the recorded field center
         # XCoord_um is the relative position from back towards curtain, i.e. larger XCoord_um means closer to curtain
         # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
+        # ZCoord_um is the relative position from top to bottom, i.e. larger ZCoord_um means more down
 
         -> self.roi_table
         ---
         relx_wrt_field   :float      # XCoord_um relative to the field center
         rely_wrt_field   :float      # YCoord_um relative to the field center
-        relz_wrt_field = NULL  :float      # YCoord_um relative to the field center
+        relz_wrt_field   :float      # ZCoord_um relative to the field center
         """
         return definition
 
@@ -85,7 +86,7 @@ class RelativeRoiLocationWrtFieldTemplate(dj.Computed):
     def make(self, key):
         roi_id = (self.roi_table & key).fetch1('roi_id')
         roi_mask = (self.roi_mask_table & key).fetch1('roi_mask')
-        pixel_size_um, scan_type = (self.field_table & key).fetch('pixel_size_um', 'scan_type')
+        pixel_size_um, z_step_um, scan_type = (self.field_table & key).fetch('pixel_size_um', 'z_step_um', 'scan_type')
 
         ang_deg_list = (self.presentation_table.ScanInfo() & (self.field_table & key)).fetch('angle_deg')
         assert np.unique(ang_deg_list).size == 1, f'Found different angles for different presentations: {ang_deg_list}'
@@ -93,19 +94,47 @@ class RelativeRoiLocationWrtFieldTemplate(dj.Computed):
 
         if scan_type == 'xy':
             # Here x and y are flipped because the ROI mask is already rotated to normal view
-            rely_wrt_field, relx_wrt_field = get_rel_roi_pos(roi_id, roi_mask, pixel_size_um, ang_deg=ang_deg)
+            d1_um, d2_um = get_rel_roi_pos(roi_id, roi_mask, pixel_size_um, ang_deg=ang_deg)
+
+            relx_wrt_field = -d2_um
+            rely_wrt_field = -d1_um
+            relz_wrt_field = 0.
+
+        elif scan_type == 'xz':
+            d1_um, d2_um = get_rel_roi_pos(
+                roi_id, roi_mask, pixel_size_um, pixel_size_d2_um=z_step_um, ang_deg=ang_deg)
+
+            relx_wrt_field = 0
+            rely_wrt_field = -d1_um
+            relz_wrt_field = d2_um
         else:
             raise NotImplementedError(scan_type)
 
         roi_key = key.copy()
         roi_key['relx_wrt_field'] = relx_wrt_field
         roi_key['rely_wrt_field'] = rely_wrt_field
+        roi_key['relz_wrt_field'] = relz_wrt_field
 
         self.insert1(roi_key)
 
-    def plot(self, view='igor_local'):
-        relx, rely = self.fetch("relx_wrt_field", "rely_wrt_field")
-        plot_rel_xy_pos(relx, rely, view=view)
+    def plot(self, restriction=None, view='igor_local'):
+        restriction = {} if restriction is None else restriction
+        scan_type = (self.field_table & restriction).fetch('scan_type')
+
+        if np.unique(scan_type).size != 1:
+            raise ValueError(
+                f'Found different scan types for different fields: {np.unique(scan_type)}. Use restriction.')
+        else:
+            scan_type = scan_type[0]
+
+        relx, rely, relz = (self & restriction).fetch("relx_wrt_field", "rely_wrt_field", "relz_wrt_field")
+
+        if scan_type == 'xy':
+            plot_relxy_pos(relx, rely, view=view)
+        elif scan_type == 'xz':
+            plot_relyz_pos(rely, relz, view=view)
+        else:
+            raise NotImplementedError(scan_type)
 
 
 class RelativeRoiLocationTemplate(dj.Computed):
@@ -170,9 +199,24 @@ class RelativeRoiLocationTemplate(dj.Computed):
 
         self.insert1(roi_key)
 
-    def plot(self, view='igor_local'):
-        relx, rely = self.fetch("relx", "rely")
-        plot_rel_xy_pos(relx, rely, view=view)
+    def plot(self, restriction=None, view='igor_local'):
+        restriction = {} if restriction is None else restriction
+        scan_type = (self.field_table & restriction).fetch('scan_type')
+
+        if np.unique(scan_type).size != 1:
+            raise ValueError(
+                f'Found different scan types for different fields: {np.unique(scan_type)}. Use restriction.')
+        else:
+            scan_type = scan_type[0]
+
+        relx, rely, relz = (self & restriction).fetch("relx", "rely", "relz")
+
+        if scan_type == 'xy':
+            plot_relxy_pos(relx, rely, view=view)
+        elif scan_type == 'xz':
+            plot_relyz_pos(rely, relz, view=view)
+        else:
+            raise NotImplementedError(scan_type)
 
 
 class RetinalRoiLocationTemplate(dj.Computed):
@@ -221,8 +265,10 @@ class RetinalRoiLocationTemplate(dj.Computed):
         rfl_key['temporal_nasal_pos_um'] = temporal_nasal_pos_um
         self.insert1(rfl_key)
 
-    def plot(self, key=None):
-        temporal_nasal_pos_um, ventral_dorsal_pos_um = self.fetch("temporal_nasal_pos_um", "ventral_dorsal_pos_um")
+    def plot(self, restriction=None, key=None):
+        restriction = {} if restriction is None else restriction
+        temporal_nasal_pos_um, ventral_dorsal_pos_um = (self & restriction).fetch(
+            "temporal_nasal_pos_um", "ventral_dorsal_pos_um")
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
         ax.scatter(temporal_nasal_pos_um, ventral_dorsal_pos_um, label='all', s=1, alpha=0.5)
         if key is not None:
