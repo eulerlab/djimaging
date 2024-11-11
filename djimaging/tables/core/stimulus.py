@@ -253,6 +253,10 @@ class StimulusTemplate(dj.Manual):
 
         if trial_info is None:
             trial_info = np.array([0, 180, 45, 225, 90, 270, 135, 315])
+            # In the setups this corresponds to the following directions
+            # (assuming the standard setup 1 stimulus was used):
+            # Setup 1: →, ←, ↗, ↙, ↑, ↓, ↖, ↘ (rotated 90° counterclockwise and then flipped upside-down)
+            # Setup 3: →, ←, ↘, ↖, ↓, ↑, ↙, ↗ (rotated 90° counterclockwise)
 
         if alias is None:
             alias = "mb_mbar_bar_movingbar"
