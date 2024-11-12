@@ -83,8 +83,16 @@ class ChirpFeaturesBcTemplate(dj.Computed):
             pass
 
     def compute_entry(self, key, plot=False):
-        snippets_times, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-            "snippets_times", 'snippets', 'triggertimes_snippets')
+        try:
+            # Deprecated
+            snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
+                "snippets", "snippets_times", "triggertimes_snippets")
+        except dj.DataJointError:
+            snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
+                "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
+
+            snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
+                              + snippets_t0)
 
         average, average_times, _ = compute_upsampled_average(
             snippets, snippets_times, triggertimes_snippets, f_resample=self._fs_resample)
