@@ -9,9 +9,21 @@ from djimaging.tables.response import CslMetrics
 
 @schema
 class CslMetrics(response.CslMetricsTemplate):
+    _stim_restriction = dict(stim_name='csl')
+
     stimulus_table = Stimulus
     presentation_table = Presentation
     traces_table = Traces
+
+    _w_zero_fit = 0 # Or 1
+    _dt_order = 3
+    _dt_window = 60
+    _peak_q = 98
+    _contrast_levels = (0.10, 0.20, 0.40, 0.60, 0.80, 1.00)
+    _dt_breaks = 3.
+    _dt_baseline_a = 1.6
+    _dt_baseline_b = 2.9
+    _dt_window_plateau = 1.0
 
 # Populate with plots:
 CslMetrics().populate(make_kwargs=dict(plot=True))
@@ -32,6 +44,16 @@ from djimaging.utils.snippet_utils import split_trace_by_reps
 class CslMetricsTemplate(dj.Computed):
     database = ""
     _stim_restriction = dict(stim_name='csl')
+
+    _w_zero_fit = 1
+    _dt_order = 3
+    _dt_window = 60
+    _peak_q = 98
+    _contrast_levels = (0.10, 0.20, 0.40, 0.60, 0.80, 1.00)
+    _dt_breaks = 3.
+    _dt_baseline_a = 1.6
+    _dt_baseline_b = 2.9
+    _dt_window_plateau = 1.0
 
     @property
     def definition(self):
@@ -82,14 +104,12 @@ class CslMetricsTemplate(dj.Computed):
 
     def _make_fetch_and_compute(self, key, plot=False):
         trace_dt, trace_t0, trace = (self.traces_table & key).fetch1('trace_dt', 'trace_t0', 'trace')
-        trace_times = np.arange(trace.size) * trace_dt + trace_t0
-        
+
         if len(trace) == 0:
             raise ValueError(f'Cannot compute CSL metrics for empty trace with key={key}')
 
-        scan_type = (self.presentation_table & key).fetch1('scan_type')
-        line_duration, nypix, nzpix = (self.presentation_table.ScanInfo() & key).fetch1(
-            'line_duration', 'user_dypix', 'user_dzpix')
+        line_duration = (self.presentation_table().ScanInfo & key).fetch1('line_duration')
+        scan_type, nypix, nzpix = (self.presentation_table & key).fetch1('scan_type', 'nypix', 'nzpix')
         n_lines = int(nzpix if scan_type == 'xz' else nypix)
 
         triggertimes = (self.presentation_table & key).fetch1('triggertimes')
@@ -97,7 +117,14 @@ class CslMetricsTemplate(dj.Computed):
 
         fs_resample = 1 / line_duration
 
-        d_csl = analyse_csl_response(trace_times, trace, triggertimes, ntrigger_rep, fs_resample, plot=plot)
+        d_csl = analyse_csl_response(
+            trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, fs_resample, plot=plot,
+            w_zero_fit=self._w_zero_fit, dt_order=self._dt_order,
+            dt_window=self._dt_window, peak_q=self._peak_q,
+            contrast_levels=self._contrast_levels, dt_breaks=self._dt_breaks,
+            dt_baseline_a=self._dt_baseline_a, dt_baseline_b=self._dt_baseline_b,
+            dt_window_plateau=self._dt_window_plateau
+        )
 
         # Downsample before saving
         fs = fs_resample / n_lines
@@ -163,15 +190,14 @@ def fit_sigmoid_with_retry(x_data, y_data, max_tries=3):
     return p00
 
 
-def fit_sigmoid(y_data, x_data=None, sign=1., ax=None):
+def fit_sigmoid(y_data, x_data=None, sign=1, ax=None):
     """Fit sigmoid function to data, and estimate half amp"""
     np.random.seed(42)
 
     if x_data is None:
         x_data = np.arange(y_data.size)
 
-    # Make sure y_data is positive before fitting, and invert at the end again if necessary
-    y_data = sign * y_data
+    y_data = y_data * sign
 
     # Fit sigmoid curve to the data
     popt = fit_sigmoid_with_retry(x_data, y_data, max_tries=3)
@@ -181,14 +207,17 @@ def fit_sigmoid(y_data, x_data=None, sign=1., ax=None):
         x0_fit = 0
 
     # Calculate half amplitude x value
-    half_amplitude = sign * a_fit / 2
+    half_amplitude = a_fit / 2
     half_amplitude_x = x0_fit
-    slope_at_half_amplitude = sign * k_fit * half_amplitude * (1 - half_amplitude / a_fit)
+    slope_at_half_amplitude = k_fit * half_amplitude * (1 - half_amplitude / a_fit)
+
+    half_amplitude *= sign
+    slope_at_half_amplitude *= sign
 
     if ax is not None:
         x_data_us = np.linspace(x_data[0], x_data[-1], x_data.size * 20)
-        ax.scatter(x_data, sign * y_data, label='Data')
-        ax.plot(x_data_us, sign * sigmoid(x_data_us, *popt), 'r-',
+        ax.scatter(x_data, y_data * sign, label='Data')
+        ax.plot(x_data_us, sigmoid(x_data_us, *popt) * sign, 'r-',
                 label='Fit: x0=%5.3f, k=%5.3f, A=%5.3f' % tuple(popt))
         ax.plot(half_amplitude_x, half_amplitude, 'gD', linestyle='--',
                 label=f'x(Half Amplitude)={half_amplitude_x:.2f}')
@@ -202,7 +231,7 @@ def fit_sigmoid(y_data, x_data=None, sign=1., ax=None):
     return half_amplitude, half_amplitude_x, slope_at_half_amplitude
 
 
-def analyse_csl_response(trace_times, trace, triggertimes, ntrigger_rep, fs_resample, plot=False,
+def analyse_csl_response(trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, fs_resample, plot=False,
                          w_zero_fit=1, dt_order=3, dt_window=60, peak_q=98,
                          contrast_levels=(0.10, 0.20, 0.40, 0.60, 0.80, 1.00),
                          dt_breaks=3., dt_baseline_a=1.6, dt_baseline_b=2.9, dt_window_plateau=1.0):
@@ -216,9 +245,12 @@ def analyse_csl_response(trace_times, trace, triggertimes, ntrigger_rep, fs_resa
         fig, axs = plt.subplot_mosaic(
             [['A'] * 2, ['B'] * 2, ['C'] * 2, ['D'] * 2, ['E'] * 2, ['F'] * 2, ['G'] * 2, ['H', 'I']],
             figsize=(10, 10), height_ratios=[1] * 7 + [2])
-    pp_trace_times, pp_trace, pp_smoothed_trace = process_trace(
-        trace=trace, trace_t0=trace_times[0], trace_dt=np.mean(np.diff(trace_times)),
+
+    pp_trace, pp_smoothed_trace, pp_dt = process_trace(
+        trace=trace, trace_t0=trace_t0, trace_dt=trace_dt,
         poly_order=dt_order, window_len_seconds=dt_window, fs_resample=fs_resample)
+
+    pp_trace_times = np.arange(pp_trace.size) * pp_dt + trace_t0
 
     # Compute snippets
     snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_reps(
@@ -294,14 +326,14 @@ def analyse_csl_response(trace_times, trace, triggertimes, ntrigger_rep, fs_resa
 
     x_data = np.append(np.zeros(w_zero_fit), contrast_levels)
     ub_fit = fit_sigmoid(y_data=np.append(np.zeros(w_zero_fit), cs_bounds[:, 1]), x_data=x_data,
-                         ax=None if not plot else axs['H'])
+                         ax=None if not plot else axs['H'], sign=+1)
     lb_fit = fit_sigmoid(y_data=np.append(np.zeros(w_zero_fit), cs_bounds[:, 0]), x_data=x_data,
                          ax=None if not plot else axs['I'], sign=-1)
 
     if plot:
         ax = axs['A']
         ax.set_title('Trace')
-        ax.plot(trace_times, trace)
+        ax.plot(np.arange(trace.size) * trace_dt + trace_t0, trace)
         ax.vlines(triggertimes, np.min(trace), np.max(trace), color='r')
         ax.axhline(np.median(trace), c='dimgray', ls='--')
 

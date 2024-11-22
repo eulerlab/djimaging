@@ -246,7 +246,7 @@ def compute_polarity_index(average, fs, alpha=2, t_on_step=2, t_off_step=5, plot
 
     scale = avg_on + avg_off
     if scale < 1e-9:
-        polarity_index = 0.5
+        polarity_index = 0.
     else:
         polarity_index = (avg_on - avg_off) / scale
 

@@ -43,25 +43,25 @@ class ChirpSurroundTemplate(dj.Computed):
     def snippets_table(self):
         pass
 
-    def lchirp_snippets_table(self):
+    def _l_table(self):
         secondary_keys = get_secondary_keys(self.snippets_table)
-        return self.snippets_table.proj(*secondary_keys, lChirp='stim_name') & dict(lChirp='lChirp')
+        return (self.snippets_table & dict(stim_name="lChirp")).proj(*secondary_keys, lChirp='stim_name')
 
-    def gchirp_snippets_table(self):
+    def _g_table(self):
         secondary_keys = get_secondary_keys(self.snippets_table)
-        return self.snippets_table.proj(*secondary_keys, gChirp='stim_name') & dict(gChirp='gChirp')
+        return (self.snippets_table & dict(stim_name="gChirp")).proj(*secondary_keys, gChirp='stim_name')
 
     @property
     def key_source(self):
         try:
-            return self.lchirp_snippets_table().proj() * self.gchirp_snippets_table().proj()
+            return self._l_table().proj() * self._g_table().proj()
         except (AttributeError, TypeError):
             pass
 
     def compute_entry(self, key, plot=False):
-        l_snippets_t0, l_snippets_dt, l_snippets, l_triggertimes_snippets = (self.lchirp_snippets_table() & key).fetch1(
+        l_snippets_t0, l_snippets_dt, l_snippets, l_triggertimes_snippets = (self._l_table() & key).fetch1(
             "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-        g_snippets_t0, g_snippets_dt, g_snippets, g_triggertimes_snippets = (self.gchirp_snippets_table() & key).fetch1(
+        g_snippets_t0, g_snippets_dt, g_snippets, g_triggertimes_snippets = (self._g_table() & key).fetch1(
             "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
 
         l_snippets_times = (np.tile(np.arange(l_snippets.shape[0]) * l_snippets_dt, (len(l_snippets_t0), 1)).T
@@ -162,7 +162,7 @@ def compute_step_response_index(average, fs, alpha=2, t_on_step=2, t_off_step=5,
 
     scale = avg_on + avg_off
     if scale < 1e-9:
-        polarity_index = 0.5
+        polarity_index = 0.
     else:
         polarity_index = (avg_on - avg_off) / scale
 
