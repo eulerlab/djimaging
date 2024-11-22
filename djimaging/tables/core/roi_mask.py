@@ -275,7 +275,7 @@ class RoiMaskTemplate(dj.Manual):
         elif len(database_roi_masks) == 0:
             database_roi_mask = None
         else:
-            raise ValueError(f'Found multiple ROI masks for key=\n{field_key}')
+            raise ValueError(f'Found multiple ROI masks for key=\n{field_key}\n{(self & field_key).fetch("KEY")}')
 
         return database_roi_mask
 

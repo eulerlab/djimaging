@@ -62,7 +62,7 @@ def align_trace_to_stim(stimtime, trace, tracetime):
     """Align stimulus and trace."""
     dt, dt_rel_error = get_mean_dt(stimtime, rtol_error=np.inf, rtol_warning=0.5)
     t0 = stimtime[0]
-    
+
     aligned_trace = np.zeros(stimtime.size)
     for i, (t_a, t_b) in enumerate(zip(stimtime, np.append(stimtime[1:], stimtime[-1] + dt))):
         # Take mean to not put more weight on lagged frames
@@ -78,7 +78,10 @@ def find_closest(target: float, data: np.ndarray, atol=np.inf, as_index=False):
 
     eps = np.abs(target - closest)
     if eps > atol:
-        raise ValueError(f'Did not find any point being close enough {eps} vs. atol={atol}')
+        raise ValueError(
+            f'Closest point={closest:.3g} is too far from target={target:.3g} by delta={eps:.3g} vs. atol={atol:.3g}. '
+            f'Data range is [{data[0]:.3g}, {data[-1]:.3g}].'
+        )
     if as_index:
         return closest_index
     else:

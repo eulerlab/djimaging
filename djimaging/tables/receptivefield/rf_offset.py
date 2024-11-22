@@ -200,11 +200,14 @@ class RfRoiOffsetTemplate(dj.Computed):
 
         setupid = (self.experiment_tab.ExpInfo & key).fetch1('setupid')
 
-        if str(setupid) != "1":
-            warnings.warn(f'If the Stimulus was presented at a different setupid than 1, the results might be wrong.')
-
-        relx_rf_roi_um = + rf_dy_um - relx_wrt_field  # RF y is aligned with relx axis
-        rely_rf_roi_um = - rf_dx_um - rely_wrt_field  # RF x is aligned with -rely axis
+        if str(setupid) == "1":
+            relx_rf_roi_um = + rf_dy_um - relx_wrt_field  # RF y is aligned with relx axis
+            rely_rf_roi_um = - rf_dx_um - rely_wrt_field  # RF x is aligned with -rely axis
+        elif str(setupid) == "3":
+            relx_rf_roi_um = + rf_dy_um - relx_wrt_field  # RF y is aligned with relx axis
+            rely_rf_roi_um = - rf_dx_um - rely_wrt_field  # RF x is aligned with -rely axis
+        else:
+            raise NotImplementedError
 
         self.insert1(dict(**key, relx_rf_roi_um=relx_rf_roi_um, rely_rf_roi_um=rely_rf_roi_um))
 
@@ -214,32 +217,45 @@ class RfRoiOffsetTemplate(dj.Computed):
         if restriction is None:
             restriction = {}
 
-        relx_wrt_field, rely_wrt_field, relx_rf_roi_um, rely_rf_roi_um = (
-                self * self.roi_pos_wrt_field_tab() & restriction).fetch(
-            'relx_wrt_field', 'rely_wrt_field', 'relx_rf_roi_um', 'rely_rf_roi_um')
+        df = (self * self.roi_pos_wrt_field_tab() & restriction).proj(
+            'relx_wrt_field', 'rely_wrt_field', 'relx_rf_roi_um', 'rely_rf_roi_um').fetch(format='frame')
+        df['relx_rf_wrt_field'] = df['relx_rf_roi_um'] + df['relx_wrt_field']
+        df['rely_rf_wrt_field'] = df['rely_rf_roi_um'] + df['rely_wrt_field']
 
-        fig, axs = plt.subplots(1, 3, figsize=(15, 5), sharex=True)
-
-        scatter_kws = {'s': 1, "alpha": 0.5, "color": 'gray', 'zorder': -100}
+        fig, axs = plt.subplots(1, 4, figsize=(15, 4))
 
         ax = axs[0]
-        sns.regplot(ax=ax, x=relx_wrt_field, y=relx_rf_roi_um + relx_wrt_field, scatter_kws=scatter_kws)
-        ax.set_xlabel('ROI: relx_wrt_field')
-        ax.set_ylabel('RF: relx_wrt_field')
+        sns.regplot(ax=ax, data=df, x='relx_wrt_field', y='relx_rf_wrt_field', scatter=False, color='black')
 
         ax = axs[1]
-        sns.regplot(ax=ax, x=rely_wrt_field, y=rely_rf_roi_um + rely_wrt_field, scatter_kws=scatter_kws)
-        ax.set_xlabel('ROI: rely_wrt_field')
-        ax.set_ylabel('RF: rely_rf_roi_um')
+        sns.regplot(ax=ax, data=df, x='rely_wrt_field', y='rely_rf_wrt_field', scatter=False, color='black')
 
         ax = axs[2]
-        sns.regplot(ax=ax, x=relx_rf_roi_um, y=rely_rf_roi_um, scatter_kws=scatter_kws)
-        ax.set_xlabel('RF: relx_rf_roi_um')
-        ax.set_ylabel('RF: rely_rf_roi_um')
+        sns.regplot(ax=ax, data=df, x='relx_rf_roi_um', y='rely_rf_roi_um', scatter=False, color='black')
+
+        ax = axs[3]
+        sns.regplot(ax=ax, data=df, x='rely_rf_roi_um', y='relx_rf_roi_um', scatter=False, color='black')
+
+        s_kws = {'s': 5, "alpha": 0.8, 'zorder': -100}
+        groups = df.reset_index().groupby(['experimenter', 'date', 'exp_num'])
+        colors = sns.color_palette('brg', len(groups))
+        for i, (field_info, df_field) in enumerate(groups):
+            ax = axs[0]
+            sns.scatterplot(ax=ax, data=df_field, x='relx_wrt_field', y='relx_rf_wrt_field', color=colors[i], **s_kws)
+
+            ax = axs[1]
+            sns.scatterplot(ax=ax, data=df_field, x='rely_wrt_field', y='rely_rf_wrt_field', color=colors[i], **s_kws)
+
+            ax = axs[2]
+            sns.scatterplot(ax=ax, data=df_field, x='relx_rf_roi_um', y='rely_rf_roi_um', color=colors[i], **s_kws)
+
+            ax = axs[3]
+            sns.scatterplot(ax=ax, data=df_field, x='rely_rf_roi_um', y='relx_rf_roi_um', color=colors[i], **s_kws)
 
         for ax in axs:
             ax.grid()
-            ax.set_aspect('equal')
+            ax.set_aspect('equal', 'datalim')
+            ax.axline([-1, -1], [+1, +1], color='dimgray', ls='--', lw=1)
 
         plt.tight_layout()
 
@@ -287,8 +303,6 @@ class RfRoiOffsetTemplate(dj.Computed):
                     self * self.roi_pos_wrt_field_tab() & roi_key).fetch1(
                 'relx_wrt_field', 'rely_wrt_field', 'relz_wrt_field', 'relx_rf_roi_um', 'rely_rf_roi_um')
 
-            srf_params = (self.rf_fit_tab & roi_key).fetch1("srf_params")
-
             if scan_type == 'xy':
                 roi_xy = rely_wrt_field, relx_wrt_field
             elif scan_type == 'xz':
@@ -300,11 +314,19 @@ class RfRoiOffsetTemplate(dj.Computed):
             ax.plot(*roi_xy, 'X', zorder=100, ms=3, c=colors[i])
             ax.plot([roi_xy[0], rf_xy[0]], [roi_xy[1], rf_xy[1]], '-', zorder=100, ms=3, c=colors[i])
 
-            ax.add_patch(Ellipse(
-                xy=rf_xy,
-                width=n_std * 2 * srf_params['x_stddev'] * pix_scale_x_um,
-                height=n_std * 2 * srf_params['y_stddev'] * pix_scale_y_um,
-                angle=np.rad2deg(srf_params['theta']), color=colors[i], fill=False, alpha=0.5))
+            if isinstance(self.rf_fit_tab(), FitGauss2DRFTemplate):
+                srf_params = (self.rf_fit_tab & roi_key).fetch1("srf_params")
+            elif isinstance(self.rf_fit_tab(), FitDoG2DRFTemplate):
+                srf_params = (self.rf_fit_tab & roi_key).fetch1("srf_eff_center_params")
+            else:
+                srf_params = None
+
+            if srf_params is not None:
+                ax.add_patch(Ellipse(
+                    xy=rf_xy,
+                    width=n_std * 2 * srf_params['x_stddev'] * pix_scale_x_um,
+                    height=n_std * 2 * srf_params['y_stddev'] * pix_scale_y_um,
+                    angle=np.rad2deg(srf_params['theta']), color=colors[i], fill=False, alpha=0.5))
 
         ax.set_xlabel('µm')
         ax.set_ylabel('µm')

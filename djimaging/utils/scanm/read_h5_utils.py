@@ -9,9 +9,12 @@ from djimaging.utils.scanm.roi_utils import get_roi2trace
 
 def load_stacks_and_wparams(filepath, ch_names=('wDataCh0', 'wDataCh1')) -> (dict, dict):
     """Load stacks from h5 file"""
-    with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        ch_stacks = extract_stacks(h5_file, ch_names=ch_names)
-        wparams = extract_wparams(h5_file)
+    try:
+        with h5py.File(filepath, 'r', driver="stdio") as h5_file:
+            ch_stacks = extract_stacks(h5_file, ch_names=ch_names)
+            wparams = extract_wparams(h5_file)
+    except OSError as e:
+        raise OSError(f"Error loading file {filepath}: {e}")
 
     for name, stack in ch_stacks.items():
         check_dims_ch_stack_wparams(ch_stack=stack, wparams=wparams)
@@ -21,26 +24,38 @@ def load_stacks_and_wparams(filepath, ch_names=('wDataCh0', 'wDataCh1')) -> (dic
 
 def load_traces(filepath):
     """Extract traces from ScanM h5 file"""
-    with h5py.File(filepath, "r", driver="stdio") as h5_file:
-        traces, traces_times = extract_traces(h5_file)
+    try:
+        with h5py.File(filepath, "r", driver="stdio") as h5_file:
+            traces, traces_times = extract_traces(h5_file)
+    except OSError as e:
+        raise OSError(f"Error loading file {filepath}: {e}")
     return traces, traces_times
 
 
 def load_triggers(filepath):
-    with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        triggertimes, triggervalues = extract_triggers(h5_file)
+    try:
+        with h5py.File(filepath, 'r', driver="stdio") as h5_file:
+            triggertimes, triggervalues = extract_triggers(h5_file)
+    except OSError as e:
+        raise OSError(f"Error loading file {filepath}: {e}")
     return triggertimes, triggervalues
 
 
 def load_roi_mask(filepath, ignore_not_found=False):
-    with h5py.File(filepath, 'r', driver="stdio") as h5_file:
-        roi_mask = extract_roi_mask(h5_file, ignore_not_found=ignore_not_found)
+    try:
+        with h5py.File(filepath, 'r', driver="stdio") as h5_file:
+            roi_mask = extract_roi_mask(h5_file, ignore_not_found=ignore_not_found)
+    except OSError as e:
+        raise OSError(f"Error loading file {filepath}: {e}")
     return roi_mask
 
 
 def load_roi2trace(filepath: str, roi_ids: np.ndarray):
-    with h5py.File(filepath, "r", driver="stdio") as h5_file:
-        traces, traces_times = extract_traces(h5_file)
+    try:
+        with h5py.File(filepath, "r", driver="stdio") as h5_file:
+            traces, traces_times = extract_traces(h5_file)
+    except OSError as e:
+        raise OSError(f"Error loading file {filepath}: {e}")
     roi2trace = get_roi2trace(traces=traces, traces_times=traces_times, roi_ids=roi_ids)
     frame_dt = np.mean(np.diff(traces_times, axis=0))
     return roi2trace, frame_dt

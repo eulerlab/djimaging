@@ -266,8 +266,6 @@ class FastStaTemplate(dj.Computed):
                 dims, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s)
             rf_entries.append({**key, **rf_key, "rf": rf})
 
-        dj.conn().ping()  # Make sure connection is alive
-
         self.insert(rf_entries)
 
     @staticmethod

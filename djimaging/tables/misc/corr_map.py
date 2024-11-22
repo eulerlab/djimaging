@@ -32,6 +32,11 @@ class CorrMapTemplate(dj.Computed):
     _cut_z = (1, 1)
     _include_prestim = False
 
+    def __init__(self):
+        super().__init__()
+        if "corr_map_pre_stim" in self.definition:
+            self._include_prestim = True
+
     @property
     def definition(self):
         definition = """
