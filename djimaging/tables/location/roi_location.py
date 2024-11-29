@@ -254,7 +254,6 @@ class RetinalRoiLocationTemplate(dj.Computed):
         eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
 
         if prepwmorient == -1:
-            warnings.warn(f'prepwmorient is -1 for {key}. Skipping.')
             return
 
         ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(

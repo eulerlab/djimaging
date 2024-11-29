@@ -1,3 +1,4 @@
+import warnings
 from abc import abstractmethod
 
 import datajoint as dj
@@ -115,7 +116,7 @@ class TracesTemplate(dj.Computed):
                 if roi_data['trace_valid']:
                     raise e
                 else:
-                    print(f"Skipping invalid trace for {key} and roi_id={roi_id}")
+                    warnings.warn(f"Skipping invalid trace for {key} and roi_id={roi_id}")
 
     def gui_clip_trace(self, key):
         """GUI to clip traces. Note that this can not be easily undone for now."""
