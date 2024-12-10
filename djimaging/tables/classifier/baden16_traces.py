@@ -103,9 +103,6 @@ def preprocess_chirp(chirp_average, dt, shift=1):
 
     baden_dt = 0.128
 
-    # Extract original baseline before shifting
-    baden16_baseline = np.mean(chirp_average[:int(np.round(8 * baden_dt / dt))])
-
     # Shift to re-correct for stimulator delay
     time_avg = np.arange(chirp_average.size) * dt + (shift * baden_dt)
 
@@ -117,7 +114,7 @@ def preprocess_chirp(chirp_average, dt, shift=1):
         fill_value=(chirp_average[0], chirp_average[-1]))(baden16_time)
 
     # Normalize
-    baden16_average -= baden16_baseline
+    baden16_average -= np.median(baden16_average[:8])
     baden16_average /= np.max(np.abs(baden16_average))
 
     return baden16_average
@@ -140,6 +137,12 @@ def preprocess_bar(bar_average, dt, shift=-4):
     baden16_time = np.arange(32) * baden_dt
     baden16_average = interpolate.interp1d(
         time, bar_average, assume_sorted=True, bounds_error=False, fill_value='extrapolate')(baden16_time)
+
     # Shift
     baden16_average = np.roll(baden16_average, shift)
+
+    # Subtract baseline after rolling
+    baden16_average -= np.median(baden16_average[:8])
+    baden16_average /= np.max(np.abs(baden16_average))
+
     return baden16_average
