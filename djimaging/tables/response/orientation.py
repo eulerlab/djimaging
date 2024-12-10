@@ -3,14 +3,12 @@ from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
-from djimaging.utils.trace_utils import get_mean_dt
-
-from djimaging.utils import math_utils
 from matplotlib import pyplot as plt
-from scipy import stats
 
 from djimaging.tables.response.response_quality import RepeatQITemplate
+from djimaging.utils import math_utils
 from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.trace_utils import get_mean_dt
 
 
 def quality_index_ds(raw_sorted_resp_mat):
@@ -66,18 +64,22 @@ def get_time_dir_kernels(sorted_responses, dt):
     singular_value  float, 1st singular value
     """
 
-    U, S, V = np.linalg.svd(sorted_responses)
+    U, S, Vh = np.linalg.svd(sorted_responses)
 
     time_component = U[:, 0]
-    dir_component = V[0, :]
+    dir_component = Vh[0, :]
 
     # the time_kernel determined by SVD should be correlated to the average response across all directions. if the
     # correlation is negative, U is likely flipped
-    r, _ = stats.spearmanr(time_component, np.mean(sorted_responses, axis=-1), axis=1)
-    su = np.sign(r)
-    if su == 0:
+
+    if np.mean((-1 * time_component - np.mean(sorted_responses, axis=-1)) ** 2) < np.mean(
+        (time_component - np.mean(sorted_responses, axis=-1)) ** 2
+    ):
+        su = -1
+    else:
         su = 1
-    sv = np.sign(np.mean(np.sign(V[0, :])))
+
+    sv = np.sign(np.mean(np.sign(dir_component)))
     if sv == 1 and su == 1:
         s = 1
     elif sv == -1 and su == -1:
@@ -93,11 +95,12 @@ def get_time_dir_kernels(sorted_responses, dt):
     dir_component *= s
 
     # determine which entries correspond to the first second, assuming 4 seconds presentation time
-    first_second_idx = np.maximum(int(np.round(1. / dt)), 1)
+    first_second_idx = np.maximum(int(np.floor(1.0 / dt)), 1)
     time_component -= np.mean(time_component[:first_second_idx])
-    time_component = time_component / np.max(abs(time_component))
+    time_component = time_component / np.max(np.abs(time_component))
 
-    dir_component = math_utils.normalize_zero_one(dir_component)
+    dir_component = dir_component - np.min(dir_component)
+    dir_component = dir_component / np.max(dir_component)
 
     return time_component, dir_component
 
@@ -117,7 +120,7 @@ def get_si(dir_component, dirs, per):
     """
     bin_spacing = np.diff(per * dirs)[0]
     correction_factor = bin_spacing / (2 * (np.sin(bin_spacing / 2)))  # Zar 1999, Equation 26.16
-    compl_exp = [np.exp(per * 1j * d) for d in dirs]
+    compl_exp = np.array([np.exp(per * 1j * d) for d in dirs])
     vector = np.dot(compl_exp, dir_component)
     # get the absolute of the vector, normalize to make it range between 0 and 1
     index = correction_factor * np.abs(vector) / np.sum(dir_component)
@@ -129,25 +132,47 @@ def get_si(dir_component, dirs, per):
     return index, direction
 
 
-def compute_null_dist(rep_dir_resps, dirs, per, iters=1000):
+def test_tuning(dirs, counts, per, iters=1000):
     """
-    Compute null distribution for direction selectivity
-    """
-    (rep_n, dir_n) = rep_dir_resps.shape
-    flattened = np.reshape(rep_dir_resps, (rep_n * dir_n))
-    rand_idx = np.linspace(0, rep_n * dir_n - 1, rep_n * dir_n, dtype=int)
-    null_dist = np.zeros(iters)
-    for i in range(iters):
-        np.random.shuffle(rand_idx)
-        shuffled = flattened[rand_idx]
-        shuffled = np.reshape(shuffled, (rep_n, dir_n))
-        shuffled_mean = np.mean(shuffled, axis=0)
-        normalized_shuffled_mean = shuffled_mean - np.min(shuffled_mean)
-        normalized_shuffled_mean /= np.max(abs(normalized_shuffled_mean))
-        dsi, _ = get_si(normalized_shuffled_mean, dirs, per)
-        null_dist[i] = dsi
+    Test significance of orientation tuning by permutation test.
 
-    return null_dist
+    Parameters:
+        dirs (ndarray): Vector of directions (#directions x 1) in radians.
+        counts (ndarray): Matrix of responses (#reps x #directions).
+        per (int): Fourier component to test (1 = direction, 2 = orientation).
+        iters (int): Number of permutations for the test.
+
+    Returns:
+        p (float): p-value for tuning.
+        q (float): Magnitude of the Fourier component.
+        qdistr (ndarray): Sampling distribution of |q| under the null hypothesis.
+    """
+    rep_n, dir_n = counts.shape
+    k = dirs.reshape(-1)
+    v = np.exp(per * 1j * k) / np.sqrt(dir_n)
+
+    # Compute magnitude of Fourier component for original data
+    q = np.abs(np.mean(counts, axis=0) @ v)
+
+    # Initialize null distribution
+    qdistr = np.zeros(iters)
+
+    # Flatten counts for permutation
+    flattened_counts = counts.flatten()
+
+    for i in range(iters):
+        # Shuffle counts
+        shuffled_indices = np.random.permutation(rep_n * dir_n)
+        shuffled_counts = flattened_counts[shuffled_indices]
+        shuffled_counts = shuffled_counts.reshape(rep_n, dir_n)
+
+        # Compute Fourier magnitude for shuffled data
+        qdistr[i] = np.abs(np.mean(shuffled_counts, axis=0) @ v)
+
+    # Compute p-value
+    p = np.mean(qdistr > q)
+
+    return p, q, qdistr
 
 
 def get_on_off_index(time_kernel, dt, t_start=1.152, t_change=2.432, t_end=3.712):
@@ -168,7 +193,7 @@ def get_on_off_index(time_kernel, dt, t_start=1.152, t_change=2.432, t_end=3.712
     on_response = np.max((0, on_response))
 
     if (on_response + off_response) < 1e-9:
-        on_off = 0.
+        on_off = 0.0
     else:
         on_off = (on_response - off_response) / (on_response + off_response)
         on_off = np.round(on_off, 2)
@@ -220,23 +245,38 @@ def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float):
     osi, pref_or = get_si(dir_component, sorted_directions, 2)
     (t, d, r) = sorted_responses.shape
     temp = np.reshape(sorted_responses, (t, d * r))
-    projected = np.dot(np.transpose(temp), time_component)  # we do this whole projection thing to make the result
-    projected = np.reshape(projected, (d, r))  # between the original and the shuffled comparable
+    projected_flat = temp.T @ time_component  # we do this whole projection thing to make the result
+    projected = np.reshape(projected_flat, (d, r))  # between the original and the shuffled comparable
     surrogate_v = np.mean(projected, axis=-1)
     surrogate_v -= np.min(surrogate_v)
     surrogate_v /= np.max(surrogate_v)
 
     dsi_s, pref_dir_s = get_si(surrogate_v, sorted_directions, 1)
     osi_s, pref_or_s = get_si(surrogate_v, sorted_directions, 2)
-    null_dist_dsi = compute_null_dist(np.transpose(projected), sorted_directions, 1)
-    p_dsi = np.mean(null_dist_dsi > dsi_s)
-    null_dist_osi = compute_null_dist(np.transpose(projected), sorted_directions, 2)
-    p_osi = np.mean(null_dist_osi > osi_s)
+
+    p_dsi, null_dist_dsi, _ = test_tuning(sorted_directions, projected.T, 1)
+    p_osi, null_dist_osi, _ = test_tuning(sorted_directions, projected.T, 2)
+
     d_qi = quality_index_ds(sorted_responses)
     on_off = get_on_off_index(time_component, dt=dt)
 
-    return dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
-        on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses
+    return (
+        dsi,
+        p_dsi,
+        null_dist_dsi,
+        pref_dir,
+        osi,
+        p_osi,
+        null_dist_osi,
+        pref_or,
+        on_off,
+        d_qi,
+        time_component,
+        dir_component,
+        surrogate_v,
+        dsi_s,
+        avg_sorted_responses,
+    )
 
 
 class OsDsIndexesTemplate(dj.Computed):
@@ -281,49 +321,80 @@ class OsDsIndexesTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.snippets_table().proj() & \
-                (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
+            return self.snippets_table().proj() & (
+                self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'"
+            )
         except (AttributeError, TypeError):
             pass
 
     def make(self, key):
-        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
-        snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
+        dir_order = (self.stimulus_table() & key).fetch1("trial_info")
+        snippets, snippets_times = (self.snippets_table() & key).fetch1("snippets", "snippets_times")
 
         dt = float(np.mean([get_mean_dt(snippets_time)[0] for snippets_time in snippets_times.T]))
 
-        dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
-            on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses = \
-            compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=dt)
+        (
+            dsi,
+            p_dsi,
+            null_dist_dsi,
+            pref_dir,
+            osi,
+            p_osi,
+            null_dist_osi,
+            pref_or,
+            on_off,
+            d_qi,
+            time_component,
+            dir_component,
+            surrogate_v,
+            dsi_s,
+            avg_sorted_responses,
+        ) = compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=dt)
 
-        self.insert1(dict(key,
-                          ds_index=dsi, ds_pvalue=p_dsi,
-                          ds_null=null_dist_dsi, pref_dir=pref_dir,
-                          os_index=osi, os_pvalue=p_osi,
-                          os_null=null_dist_osi, pref_or=pref_or,
-                          on_off=on_off, d_qi=d_qi,
-                          time_component=time_component, dir_component=dir_component,
-                          surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
-                          avg_sorted_resp=avg_sorted_responses, time_component_dt=dt))
+        self.insert1(
+            dict(
+                key,
+                ds_index=dsi,
+                ds_pvalue=p_dsi,
+                ds_null=null_dist_dsi,
+                pref_dir=pref_dir,
+                os_index=osi,
+                os_pvalue=p_osi,
+                os_null=null_dist_osi,
+                pref_or=pref_or,
+                on_off=on_off,
+                d_qi=d_qi,
+                time_component=time_component,
+                dir_component=dir_component,
+                surrogate_v=surrogate_v,
+                surrogate_dsi=dsi_s,
+                avg_sorted_resp=avg_sorted_responses,
+                time_component_dt=dt,
+            )
+        )
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
-        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
+        dir_order = (self.stimulus_table() & key).fetch1("trial_info")
         sorted_directions_rad = np.deg2rad(np.sort(dir_order))
 
-        dir_component, ds_index, pref_dir, avg_sorted_resp = \
-            (self & key).fetch1('dir_component', 'ds_index', 'pref_dir', 'avg_sorted_resp')
+        dir_component, ds_index, pref_dir, avg_sorted_resp = (self & key).fetch1(
+            "dir_component", "ds_index", "pref_dir", "avg_sorted_resp"
+        )
 
-        fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor='w', subplot_kw=dict(frameon=False))
+        fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor="w", subplot_kw=dict(frameon=False))
         axs[1, 1].remove()
-        ax = fig.add_subplot(3, 3, 5, projection='polar', frameon=False)
+        ax = fig.add_subplot(3, 3, 5, projection="polar", frameon=False)
         temp = np.max(np.append(dir_component, ds_index))
-        ax.plot((0, np.pi), (temp * 1.2, temp * 1.2), color='gray')
-        ax.plot((np.pi / 2, np.pi / 2 * 3), (temp * 1.2, temp * 1.2), color='gray')
-        ax.plot([0, pref_dir], [0, ds_index * np.sum(dir_component)], color='r')
-        ax.plot(np.append(sorted_directions_rad, sorted_directions_rad[0]),
-                np.append(dir_component, dir_component[0]), color='k')
+        ax.plot((0, np.pi), (temp * 1.2, temp * 1.2), color="gray")
+        ax.plot((np.pi / 2, np.pi / 2 * 3), (temp * 1.2, temp * 1.2), color="gray")
+        ax.plot([0, pref_dir], [0, ds_index * np.sum(dir_component)], color="r")
+        ax.plot(
+            np.append(sorted_directions_rad, sorted_directions_rad[0]),
+            np.append(dir_component, dir_component[0]),
+            color="k",
+        )
         ax.set_rmin(0)
         ax.set_thetalim([0, 2 * np.pi])
         ax.set_yticks([])
@@ -334,7 +405,7 @@ class OsDsIndexesTemplate(dj.Computed):
 
         for ax_idx, dir_idx in zip(ax_idxs, dir_idxs):
             ax = axs.flat[ax_idx]
-            ax.plot(avg_sorted_resp[:, dir_idx], color='k')
+            ax.plot(avg_sorted_resp[:, dir_idx], color="k")
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_ylim([vmin - vmax * 0.2, vmax * 1.2])
@@ -345,7 +416,7 @@ class OsDsIndexesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        var_names = ['ds_index', 'ds_pvalue', 'os_index', 'os_pvalue', 'on_off', 'd_qi']
+        var_names = ["ds_index", "ds_pvalue", "os_index", "os_pvalue", "on_off", "d_qi"]
         fig, axs = plt.subplots(1, len(var_names), figsize=(len(var_names) * 2, 2), squeeze=False)
         axs = axs.flatten()
         for ax, var_name in zip(axs, var_names):
@@ -372,8 +443,8 @@ class MovingBarQITemplate(RepeatQITemplate):
         pass
 
     def make(self, key):
-        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
-        snippets = (self.snippets_table() & key).fetch1('snippets')
+        dir_order = (self.stimulus_table() & key).fetch1("trial_info")
+        snippets = (self.snippets_table() & key).fetch1("snippets")
 
         qidx = compute_mb_qi(snippets, dir_order)
         min_qidx = 1 / (snippets.shape[1] / np.unique(dir_order).size)
