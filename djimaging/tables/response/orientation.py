@@ -79,7 +79,7 @@ def get_time_dir_kernels(sorted_responses, dt):
     else:
         su = 1
 
-    sv = np.sign(np.mean(np.sign(time_component)))
+    sv = np.sign(np.mean(np.sign(dir_component)))
     if sv == 1 and su == 1:
         s = 1
     elif sv == -1 and su == -1:
@@ -260,8 +260,23 @@ def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float):
     d_qi = quality_index_ds(sorted_responses)
     on_off = get_on_off_index(time_component, dt=dt)
 
-    return dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
-        on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses
+    return (
+        dsi,
+        p_dsi,
+        null_dist_dsi,
+        pref_dir,
+        osi,
+        p_osi,
+        null_dist_osi,
+        pref_or,
+        on_off,
+        d_qi,
+        time_component,
+        dir_component,
+        surrogate_v,
+        dsi_s,
+        avg_sorted_responses,
+    )
 
 
 class OsDsIndexesTemplate(dj.Computed):
@@ -306,49 +321,80 @@ class OsDsIndexesTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.snippets_table().proj() & \
-                (self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'")
+            return self.snippets_table().proj() & (
+                self.stimulus_table() & "stim_name = 'movingbar' or stim_family = 'movingbar'"
+            )
         except (AttributeError, TypeError):
             pass
 
     def make(self, key):
-        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
-        snippets, snippets_times = (self.snippets_table() & key).fetch1('snippets', 'snippets_times')
+        dir_order = (self.stimulus_table() & key).fetch1("trial_info")
+        snippets, snippets_times = (self.snippets_table() & key).fetch1("snippets", "snippets_times")
 
         dt = float(np.mean([get_mean_dt(snippets_time)[0] for snippets_time in snippets_times.T]))
 
-        dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
-            on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses = \
-            compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=dt)
+        (
+            dsi,
+            p_dsi,
+            null_dist_dsi,
+            pref_dir,
+            osi,
+            p_osi,
+            null_dist_osi,
+            pref_or,
+            on_off,
+            d_qi,
+            time_component,
+            dir_component,
+            surrogate_v,
+            dsi_s,
+            avg_sorted_responses,
+        ) = compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=dt)
 
-        self.insert1(dict(key,
-                          ds_index=dsi, ds_pvalue=p_dsi,
-                          ds_null=null_dist_dsi, pref_dir=pref_dir,
-                          os_index=osi, os_pvalue=p_osi,
-                          os_null=null_dist_osi, pref_or=pref_or,
-                          on_off=on_off, d_qi=d_qi,
-                          time_component=time_component, dir_component=dir_component,
-                          surrogate_v=surrogate_v, surrogate_dsi=dsi_s,
-                          avg_sorted_resp=avg_sorted_responses, time_component_dt=dt))
+        self.insert1(
+            dict(
+                key,
+                ds_index=dsi,
+                ds_pvalue=p_dsi,
+                ds_null=null_dist_dsi,
+                pref_dir=pref_dir,
+                os_index=osi,
+                os_pvalue=p_osi,
+                os_null=null_dist_osi,
+                pref_or=pref_or,
+                on_off=on_off,
+                d_qi=d_qi,
+                time_component=time_component,
+                dir_component=dir_component,
+                surrogate_v=surrogate_v,
+                surrogate_dsi=dsi_s,
+                avg_sorted_resp=avg_sorted_responses,
+                time_component_dt=dt,
+            )
+        )
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
-        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
+        dir_order = (self.stimulus_table() & key).fetch1("trial_info")
         sorted_directions_rad = np.deg2rad(np.sort(dir_order))
 
-        dir_component, ds_index, pref_dir, avg_sorted_resp = \
-            (self & key).fetch1('dir_component', 'ds_index', 'pref_dir', 'avg_sorted_resp')
+        dir_component, ds_index, pref_dir, avg_sorted_resp = (self & key).fetch1(
+            "dir_component", "ds_index", "pref_dir", "avg_sorted_resp"
+        )
 
-        fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor='w', subplot_kw=dict(frameon=False))
+        fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor="w", subplot_kw=dict(frameon=False))
         axs[1, 1].remove()
-        ax = fig.add_subplot(3, 3, 5, projection='polar', frameon=False)
+        ax = fig.add_subplot(3, 3, 5, projection="polar", frameon=False)
         temp = np.max(np.append(dir_component, ds_index))
-        ax.plot((0, np.pi), (temp * 1.2, temp * 1.2), color='gray')
-        ax.plot((np.pi / 2, np.pi / 2 * 3), (temp * 1.2, temp * 1.2), color='gray')
-        ax.plot([0, pref_dir], [0, ds_index * np.sum(dir_component)], color='r')
-        ax.plot(np.append(sorted_directions_rad, sorted_directions_rad[0]),
-                np.append(dir_component, dir_component[0]), color='k')
+        ax.plot((0, np.pi), (temp * 1.2, temp * 1.2), color="gray")
+        ax.plot((np.pi / 2, np.pi / 2 * 3), (temp * 1.2, temp * 1.2), color="gray")
+        ax.plot([0, pref_dir], [0, ds_index * np.sum(dir_component)], color="r")
+        ax.plot(
+            np.append(sorted_directions_rad, sorted_directions_rad[0]),
+            np.append(dir_component, dir_component[0]),
+            color="k",
+        )
         ax.set_rmin(0)
         ax.set_thetalim([0, 2 * np.pi])
         ax.set_yticks([])
@@ -359,7 +405,7 @@ class OsDsIndexesTemplate(dj.Computed):
 
         for ax_idx, dir_idx in zip(ax_idxs, dir_idxs):
             ax = axs.flat[ax_idx]
-            ax.plot(avg_sorted_resp[:, dir_idx], color='k')
+            ax.plot(avg_sorted_resp[:, dir_idx], color="k")
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_ylim([vmin - vmax * 0.2, vmax * 1.2])
@@ -370,7 +416,7 @@ class OsDsIndexesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        var_names = ['ds_index', 'ds_pvalue', 'os_index', 'os_pvalue', 'on_off', 'd_qi']
+        var_names = ["ds_index", "ds_pvalue", "os_index", "os_pvalue", "on_off", "d_qi"]
         fig, axs = plt.subplots(1, len(var_names), figsize=(len(var_names) * 2, 2), squeeze=False)
         axs = axs.flatten()
         for ax, var_name in zip(axs, var_names):
@@ -397,8 +443,8 @@ class MovingBarQITemplate(RepeatQITemplate):
         pass
 
     def make(self, key):
-        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
-        snippets = (self.snippets_table() & key).fetch1('snippets')
+        dir_order = (self.stimulus_table() & key).fetch1("trial_info")
+        snippets = (self.snippets_table() & key).fetch1("snippets")
 
         qidx = compute_mb_qi(snippets, dir_order)
         min_qidx = 1 / (snippets.shape[1] / np.unique(dir_order).size)
