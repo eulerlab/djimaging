@@ -29,8 +29,12 @@ def test_definition_ChirpQITemplate():
 
 
 # orientation
-def test_definition_OsDsIndexesTemplate():
-    _test_definition(response.OsDsIndexesTemplate)
+def test_definition_OsDsIndexesTemplateV1():
+    _test_definition(response.OsDsIndexesTemplateV1)
+
+
+def test_definition_OsDsIndexesTemplateV2():
+    _test_definition(response.OsDsIndexesTemplateV2)
 
 
 # rgc_classifier
