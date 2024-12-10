@@ -58,9 +58,15 @@ def split_trace_by_reps(trace, times, triggertimes, ntrigger_rep, delay=0., atol
                         pad_trace=False):
     """Split trace in snippets, using triggertimes."""
 
+    if len(triggertimes) <= 0:
+        raise ValueError("No trigger times given")
+
     t_idxs, n_frames_per_rep, droppedlastrep_flag = compute_t_idxs(
         trace, times, triggertimes, ntrigger_rep,
         delay=delay, atol=atol, allow_drop_last=allow_drop_last, pad_trace=pad_trace)
+
+    if n_frames_per_rep < 1:
+        raise ValueError(f"n_frames_per_rep={n_frames_per_rep} is invalid for trigger times {triggertimes}")
 
     snippets = np.zeros((n_frames_per_rep, len(t_idxs)))
     snippets_times = np.zeros((n_frames_per_rep, len(t_idxs)))

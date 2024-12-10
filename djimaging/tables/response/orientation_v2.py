@@ -1,5 +1,5 @@
 """
-Moving Bar feature extraction as implemented in Baden et al. 2016
+Moving Bar feature extraction implemented as in Baden et al. 2016
 
 Example usage:
 
@@ -14,15 +14,13 @@ class OsDsIndexes(response.OsDsIndexesTemplate):
     snippets_table = Snippets
 """
 
-import cmath
 from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy import stats
 
-from djimaging.utils import math_utils
+from djimaging.tables.response.orientation_v1 import preprocess_mb_snippets, get_si, quality_index_ds, get_on_off_index
 from djimaging.utils.dj_utils import get_primary_key
 
 T_START = 1.152
@@ -175,43 +173,6 @@ class OsDsIndexesTemplate(dj.Computed):
         return fig, axs
 
 
-def quality_index_ds(raw_sorted_resp_mat):
-    """
-    This function computes the quality index for responses to moving bar as described in
-    Baden et al. 2016. QI is computed for each direction separately and the best QI is taken
-    Inputs:
-    raw_sorted_resp_mat:    3d array (time x directions x reps per direction)
-    Output:
-    qi: float               quality index
-    """
-
-    n_dirs = raw_sorted_resp_mat.shape[1]
-    qis = []
-    for d in range(n_dirs):
-        numerator = np.var(np.mean(raw_sorted_resp_mat[:, d, :], axis=-1), axis=0)
-        denom = np.mean(np.var(raw_sorted_resp_mat[:, d, :], axis=0), axis=-1)
-        qis.append(numerator / denom)
-    return np.max(qis)
-
-
-def sort_response_matrix(snippets: np.ndarray, idxs: list, directions: np.ndarray):
-    """
-    Sorts the snippets according to stimulus condition and repetition into a time x direction x repetition matrix
-    Inputs:
-    snippets    list or array, time x (directions*repetitions)
-    idxs        list of lists giving idxs into last axis of snippets. idxs[0] gives the indexes of rows in snippets
-                which are responses to the direction directions[0]
-    Outputs:
-    sorted_responses   array, time x direction x repetitions, with directions sorted(!) (0, 45, 90, ..., 315) degrees
-    sorted_directions   array, sorted directions
-    """
-    structured_responses = snippets[:, idxs]
-    sorting = np.argsort(directions)
-    sorted_responses = structured_responses[:, sorting, :]
-    sorted_directions = directions[sorting]
-    return sorted_responses, sorted_directions
-
-
 def get_time_dir_kernels(sorted_responses, dt):
     """
     Performs singular value decomposition on the time x direction matrix (averaged across repetitions)
@@ -228,18 +189,22 @@ def get_time_dir_kernels(sorted_responses, dt):
     singular_value  float, 1st singular value
     """
 
-    U, S, V = np.linalg.svd(sorted_responses)
+    U, S, Vh = np.linalg.svd(sorted_responses)
 
     time_component = U[:, 0]
-    dir_component = V[0, :]
+    dir_component = Vh[0, :]
 
     # the time_kernel determined by SVD should be correlated to the average response across all directions. if the
     # correlation is negative, U is likely flipped
-    r, _ = stats.spearmanr(time_component, np.mean(sorted_responses, axis=-1), axis=1)
-    su = np.sign(r)
-    if su == 0:
+
+    if np.mean((-1 * time_component - np.mean(sorted_responses, axis=-1)) ** 2) < np.mean(
+            (time_component - np.mean(sorted_responses, axis=-1)) ** 2
+    ):
+        su = -1
+    else:
         su = 1
-    sv = np.sign(np.mean(np.sign(V[0, :])))
+
+    sv = np.sign(np.mean(np.sign(dir_component)))
     if sv == 1 and su == 1:
         s = 1
     elif sv == -1 and su == -1:
@@ -255,125 +220,57 @@ def get_time_dir_kernels(sorted_responses, dt):
     dir_component *= s
 
     # determine which entries correspond to the first second, assuming 4 seconds presentation time
-    first_second_idx = np.maximum(int(np.round(1. / dt)), 1)
+    first_second_idx = np.maximum(int(np.floor(1.0 / dt)), 1)
     time_component -= np.mean(time_component[:first_second_idx])
-    time_component = time_component / np.max(abs(time_component))
+    time_component = time_component / np.max(np.abs(time_component))
 
-    dir_component = math_utils.normalize_zero_one(dir_component)
+    dir_component = dir_component - np.min(dir_component)
+    dir_component = dir_component / np.max(dir_component)
 
     return time_component, dir_component
 
 
-def get_si(dir_component, dirs, per):
+def compute_null_dist(dirs, counts, per, iters=1000):
     """
-    Computes direction/orientation selectivity index and preferred direction/orientation
-    of a cell by projecting the tuning curve v on a
-    complex exponential of the according directions dirs (as in Baden et al. 2016)
-    Inputs:
-    v:  array, dirs x 1, tuning curve as returned by SVD
-    dirs:   array, dirs x 1, directions in radians
-    per:    int (1 or 2), indicating whether direction (1) or orientation (2) shall be tested
-    Output:
-    index:  float, D/O si
-    direction:  float, preferred D/O
-    """
-    bin_spacing = np.diff(per * dirs)[0]
-    correction_factor = bin_spacing / (2 * (np.sin(bin_spacing / 2)))  # Zar 1999, Equation 26.16
-    compl_exp = [np.exp(per * 1j * d) for d in dirs]
-    vector = np.dot(compl_exp, dir_component)
-    # get the absolute of the vector, normalize to make it range between 0 and 1
-    index = correction_factor * np.abs(vector) / np.sum(dir_component)
+    Test significance of orientation tuning by permutation test.
 
-    direction = cmath.phase(vector) / per
-    # for orientation, the directions are mapped to the right half of a circle. Map instead to upper half
-    if per == 2 and direction < 0:
-        direction += np.pi
-    return index, direction
+    Parameters:
+        dirs (ndarray): Vector of directions (#directions x 1) in radians.
+        counts (ndarray): Matrix of responses (#reps x #directions).
+        per (int): Fourier component to test (1 = direction, 2 = orientation).
+        iters (int): Number of permutations for the test.
 
+    Returns:
+        p (float): p-value for tuning.
+        q (float): Magnitude of the Fourier component.
+        qdistr (ndarray): Sampling distribution of |q| under the null hypothesis.
+    """
+    rep_n, dir_n = counts.shape
+    k = dirs.reshape(-1)
+    v = np.exp(per * 1j * k) / np.sqrt(dir_n)
 
-def compute_null_dist(rep_dir_resps, dirs, per, iters=1000):
-    """
-    Compute null distribution for direction selectivity
-    """
-    (rep_n, dir_n) = rep_dir_resps.shape
-    flattened = np.reshape(rep_dir_resps, (rep_n * dir_n))
-    rand_idx = np.linspace(0, rep_n * dir_n - 1, rep_n * dir_n, dtype=int)
-    null_dist = np.zeros(iters)
+    # Compute magnitude of Fourier component for original data
+    q = np.abs(np.mean(counts, axis=0) @ v)
+
+    # Initialize null distribution
+    qdistr = np.zeros(iters)
+
+    # Flatten counts for permutation
+    flattened_counts = counts.flatten()
+
     for i in range(iters):
-        np.random.shuffle(rand_idx)
-        shuffled = flattened[rand_idx]
-        shuffled = np.reshape(shuffled, (rep_n, dir_n))
-        shuffled_mean = np.mean(shuffled, axis=0)
-        normalized_shuffled_mean = shuffled_mean - np.min(shuffled_mean)
-        normalized_shuffled_mean /= np.max(abs(normalized_shuffled_mean))
-        dsi, _ = get_si(normalized_shuffled_mean, dirs, per)
-        null_dist[i] = dsi
+        # Shuffle counts
+        shuffled_indices = np.random.permutation(rep_n * dir_n)
+        shuffled_counts = flattened_counts[shuffled_indices]
+        shuffled_counts = shuffled_counts.reshape(rep_n, dir_n)
 
-    return null_dist
+        # Compute Fourier magnitude for shuffled data
+        qdistr[i] = np.abs(np.mean(shuffled_counts, axis=0) @ v)
 
+    # Compute p-value
+    p = np.mean(qdistr > q)
 
-def get_on_off_index(time_kernel, dt, t_start=T_START, t_change=T_CHANGE, t_end=T_END):
-    """
-    Computes a preliminary On-Off Index based on the responses to the On (first half) and the OFF (2nd half) part of
-    the responses to the moving bars stimulus
-    """
-
-    idx_start = int(np.round(t_start / dt))
-    idx_change = int(np.round(t_change / dt))
-    idx_end = int(np.round(t_end / dt))
-
-    normed_kernel = math_utils.normalize_zero_one(time_kernel)
-    deriv = np.diff(normed_kernel)
-    on_response = np.max(deriv[idx_start:idx_change])
-    off_response = np.max(deriv[idx_change:idx_end])
-    off_response = np.max((0, off_response))
-    on_response = np.max((0, on_response))
-
-    if (on_response + off_response) < 1e-9:
-        on_off = 0.
-    else:
-        on_off = (on_response - off_response) / (on_response + off_response)
-        on_off = np.round(on_off, 2)
-
-    return on_off
-
-
-def get_dir_idx(snippets, dir_order):
-    """
-    snippets: np.ndarray (times, dirs*reps)
-    dir_order: np.ndarray (dirs, ) or (dirs*reps, )
-    """
-    dir_order = np.asarray(dir_order).squeeze()
-    assert dir_order.ndim == 1, dir_order.shape
-    assert snippets.ndim == 2, snippets.shape
-    n_snippets = snippets.shape[-1]
-    assert (n_snippets % dir_order.size) == 0, f"Snippet length {n_snippets} is not a multiple of {dir_order.size}"
-    dir_order = np.tile(dir_order, n_snippets // dir_order.size)
-    assert n_snippets == dir_order.size
-
-    dir_deg = dir_order[:8]  # get the directions of the bars in degree
-    dir_rad = np.deg2rad(dir_deg)  # convert to radians
-    dir_idx = [list(np.where(dir_order == d)[0]) for d in dir_deg]
-
-    return dir_idx, dir_rad
-
-
-def compute_mb_qi(snippets, dir_order):
-    assert snippets.ndim == 2
-    assert np.asarray(dir_order).ndim == 1
-
-    dir_idx, dir_rad = get_dir_idx(snippets, dir_order)
-    sorted_responses, sorted_directions = sort_response_matrix(snippets, dir_idx, dir_rad)
-    d_qi = quality_index_ds(sorted_responses)
-    return d_qi
-
-
-def preprocess_mb_snippets(snippets, dir_order):
-    dir_idx, dir_rad = get_dir_idx(snippets, dir_order)
-
-    sorted_responses, sorted_directions = sort_response_matrix(snippets, dir_idx, dir_rad)
-    sorted_averages = np.mean(sorted_responses, axis=-1)
-    return sorted_directions, sorted_responses, sorted_averages
+    return p, q, qdistr
 
 
 def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n_shuffles: int = 100):
@@ -388,20 +285,35 @@ def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n
     osi, pref_or = get_si(dir_component, sorted_directions, 2)
     (t, d, r) = sorted_responses.shape
     temp = np.reshape(sorted_responses, (t, d * r))
-    projected = np.dot(np.transpose(temp), time_component)  # we do this whole projection thing to make the result
-    projected = np.reshape(projected, (d, r))  # between the original and the shuffled comparable
+    projected_flat = temp.T @ time_component  # we do this whole projection thing to make the result
+    projected = np.reshape(projected_flat, (d, r))  # between the original and the shuffled comparable
     surrogate_v = np.mean(projected, axis=-1)
     surrogate_v -= np.min(surrogate_v)
     surrogate_v /= np.max(surrogate_v)
 
     dsi_s, pref_dir_s = get_si(surrogate_v, sorted_directions, 1)
-    osi_s, pref_or_s = get_si(surrogate_v, sorted_directions, 2)
-    null_dist_dsi = compute_null_dist(np.transpose(projected), sorted_directions, 1, iters=n_shuffles)
-    p_dsi = np.mean(null_dist_dsi > dsi_s)
-    null_dist_osi = compute_null_dist(np.transpose(projected), sorted_directions, 2, iters=n_shuffles)
-    p_osi = np.mean(null_dist_osi > osi_s)
+    # osi_s, pref_or_s = get_si(surrogate_v, sorted_directions, 2)  # Not used atm
+
+    p_dsi, null_dist_dsi, _ = compute_null_dist(sorted_directions, projected.T, 1, iters=n_shuffles)
+    p_osi, null_dist_osi, _ = compute_null_dist(sorted_directions, projected.T, 2, iters=n_shuffles)
+
     d_qi = quality_index_ds(sorted_responses)
     on_off = get_on_off_index(time_component, dt=dt)
 
-    return dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
-        on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, sorted_averages
+    return (
+        dsi,
+        p_dsi,
+        null_dist_dsi,
+        pref_dir,
+        osi,
+        p_osi,
+        null_dist_osi,
+        pref_or,
+        on_off,
+        d_qi,
+        time_component,
+        dir_component,
+        surrogate_v,
+        dsi_s,
+        sorted_averages,
+    )

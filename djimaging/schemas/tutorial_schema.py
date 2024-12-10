@@ -42,7 +42,7 @@ class ChirpFeaturesRgc(response.ChirpFeaturesRgcTemplate):
 
 
 @schema
-class OsDsIndexes(response.OsDsIndexesTemplate):
+class OsDsIndexes(response.OsDsIndexesTemplateV2):
     stimulus_table = Stimulus
     snippets_table = Snippets
 

@@ -2,7 +2,7 @@ import pickle as pkl
 
 import numpy as np
 
-from djimaging.tables.response.orientation import compute_os_ds_idxs
+from djimaging.tables.response.orientation_v1 import compute_os_ds_idxs
 
 
 def load_test_data(cell_type, path='testdata/test_mb.pkl'):
@@ -45,3 +45,5 @@ def test_nonds(path='testdata/test_mb.pkl'):
     assert np.isclose(p_dsi, 0.982, atol=0.01, rtol=0.01)
     assert np.isclose(osi, 0.704, atol=0.01, rtol=0.01)
     assert np.isclose(p_osi, 0.002, atol=0.01, rtol=0.01)
+
+# TODO: Test v2
