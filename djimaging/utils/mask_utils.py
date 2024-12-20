@@ -547,23 +547,28 @@ def to_roi_mask_file(data_file, old_suffix=None, new_suffix='_ROIs.pkl',
     return roi_mask_file
 
 
-def sort_roi_mask_files(files, mask_alias='', highres_alias='', suffix='.h5', as_index=False):
+def sort_roi_mask_files(files, mask_alias='', highres_alias='', as_index=False):
     """Sort files by their relevance for the ROI masks given by the user"""
-    files = np.array(files)
-    penalties = np.full(files.size, len(mask_alias.split('_')))
 
-    for i, file in enumerate(files):
-        if check_shared_alias_str(highres_alias, file.lower().replace(suffix, '')):
+    files_base = np.array([os.path.splitext(os.path.basename(f))[0].lower()
+                           for f in files])
+
+    penalties = np.full(files_base.size, len(mask_alias.split('_')), dtype=float)
+
+    for i, file in enumerate(files_base):
+        if check_shared_alias_str(highres_alias, file):
             penalties[i] = len(mask_alias.split('_')) + 1
 
         else:
             for penalty, alias in enumerate(mask_alias.split('_')):
-                if alias.lower() in file.lower().replace(suffix, '').split('_'):
+                if alias in file.split('_'):
                     penalties[i] = penalty
 
+    penalties += np.arange(len(files_base))[np.argsort(files_base)] * 0.01
+
     # Penalize non control conditions
-    for i, file in enumerate(files):
-        is_control = ('_control' in file.lower()) or ('_ctrl' in file.lower()) or ('_c1' in file.lower())
+    for i, file in enumerate(files_base):
+        is_control = ('_control' in file) or ('_ctrl' in file) or ('_c1' in file)
         if not is_control:
             penalties[i] += 100
 
@@ -571,12 +576,12 @@ def sort_roi_mask_files(files, mask_alias='', highres_alias='', suffix='.h5', as
     if as_index:
         return sort_idxs
     else:
-        return files[sort_idxs]
+        return np.asarray(files)[sort_idxs]
 
 
-def load_preferred_roi_mask_igor(files, mask_alias='', highres_alias='', suffix='.h5'):
+def load_preferred_roi_mask_igor(files, mask_alias='', highres_alias=''):
     """Load ROI mask for field"""
-    sorted_files = sort_roi_mask_files(files=files, mask_alias=mask_alias, highres_alias=highres_alias, suffix=suffix)
+    sorted_files = sort_roi_mask_files(files, mask_alias=mask_alias, highres_alias=highres_alias)
     for file in sorted_files:
         if os.path.isfile(file) and file.endswith('.h5'):
             roi_mask = read_h5_utils.load_roi_mask(filepath=file, ignore_not_found=True)
@@ -589,7 +594,7 @@ def load_preferred_roi_mask_igor(files, mask_alias='', highres_alias='', suffix=
 def load_preferred_roi_mask_pickle(files, mask_alias='', highres_alias='',
                                    roi_mask_dir=None, old_prefix=None, new_prefix=None):
     """Load ROI mask for field"""
-    sorted_files = sort_roi_mask_files(files=files, mask_alias=mask_alias, highres_alias=highres_alias)
+    sorted_files = sort_roi_mask_files(files, mask_alias=mask_alias, highres_alias=highres_alias)
     for file in sorted_files:
         roimask_file = to_roi_mask_file(file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
         if os.path.isfile(roimask_file):

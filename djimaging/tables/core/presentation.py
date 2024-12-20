@@ -5,7 +5,6 @@ from copy import deepcopy
 import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.core.pylabtools import figsize
 
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field

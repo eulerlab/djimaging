@@ -385,22 +385,27 @@ class RoiMaskTemplate(dj.Manual):
         if len(self & field_key) == 0:
             # Find preferred file that should be used as main key.
             mask_alias, highres_alias = (self.userinfo_table & field_key).fetch1("mask_alias", "highres_alias")
-            files = [(self.presentation_table & pres_key).fetch1('pres_data_file')
-                     for pres_key, roi_mask in data_pairs
-                     if roi_mask is not None]
+            keys_masks_files = [
+                (pres_key, roi_mask, (self.presentation_table & pres_key).fetch1('pres_data_file'))
+                for pres_key, roi_mask in data_pairs
+                if roi_mask is not None]
 
-            if len(files) == 0:
+            if len(keys_masks_files) == 0:
                 if verboselvl > 1:
                     print('No ROI masks found for field:', field_key)
                 return
             else:
                 if verboselvl > 0:
-                    print(f'Adding {len(files)} ROI masks for field:', field_key)
+                    print(f'Adding {len(keys_masks_files)} ROI masks for field:', field_key)
 
-            sort_idxs = sort_roi_mask_files(files, mask_alias=mask_alias, highres_alias=highres_alias, as_index=True)
-            main_pres_key, main_roi_mask = data_pairs[sort_idxs[0]]
+            sort_idxs = sort_roi_mask_files(
+                files=[f for k, m, f in keys_masks_files],
+                mask_alias=mask_alias, highres_alias=highres_alias, as_index=True)
+
+            main_pres_key, main_roi_mask = keys_masks_files[sort_idxs[0]][:2]
         else:
-            main_pres_key, main_roi_mask = (self.RoiMaskPresentation & field_key).fetch1('KEY', 'roi_mask')
+            main_pres_key = (self.RoiMaskPresentation().proj() & (self & field_key)).fetch1('KEY')
+            main_roi_mask = (self.RoiMaskPresentation & main_pres_key).fetch1('roi_mask')
 
         roi_mask_pres_keys = []
 
