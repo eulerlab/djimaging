@@ -4,11 +4,10 @@ import numpy as np
 import datajoint as dj
 from matplotlib import pyplot as plt
 
-from djimaging.tables.receptivefield.rf_properties_utils import compute_trf_transience_index, compute_half_amp_width, \
-    compute_main_peak_lag
-from djimaging.tables.receptivefield.rf_utils import compute_polarity_and_peak_idxs
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.plot_utils import set_long_title, plot_trf, prep_long_title
+from djimaging.utils.plot_utils import plot_trf, prep_long_title
+from djimaging.utils.receptive_fields.temporal_rf_utils import compute_polarity_and_peak_idxs, \
+    compute_trf_transience_index, compute_half_amp_width, compute_main_peak_lag
 
 
 class CenterSurroundParamsTemplate(dj.Lookup):

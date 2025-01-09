@@ -1,11 +1,4 @@
-# Choose the core schema you want to use:
-# if you want to change the core schema, you have to drop the schema first, then change it here and restart.
-# Use this for standard schema:
 from djimaging.schemas.core_schema import *
-# Use this for autorois schema:
-# from djimaging.schemas.core_autorois_schema import *
-
-# Load some additional tables, compatible with both core schemas.
 from djimaging.tables import misc, response, location
 
 
@@ -13,6 +6,7 @@ from djimaging.tables import misc, response, location
 class OpticDisk(location.OpticDiskTemplate):
     userinfo_table = UserInfo
     experiment_table = Experiment
+    raw_params_table = RawDataParams
 
 
 @schema
@@ -34,7 +28,14 @@ class ChirpQI(response.ChirpQITemplate):
 
 
 @schema
-class ChirpFeatures(response.ChirpFeaturesRgcTemplate):
+class ChirpFeaturesBc(response.ChirpFeaturesBcTemplate):
+    stimulus_table = Stimulus
+    snippets_table = Snippets
+    presentation_table = Presentation
+
+
+@schema
+class ChirpFeaturesRgc(response.ChirpFeaturesRgcTemplate):
     stimulus_table = Stimulus
     snippets_table = Snippets
     presentation_table = Presentation

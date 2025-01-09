@@ -6,6 +6,7 @@ from djimaging.utils.math_utils import normalize_zero_one
 
 def resize_image(image, output_shape: tuple, order: int = 0):
     from skimage.transform import resize
+
     image = image.copy().astype(float)
     finite_mask = np.isfinite(image)
     image[~finite_mask] = np.nanmin(image)
@@ -20,6 +21,7 @@ def resize_image(image, output_shape: tuple, order: int = 0):
 
 def rotate_image(image, angle, order=1, cval=None):
     from skimage.transform import rotate
+
     finite_mask = np.isfinite(image)
     image = image.copy()
 

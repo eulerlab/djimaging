@@ -1,11 +1,25 @@
+"""
+Features for the sinespot stimulus.
+
+Example usage:
+
+from djimaging.tables import response
+
+@schema
+class SineSpotFeatures(response.SineSpotFeaturesTemplate):
+    stimulus_table = Stimulus
+    preprocesstraces_table = PreprocessTraces
+    presentation_table = Presentation
+"""
+
 from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.receptivefield.rf_utils import get_mean_dt
 from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.trace_utils import get_mean_dt
 
 
 class SineSpotFeaturesTemplate(dj.Computed):
@@ -56,9 +70,11 @@ class SineSpotFeaturesTemplate(dj.Computed):
     _rep_dt = 0.8
 
     def make(self, key):
-        trace, tracetimes = (self.preprocesstraces_table() & key).fetch1("preprocess_trace", "preprocess_trace_times")
+        trace_t0, trace_dt, trace = (self.preprocesstraces_table() & key).fetch1("trace_t0", "trace_dt", "trace")
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
+
+        tracetimes = np.arange(len(trace)) * trace_dt + trace_t0
 
         response_rep_x_cond = compute_sinespot_response_matrix(
             trace, tracetimes, triggertimes, ntrigger_rep, delay=self._delay, rep_dt=self._rep_dt)
@@ -124,7 +140,7 @@ class SineSpotFeaturesTemplate(dj.Computed):
 
 def compute_sinespot_response_matrix(trace, times, triggertimes, ntrigger_rep, delay=0.1, rep_dt=0.8):
     """Split data into responses to different reps and summarize as mean response"""
-    from djimaging.utils.scanm_utils import split_trace_by_reps
+    from djimaging.utils.snippet_utils import split_trace_by_reps
 
     dt = get_mean_dt(times)[0]
     n_frames = int(np.ceil(rep_dt / dt))

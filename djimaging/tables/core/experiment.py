@@ -7,8 +7,8 @@ from typing import Optional
 
 import datajoint as dj
 
-from djimaging.utils.data_utils import read_config_dict
-from djimaging.utils.datafile_utils import find_folders_with_file_of_type
+from djimaging.utils.scanm.read_h5_utils import read_config_dict
+from djimaging.utils.filesystem_utils import find_folders_with_file_of_type
 
 
 class ExperimentTemplate(dj.Computed):
@@ -20,10 +20,10 @@ class ExperimentTemplate(dj.Computed):
         # Header-File location, name and path
         -> self.userinfo_table
         date                        :date                     # date of recording
-        exp_num                     :mediumint                # experiment number in a day
+        exp_num                     :tinyint unsigned         # experiment number in a day
         ---
         header_path                 :varchar(191)             # path to header file
-        header_name                 :varchar(191)             # name of header file
+        header_name                 :varchar(63)              # name of header file
         """
         return definition
 
@@ -120,7 +120,8 @@ class ExperimentTemplate(dj.Computed):
                 warnings.warn(f'Failed to convert `{header_path.split("/")[-2]}` to date. Skip this folder.')
             return
 
-        primary_key["exp_num"] = int(header_path.split("/")[-1])
+        exp_num = int(header_path.split("/")[-1])
+        primary_key["exp_num"] = exp_num
 
         if only_new:
             search = (self & restrictions & primary_key)
@@ -130,11 +131,12 @@ class ExperimentTemplate(dj.Computed):
                 return
 
         pre_data_path = header_path + "/" + pre_data_dir + "/"
-        assert os.path.isdir(pre_data_path), f"{pre_data_dir} not found {header_path}"
+        if not os.path.isdir(pre_data_path):
+            warnings.warn(f"Folder `{pre_data_dir}` not found in {header_path}")
 
         raw_data_path = header_path + "/" + raw_data_dir + "/"
         if not os.path.isdir(raw_data_path):
-            warnings.warn(f"Folder {raw_data_dir} not found in {header_path}")
+            warnings.warn(f"Folder `{raw_data_dir}` not found in {header_path}")
 
         exp_key = deepcopy(primary_key)
         exp_key["header_path"] = header_path + "/"
@@ -142,7 +144,20 @@ class ExperimentTemplate(dj.Computed):
 
         # Populate ExpInfo table for this experiment
         expinfo_key = deepcopy(primary_key)
-        expinfo_key["eye"] = header_dict["eye"] if header_dict["eye"] != "" else "unknown"
+
+        eye = header_dict["eye"] if header_dict["eye"] != "" else "unknown"
+
+        if (
+                (eye in ["Right", "right"] and (exp_num == 1 or 'left' in header_name.lower())) or
+                (eye in ["Left", "left"] and (exp_num == 2 or 'right' in header_name.lower()))
+        ):
+            warnings.warn(
+                f"Eye is set to {eye} in .ini file, "
+                f"but exp_num is {exp_num} and header_file_name is '{header_name}'. "
+                f"Use exp_num=1 for left eye and exp_num=2 for right eye. "
+                f"To overwrite this, use all-caps in .ini file which is then used.")
+
+        expinfo_key["eye"] = eye.lower()
         expinfo_key["projname"] = header_dict["projname"]
         expinfo_key["setupid"] = header_dict["setupid"]
         expinfo_key["prep"] = header_dict["prep"]
@@ -285,13 +300,13 @@ class ExperimentTemplate(dj.Computed):
                isepored                    :varchar(191)     # whether the retina was electroporated
                eporrem                     :varchar(191)     # comments about the electroporation
                epordye                     :varchar(191)     # which dye was used for the electroporation
-               isvirusinject               :varchar(5)       # whether the retina was injected
+               isvirusinject               :varchar(63)       # whether the retina was injected
                virusvect                   :varchar(191)     # what vector was used in the injection
                virusserotype               :varchar(191)     # what serotype was used in the injection
                virustransprotein           :varchar(191)     # the viral transprotein
                virusinjectrem              :varchar(191)     # comments about the injection
                virusinjectq                :varchar(191)     # numerical rating of the injection quality
-               isbraininject               :varchar(5)       # whether the retina was injected
+               isbraininject               :varchar(63)       # whether the retina was injected
                tracer                      :varchar(191)     # which tracer has been used in the brain injection
                braininjectq                :varchar(191)     # numerical rating of the brain injection quality
                braininjectrem              :varchar(191)     # comments on the brain injection

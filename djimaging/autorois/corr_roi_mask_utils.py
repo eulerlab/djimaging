@@ -11,6 +11,7 @@ class CorrRoiMask:
     def __init__(
             self, cut_x=(1, 1), cut_z=(1, 1), min_area_um2=0.8, max_area_um2=12.6,
             n_pix_min=None, n_pix_max=None, line_threshold_q=70, line_threshold_min=0.1,
+            n_pix_max_x=None, n_pix_max_z=None,
             grow_only_local_thresh_pixels=True, use_ch0_stack=True, grow_use_corr_map=False, grow_threshold=None):
         """12.6 um² ~= pi * ((4 um) / 2)² """
 
@@ -21,6 +22,10 @@ class CorrRoiMask:
         self.max_area_um2 = max_area_um2
         self.n_pix_min = n_pix_min
         self.n_pix_max = n_pix_max
+
+        self.n_pix_max_x = n_pix_max_x
+        self.n_pix_max_z = n_pix_max_z
+
         self.line_threshold_q = line_threshold_q
         self.line_threshold_min = line_threshold_min
         self.grow_only_local_thresh_pixels = grow_only_local_thresh_pixels
@@ -28,7 +33,8 @@ class CorrRoiMask:
         self.grow_use_corr_map = grow_use_corr_map
         self.grow_threshold = grow_threshold
 
-    def create_mask_from_data(self, ch0_stack, ch1_stack, n_artifact, pixel_size_um=(1., 1.), plot=False, **kwargs):
+    def create_mask_from_data(self, ch0_stack, ch1_stack=None, n_artifact=0, pixel_size_um=(1., 1.),
+                              plot=False, **kwargs):
         if len(kwargs) > 0:
             warnings.warn(f'ignoring kwargs: {kwargs}')
 
@@ -44,8 +50,10 @@ class CorrRoiMask:
         n_pix_max = int(np.maximum(np.round(self.max_area_um2 / (pixel_size_um[0] * pixel_size_um[1])), n_pix_max))
 
         # At most twice as long as wide
-        n_pix_max_x = int(np.maximum(np.sqrt(2 * self.max_area_um2), 1))
-        n_pix_max_z = int(np.maximum(np.sqrt(2 * self.max_area_um2), 1))
+        n_pix_max_x = int(
+            np.maximum(np.sqrt(2 * self.max_area_um2), 1)) if self.n_pix_max_x is None else self.n_pix_max_x
+        n_pix_max_z = int(
+            np.maximum(np.sqrt(2 * self.max_area_um2), 1)) if self.n_pix_max_z is None else self.n_pix_max_z
 
         print(f'Creating ROI mask for stack of shape={stack.shape}, '
               f'with n_pix_min={n_pix_min}, n_pix_max={n_pix_max}, '
@@ -105,6 +113,11 @@ def corr_map_rois(stack, cut_x, cut_z, n_pix_max_x=5, n_pix_max_z=5, n_pix_max=2
 
     nx, nz, nt = stack.shape
     seed_ixs, seed_iys = np.argwhere(corr_map >= line_threshold).T
+    # Sort by neighborhood correlation
+    sort_idxs = np.argsort(corr_map[seed_ixs, seed_iys])[::-1]
+    seed_ixs = seed_ixs[sort_idxs]
+    seed_iys = seed_iys[sort_idxs]
+
     roi_mask = np.zeros((nx, nz), dtype=int)
 
     roi_id = 1
@@ -118,7 +131,7 @@ def corr_map_rois(stack, cut_x, cut_z, n_pix_max_x=5, n_pix_max_z=5, n_pix_max=2
 
     p_threshold = grow_threshold if grow_threshold is not None else line_threshold
 
-    for seed_ix, seed_iz in sorted(zip(seed_ixs, seed_iys), key=lambda v: corr_map[v[0], v[1]]):
+    for seed_ix, seed_iz in zip(seed_ixs, seed_iys):
         if roi_mask[seed_ix, seed_iz] != 0:
             continue
 
@@ -173,7 +186,7 @@ def corr_map_rois(stack, cut_x, cut_z, n_pix_max_x=5, n_pix_max_z=5, n_pix_max=2
         axs[0, 3].set_ylim(0, line_threshold.size - 1)
         axs[1, 3].axis('off')
 
-        im = axs[0, 4].imshow(seed_pixels.T, cmap='viridis', origin='lower', interpolation='none')
+        im = axs[0, 4].imshow(corr_map_nan.T, cmap='viridis', origin='lower', interpolation='none')
         axs[0, 4].set_title('Seed pixels')
         plt.colorbar(im, ax=axs[0, 4], cax=axs[1, 4], orientation='horizontal')
 

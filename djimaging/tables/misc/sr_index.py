@@ -1,3 +1,22 @@
+"""
+Table for computing SR index for each ROI. SR index is defined as (ROI_avg - lb) / (ub - lb), where lb is the background
+and lb is the light artifact intensity.
+
+Example usage:
+
+from djimaging.tables import misc
+
+@schema
+class SrIndex(misc.SrIndexTemplate):
+    _stim_name = 'gChirp'
+
+    presentation_table = Presentation
+    roimask_table = RoiMask
+    roi_table = Roi
+    stimulus_table = Stimulus
+    raw_params_table = RawDataParams
+"""
+
 import warnings
 from abc import abstractmethod
 
@@ -5,7 +24,8 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.utils import scanm_utils, mask_utils
+from djimaging.utils.scanm import read_utils
+from djimaging.utils import mask_utils
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -83,7 +103,7 @@ class SrIndexTemplate(dj.Computed):
         except dj.DataJointError:
             from_raw_data = False
 
-        ch_stacks, wparams = scanm_utils.load_stacks(
+        ch_stacks, wparams = read_utils.load_stacks(
             filepath, from_raw_data=from_raw_data, ch_names=('wDataCh1',) if not plot else ('wDataCh0', 'wDataCh1'))
 
         ch1_stack = ch_stacks['wDataCh1'][:, :, stim_onset_idx:stim_offset_idx]

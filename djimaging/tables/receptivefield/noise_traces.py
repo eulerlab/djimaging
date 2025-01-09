@@ -1,9 +1,13 @@
+"""
+This module contains tables for preprocessing traces for receptive field estimation.
+"""
+
 from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
 
-from djimaging.tables.receptivefield.rf_utils import prepare_noise_data
+from djimaging.utils.receptive_fields.preprocess_rf_utils import prepare_noise_data
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -13,7 +17,8 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        dnoise_params_id: int # unique param set id
+        -> self.stimulus_table
+        dnoise_params_id: tinyint unsigned # unique param set id
         ---
         fit_kind : varchar(191)
         fupsample_trace : tinyint unsigned  # Multiplier of sampling frequency, using linear interpolation.
@@ -25,23 +30,35 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
         """
         return definition
 
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
     def add_default(
-            self, dnoise_params_id=1, fit_kind="events", ref_time='trace',
-            fupsample_trace=1, fupsample_stim=1, lowpass_cutoff=0,
+            self, stim_names=None, dnoise_params_id=1, fit_kind="gradient", ref_time='stim',
+            fupsample_trace=10, fupsample_stim=10, lowpass_cutoff=0,
             pre_blur_sigma_s=0, post_blur_sigma_s=0, skip_duplicates=False):
         """Add default preprocess parameter to table"""
+
+        if stim_names is None:
+            stim_names = (self.stimulus_table() & 'stim_family = "noise"').fetch('stim_name')
 
         key = dict(dnoise_params_id=dnoise_params_id, fit_kind=fit_kind,
                    fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
                    ref_time=ref_time, lowpass_cutoff=lowpass_cutoff,
                    pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s)
 
-        self.insert1(key, skip_duplicates=skip_duplicates)
+        for stim_name in stim_names:
+            """Add default preprocess parameter to table"""
+            stim_key = key.copy()
+            stim_key['stim_name'] = stim_name
+            self.insert1(stim_key, skip_duplicates=skip_duplicates)
 
 
 class DNoiseTraceTemplate(dj.Computed):
     database = ""
-    _stim_restriction = dict(stim_family='noise')
+    _traces_prefix = 'pp_'
 
     @property
     def definition(self):
@@ -50,10 +67,10 @@ class DNoiseTraceTemplate(dj.Computed):
         -> self.traces_table
         -> self.params_table
         ---
-        dt : float  # Time-step of time component
-        time : longblob  # Time lof aligned traces and stimulus
         trace : longblob   # Trace to fit
-        stim : longblob  # Stimulus frames
+        stim_idxs : longblob  # Stimulus frame indexes
+        noise_dt : float  # Time-step of time component
+        noise_t0 : float  # Time of first sample
         dt_rel_error : float  # Maximum relative error of dts, if too large, can have unwanted effects
         '''
         return definition
@@ -81,33 +98,36 @@ class DNoiseTraceTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.params_table() * self.traces_table().proj() & (self.stimulus_table() & self._stim_restriction)
+            return self.params_table() * self.traces_table().proj() & \
+                (self.stimulus_table() & "stim_family = 'noise'")
         except (AttributeError, TypeError):
             pass
 
     def make(self, key):
         stim, stim_dict = (self.stimulus_table() & key).fetch1("stim_trace", "stim_dict")
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
-        trace, tracetime = (self.traces_table() & key).fetch1('preprocess_trace', 'preprocess_trace_times')
+        trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1(
+            self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace')
         fupsample_trace, fupsample_stim, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s, ref_time = (
                 self.params_table() & key).fetch1(
             "fupsample_trace", "fupsample_stim", "fit_kind", "lowpass_cutoff",
             "pre_blur_sigma_s", "post_blur_sigma_s", "ref_time")
 
-        stim, trace, dt, t0, dt_rel_error = prepare_noise_data(
-            trace=trace, tracetime=tracetime, stim=stim, triggertimes=triggertimes,
-            ntrigger_per_frame=stim_dict.get('ntrigger_per_frame', 1) if stim_dict is not None else 1,
+        tracetime = np.arange(trace.size) * trace_dt + trace_t0
+        stim_idxs = np.arange(stim.shape[0])
+
+        stim_idxs, trace, dt, t0, dt_rel_error = prepare_noise_data(
+            trace=trace, tracetime=tracetime, stim=stim_idxs, triggertimes=triggertimes,
+            ntrigger_per_frame=stim_dict.get('ntrigger_per_frame', 1),
             fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim, ref_time=ref_time,
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
             pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s)
 
-        time = np.arange(trace.size) * dt + t0
-
         data_key = key.copy()
-        data_key['dt'] = dt
-        data_key['time'] = time
-        data_key['trace'] = trace
-        data_key['stim'] = stim
+        data_key['trace'] = trace.astype(np.float32)
+        data_key['stim_idxs'] = stim_idxs.astype(np.uint16)
+        data_key['noise_t0'] = t0
+        data_key['noise_dt'] = dt
         data_key['dt_rel_error'] = dt_rel_error
         self.insert1(data_key)
 
@@ -116,27 +136,34 @@ class DNoiseTraceTemplate(dj.Computed):
 
         from matplotlib import pyplot as plt
 
-        raw_trace, raw_tracetime = (self.traces_table() & key).fetch1('preprocess_trace', 'preprocess_trace_times')
+        raw_trace_t0, raw_trace_dt, raw_trace = (self.traces_table() & key).fetch1(
+            self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace')
 
-        time, trace, stim = (self & key).fetch1('time', 'trace', 'stim')
-        assert time.shape[0] == trace.shape[0], (time.shape[0], trace.shape[0])
-        assert time.shape[0] == stim.shape[0], (time.shape[0], stim.shape[0])
+        raw_tracetime = np.arange(raw_trace.size) * raw_trace_dt + raw_trace_t0
+
+        noise_t0, noise_dt, trace, stim_idxs = (self & key).fetch1('noise_t0', 'noise_dt', 'trace', 'stim_idxs')
+        assert trace.shape[0] == stim_idxs.shape[0], "Trace and stim have different lengths"
+
+        stim = (self.stimulus_table() & key).fetch1("stim_trace")
+        stim = stim[stim_idxs]
+
+        tracetime = np.arange(trace.size) * noise_dt + noise_t0
 
         fit_kind = (self.params_table() & key).fetch1('fit_kind')
 
         fig, axs = plt.subplots(2, 1, figsize=(10, 5), sharex='all')
         ax = axs[0]
-        ax.plot(time, trace, label='output trace')
+        ax.plot(tracetime, trace, label='output trace')
         ax.legend(loc='upper left')
         ax = ax.twinx()
-        ax.vlines(time[1:][np.any(np.diff(stim, axis=0) > 0, axis=tuple(np.arange(1, stim.ndim)))], 0, 1,
+        ax.vlines(tracetime[1:][np.any(np.diff(stim, axis=0) > 0, axis=tuple(np.arange(1, stim.ndim)))], 0, 1,
                   label='stim changes', alpha=0.1, color='k')
         ax.legend(loc='upper right')
         ax.set(xlabel='Time', title=fit_kind)
         ax.set_xlim(xlim)
 
         ax = axs[1]
-        ax.plot(time, trace, label='output trace')
+        ax.plot(tracetime, trace, label='output trace')
         ax.legend(loc='upper left')
         ax = ax.twinx()
         ax.plot(raw_tracetime, raw_trace, 'r-', label='input trace', alpha=0.5)

@@ -1,6 +1,6 @@
 import datajoint as dj
 
-from djimaging.tables import core
+from djimaging.tables import core, misc
 
 schema = dj.Schema()
 
@@ -8,6 +8,11 @@ schema = dj.Schema()
 @schema
 class UserInfo(core.UserInfoTemplate):
     pass
+
+
+@schema
+class RawDataParams(core.RawDataParamsTemplate):
+    userinfo_table = UserInfo
 
 
 @schema
@@ -29,12 +34,14 @@ class Experiment(core.ExperimentTemplate):
 
 @schema
 class Field(core.FieldTemplate):
-    _load_field_roi_masks = True  # Set to False if you don't want to use Field level Roi masks!
-    userinfo_table = UserInfo
-    experiment_table = Experiment
+    incl_region = True  # Include region as primary key?
+    incl_cond1 = True  # Include condition 1 as primary key?
+    incl_cond2 = False  # Include condition 2 as primary key?
+    incl_cond3 = False  # Include condition 3 as primary key?
 
-    class RoiMask(core.FieldTemplate.RoiMask):
-        pass
+    userinfo_table = UserInfo
+    raw_params_table = RawDataParams
+    experiment_table = Experiment
 
     class StackAverages(core.FieldTemplate.StackAverages):
         pass
@@ -42,21 +49,21 @@ class Field(core.FieldTemplate):
 
 @schema
 class Stimulus(core.StimulusTemplate):
-    pass
-
-
-@schema
-class RawDataParams(core.RawDataParamsTemplate):
-    pass
+    _incl_snippet_base_dt = True
 
 
 @schema
 class Presentation(core.PresentationTemplate):
+    incl_region = True  # Include region as primary key?
+    incl_cond1 = True  # Include condition 1 as primary key?
+    incl_cond2 = True  # Include condition 2 as primary key?
+    incl_cond3 = False  # Include condition 3 as primary key?
+
     userinfo_table = UserInfo
     experiment_table = Experiment
     field_table = Field
     stimulus_table = Stimulus
-    params_table = RawDataParams
+    raw_params_table = RawDataParams
 
     class ScanInfo(core.PresentationTemplate.ScanInfo):
         pass
@@ -64,39 +71,90 @@ class Presentation(core.PresentationTemplate):
     class StackAverages(core.PresentationTemplate.StackAverages):
         pass
 
-    class RoiMask(core.PresentationTemplate.RoiMask):
+
+# Misc
+@schema
+class HighRes(misc.HighResTemplate):
+    field_table = Field
+    experiment_table = Experiment
+    userinfo_table = UserInfo
+    raw_params_table = RawDataParams
+
+    class StackAverages(misc.HighResTemplate.StackAverages):
         pass
 
 
 @schema
-class Roi(core.RoiTemplate):
+class RoiMask(core.RoiMaskTemplate):
+    _max_shift = 5  # Maximum shift of ROI mask in pixels
+
+    field_table = Field
+    presentation_table = Presentation
+    experiment_table = Experiment
     userinfo_table = UserInfo
-    field_or_pres_table = Field  # Can also be set to Presentation
+    raw_params_table = RawDataParams
+    highres_table = HighRes
+
+    class RoiMaskPresentation(core.RoiMaskTemplate.RoiMaskPresentation):
+        presentation_table = Presentation
+
+
+@schema
+class Roi(core.RoiTemplate):
+    roi_mask_table = RoiMask
+    userinfo_table = UserInfo
+    field_table = Field
 
 
 @schema
 class Traces(core.TracesTemplate):
     userinfo_table = UserInfo
-    params_table = RawDataParams
+    raw_params_table = RawDataParams
     presentation_table = Presentation
-    roi_mask_table = Field.RoiMask  # Can also be set to Presentation.RoiMask
     roi_table = Roi
+    roi_mask_table = RoiMask
 
 
 @schema
 class PreprocessParams(core.PreprocessParamsTemplate):
-    pass
+    stimulus_table = Stimulus
 
 
 @schema
 class PreprocessTraces(core.PreprocessTracesTemplate):
+    _baseline_max_dt = 2.  # seconds before stimulus used for baseline calculation
+
     presentation_table = Presentation
     preprocessparams_table = PreprocessParams
     traces_table = Traces
 
 
+# use this if you want to upsample averages
 @schema
 class Snippets(core.SnippetsTemplate):
+    _pad_trace = True
+
+    stimulus_table = Stimulus
+    presentation_table = Presentation
+    traces_table = Traces
+    preprocesstraces_table = PreprocessTraces
+
+
+@schema
+class Averages(core.ResampledAveragesTemplate):
+    _f_resample = 500  # Frequency in Hz to resample averages
+    _norm_kind = 'amp_one'  # How to normalize averages?
+
+    snippets_table = Snippets
+
+
+"""
+# Replace Snippet and Averages above if you want to use the old way of defining snippets and averages
+
+@schema
+class Snippets(core.SnippetsTemplate):
+    _pad_trace = False
+
     stimulus_table = Stimulus
     presentation_table = Presentation
     traces_table = Traces
@@ -105,5 +163,7 @@ class Snippets(core.SnippetsTemplate):
 
 @schema
 class Averages(core.AveragesTemplate):
-    _norm_kind = 'amp_one'
+    _norm_kind = 'amp_one'  # How to normalize averages
+
     snippets_table = Snippets
+"""

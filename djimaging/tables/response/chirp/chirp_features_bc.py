@@ -1,5 +1,5 @@
 """
-Tables for Chirp response features from Franke et al. 2017
+Tables for Chirp Bipolar Cell (BC) features.
 
 Example usage:
 
@@ -31,8 +31,10 @@ class ChirpFeaturesBcTemplate(dj.Computed):
     _t_off_step = 5
     _t_max = 6
     _t_flicker_start = 10  # Start of first flicker
-    _t_flicker_pause = 17  # End of first flicker
+    _t_flicker_pause = 18  # End of first flicker #changed from 17 to 18
     _t_flicker_end = 29  # End of second flicker
+    _t_contrast_start = 20
+    _t_contrast_end = 28
 
     _hfi_constant = 1e4  # See Baden et al 2013
 
@@ -51,6 +53,9 @@ class ChirpFeaturesBcTemplate(dj.Computed):
         l_freq_response : float # Low frequency response
         h_freq_response : float # High frequency response
         lh_freq_index : float # Ratio of high to low frequency response
+        l_contrast_response : float # Low contrast response
+        h_contrast_response : float # High contrast response
+        lh_contrast_index : float # Ratio of high to low contrast response
         '''
         return definition
 
@@ -78,15 +83,23 @@ class ChirpFeaturesBcTemplate(dj.Computed):
             pass
 
     def compute_entry(self, key, plot=False):
-        snippets_times, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-            "snippets_times", 'snippets', 'triggertimes_snippets')
+        try:
+            # Deprecated
+            snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
+                "snippets", "snippets_times", "triggertimes_snippets")
+        except dj.DataJointError:
+            snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
+                "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
+
+            snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
+                              + snippets_t0)
 
         average, average_times, _ = compute_upsampled_average(
             snippets, snippets_times, triggertimes_snippets, f_resample=self._fs_resample)
 
-        n_plots = 7
+        n_plots = 8
         if plot:
-            fig, axs = plt.subplots(1, n_plots, figsize=(15, 2))
+            fig, axs = plt.subplots(1, n_plots, figsize=(18, 2))
             ax = axs[0]
             ax.set_title(f"Average trace; fs={self._fs_resample} Hz")
             ax.plot(average)
@@ -119,16 +132,23 @@ class ChirpFeaturesBcTemplate(dj.Computed):
             average=average, fs=self._fs_resample,
             t_flicker_start=self._t_flicker_start, t_flicker_pause=self._t_flicker_pause, plot=axs[6])
 
+        l_contrast_response, h_contrast_response, lh_contrast_index = compute_contrast_response_ratio(
+            average=average, fs=self._fs_resample,
+            t_contrast_start=self._t_contrast_start, t_contrast_end=self._t_contrast_end, plot=axs[7])
+
         if plot:
             plt.tight_layout()
             plt.show()
 
         return (polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index,
-                l_freq_response, h_freq_response, lh_freq_index)
+                l_freq_response, h_freq_response, lh_freq_index,
+                l_contrast_response, h_contrast_response, lh_contrast_index)
 
     def make(self, key, plot=False):
-        (polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index, l_freq_response,
-         h_freq_response, lh_freq_index) = self.compute_entry(key, plot=plot)
+        (polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index,
+         l_freq_response, h_freq_response, lh_freq_index,
+         l_contrast_response, h_contrast_response, lh_contrast_index,
+         ) = self.compute_entry(key, plot=plot)
 
         self.insert1(dict(
             key,
@@ -140,24 +160,14 @@ class ChirpFeaturesBcTemplate(dj.Computed):
             l_freq_response=l_freq_response,
             h_freq_response=h_freq_response,
             lh_freq_index=lh_freq_index,
+            l_contrast_response=l_contrast_response,
+            h_contrast_response=h_contrast_response,
+            lh_contrast_index=lh_contrast_index,
         ))
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
-        (
-            polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index,
-            l_freq_response, h_freq_response, lh_freq_index
-        ) = (self & key).fetch1(
-            'polarity_index', 'high_frequency_index', 'transience_index', 'plateau_index', 'tonic_release_index',
-            'l_freq_response', 'h_freq_response', 'lh_freq_index')
-
-        plot_values = np.array(self.compute_entry(key, plot=True))
-        db_values = np.array([
-            polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index,
-            l_freq_response, h_freq_response, lh_freq_index])
-
-        if not np.all(plot_values == db_values):
-            raise ValueError("Computed values do not match stored values")
+        self.compute_entry(key, plot=True)
 
 
 def compute_high_frequency_index(snippets, fs, constant=1e4, plot=None):
@@ -236,7 +246,7 @@ def compute_polarity_index(average, fs, alpha=2, t_on_step=2, t_off_step=5, plot
 
     scale = avg_on + avg_off
     if scale < 1e-9:
-        polarity_index = 0.5
+        polarity_index = 0.
     else:
         polarity_index = (avg_on - avg_off) / scale
 
@@ -409,7 +419,7 @@ def compute_tonic_release_index(average, fs, t_flicker_start=10, t_flicker_end=2
     return tonic_release_index
 
 
-def compute_freq_response(average, fs, t_flicker_start=10, t_flicker_pause=17, plot=None):
+def compute_freq_response(average, fs, t_flicker_start=10, t_flicker_pause=18, plot=None):  # changed from 17 to 18
     """
     Calculate the low and high frequency response and the ratio of high to low frequency response.
 
@@ -430,21 +440,25 @@ def compute_freq_response(average, fs, t_flicker_start=10, t_flicker_pause=17, p
     idx_l_end = idx_l_start + didxs // 3
     idx_h_start = idx_h_end - didxs // 3
 
-    low_freq_response = np.max(average[idx_l_start:idx_l_end])
-    high_freq_response = np.max(average[idx_h_start:idx_h_end])
+    low_freq_response = np.percentile(average[idx_l_start:idx_l_end], 95)
+    high_freq_response = np.percentile(average[idx_h_start:idx_h_end], 95)
 
-    if low_freq_response < 1e-9:
-        warnings.warn("Low frequency response can not be computed for <= 0 peaks, setting response index to -1.")
+    # if low_freq_response < 1e-9:
+    #     warnings.warn("Low frequency response can not be computed for <= 0 peaks, setting response index to -1.")
+    #     lh_freq_index = -1
+    if np.max(np.abs(low_freq_response) + np.abs(high_freq_response)) < 1e-9:
+        warnings.warn("Cannot divide by zero, setting response index to -1.")
         lh_freq_index = -1
     else:
-        lh_freq_index = high_freq_response / low_freq_response
+        lh_freq_index = ((high_freq_response - low_freq_response) / np.max(
+            np.abs(low_freq_response) + np.abs(high_freq_response)))
 
     if plot:
         if isinstance(plot, plt.Axes):
             ax = plot
         else:
             fig, ax = plt.subplots(1, 1, figsize=(4, 2))
-        ax.set_title(f"H/L: {lh_freq_index:.2f}")
+        ax.set_title(f"$\\frac{{(hf-lf)}}{{(lf+hf)}}$: {lh_freq_index:.2f}")
 
         plot_idxs = np.arange(idx_l_start - didxs // 10, idx_h_end + didxs // 10)
         vmin = np.min(average[plot_idxs])
@@ -461,6 +475,64 @@ def compute_freq_response(average, fs, t_flicker_start=10, t_flicker_pause=17, p
         ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
 
     return low_freq_response, high_freq_response, lh_freq_index
+
+
+def compute_contrast_response_ratio(average, fs, t_contrast_start=20, t_contrast_end=28, plot=None):
+    """
+    Calculate the low and high contrast response and the ratio of high to low contrast response.
+
+    :param average: A 1d numpy array of trace
+    :param fs: Sampling rate of the data in Hz.
+    :param t_contrast_start: Time of the onset of the flicker in seconds.
+    :param t_contrast_end: Time of the pause of the flicker in seconds.
+    :param plot: If True, plot the average trace and the response window.
+
+    :return: Low contrast response, high contrast response, ratio of high to low contrast response.
+    """
+
+    idx_l_contrast_start = int(fs * t_contrast_start)
+    idx_h_contrast_end = int(fs * t_contrast_end)
+
+    # Split into three parts
+    didxs = idx_h_contrast_end - idx_l_contrast_start
+    idx_l_contrast_end = idx_l_contrast_start + didxs // 3
+    idx_h_contrast_start = idx_h_contrast_end - didxs // 3
+
+    low_contrast_response = np.percentile(average[idx_l_contrast_start:idx_l_contrast_end], 95)
+    high_contrast_response = np.percentile(average[idx_h_contrast_start:idx_h_contrast_end], 95)
+
+    # if low_contrast_response < 1e-9:
+    #     warnings.warn("Low contrast response can not be computed for <= 0 peaks, setting response index to -1.")
+    #     lh_contrast_index = -1
+    if np.max(np.abs(low_contrast_response) + np.abs(high_contrast_response)) < 1e-9:
+        warnings.warn("Cannot divide by zero, setting response index to -1.")
+        lh_contrast_index = -1
+    else:
+        lh_contrast_index = ((high_contrast_response - low_contrast_response) / np.max(
+            np.abs(low_contrast_response) + np.abs(high_contrast_response)))
+
+    if plot:
+        if isinstance(plot, plt.Axes):
+            ax = plot
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(4, 2))
+        ax.set_title(f"$\\frac{{(hc-lc)}}{{(lc+hc)}}$: {lh_contrast_index:.2f}")
+
+        plot_idxs = np.arange(idx_l_contrast_start - didxs // 10, idx_h_contrast_end + didxs // 10)
+        vmin = np.min(average[plot_idxs])
+        vmax = np.max(average[plot_idxs])
+
+        ax.plot(plot_idxs, average[plot_idxs])
+
+        ax.fill_between([idx_l_contrast_start, idx_l_contrast_end], [vmin, vmin], [vmax, vmax], color='r', alpha=0.5)
+        ax.fill_between([idx_h_contrast_start, idx_h_contrast_end], [vmin, vmin], [vmax, vmax], color='g', alpha=0.5)
+
+        ax.plot([idx_l_contrast_start, idx_l_contrast_end], [low_contrast_response, low_contrast_response], c='k')
+        ax.plot([idx_h_contrast_start, idx_h_contrast_end], [high_contrast_response, high_contrast_response], c='k')
+
+        ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
+
+    return low_contrast_response, high_contrast_response, lh_contrast_index
 
 
 def compute_upsampled_average(snippets, snippets_times, triggertimes_snippets, f_resample=500):

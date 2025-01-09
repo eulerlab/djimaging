@@ -50,8 +50,3 @@ def test_definition_preprocesstraces():
 
 def test_definition_snippets():
     _test_definition(core.SnippetsTemplate)
-
-
-# presentation
-def test_definition_presentation():
-    _test_definition(core.PresentationTemplate)

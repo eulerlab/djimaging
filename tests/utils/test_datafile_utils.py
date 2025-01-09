@@ -1,6 +1,6 @@
 import pytest
 
-from djimaging.utils.datafile_utils import as_pre_filepath
+from djimaging.utils.filesystem_utils import as_pre_filepath
 
 
 def test_as_pre_filepath():

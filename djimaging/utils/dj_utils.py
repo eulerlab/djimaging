@@ -1,7 +1,10 @@
 import hashlib
+import os
 import random
+import sys
 from collections import OrderedDict
 from collections.abc import Iterable, Mapping
+from contextlib import contextmanager
 
 import datajoint as dj
 import numpy as np
@@ -132,3 +135,20 @@ def check_unique_one(values, name='values'):
         raise ValueError(f'{name} are not unique: {values}')
 
     return values[0]
+
+
+@contextmanager
+def suppress_output(condition=True):
+    if condition:
+        with open(os.devnull, 'w') as devnull:
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
+            sys.stdout = devnull
+            sys.stderr = devnull
+            try:
+                yield
+            finally:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+    else:
+        yield

@@ -1,5 +1,5 @@
 from djimaging.schemas.core_schema import *
-from djimaging.tables import response, classifier, receptivefield, location, misc
+from djimaging.tables import response, classifier, receptivefield, location
 
 
 # Classifier
@@ -24,8 +24,12 @@ class OsDsIndexes(response.OsDsIndexesTemplateV2):
 
 @schema
 class Baden16Traces(classifier.Baden16TracesTemplate):
-    roi_table = Roi
-    preprocessparams_table = PreprocessParams
+    _shift_chirp = 1
+    _shift_bar = -4
+
+    _stim_name_chirp = 'gChirp'
+    _stim_name_bar = 'movingbar'
+
     averages_table = Averages
     os_ds_table = OsDsIndexes
 
@@ -51,12 +55,15 @@ class CelltypeAssignment(classifier.CelltypeAssignmentTemplate):
     classifier_training_data_table = ClassifierTrainingData
     classifier_table = Classifier
     baden_trace_table = Baden16Traces
+    field_table = Field
+    roi_table = Roi
+    os_ds_table = OsDsIndexes
 
 
 # Receptive fields
 @schema
 class DNoiseTraceParams(receptivefield.DNoiseTraceParamsTemplate):
-    pass
+    stimulus_table = Stimulus
 
 
 @schema
@@ -107,6 +114,7 @@ class FitDoG2DRF(receptivefield.FitDoG2DRFTemplate):
 # Retinal field location
 @schema
 class OpticDisk(location.OpticDiskTemplate):
+    raw_params_table = RawDataParams
     userinfo_table = UserInfo
     experiment_table = Experiment
 
@@ -121,14 +129,3 @@ class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
 class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
     relativefieldlocation_table = RelativeFieldLocation
     expinfo_table = Experiment.ExpInfo
-
-
-# Misc
-@schema
-class HighRes(misc.HighResTemplate):
-    field_table = Field
-    experiment_table = Experiment
-    userinfo_table = UserInfo
-
-    class StackAverages(misc.HighResTemplate.StackAverages):
-        pass

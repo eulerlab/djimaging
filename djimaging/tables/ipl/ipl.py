@@ -27,7 +27,7 @@ from djimaging.utils.dj_utils import get_primary_key
 from matplotlib import pyplot as plt
 
 from djimaging.utils.plot_utils import plot_roi_mask_boundaries, prep_long_title
-from djimaging.utils.scanm_utils import get_roi_centers
+from djimaging.utils.scanm.roi_utils import get_roi_centers
 from djimaging.utils.math_utils import normalize_soft_zero_one
 
 
@@ -79,7 +79,7 @@ class IplBordersTemplate(dj.Manual):
 
         return ch0_avg, ch1_avg
 
-    def gui(self, key, figsize=(8, 5), left0=12, right0=12, thick0=30, q_clip0=0.0, q_clip1=0.0):
+    def gui(self, key, figsize=(8, 5), left0=12, right0=12, thick0=30, q_clip0=2.0, q_clip1=2.0):
         import ipywidgets as widgets
 
         ch0_avg, ch1_avg = self.fetch1_and_norm_ch_avgs(key, q_clip0=q_clip0, q_clip1=q_clip1)
@@ -232,12 +232,12 @@ def plot_field_and_fit(left, right, thick, ch0_avg, ch1_avg, figsize=(8, 5), ext
     inl_line[:, 0] = np.arange(ch0_avg.shape[0])
     inl_line[:, 1] = m2 * inl_line[:, 0] + b2
 
-    axs[0].imshow(ch0_avg.T, cmap='viridis', vmin=0, vmax=1, origin='lower', extent=extent)
+    axs[0].imshow(ch0_avg.T, cmap='grey', vmin=0, vmax=1, origin='lower', extent=extent)
     axs[0].plot(gcl_line[:, 0], gcl_line[:, 1], alpha=0.8)
     axs[0].plot(inl_line[:, 0], inl_line[:, 1], alpha=0.8)
     axs[0].set_title('Data Channel')
 
-    axs[1].imshow(ch1_avg.T, cmap='viridis', vmin=0, vmax=1, origin='lower', extent=extent)
+    axs[1].imshow(ch1_avg.T, cmap='grey', vmin=0, vmax=1, origin='lower', extent=extent)
     axs[1].set_title('2nd Channel (e.g. SR101)')
     axs[1].plot(gcl_line[:, 0], gcl_line[:, 1], alpha=0.8)
     axs[1].plot(inl_line[:, 0], inl_line[:, 1], alpha=0.8)

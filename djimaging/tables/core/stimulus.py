@@ -43,25 +43,32 @@ def check_trial_info(trial_info, ntrigger_rep):
 
 class StimulusTemplate(dj.Manual):
     database = ""
+    _incl_snippet_base_dt = False  # Optional for compatibility with previous versions
 
     @property
     def definition(self):
         definition = """
         # Light stimuli
-        stim_name           :varchar(16)       # Unique string identifier
+        stim_name           :varchar(32)       # Unique string identifier
         ---
-        alias               :varchar(191)      # Strings (_ seperator) to identify this stimulus, not case sensitive!
-        stim_family=""      :varchar(32)       # To group stimuli (e.g. gChirp and lChirp) for downstream processing 
+        alias               :varchar(999)       # Strings (_ seperator) to identify this stimulus, not case sensitive!
+        stim_family=""      :varchar(191)       # To group stimuli (e.g. gChirp and lChirp) for downstream processing 
         framerate=0         :float              # framerate in Hz
         isrepeated=0        :tinyint unsigned   # Is the stimulus repeated? Used for snippets
-        ntrigger_rep=0      :int unsigned       # Number of triggers (per repetition)  
+        ntrigger_rep=0      :mediumint unsigned # Number of triggers (per repetition)
         stim_path=""        :varchar(191)       # Path to hdf5 file containing numerical array and info about stim
         commit_id=""        :varchar(191)       # Commit id corresponding to stimulus entry in GitHub repo
-        stim_hash=""        :varchar(191)       # QDSPy hash
+        stim_hash=""        :varchar(191)       # QDSpy hash
         trial_info=NULL     :longblob           # trial information, e.g. directions of moving bar
         stim_trace=NULL     :longblob           # array of stimulus if available
         stim_dict=NULL      :longblob           # stimulus information dictionary, contains e.g. spatial extent
         """
+
+        if self._incl_snippet_base_dt:
+            definition += """
+            snippet_base_dt=NULL : float           # Time used for snippet baseline estimation
+            """
+
         return definition
 
     def check_alias(self, alias: str, stim_name: str):
@@ -72,7 +79,8 @@ class StimulusTemplate(dj.Manual):
                     f'Found existing alias `{existing_alias_i}`. Set `unique_alias` to False to insert duplicate.'
 
     def add_stimulus(self, stim_name: str, alias: str, stim_family: str = "", framerate: float = 0,
-                     isrepeated: bool = 0, ntrigger_rep: int = 0, stim_path: str = "", commit_id: str = "",
+                     isrepeated: bool = 0, ntrigger_rep: int = 0, snippet_base_dt: float = None,
+                     stim_path: str = "", commit_id: str = "",
                      trial_info: Iterable = None, stim_trace: np.ndarray = None, stim_dict: dict = None,
                      skip_duplicates: bool = False, unique_alias: bool = True) -> None:
         """
@@ -83,6 +91,7 @@ class StimulusTemplate(dj.Manual):
         :param framerate: See table definition.
         :param isrepeated: See table definition.
         :param ntrigger_rep: See table definition.
+        :param snippet_base_dt: See table definition.
         :param stim_path: See table definition.
         :param commit_id: See table definition.
         :param trial_info: See table definition.
@@ -121,6 +130,14 @@ class StimulusTemplate(dj.Manual):
             "stim_dict": stim_dict,
         }
 
+        if self._incl_snippet_base_dt:
+            key["snippet_base_dt"] = snippet_base_dt
+        elif snippet_base_dt is not None:
+            raise ValueError(
+                'Snippet base dt is not supported for this table. '
+                'Set `_incl_snippet_base_dt` to True in the table definition or remove the parameter.'
+            )
+
         self.insert1(key, skip_duplicates=skip_duplicates)
 
     def update_trial_info_format(self, restriction=None):
@@ -146,9 +163,11 @@ class StimulusTemplate(dj.Manual):
 
     def add_noise(self, stim_name: str = "noise", stim_family: str = 'noise',
                   framerate: float = 5., ntrigger_rep: int = 1500, isrepeated: bool = False,
+                  snippet_base_dt: float = None,
                   alias: str = None, ntrigger_per_frame: int = 1, stim_trace=None,
                   pix_n_x: int = None, pix_n_y: int = None, pix_scale_x_um: float = None, pix_scale_y_um: float = None,
                   n_colors: int = None, locations_cats: list = None,
+                  offset_x_um: float = None, offset_y_um: float = None,
                   skip_duplicates: bool = False) -> None:
 
         if alias is None:
@@ -170,6 +189,21 @@ class StimulusTemplate(dj.Manual):
             stim_dict["pix_scale_y_um"] = pix_scale_y_um
         if locations_cats is not None:
             stim_dict["locations_cats"] = locations_cats
+        if offset_x_um is not None:
+            stim_dict["offset_x_um"] = offset_x_um
+        else:
+            warnings.warn(
+                "Stimulus offset not set. Assuming 0 offset. "
+                "This is incorrect for the standard dense noise stimulus.")
+            stim_dict["offset_x_um"] = 0
+
+        if offset_y_um is not None:
+            stim_dict["offset_y_um"] = offset_y_um
+        else:
+            warnings.warn(
+                "Stimulus offset not set. Assuming 0 offset. "
+                "This is incorrect for the standard dense noise stimulus.")
+            stim_dict["offset_y_um"] = 0
 
         self.add_stimulus(
             stim_name=stim_name,
@@ -177,6 +211,7 @@ class StimulusTemplate(dj.Manual):
             alias=alias,
             ntrigger_rep=ntrigger_rep,
             isrepeated=isrepeated,
+            snippet_base_dt=snippet_base_dt,
             framerate=framerate,
             skip_duplicates=skip_duplicates,
             unique_alias=True,
@@ -186,8 +221,8 @@ class StimulusTemplate(dj.Manual):
 
     def add_chirp(self, stim_name: str = "chirp", stim_family: str = 'chirp',
                   spatialextent: float = None, framerate: float = 1 / 60.,
-                  ntrigger_rep: int = 2, isrepeated: bool = True, stim_trace: np.ndarray = None,
-                  alias: str = None, skip_duplicates: bool = False):
+                  ntrigger_rep: int = 2, isrepeated: bool = True, snippet_base_dt: float = None,
+                  stim_trace: np.ndarray = None, alias: str = None, skip_duplicates: bool = False):
 
         if alias is None:
             alias = "chirp_gchirp_globalchirp_lchirp_localchirp"
@@ -200,8 +235,9 @@ class StimulusTemplate(dj.Manual):
             stim_name=stim_name,
             stim_family=stim_family,
             alias=alias,
-            ntrigger_rep=ntrigger_rep,
             isrepeated=isrepeated,
+            ntrigger_rep=ntrigger_rep,
+            snippet_base_dt=snippet_base_dt,
             framerate=framerate,
             skip_duplicates=skip_duplicates,
             unique_alias=True,
@@ -210,12 +246,17 @@ class StimulusTemplate(dj.Manual):
         )
 
     def add_movingbar(self, stim_name: str = "movingbar", stim_family: str = 'movingbar',
-                      bardx: float = None, bardy: float = None, velumsec: float = None, tmovedurs: float = None,
                       ntrigger_rep: int = 1, isrepeated: bool = 1, trial_info=None, framerate: float = 1 / 60.,
+                      snippet_base_dt: float = None,
+                      bardx: float = None, bardy: float = None, velumsec: float = None, tmovedurs: float = None,
                       alias: str = None, skip_duplicates: bool = False):
 
         if trial_info is None:
             trial_info = np.array([0, 180, 45, 225, 90, 270, 135, 315])
+            # In the setups this corresponds to the following directions
+            # (assuming the standard setup 1 stimulus was used):
+            # Setup 1: →, ←, ↗, ↙, ↑, ↓, ↖, ↘ (rotated 90° counterclockwise and then flipped upside-down)
+            # Setup 3: →, ←, ↘, ↖, ↓, ↑, ↙, ↗ (rotated 90° counterclockwise)
 
         if alias is None:
             alias = "mb_mbar_bar_movingbar"
@@ -233,6 +274,7 @@ class StimulusTemplate(dj.Manual):
             alias=alias,
             ntrigger_rep=ntrigger_rep,
             isrepeated=isrepeated,
+            snippet_base_dt=snippet_base_dt,
             framerate=framerate,
             trial_info=trial_info,
             stim_dict=stim_dict,

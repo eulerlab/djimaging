@@ -1,22 +1,22 @@
-import os
 import warnings
 from abc import abstractmethod
 from copy import deepcopy
 
 import datajoint as dj
+import matplotlib.pyplot as plt
 import numpy as np
 
-from djimaging.utils.datafile_utils import get_condition, get_stim
-from djimaging.utils import scanm_utils
-from djimaging.utils.alias_utils import get_field_files
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm_utils import get_stimulator_delay, load_roi_mask_from_h5
+from djimaging.utils.scanm.recording import ScanMRecording
 
 
 class PresentationTemplate(dj.Computed):
     database = ""
-    __filepath = 'h5_header'
+    incl_region = True  # Include region as primary key?
+    incl_cond1 = True  # Include condition 1 as primary key?
+    incl_cond2 = False  # Include condition 2 as primary key?
+    incl_cond3 = False  # Include condition 3 as primary key?
 
     @property
     def definition(self):
@@ -24,27 +24,56 @@ class PresentationTemplate(dj.Computed):
         # information about each stimulus presentation
         -> self.field_table
         -> self.stimulus_table
-        -> self.params_table
-        condition             :varchar(16)     # condition (pharmacological or other)
+        -> self.raw_params_table
+        """
+
+        if self.incl_region and not self.field_table.incl_region:
+            definition += "    region   :varchar(16)    # region (e.g. LR or RR)\n"
+        if self.incl_cond1 and not self.field_table.incl_cond1:
+            definition += "    cond1    :varchar(16)    # condition (pharmacological or other)\n"
+        if self.incl_cond2 and not self.field_table.incl_cond2:
+            definition += "    cond2    :varchar(16)    # condition (pharmacological or other)\n"
+        if self.incl_cond3 and not self.field_table.incl_cond3:
+            definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
+
+        definition += """
         ---
-        {self.filepath}     :varchar(191)     # path to h5 file
-        trigger_flag          :tinyint unsigned # Are triggers as expected (1) or not (0)?
-        triggertimes          :longblob         # triggertimes in each presentation
-        triggervalues         :longblob         # values of the recorded triggers
+        pres_data_file :varchar(191)        # path to file (e.g. h5 file)
+        triggertimes :longblob              # triggertimes in each presentation
+        trigger_valid :tinyint unsigned     # Are triggers as expected (1) or not (0)?
+        absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
+        absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
+        absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
         scan_type: enum("xy", "xz", "xyz")  # Type of scan
-        npixartifact : int unsigned # Number of pixel with light artifact
-        pixel_size_um :float  # width / height of a pixel in um
-        z_step_um :float  # z-step in um
+        npixartifact : int unsigned         # number of pixel with light artifact
+        nxpix: int unsigned                 # number of pixels in x
+        nypix: int unsigned                 # number of pixels in y
+        nzpix: int unsigned                 # number of pixels in z
+        nxpix_offset: int unsigned          # number of offset pixels in x
+        nxpix_retrace: int unsigned         # number of retrace pixels in x
+        pixel_size_um :float                # width of a pixel in um (also height if y is second dimension)
+        z_step_um = NULL :float             # z-step in um
+        nframes: int unsigned               # number of pixels in time
         """
         return definition
 
     @property
-    def filepath(self):
-        return self.__filepath
+    def new_primary_keys(self):
+        """Primary keys that will be added in this table with respect to the field table."""
+        new_primary_keys = ['stim_name']
+        if self.incl_region and not self.field_table.incl_region:
+            new_primary_keys.append('region')
+        if self.incl_cond1 and not self.field_table.incl_cond1:
+            new_primary_keys.append('cond1')
+        if self.incl_cond2 and not self.field_table.incl_cond2:
+            new_primary_keys.append('cond2')
+        if self.incl_cond3 and not self.field_table.incl_cond3:
+            new_primary_keys.append('cond3')
+        return new_primary_keys
 
     @property
     @abstractmethod
-    def params_table(self):
+    def raw_params_table(self):
         pass
 
     @property
@@ -70,7 +99,7 @@ class PresentationTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.params_table.proj() * self.field_table.RoiMask.proj() * self.stimulus_table.proj()
+            return self.field_table.proj() * self.stimulus_table.proj() * self.raw_params_table.proj()
         except (AttributeError, TypeError):
             pass
 
@@ -80,21 +109,9 @@ class PresentationTemplate(dj.Computed):
             definition = """
             # Stack median (over time of the available channels)
             -> master
-            ch_name : varchar(16)  # name of the channel
+            ch_name : varchar(32)  # name of the channel
             ---
             ch_average : longblob  # Stack median over time
-            """
-            return definition
-
-    class RoiMask(dj.Part):
-        @property
-        def definition(self):
-            definition = """
-            # ROI Mask of presentation
-            -> master
-            ---
-            pres_and_field_mask  : enum("same", "different", "shifted", "similar", "no_field_mask")  # relationship to field mask
-            roi_mask    :longblob       # roi mask for the presentation, can be same as field
             """
             return definition
 
@@ -105,91 +122,54 @@ class PresentationTemplate(dj.Computed):
             # Data read from wParamsNum and wParamsStr tables in h5 file
             -> master
             ---
-            scan_period=0              :float # Scanning frequency in Hz
-            scan_frequency=0           :float # Scanning frequency in Hz
-            line_duration=0            :float # Line duration from OS_Parameters
-            hdrleninvaluepairs         :int        
-            hdrleninbytes              :float        
-            minvolts_ao                :float        
-            maxvolts_ao                :float        
-            stimchanmask               :float        
-            maxstimbufmaplen           :float        
-            numberofstimbufs           :int        
-            targetedpixdur_us          :float        
-            minvolts_ai                :float        
-            maxvolts_ai                :float        
-            inputchanmask              :int        
-            numberofinputchans         :int        
-            pixsizeinbytes             :float        
-            numberofpixbufsset         :int        
-            pixeloffs                  :float        
-            pixbufcounter              :float        
-            user_scanmode              :float        
-            user_dxpix                 :int        
-            user_dypix                 :int        
-            user_npixretrace           :int        
-            user_nxpixlineoffs         :int        
-            user_nypixlineoffs=0       :int        
-            user_divframebufreq        :float        
-            user_scantype              :float        
-            user_scanpathfunc          :varchar(191) 
-            user_nsubpixoversamp       :int        
-            user_nfrperstep            :int        
-            user_xoffset_v             :float        
-            user_yoffset_v             :float        
-            user_offsetz_v=0           :float        
-            user_zoomz=0               :float        
-            user_noyscan=0             :float        
-            realpixdur                 :float        
-            oversampfactor             :float        
-            xcoord_um                  :float        
-            ycoord_um                  :float        
-            zcoord_um                  :float        
-            zstep_um=0                 :float        
-            zoom                       :float        
-            angle_deg                  :float        
-            datestamp_d_m_y            :varchar(191) 
-            timestamp_h_m_s_ms         :varchar(191) 
-            inchan_pixbuflenlist       :varchar(191) 
-            username                   :varchar(191) 
-            guid                       :varchar(191) 
-            origpixdatafilename        :varchar(191) 
-            stimbuflenlist             :varchar(191) 
-            callingprocessver          :varchar(191) 
-            callingprocesspath         :varchar(191) 
-            targetedstimdurlist        :varchar(191) 
-            computername               :varchar(191) 
-            scanm_pver_targetos        :varchar(191) 
-            user_zlensscaler=0         :float        
-            user_stimbufperfr=0        :float        
-            user_aspectratiofr=0       :float        
-            user_zforfastscan=0        :float        
-            user_zlensshifty=0         :float        
-            user_nzpixlineoff=0        :float        
-            user_dzpix=0               :float        
-            user_setupid=0             :float        
-            user_nzpixretrace=0        :float        
-            user_laserwavelen_nm=0     :float        
-            user_scanpathfunc          :varchar(191) 
-            user_dzfrdecoded=0         :int        
-            user_dxfrdecoded=0         :int        
-            user_dyfrdecoded=0         :int        
-            user_zeroz_v=0             :float        
-            igorguiver                 :varchar(191) 
-            user_comment=''            :varchar(191) 
-            user_objective=''          :varchar(191) 
-            realstimdurlist=""         :varchar(191) 
-            user_ichfastscan=0         :float        
-            user_trajdefvrange_v=0     :float        
-            user_ntrajparams=0         :float        
-            user_offset_v=0            :float        
-            user_etl_polarity_v=0      :float        
-            user_etl_min_v=0           :float        
-            user_etl_max_v=0           :float        
-            user_etl_neutral_v=0       :float        
-            user_nimgperfr=0           :int      
+            scan_frequency=-1 :float             # Scanning frequency in Hz
+            scan_period=-1 :float                # Scanning duration per frame in seconds
+            line_duration=-1 :float              # Line duration from OS_Parameters
+            real_pixel_duration=-1 :float        # Duration of a pixel (un-cropped)
+            zoom :float                          # Zoom of objective, changes pixel size
+            angle_deg :float                     # Angle of objective, changes rotation of image
+            scan_params_dict :longblob           # Other ScanM parameters less frequently used
             """
             return definition
+
+    def load_field_stim_file_info_df(self, field_stim_key):
+        """Load file info for a given field into a dataframe."""
+        file_info_df = self.field_table().load_exp_file_info_df(field_stim_key, filter_kind='response')
+
+        for new_key in self.field_table().new_primary_keys:
+            file_info_df = file_info_df[file_info_df[new_key] == field_stim_key[new_key]]
+
+        # Filter wrong stimuli
+        trg_stim_aliases = (self.stimulus_table & field_stim_key).fetch1('alias').split('_')
+        file_info_df = file_info_df[file_info_df['stimulus'].apply(lambda x: x.lower() in trg_stim_aliases)]
+        file_info_df['stim_name'] = field_stim_key['stim_name']
+
+        # Set defaults
+        if self.incl_cond1 and not self.field_table.incl_cond1:
+            if 'cond1' in file_info_df:
+                file_info_df['cond1'].fillna('control', inplace=True)
+            else:
+                file_info_df['cond1'] = 'control'
+        if self.incl_cond2 and not self.field_table.incl_cond2:
+            if 'cond2' in file_info_df:
+                file_info_df['cond2'].fillna('control', inplace=True)
+            else:
+                file_info_df['cond2'] = 'control'
+        if self.incl_cond3 and not self.field_table.incl_cond3:
+            if 'cond3' in file_info_df:
+                file_info_df['cond3'].fillna('control', inplace=True)
+            else:
+                file_info_df['cond3'] = 'control'
+        if self.incl_region and not self.field_table.incl_region:
+            if 'region' in file_info_df:
+                file_info_df['region'].fillna('N/A', inplace=True)
+            else:
+                file_info_df['region'] = 'N/A'
+
+        return file_info_df
+
+    def make(self, key, verboselvl: int = 0):
+        self._add_entries(key, only_new=False, verboselvl=verboselvl, suppress_errors=False)
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False):
         """Scan filesystem for new fields and add them to the database."""
@@ -197,168 +177,198 @@ class PresentationTemplate(dj.Computed):
             restrictions = dict()
 
         for key in (self.key_source & restrictions):
-            self.add_field_presentations(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
+            self._add_entries(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def make(self, key, verboselvl=0):
-        self.add_field_presentations(key, only_new=False, verboselvl=0, suppress_errors=False)
-
-    def add_field_presentations(self, key, only_new: bool, verboselvl: int, suppress_errors: bool):
-
+    def _add_entries(self, field_stim_key, only_new: bool, verboselvl: int, suppress_errors: bool):
+        """
+        Add entries for a given Field + Stimulus combination.
+        This can be multiple presentations due to different conditions.
+        """
         if verboselvl > 2:
-            print('key:', key)
+            print('\nProcessing key:', field_stim_key)
 
-        field = (self.field_table() & key).fetch1("field")
-        stim_loc, field_loc, condition_loc = (self.userinfo_table() & key).fetch1(
-            "stimulus_loc", "field_loc", "condition_loc")
-        stim_alias = (self.stimulus_table() & key).fetch1("alias").split('_')
+        file_info_df = self.load_field_stim_file_info_df(field_stim_key)
 
-        pre_data_path = os.path.join(
-            (self.experiment_table() & key).fetch1('header_path'),
-            (self.userinfo_table() & key).fetch1("pre_data_dir"))
-        assert os.path.exists(pre_data_path), f"Error: Data folder does not exist: {pre_data_path}"
+        if len(self.new_primary_keys) > 0:
+            pres_dfs = file_info_df.groupby(self.new_primary_keys)
+        else:
+            pres_dfs = [(None, file_info_df)]
 
-        field_files = get_field_files(folder=pre_data_path, field=field, field_loc=field_loc, incl_hidden=False)
+        if (verboselvl > 0 and len(file_info_df) > 0) or verboselvl > 3:
+            print(f"Found {len(file_info_df)} files for key={field_stim_key}")
 
-        pres_files = []
-        for data_file in field_files:
-            stim = get_stim(data_file, loc=stim_loc, fill_value='nostim')
-            condition = get_condition(data_file, loc=condition_loc)
-            if (stim == 'nostim') or (len(stim) == 0) or (stim.lower() not in stim_alias):
-                continue
-            if ("condition" in key) and (key['condition'] != condition):
-                continue
-            pres_files.append(data_file)
+        if verboselvl > 3:
+            print(file_info_df['filepath'].values)
 
-        for data_file in pres_files:
-            new_key = deepcopy(key)
-            new_key["condition"] = get_condition(data_file, loc=condition_loc)
+        for pres_info, pres_df in pres_dfs:
+            if len(self.new_primary_keys) > 0:
+                pres_key = {**dict(zip(self.new_primary_keys, pres_info)), **field_stim_key}
+            else:
+                pres_key = field_stim_key
 
-            for k in self.primary_key:
-                assert k in new_key, f'Did not find k={k} in new_key.'
+            if len(pres_df) > 1:
+                raise ValueError(f"Found multiple files for key={pres_key}:\n{pres_df['filepath'].values}\n"
+                                 "Probably you have multiple conditions / regions for the same field. "
+                                 "Please check the primary keys of the field and presentation table. "
+                                 "Consider setting `incl_region=True`, `incl_cond1=True` etc.")
 
-            exists = len((self & new_key).fetch()) > 0
-            if only_new and exists:
+            if only_new and (len((self & pres_key).proj()) > 0):
                 if verboselvl > 1:
-                    print(f"\tSkipping presentation for `{data_file}`, which is already present")
+                    print(f"\tSkipping presentation `{pres_key}` because it already exists")
                 continue
+
+            if verboselvl > 0:
+                print(f"\tAdding presentation: `{pres_key}`")
 
             try:
-                if verboselvl > 0:
-                    print(f"\tAdding presentation for `{data_file}`.")
-                self.add_presentation(key=new_key, filepath=os.path.join(pre_data_path, data_file))
+                self._add_entry(
+                    pres_key=pres_key, filepath=pres_df.iloc[0]['filepath'], verboselvl=verboselvl)
             except Exception as e:
                 if suppress_errors:
-                    print("Suppressed Error:", e, '\n\tfor key:', key)
+                    print("Suppressed Error:", e, '\n\tfor key:\n', pres_key, '\n\t', pres_df.iloc[0]['filepath'])
                 else:
-                    print(f"Error for key: {key}")
                     raise e
 
-    def add_presentation(self, key, filepath: str, compute_from_stack: bool = True):
-        ch_stacks, wparams = scanm_utils.load_stacks_from_h5(filepath, ('wDataCh0', 'wDataCh1', 'wDataCh2'))
+    def _add_entry(self, pres_key, filepath: str, verboselvl=0):
+        """
+        Add presentation for Field + Stimulus + Conditions combination.
+        """
 
-        if compute_from_stack:
-            setupid = (self.experiment_table.ExpInfo() & key).fetch1("setupid")
-            stimulator_delay = get_stimulator_delay(date=key['date'], setupid=setupid)
-            trigger_precision = (self.params_table() & key).fetch1("trigger_precision")
-            triggertimes, triggervalues = scanm_utils.compute_triggers_from_wparams(
-                ch_stacks['wDataCh2'], wparams=wparams, precision=trigger_precision, stimulator_delay=stimulator_delay)
-        else:
-            triggertimes, triggervalues = scanm_utils.load_triggers_from_h5(filepath)
+        if verboselvl > 4:
+            print('\t\tAdd presentation with file:', filepath)
 
-        isrepeated, ntrigger_rep = (self.stimulus_table() & key).fetch1("isrepeated", "ntrigger_rep")
+        setupid = (self.experiment_table().ExpInfo & pres_key).fetch1("setupid")
+        from_raw_data, trigger_precision, compute_from_stack = (self.raw_params_table & pres_key).fetch1(
+            'from_raw_data', 'trigger_precision', 'compute_from_stack')
+        isrepeated, ntrigger_rep = (self.stimulus_table & pres_key).fetch1("isrepeated", "ntrigger_rep")
 
-        if isrepeated == 0:
-            trigger_flag = triggertimes.size == ntrigger_rep
-        else:
-            trigger_flag = triggertimes.size % ntrigger_rep == 0
+        rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=pres_key['date'],
+                             repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep, time_precision=trigger_precision)
 
-        if trigger_flag == 0:
-            warnings.warn(f'Found {triggertimes.size} triggers, expected {ntrigger_rep} (per rep): key={key}.')
+        if compute_from_stack or from_raw_data:
+            rec.compute_triggers(trigger_threshold='auto')
+            i = 0
 
-        roi_mask = load_roi_mask_from_h5(filepath=filepath, ignore_not_found=True)
-        field_roi_masks = (self.field_table.RoiMask & key).fetch('roi_mask')
+            found_triggers = rec.trigger_times.size
+            min_expected_triggers = 2 * ntrigger_rep if isrepeated else int(0.8 * ntrigger_rep)
 
-        if len(field_roi_masks) == 0:
-            pres_and_field_mask = 'no_field_mask'
-        elif len(field_roi_masks) == 1:
-            pres_and_field_mask = scanm_utils.compare_roi_masks(roi_mask, field_roi_masks[0])
-        else:
-            raise ValueError(f'Found multiple ROI masks for key={key} in Field. Should be 0 or 1.')
+            original_threshold = rec.trigger_threshold
 
-        setupid = (self.experiment_table().ExpInfo() & key).fetch1("setupid")
-        nxpix = wparams["user_dxpix"] - wparams["user_npixretrace"] - wparams["user_nxpixlineoffs"]
-        pixel_size_um = scanm_utils.get_pixel_size_xy_um(zoom=wparams["zoom"], setupid=setupid, npix=nxpix)
-        z_step_um = wparams.get('zstep_um', 0.)
-        npixartifact = scanm_utils.get_npixartifact(setupid=setupid)
-        scan_type = scanm_utils.get_scan_type_from_wparams(wparams)
+            # If expects triggers and way too few found repeat
+            while (found_triggers < min_expected_triggers) and i < 5:
+                if verboselvl > 1:
+                    print(f"Found {found_triggers} triggers, expected more than {min_expected_triggers} triggers. \n"
+                          f"Trying to reduce trigger threshold for {filepath}")
 
-        field_pixel_size_um = (self.field_table & key).fetch1("pixel_size_um")
-        if not np.isclose(pixel_size_um, field_pixel_size_um):
+                rec.trigger_threshold = 0.8 * rec.trigger_threshold
+                rec.compute_triggers()
+                i += 1
+
+            if found_triggers < min_expected_triggers:
+                rec.trigger_threshold = original_threshold
+                rec.compute_triggers()
+
+                warnings.warn(
+                    f"Found {found_triggers} triggers, expected more than {min_expected_triggers} triggers. \n"
+                    f"Trying to reduce trigger threshold for {filepath}")
+
+            if i > 0 and verboselvl > 0:
+                print(f"Reduced trigger threshold to {rec.trigger_threshold:.3g} for {filepath}")
+
+        pres_entry, scaninfo_entry, avg_entries = self._complete_keys(pres_key, rec)
+
+        # Sanity checks
+        field_pixel_size_um = (self.field_table & pres_key).fetch1("pixel_size_um")
+        if not np.isclose(pres_entry['pixel_size_um'], field_pixel_size_um):
             warnings.warn(
-                f"""pixel_size_um {pixel_size_um:.3g} is different in field {field_pixel_size_um}.
-                Did you use a different zoom?
-                This can result in unexpected problems.""")
+                f"Warning for key={pres_key}.\n"
+                f"pixel_size_um {pres_entry['pixel_size_um']:.3g} is different in field {field_pixel_size_um}. "
+                f"Did you use a different zoom? This can result in unexpected problems.")
 
-        pres_key = deepcopy(key)
-        pres_key[self.filepath] = filepath
-        pres_key["trigger_flag"] = int(trigger_flag)
-        pres_key["triggertimes"] = triggertimes
-        pres_key["triggervalues"] = triggervalues
-        pres_key["scan_type"] = scan_type
-        pres_key["npixartifact"] = npixartifact
-        pres_key["pixel_size_um"] = pixel_size_um
-        pres_key["z_step_um"] = z_step_um
+        if pres_entry["trigger_valid"] == 0:
+            warnings.warn(
+                f"Warning for key={pres_key}.\n"
+                f'Found {pres_entry["triggertimes"].size} triggers, expected {ntrigger_rep} '
+                f'{"(per rep)" if isrepeated else ""}: {filepath}.')
+
+        self.insert1(pres_entry, allow_direct_insert=True)
+        self.ScanInfo().insert1(scaninfo_entry, allow_direct_insert=True)
+        for avg_entry in avg_entries:
+            self.StackAverages().insert1(avg_entry, allow_direct_insert=True)
+
+    @staticmethod
+    def _complete_keys(base_key, rec) -> (dict, dict, list):
+
+        pres_entry = deepcopy(base_key)
+        pres_entry["pres_data_file"] = rec.filepath
+
+        pres_entry["trigger_valid"] = int(rec.trigger_valid)
+        pres_entry["triggertimes"] = rec.trigger_times.astype(np.float32)
+
+        pres_entry["absx"] = rec.pos_x_um
+        pres_entry["absy"] = rec.pos_y_um
+        pres_entry["absz"] = rec.pos_z_um
+        pres_entry["scan_type"] = rec.scan_type
+        pres_entry["npixartifact"] = rec.pix_n_artifact
+        pres_entry["nxpix"] = rec.pix_nx
+        pres_entry["nypix"] = rec.pix_ny
+        pres_entry["nzpix"] = rec.pix_nz
+        pres_entry["nxpix_offset"] = rec.pix_n_line_offset
+        pres_entry["nxpix_retrace"] = rec.pix_n_retrace
+        pres_entry["pixel_size_um"] = rec.pix_dx_um
+        pres_entry["z_step_um"] = rec.pix_dz_um
+        pres_entry["nframes"] = rec.ch_n_frames
 
         # get stack avgs
-        avg_keys = []
-        for name, stack in ch_stacks.items():
-            avg_key = deepcopy(key)
-            avg_key["ch_name"] = name
-            avg_key["ch_average"] = np.median(stack, 2)
-            avg_keys.append(avg_key)
+        avg_entries = []
+        for name, stack in rec.ch_stacks.items():
+            avg_entry = deepcopy(base_key)
+            avg_entry["ch_name"] = name
+            avg_entry["ch_average"] = np.median(stack, 2).astype(np.float32)
+            avg_entries.append(avg_entry)
 
         # extract params for scaninfo
-        scaninfo_key = deepcopy(key)
-        scaninfo_key.update(wparams)
-        try:
-            scaninfo_key["line_duration"] = (wparams['user_dxpix'] * wparams['realpixdur']) * 1e-6
-            scaninfo_key["scan_period"] = (scaninfo_key["line_duration"] * wparams['user_dypix'])
-            scaninfo_key["scan_frequency"] = 1. / scaninfo_key["scan_period"]
-        except KeyError:
-            pass
-        remove_list = ["user_warpparamslist", "user_nwarpparams"]
-        for k in remove_list:
-            scaninfo_key.pop(k, None)
+        scaninfo_entry = deepcopy(base_key)
 
-        # Roi mask key
-        if roi_mask is not None:
-            roimask_key = deepcopy(key)
-            roimask_key["roi_mask"] = roi_mask
-            roimask_key["pres_and_field_mask"] = pres_and_field_mask
-        else:
-            roimask_key = None
+        scaninfo_entry["scan_frequency"] = rec.scan_frequency
+        scaninfo_entry["scan_period"] = rec.scan_period
+        scaninfo_entry["line_duration"] = rec.scan_line_duration
+        scaninfo_entry["real_pixel_duration"] = rec.real_pixel_duration
+        scaninfo_entry["zoom"] = rec.obj_zoom
+        scaninfo_entry["angle_deg"] = rec.obj_angle_deg
+        scaninfo_entry["scan_params_dict"] = rec.wparams_other
 
-        self.insert1(pres_key, allow_direct_insert=True)
-        (self.ScanInfo & key).insert1(scaninfo_key, allow_direct_insert=True)
-        if roimask_key is not None:
-            (self.RoiMask & key).insert1(roimask_key, allow_direct_insert=True)
-        for avg_key in avg_keys:
-            (self.StackAverages & key).insert1(avg_key, allow_direct_insert=True)
+        return pres_entry, scaninfo_entry, avg_entries
 
-    def plot1(self, key=None, plot_field_rois=False):
+    def plot1(self, key=None, gamma=0.7):
         key = get_primary_key(table=self, key=key)
-
-        field_roi_mask = (self.field_table.RoiMask & key).fetch1("roi_mask")
-        pres_roi_mask, pres_and_field_mask = (self.RoiMask & key).fetch1("roi_mask", "pres_and_field_mask")
-
-        if pres_and_field_mask != 'same':
-            warnings.warn(f'field_roi_mask and pres_roi_mask are {pres_and_field_mask}, ' +
-                          f'plot_field_rois={plot_field_rois}')
-
-        roi_mask = field_roi_mask if plot_field_rois else pres_roi_mask
-
-        npixartifact = (self.field_table & key).fetch1('npixartifact')
+        npixartifact, scan_type = (self.field_table & key).fetch1('npixartifact', 'scan_type')
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
         main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
-        alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
-        plot_field(main_ch_average, alt_ch_average, roi_mask, title=key, npixartifact=npixartifact)
+        try:
+            alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+        except dj.DataJointError:
+            alt_ch_average = np.full_like(main_ch_average, np.nan)
+        plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
+                   title=key, npixartifact=npixartifact, figsize=(8, 4), gamma=gamma)
+
+    def plot1_triggers(self, key=None):
+        key = get_primary_key(table=self, key=key)
+        triggertimes, filepath = (self & key).fetch1('triggertimes', 'pres_data_file')
+
+        setupid = (self.experiment_table().ExpInfo & key).fetch1("setupid")
+        isrepeated, ntrigger_rep = (self.stimulus_table & key).fetch1("isrepeated", "ntrigger_rep")
+
+        rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=key['date'],
+                             repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep)
+        rec.set_auto_trigger_threshold()
+
+        trigger_trace = rec.ch_stacks[rec.trigger_ch_name].T.flatten()
+
+        fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+        ax.set_title(f"{len(triggertimes)} triggers detected")
+        ax.plot(np.arange(trigger_trace.size) * (rec.scan_line_duration / rec.pix_nx),
+                trigger_trace)
+        ax.axhline(rec.trigger_threshold, c='r')
+        ax.plot(triggertimes, np.full(len(triggertimes), rec.trigger_threshold), 'ro')
+        return fig, ax, rec

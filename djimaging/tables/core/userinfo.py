@@ -4,6 +4,7 @@ from copy import deepcopy
 import datajoint as dj
 
 from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.filesystem_utils import print_tree
 
 
 class UserInfoTemplate(dj.Manual):
@@ -11,20 +12,21 @@ class UserInfoTemplate(dj.Manual):
 
     @property
     def definition(self):
-        definition = """
+        definition = f"""
         # Info for decoding file names
-    
         experimenter                    :varchar(16)  # name of the experimenter
         ---     
-        data_dir                        :varchar(191)  # path to header file, used for computed tables
-        datatype_loc                    :tinyint       # string location for datatype (e.g. SMP)
-        animal_loc                      :tinyint       # string location for number of animal (e.g. M1)
-        region_loc                      :tinyint       # string location for region (e.g. LR or RR)
+        data_dir                        :varchar(191)   # path to header file, used for computed tables
         field_loc                       :tinyint       # string location for field
         stimulus_loc                    :tinyint       # string location for stimulus
-        condition_loc                   :tinyint       # string location for (pharmacological) condition
-        opticdisk_alias='od_opticdisk_opticdisc'  :varchar(191)  # alias(es) for optic disk recordings (separated by _)
-        outline_alias='outline_edge'    :varchar(191)  # alias(es) for retinal outline / edge recordings (separated by _)
+        animal_loc=NULL                 :tinyint       # string location for number of animal (e.g. M1)
+        datatype_loc=NULL               :tinyint       # string location for datatype (e.g. SMP)
+        region_loc=NULL                 :tinyint       # string location for region (e.g. LR or RR)
+        cond1_loc=NULL                  :tinyint       # string location for condition 1 (e.g. pharmacological)
+        cond2_loc=NULL                  :tinyint       # string location for condition 2 (e.g. pharmacological)
+        cond3_loc=NULL                  :tinyint       # string location for condition 3 (e.g. pharmacological)
+        opticdisk_alias='od_opticdisk_opticdisc'  :varchar(191)  # alias(es) for optic disk (separated by _)
+        outline_alias='outline_edge'    :varchar(191)  # alias(es) for retinal outline / edge (separated by _)
         highres_alias='hq_hr_highresolution_512' :varchar(191)  # alias(es) for high resolution stack
         mask_alias='chirp_mb_movingbar' :varchar(191)  # Ordered alias(es) for field roi mask (separated by _)
         pre_data_dir='Pre'              :varchar(32)  # directory for h5 data files
@@ -72,7 +74,7 @@ class UserInfoTemplate(dj.Manual):
         """
         key = get_primary_key(table=self, key=key)
 
-        from djimaging.utils import datafile_utils
+        from djimaging.utils import filesystem_utils
         data_dir = (self & key).fetch1('data_dir')
 
         assert os.path.isdir(data_dir), f"data_dir={data_dir} is not a directory"
@@ -85,4 +87,4 @@ class UserInfoTemplate(dj.Manual):
         if show_header:
             include_types.append('ini')
 
-        datafile_utils.print_tree(data_dir, include_types=include_types)
+        print_tree(data_dir, include_types=include_types)

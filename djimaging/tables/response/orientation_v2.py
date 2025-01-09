@@ -20,8 +20,7 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.response.orientation_v1 import get_si, quality_index_ds, get_on_off_index, get_dir_idx, \
-    sort_response_matrix
+from djimaging.tables.response.orientation_v1 import preprocess_mb_snippets, get_si, quality_index_ds, get_on_off_index
 from djimaging.utils.dj_utils import get_primary_key
 
 T_START = 1.152
@@ -141,10 +140,7 @@ class OsDsIndexesTemplate(dj.Computed):
             avg_sorted_resp = (self & key).fetch1('avg_sorted_resp')
         else:
             snippets = (self.snippets_table() & key).fetch1('snippets')
-            dir_idx, dir_rad = get_dir_idx(snippets, dir_order)
-
-            sorted_responses, sorted_directions = sort_response_matrix(snippets, dir_idx, dir_rad)
-            avg_sorted_resp = np.mean(sorted_responses, axis=-1)
+            sorted_directions, sorted_responses, avg_sorted_resp = preprocess_mb_snippets(snippets, dir_order)
 
         for idx, (ax_idx, dir_idx) in enumerate(zip(ax_idxs, dir_idxs)):
             ax = axs.flat[ax_idx]
@@ -277,16 +273,13 @@ def compute_null_dist(dirs, counts, per, iters=1000):
     return p, q, qdistr
 
 
-def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n_shuffles: int = 100):
+def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n_shuffles: int = 1000):
     assert snippets.ndim == 2
     assert np.asarray(dir_order).ndim == 1
 
-    dir_idx, dir_rad = get_dir_idx(snippets, dir_order)
+    sorted_directions, sorted_responses, sorted_averages = preprocess_mb_snippets(snippets, dir_order)
 
-    sorted_responses, sorted_directions = sort_response_matrix(snippets, dir_idx, dir_rad)
-    avg_sorted_responses = np.mean(sorted_responses, axis=-1)
-
-    time_component, dir_component = get_time_dir_kernels(avg_sorted_responses, dt=dt)
+    time_component, dir_component = get_time_dir_kernels(sorted_averages, dt=dt)
 
     dsi, pref_dir = get_si(dir_component, sorted_directions, 1)
     osi, pref_or = get_si(dir_component, sorted_directions, 2)
@@ -322,5 +315,5 @@ def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n
         dir_component,
         surrogate_v,
         dsi_s,
-        avg_sorted_responses,
+        sorted_averages,
     )

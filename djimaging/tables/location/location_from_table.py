@@ -1,3 +1,23 @@
+"""
+Tables for location of the recorded fields relative to the optic disk.
+Use if you want to extract locations from a table, e.g. after reconstructing the position with Retiscruct.
+
+Example usage:
+
+from djimaging.tables.location import location_from_table
+
+@schema
+class RetinalFieldLocationTableParams(location_from_table.RetinalFieldLocationTableParamsTemplate):
+    pass
+
+
+@schema
+class RetinalFieldLocationFromTable(location_from_table.RetinalFieldLocationFromTableTemplate):
+    field_table = Field
+    params_table = RetinalFieldLocationTableParams
+    expinfo_table = Experiment.ExpInfo
+"""
+
 import os
 import warnings
 from abc import abstractmethod
@@ -10,23 +30,6 @@ from matplotlib import pyplot as plt
 from djimaging.utils.dj_utils import make_hash
 
 
-def prepare_dj_config_location_from_table(input_folder):
-    stores_dict = {
-        "location_table_input": {"protocol": "file", "location": input_folder, "stage": input_folder}}
-
-    # Make sure folders exits
-    for store, store_dict in stores_dict.items():
-        for name in store_dict.keys():
-            if name in ["location", "stage"]:
-                assert os.path.isdir(store_dict[name]), f'This must be a folder you have access to: {store_dict[name]}'
-
-    os.environ["DJ_SUPPORT_FILEPATH_MANAGEMENT"] = "TRUE"
-
-    dj_config_stores = dj.config['stores'] or dict()
-    dj_config_stores.update(stores_dict)
-    dj.config['stores'] = dj_config_stores
-
-
 class RetinalFieldLocationTableParamsTemplate(dj.Lookup):
     database = ""
     store = "location_table_input"
@@ -34,7 +37,7 @@ class RetinalFieldLocationTableParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        table_hash : varchar(32)         # hash of the classifier params config
+        table_hash : varchar(63)         # hash of the classifier params config
         ---
         table_path :   attach@{store} # Path to table
         col_experimenter = 'experimenter' : varchar(191)
@@ -135,3 +138,20 @@ class RetinalFieldLocationFromTableTemplate(dj.Computed):
         ax.set(xlabel="temporal_nasal_pos", ylabel="ventral_dorsal_pos")
         ax.set_aspect(aspect="equal", adjustable="datalim")
         plt.show()
+
+
+def prepare_dj_config_location_from_table(input_folder):
+    stores_dict = {
+        "location_table_input": {"protocol": "file", "location": input_folder, "stage": input_folder}}
+
+    # Make sure folders exits
+    for store, store_dict in stores_dict.items():
+        for name in store_dict.keys():
+            if name in ["location", "stage"]:
+                assert os.path.isdir(store_dict[name]), f'This must be a folder you have access to: {store_dict[name]}'
+
+    os.environ["DJ_SUPPORT_FILEPATH_MANAGEMENT"] = "TRUE"
+
+    dj_config_stores = dj.config['stores'] or dict()
+    dj_config_stores.update(stores_dict)
+    dj.config['stores'] = dj_config_stores

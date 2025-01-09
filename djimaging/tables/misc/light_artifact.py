@@ -18,9 +18,13 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.utils import math_utils
+from djimaging.autorois.corr_roi_mask_utils import stack_corr_image
+from djimaging.tables.core.averages import compute_upsampled_average
+from djimaging.tables.core.snippets import get_aligned_snippets_times
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.scanm_utils import load_stacks, split_trace_by_reps
+from djimaging.utils.math_utils import normalize
+from djimaging.utils.scanm import read_utils
+from djimaging.utils.snippet_utils import split_trace_by_reps
 
 
 class LightArtifactTemplate(dj.Computed):
@@ -71,7 +75,7 @@ class LightArtifactTemplate(dj.Computed):
         data_name = (self.userinfo_table & key).fetch1('data_stack_name'
                                                        if self._use_main_channel else 'alt_stack_name')
 
-        stack = load_stacks(filepath, from_raw_data, ch_names=(data_name,))[0][data_name]
+        stack = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_name,))[0][data_name]
         light_artifact = stack[0, :, :].T.flatten()
 
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
@@ -85,7 +89,7 @@ class LightArtifactTemplate(dj.Computed):
 
         triggertimes_rel = np.mean(triggertimes_snippets - triggertimes_snippets[0, :], axis=1)
         average = np.mean(snippets, axis=1)
-        average = math_utils.normalize_zero_one(average)
+        average = normalize(average, norm_kind='zero_one')
 
         self.insert1(dict(key, light_artifact=average, triggertimes_rel=triggertimes_rel))
 

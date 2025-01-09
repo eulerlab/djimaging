@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from djimaging.tables.receptivefield import rf_utils
-from djimaging.tables.receptivefield.rf_utils import prepare_noise_data, split_data
+from djimaging.utils.receptive_fields import fit_rf_utils
+from djimaging.utils.receptive_fields.preprocess_rf_utils import prepare_noise_data
 
 try:
     import rfest
@@ -47,7 +47,7 @@ def test_split_train():
         trace=trace, tracetime=tracetime, stim=stim, triggertimes=stimtime,
         fupsample_trace=2, fit_kind='trace', lowpass_cutoff=0)
 
-    x_dict, y_dict = split_data(x=stim, y=trace, frac_train=1., frac_dev=0., as_dict=True)
+    x_dict, y_dict = fit_rf_utils.split_data(x=stim, y=trace, frac_train=1., frac_dev=0., as_dict=True)
     assert set(x_dict.keys()) == {'train'}
 
 
@@ -58,7 +58,7 @@ def test_split_train_dev():
         trace=trace, tracetime=tracetime, stim=stim, triggertimes=stimtime,
         fupsample_trace=2, fit_kind='trace', lowpass_cutoff=0)
 
-    x_dict, y_dict = split_data(x=stim, y=trace, frac_train=0.8, frac_dev=0.2, as_dict=True)
+    x_dict, y_dict = fit_rf_utils.split_data(x=stim, y=trace, frac_train=0.8, frac_dev=0.2, as_dict=True)
 
     assert set(x_dict.keys()) == {'train', 'dev'}
     assert np.isclose(y_dict['dev'].size / y_dict['train'].size, 0.2 / 0.8, atol=0.01, rtol=0.01)
@@ -71,7 +71,7 @@ def test_split_train_test():
         trace=trace, tracetime=tracetime, stim=stim, triggertimes=stimtime,
         fupsample_trace=2, fit_kind='trace', lowpass_cutoff=0)
 
-    x_dict, y_dict = split_data(x=stim, y=trace, frac_train=0.8, frac_dev=0.0, as_dict=True)
+    x_dict, y_dict = fit_rf_utils.split_data(x=stim, y=trace, frac_train=0.8, frac_dev=0.0, as_dict=True)
 
     assert set(x_dict.keys()) == {'train', 'test'}
     assert np.isclose(y_dict['test'].size / y_dict['train'].size, 0.2 / 0.8, atol=0.01, rtol=0.01)
@@ -84,7 +84,7 @@ def test_split_train_dev_test():
         trace=trace, tracetime=tracetime, stim=stim, triggertimes=stimtime,
         fupsample_trace=1, fit_kind='trace', lowpass_cutoff=0)
 
-    x_dict, y_dict = split_data(x=stim, y=trace, frac_train=0.6, frac_dev=0.2, as_dict=True)
+    x_dict, y_dict = fit_rf_utils.split_data(x=stim, y=trace, frac_train=0.6, frac_dev=0.2, as_dict=True)
 
     assert set(x_dict.keys()) == {'train', 'dev', 'test'}
     assert np.isclose(y_dict['dev'].size / y_dict['train'].size, 0.2 / 0.6, atol=0.01, rtol=0.01)
@@ -100,7 +100,7 @@ def test_sta_fit():
         stim_noise='white', rf_kind='gauss', response_noise='none', design_matrix=True,
         n_stim_frames=500, n_reps_per_frame=3, shift=0)
 
-    w_fit = rf_utils.compute_rf_sta(X=X, y=y)
+    w_fit = fit_rf_utils.compute_rf_sta(X=X, y=y)
     fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
     assert fit_mse < np.mean(random_mses) - 2 * np.std(random_mses)
 
@@ -115,7 +115,7 @@ def test_sta_fit_single_batch():
 
     assert w_true.shape[1:] == X.shape[1:]
 
-    w_fit, _ = rf_utils._compute_linear_rf_single_batch(
+    w_fit, _ = fit_rf_utils._compute_linear_rf_single_batch(
         x_train=X, y_train=y, kind='sta', dim_t=w_true.shape[0], shift=0, burn_in=w_true.shape[0] - 1,
         threshold_pred=False, is_spikes=False, dtype=y.dtype)
 
@@ -135,7 +135,7 @@ def test_sta_fit_batchwise():
 
     assert w_true.shape[1:] == X.shape[1:]
 
-    w_fit, _ = rf_utils._compute_sta_batchwise(
+    w_fit, _ = fit_rf_utils._compute_sta_batchwise(
         x_train=X, y_train=y, kind='sta', dim_t=w_true.shape[0], shift=0, burn_in=w_true.shape[0] - 1,
         threshold_pred=False, is_spikes=False, dtype=y.dtype, batch_size=3)
 
@@ -153,14 +153,14 @@ def test_sta_fit_single_batch_vs_batchwise():
 
     assert w_true.shape[1:] == X.shape[1:]
 
-    w_fit, y_pred = rf_utils._compute_linear_rf_single_batch(
+    w_fit, y_pred = fit_rf_utils._compute_linear_rf_single_batch(
         x_train=X, y_train=y, kind='sta', dim_t=w_true.shape[0], shift=0, burn_in=w_true.shape[0] - 1,
         threshold_pred=False, is_spikes=False, dtype=y.dtype)
 
     w_fit = w_fit.reshape(w_true.shape)
 
     for batch_size in [1, 7, 400, 1000]:
-        w_fit2, y_pred2 = rf_utils._compute_sta_batchwise(
+        w_fit2, y_pred2 = fit_rf_utils._compute_sta_batchwise(
             x_train=X, y_train=y, kind='sta', dim_t=w_true.shape[0], shift=0, burn_in=w_true.shape[0] - 1,
             threshold_pred=False, is_spikes=False, dtype=y.dtype, batch_size=batch_size)
 
@@ -177,7 +177,7 @@ def test_sta_fit_few_datapoints():
         stim_noise='white', rf_kind='gauss', response_noise='gaussian', design_matrix=True,
         n_stim_frames=13, n_reps_per_frame=3, shift=0)
 
-    w_fit = rf_utils.compute_rf_sta(X=X, y=y)
+    w_fit = fit_rf_utils.compute_rf_sta(X=X, y=y)
     fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
     assert fit_mse < np.mean(random_mses)
 
@@ -190,7 +190,7 @@ def test_sta_fit_shift():
         stim_noise='white', rf_kind='gauss', response_noise='gaussian', design_matrix=True,
         n_stim_frames=1000, n_reps_per_frame=1, shift=5)
 
-    w_fit = rf_utils.compute_rf_sta(X=X, y=y)
+    w_fit = fit_rf_utils.compute_rf_sta(X=X, y=y)
     fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
     assert fit_mse < np.mean(random_mses)
 
@@ -202,8 +202,8 @@ def test_sta_response():
     w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
         stim_noise='white', rf_kind='gauss', response_noise='gaussian', design_matrix=True,
         n_stim_frames=1000, n_reps_per_frame=1, shift=5)
-    w_fit = rf_utils.compute_rf_sta(X=X, y=y)
-    y_pred = rf_utils.predict_linear_rf_response(w_fit.flat, X, threshold=False, dtype=np.float32)
+    w_fit = fit_rf_utils.compute_rf_sta(X=X, y=y)
+    y_pred = fit_rf_utils.predict_linear_rf_response(w_fit.flat, X, threshold=False, dtype=np.float32)
     assert np.corrcoef(y, y_pred)[0, 1] > 0.5
 
 
@@ -215,12 +215,12 @@ def test_sta_response_splits():
         stim_noise='white', rf_kind='gauss', response_noise='gaussian', design_matrix=True,
         n_stim_frames=3000, n_reps_per_frame=1, shift=5)
 
-    (x_trn, y_trn), (_, _), (x_tst, y_tst) = split_data(X, y, frac_train=0.8, frac_dev=0.)
+    (x_trn, y_trn), (_, _), (x_tst, y_tst) = fit_rf_utils.split_data(X, y, frac_train=0.8, frac_dev=0.)
 
-    w_fit = rf_utils.compute_rf_sta(X=x_trn, y=y_trn)
+    w_fit = fit_rf_utils.compute_rf_sta(X=x_trn, y=y_trn)
 
-    y_pred_train = rf_utils.predict_linear_rf_response(w_fit.flat, x_trn, threshold=False, dtype=np.float32)
-    y_pred_test = rf_utils.predict_linear_rf_response(w_fit.flat, x_tst, threshold=False, dtype=np.float32)
+    y_pred_train = fit_rf_utils.predict_linear_rf_response(w_fit.flat, x_trn, threshold=False, dtype=np.float32)
+    y_pred_test = fit_rf_utils.predict_linear_rf_response(w_fit.flat, x_tst, threshold=False, dtype=np.float32)
 
     assert np.corrcoef(y_trn, y_pred_train)[0, 1] > 0.5
     assert np.corrcoef(y_tst, y_pred_test)[0, 1] > 0.25
@@ -234,6 +234,6 @@ def test_mle_fit():
         stim_noise='pink', rf_kind='gauss', response_noise='none', design_matrix=True,
         n_stim_frames=500, n_reps_per_frame=3, shift=3)
 
-    w_fit = rf_utils.compute_rf_mle(X=X, y=y)
+    w_fit = fit_rf_utils.compute_rf_mle(X=X, y=y)
     fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
     assert fit_mse < np.mean(random_mses) - 2 * np.std(random_mses)

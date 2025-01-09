@@ -1,21 +1,46 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.utils.math_utils import normalize_zero_one
 
-def plot_field(main_ch_average, alt_ch_average, roi_mask=None, roi_ch_average=None, npixartifact=0,
-               title='', figsize=(20, 4), highlight_roi=None, fig=None, axs=None):
+
+def plot_field(main_ch_average, alt_ch_average, scan_type='xy', roi_mask=None, roi_ch_average=None, npixartifact=0,
+               title='', figsize=(18, 4), highlight_roi=None, fig=None, axs=None, gamma=1.):
     if roi_mask is not None and roi_mask.size == 0:
         roi_mask = None
 
     if roi_ch_average is None:
         roi_ch_average = main_ch_average
 
+    # normalize
+    main_ch_average = normalize_zero_one(main_ch_average)
+    alt_ch_average = normalize_zero_one(alt_ch_average)
+    roi_ch_average = normalize_zero_one(roi_ch_average)
+
+    # gamma correction
+    main_ch_average = main_ch_average ** gamma
+    alt_ch_average = alt_ch_average ** gamma
+    roi_ch_average = roi_ch_average ** gamma
+
     if (fig is None) or (axs is None):
         fig, axs = plt.subplots(1, 2 if roi_mask is None else 4, figsize=figsize, sharex='all', sharey='all')
 
     fig.suptitle(title)
 
-    extent = (0, main_ch_average.shape[0], 0, main_ch_average.shape[1])
+    if scan_type == 'xy':
+        for ax in axs:
+            ax.set(xlabel='relY [pixel]')
+        axs[0].set(ylabel='relX [pixel]')
+        extent = (main_ch_average.shape[0] / 2, -main_ch_average.shape[0] / 2,
+                  main_ch_average.shape[1] / 2, -main_ch_average.shape[1] / 2)
+    elif scan_type == 'xz':
+        for ax in axs:
+            ax.set(xlabel='relY [pixel]')
+        axs[0].set(ylabel='relZ [pixel]')
+        extent = (main_ch_average.shape[0] / 2, -main_ch_average.shape[0] / 2,
+                  -main_ch_average.shape[1] / 2, main_ch_average.shape[1] / 2)
+    else:
+        raise ValueError(f'Unknown scan_type: {scan_type}')
 
     ax = axs[0]
     ax.imshow(main_ch_average.T, origin='lower', extent=extent)
@@ -32,7 +57,6 @@ def plot_field(main_ch_average, alt_ch_average, roi_mask=None, roi_ch_average=No
         _rois = rois.copy()
         _rois[_rois <= 0] = np.nan
         roi_mask_im = ax.imshow(_rois, cmap='jet', origin='lower', extent=extent)
-        plt.colorbar(roi_mask_im, ax=ax)
         ax.set(title='roi_mask')
 
         ax = axs[3]
@@ -44,6 +68,7 @@ def plot_field(main_ch_average, alt_ch_average, roi_mask=None, roi_ch_average=No
         rois_us = np.repeat(np.repeat(rois, 10, axis=0), 10, axis=1)
         vmin = np.min(rois)
         vmax = np.max(rois)
+        plt.colorbar(roi_mask_im, ax=ax)
 
         if highlight_roi is not None:
             rois_to_plot = [highlight_roi]
@@ -57,6 +82,7 @@ def plot_field(main_ch_average, alt_ch_average, roi_mask=None, roi_ch_average=No
             ax.contour(_rois_us, extent=extent, vmin=vmin, vmax=vmax, levels=[roi - 1e-3], alpha=0.8, cmap='jet')
 
     plt.tight_layout()
+    return fig, axs
 
 
 def plot_field_and_traces(main_ch_average, alt_ch_average, roi_mask, title='', figsize=(16, 8), highlight_roi=None):
@@ -110,36 +136,57 @@ def plot_trace_and_trigger(time, trace, triggertimes, trace_norm=None, title=Non
     ax.plot(time, trace, label=label)
     ax.set(xlabel='time', ylabel='trace')
     if len(triggertimes) > 0:
-        ax.vlines(triggertimes, np.min(trace), np.max(trace), color='r', label='trigger', zorder=-2)
+        vmin, vmax = np.nanmin(trace), np.nanmax(trace)
+        vrng = vmax - vmin
+        ax.vlines(triggertimes, vmin - 0.22 * vrng, vmin - 0.02 * vrng, color='r', label='trigger', zorder=-2)
     ax.legend(loc='upper right')
 
     if trace_norm is not None:
         tax = ax.twinx()
         tax.plot(time, trace_norm, ':')
         if len(triggertimes) > 0:
-            tax.vlines(triggertimes, np.min(trace_norm), np.max(trace_norm), color='r', label='trigger', ls=':',
+            vmin, vmax = np.nanmin(trace_norm), np.nanmax(trace_norm)
+            vrng = vmax - vmin
+            tax.vlines(triggertimes, vmin - 0.22 * vrng, vmin - 0.02 * vrng, color='r', label='trigger', ls=':',
                        zorder=-1)
         tax.set(ylabel='normalized')
 
     return ax
 
 
-def plot_srf(srf, ax=None, vabsmax=None, pixelsize=None):
+def plot_srf(srf, ax=None, vabsmax=None, pixelsize=None, extent=None):
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+
     if vabsmax is None:
         vabsmax = np.nanmax(np.abs(srf))
 
-    if pixelsize is not None:
-        extent = np.array([-srf.shape[1] / 2., srf.shape[1] / 2., -srf.shape[0] / 2., srf.shape[0] / 2.]) * pixelsize
+    if np.all(srf >= 0):
+        vmin = 0
+        vmax = vabsmax
+        cmap = 'viridis'
+    elif np.all(srf <= 0):
+        vmin = -vabsmax
+        vmax = 0
+        cmap = 'viridis_r'
     else:
-        extent = None
+        vmin = -vabsmax
+        vmax = vabsmax
+        cmap = 'bwr'
+
+    if extent is None and pixelsize is not None:
+        extent = srf_extent(srf_shape=srf.shape, pixelsize=pixelsize)
 
     ax.set(title='sRF')
-    im = ax.imshow(srf.T, vmin=-vabsmax, vmax=vabsmax, cmap='bwr', origin='lower', extent=extent)
+    im = ax.imshow(srf, vmin=vmin, vmax=vmax, cmap=cmap, interpolation='none', origin='lower', extent=extent)
     plt.colorbar(im, ax=ax)
 
     return ax
+
+
+def srf_extent(srf_shape, pixelsize=None):
+    pixelsize = 1 if pixelsize is None else pixelsize
+    return np.array([-srf_shape[1] / 2., srf_shape[1] / 2., -srf_shape[0] / 2., srf_shape[0] / 2.]) * pixelsize
 
 
 def plot_trf(trf, t_trf=None, peak_idxs=None, ax=None, lim_y=True):
