@@ -273,7 +273,7 @@ def compute_null_dist(dirs, counts, per, iters=1000):
     return p, q, qdistr
 
 
-def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n_shuffles: int = 100):
+def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n_shuffles: int = 1000):
     assert snippets.ndim == 2
     assert np.asarray(dir_order).ndim == 1
 

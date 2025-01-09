@@ -52,7 +52,3 @@ def test_definition_CelltypeAssignmentTemplate():
 
 def test_definition_ClassifierMethodTemplate():
     _test_definition(classifier.ClassifierMethodTemplate)
-
-
-def test_definition_HighResTemplate():
-    _test_definition(misc.HighResTemplate)

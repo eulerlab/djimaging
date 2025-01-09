@@ -23,9 +23,9 @@ def test_compute_on_off_index_on_response():
     snippets_times = np.concatenate([trace_times + i * stim_dur for i in range(n_reps)]).reshape(n_reps, -1).T
     snippets = np.tile(trace, (n_reps, 1)).T
 
-    trigger_times = np.concatenate([[t_start + i * stim_dur, t_start + i * stim_dur] for i in range(n_reps)])
+    start_triggertimes = np.array([t_start + i * stim_dur for i in range(n_reps)])
 
-    obs = compute_on_off_index(snippets, snippets_times, trigger_times, light_step_duration=1)
+    obs = compute_on_off_index(snippets, snippets_times, start_triggertimes=start_triggertimes, light_step_duration=1)
     exp_lb = 0.95
     assert obs > exp_lb
 
@@ -50,9 +50,9 @@ def test_compute_on_off_index_off_response():
     snippets_times = np.concatenate([trace_times + i * stim_dur for i in range(n_reps)]).reshape(n_reps, -1).T
     snippets = np.tile(trace, (n_reps, 1)).T
 
-    trigger_times = np.concatenate([[t_start + i * stim_dur, t_start + i * stim_dur] for i in range(n_reps)])
+    start_triggertimes = np.array([t_start + i * stim_dur for i in range(n_reps)])
 
-    obs = compute_on_off_index(snippets, snippets_times, trigger_times, light_step_duration=1)
+    obs = compute_on_off_index(snippets, snippets_times, start_triggertimes=start_triggertimes, light_step_duration=1)
     exp_ub = -0.95
     assert obs < exp_ub
 
@@ -70,8 +70,8 @@ def test_compute_on_off_index_no_response():
     snippets_times = np.concatenate([trace_times + i * stim_dur for i in range(n_reps)]).reshape(n_reps, -1).T
     snippets = np.zeros(snippets_times.shape)
 
-    trigger_times = np.concatenate([[t_start + i * stim_dur, t_start + i * stim_dur] for i in range(n_reps)])
+    start_triggertimes = np.array([t_start + i * stim_dur for i in range(n_reps)])
 
-    obs = compute_on_off_index(snippets, snippets_times, trigger_times, light_step_duration=1)
+    obs = compute_on_off_index(snippets, snippets_times, start_triggertimes=start_triggertimes, light_step_duration=1)
     exp = 0.0
     assert obs == exp
