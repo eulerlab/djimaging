@@ -10,7 +10,6 @@ pandas
 seaborn
 scikit-learn
 opencv-python
-scikit-image
 astropy
 
 ipython
