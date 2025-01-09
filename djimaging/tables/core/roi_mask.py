@@ -418,7 +418,7 @@ class RoiMaskTemplate(dj.Manual):
                      "shift_dx": shift_dx, "shift_dy": shift_dy})
             elif auto_fill_pres_keys:
                 roi_mask_pres_keys.append(
-                    {**pres_key, "roi_mask": main_roi_mask, "as_field_mask": 'different',
+                    {**pres_key, "roi_mask": main_roi_mask, "as_field_mask": 'same',
                      "shift_dx": 0, "shift_dy": 0})
             else:
                 raise ValueError(f'No ROI mask found for key={pres_key} but `auto_fill_pres_keys` is False')
