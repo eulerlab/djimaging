@@ -1,7 +1,8 @@
 import numpy as np
 
+from djimaging.tables.motion_correction import motion_utils
 from djimaging.utils.mask_utils import assert_igor_format
-from djimaging.utils.scanm import read_smp_utils, read_h5_utils, roi_utils, wparams_utils
+from djimaging.utils.scanm import roi_utils, wparams_utils, read_utils
 
 
 def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset: np.ndarray,
@@ -97,15 +98,22 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, preci
     return traces, traces_times, frame_dt
 
 
-def roi2trace_from_stack(filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray,
-                         data_stack_name: str, precision: str, from_raw_data: bool = False):
-    if from_raw_data:
-        ch_stacks, wparams = read_smp_utils.load_stacks_and_wparams(filepath, ch_names=(data_stack_name,))
-    else:
-        ch_stacks, wparams = read_h5_utils.load_stacks_and_wparams(filepath, ch_names=(data_stack_name,))
+def roi2trace_from_stack(
+        filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray,
+        data_stack_name: str, precision: str, from_raw_data: bool = False,
+        shifts_x: np.ndarray = None, shifts_y: np.ndarray = None,
+        shift_kws: dict = None):
+    ch_stacks, wparams = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_stack_name,))
+    stack = ch_stacks[data_stack_name]
+
+    if (shifts_x is not None) or (shifts_y is not None):
+        if shift_kws is None:
+            shift_kws = dict()
+        stack = motion_utils.correct_shifts_in_stack(
+            stack=stack, shifts_x=shifts_x, shifts_y=shifts_y, cval=np.min, **shift_kws)
 
     traces, traces_times, frame_dt = compute_traces(
-        stack=ch_stacks[data_stack_name], roi_mask=roi_mask, wparams=wparams, precision=precision)
+        stack=stack, roi_mask=roi_mask, wparams=wparams, precision=precision)
     roi2trace = roi_utils.get_roi2trace(traces=traces, traces_times=traces_times, roi_ids=roi_ids)
 
     return roi2trace, frame_dt

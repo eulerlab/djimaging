@@ -15,6 +15,9 @@ from djimaging.utils.plot_utils import plot_trace_and_trigger, prep_long_title
 
 class TracesTemplate(dj.Computed):
     database = ""
+    _include_motion_correction = False
+    _mc_fupsample = 10
+    _mc_f_cutoff = 3
 
     @property
     def definition(self):
@@ -23,6 +26,13 @@ class TracesTemplate(dj.Computed):
         -> self.presentation_table
         -> self.roi_table
         -> self.raw_params_table
+        """
+        if self._include_motion_correction:
+            definition += """
+        -> self.motion_detection_table
+        """
+
+        definition += """
         ---
         trace          :longblob              # array of raw trace
         trace_t0       :float                 # numerical array of trace times
@@ -58,11 +68,20 @@ class TracesTemplate(dj.Computed):
         pass
 
     @property
+    def motion_detection_table(self):
+        return None
+
+    @property
     def key_source(self):
         try:
-            return self.presentation_table.proj() \
-                * self.raw_params_table.proj() \
-                * self.roi_mask_table.RoiMaskPresentation.proj()
+            key_source = self.presentation_table.proj() \
+                         * self.raw_params_table.proj() \
+                         * self.roi_mask_table.RoiMaskPresentation.proj()
+
+            if self._include_motion_correction:
+                key_source *= self.motion_detection_table.proj()
+
+            return key_source
         except (AttributeError, TypeError):
             pass
 
@@ -70,31 +89,19 @@ class TracesTemplate(dj.Computed):
         include_artifacts, compute_from_stack, trace_precision, from_raw_data = (self.raw_params_table & key).fetch1(
             "include_artifacts", "compute_from_stack", "trace_precision", "from_raw_data")
 
+        if self._include_motion_correction and not compute_from_stack:
+            raise ValueError("Motion correction only supported for compute_from_stack")
+        if from_raw_data and not compute_from_stack:
+            raise ValueError("from_raw_data=True only supported for compute_from_stack=True")
+
         filepath = (self.presentation_table & key).fetch1("pres_data_file")
         triggertimes = (self.presentation_table & key).fetch1("triggertimes")
         roi_ids = (self.roi_table & key).fetch("roi_id")
-        n_artifact = (self.presentation_table & key).fetch1("npixartifact")
 
         if compute_from_stack:
-            data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
-            roi_mask = (self.roi_mask_table.RoiMaskPresentation & key).fetch1("roi_mask")
-
-            if (self.roi_mask_table.RoiMaskPresentation & key).fetch1('as_field_mask') == 'different':
-                raise ValueError(f'Tried to populate traces with inconsistent roi mask for key=\n{key}\n' +
-                                 'Compare ROI mask of Field and Presentation.')
-
-            roi2trace, frame_dt = roi2trace_from_stack(
-                filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
-                data_stack_name=data_stack_name, precision=trace_precision, from_raw_data=from_raw_data)
-
-            for roi_id, roi_data in roi2trace.items():
-                if np.any(-roi_mask[:n_artifact, :] == roi_id):
-                    if verboselvl > 0:
-                        print('Found light artifact in :', key, roi_id)
-                roi2trace[roi_id]['incl_artifact'] = np.any(-roi_mask[:n_artifact, :] == roi_id)
-
+            roi2trace, frame_dt = self._compute_roi2trace_from_stack(
+                key, filepath, roi_ids, trace_precision, from_raw_data, verboselvl=verboselvl)
         else:
-            assert not from_raw_data, "from_raw_data=True only supported for compute_from_stack=True"
             roi2trace, frame_dt = load_roi2trace(filepath, roi_ids)
 
         for roi_id, roi_data in roi2trace.items():
@@ -117,6 +124,37 @@ class TracesTemplate(dj.Computed):
                     raise e
                 else:
                     warnings.warn(f"Skipping invalid trace for {key} and roi_id={roi_id}")
+
+    def _compute_roi2trace_from_stack(self, key, filepath, roi_ids, trace_precision, from_raw_data, verboselvl=0):
+        data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
+        roi_mask = (self.roi_mask_table.RoiMaskPresentation & key).fetch1("roi_mask")
+        n_artifact = (self.presentation_table & key).fetch1("npixartifact")
+
+        if (self.roi_mask_table.RoiMaskPresentation & key).fetch1('as_field_mask') == 'different':
+            raise ValueError(f'Tried to populate traces with inconsistent roi mask for key=\n{key}\n' +
+                             'Compare ROI mask of Field and Presentation.')
+
+        if self._include_motion_correction and (self.motion_detection_table is not None):
+            shifts_x, shifts_y = (self.motion_detection_table & key).fetch1('shifts_x', 'shifts_y')
+            fs = (self.presentation_table.ScanInfo & key).fetch1('scan_frequency')
+            roi2trace, frame_dt = roi2trace_from_stack(
+                filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
+                data_stack_name=data_stack_name, precision=trace_precision, from_raw_data=from_raw_data,
+                shifts_x=shifts_x, shifts_y=shifts_y,
+                shift_kws=dict(fs=fs, fupsample=self._mc_fupsample, f_cutoff=self._mc_f_cutoff)
+            )
+        else:
+            roi2trace, frame_dt = roi2trace_from_stack(
+                filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
+                data_stack_name=data_stack_name, precision=trace_precision, from_raw_data=from_raw_data)
+
+        for roi_id, roi_data in roi2trace.items():
+            if np.any(-roi_mask[:n_artifact, :] == roi_id):
+                if verboselvl > 0:
+                    print('Found light artifact in :', key, roi_id)
+            roi2trace[roi_id]['incl_artifact'] = np.any(-roi_mask[:n_artifact, :] == roi_id)
+
+        return roi2trace, frame_dt
 
     def gui_clip_trace(self, key):
         """GUI to clip traces. Note that this can not be easily undone for now."""
