@@ -29,6 +29,11 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
+If you want to use autorois, also install the following:
+```
+pip install -r requirements-autorois.txt
+```
+
 > ❗ To test if the package was successfully installed, e.g.
 > open a jupyter notebook in your container and call <code>import djimaging</code>.
 
