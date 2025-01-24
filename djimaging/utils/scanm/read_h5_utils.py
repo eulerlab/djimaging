@@ -97,22 +97,22 @@ def extract_roi_mask(h5_file_open, ignore_not_found=False):
     return roi_mask
 
 
-def extract_wparams(h5_file_open):
+def extract_wparams(h5_file_open, lower_keys=True):
     wparams = dict()
     wparamsstr_key = [k for k in h5_file_open.keys() if k.lower() == 'wparamsstr']
     if len(wparamsstr_key) > 0:
-        wparams.update(extract_h5_table(wparamsstr_key[0], open_file=h5_file_open, lower_keys=True))
+        wparams.update(extract_h5_table(wparamsstr_key[0], open_file=h5_file_open, lower_keys=lower_keys))
     wparamsnum_key = [k for k in h5_file_open.keys() if k.lower() == 'wparamsnum']
     if len(wparamsnum_key) > 0:
-        wparams.update(extract_h5_table(wparamsnum_key[0], open_file=h5_file_open, lower_keys=True))
+        wparams.update(extract_h5_table(wparamsnum_key[0], open_file=h5_file_open, lower_keys=lower_keys))
     return wparams
 
 
-def extract_os_params(h5_file_open) -> dict:
+def extract_os_params(h5_file_open, lower_keys=True) -> dict:
     os_params = dict()
     os_params_key = [k for k in h5_file_open.keys() if k.lower() == 'os_parameters']
     if len(os_params_key) > 0:
-        os_params.update(extract_h5_table(os_params_key[0], open_file=h5_file_open, lower_keys=True))
+        os_params.update(extract_h5_table(os_params_key[0], open_file=h5_file_open, lower_keys=lower_keys))
     return os_params
 
 

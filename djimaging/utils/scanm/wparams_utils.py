@@ -6,7 +6,7 @@ from djimaging.utils.scanm import traces_and_triggers_utils
 def get_scan_type(wparams: dict, assume_lower=False) -> str:
     # ToDo: Does not work for Z-Stacks.
 
-    if assume_lower:
+    if not assume_lower:
         wparams = {k.lower(): v for k, v in wparams.items()}
 
     npix_x = int(wparams.get('user_dxpix', 0))

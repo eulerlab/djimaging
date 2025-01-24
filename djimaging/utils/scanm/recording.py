@@ -1,4 +1,71 @@
+"""
+# wParamsNum:
+
+'HdrLenInValuePairs',
+'HdrLenInBytes',
+'MinVolts_AO',
+'MaxVolts_AO',
+'StimChanMask',
+'MaxStimBufMapLen',
+'NumberOfStimBufs',
+'TargetedPixDur_us',
+'MinVolts_AI',
+'MaxVolts_AI',
+'InputChanMask',
+'NumberOfInputChans',
+'PixSizeInBytes',
+'NumberOfPixBufsSet',
+'PixelOffs',
+'PixBufCounter',
+'User_ScanMode',
+'User_dxPix',
+'User_dyPix',
+'User_nPixRetrace',
+'User_nXPixLineOffs',
+'User_divFrameBufReq',
+'User_ScanType',
+'User_nSubPixOversamp',
+'RealPixDur',
+'OversampFactor',
+'XCoord_um',
+'YCoord_um',
+'ZCoord_um',
+'ZStep_um',
+'Zoom',
+'Angle_deg',
+'User_NFrPerStep',
+'User_XOffset_V',
+'User_YOffset_V',
+'User_dzPix',
+'User_nZPixRetrace',
+'User_nZPixLineOff',
+'User_ZForFastScan',
+'User_SetupID',
+'User_LaserWaveLen_nm',
+'User_ZLensScaler',
+'User_ZLensShifty'
+
+# wParamsStr:
+'GUID',
+'ComputerName',
+'UserName',
+'OrigPixDataFileName',
+'DateStamp_d_m_y',
+'TimeStamp_h_m_s_ms',
+'ScanM_PVer_TargetOS',
+'CallingProcessPath',
+'CallingProcessVer',
+'StimBufLenList',
+'TargetedStimDurList',
+'InChan_PixBufLenList',
+'User_ScanPathFunc',
+'IgorGUIVer',
+'User_Comment',
+'User_Objective'
+"""
+
 import os
+import warnings
 
 import h5py
 import numpy as np
@@ -7,7 +74,7 @@ from djimaging.utils.scanm import read_h5_utils, read_smp_utils, wparams_utils, 
 
 
 class ScanMRecording:
-    def __init__(self, filepath, setup_id,
+    def __init__(self, filepath, setup_id=None,
                  date=None, stimulator_delay=None,
                  roi_mask_ignore_not_found=True,
                  trigger_ch_name='wDataCh2', time_precision='line',
@@ -80,6 +147,24 @@ class ScanMRecording:
         self.pos_y_um = None
         self.pos_z_um = None
 
+        # Meta data
+        self.guid = None
+        self.computer_name = None
+        self.user_name = None
+        self.orig_pix_data_filename = None
+        self.date_stamp_d_m_y = None
+        self.time_stamp_h_m_s_ms = None
+        self.scanm_pver_targetos = None
+        self.calling_process_path = None
+        self.calling_process_ver = None
+        self.stim_buf_len_list = None
+        self.targeted_stim_dur_list = None
+        self.in_chan_pix_buf_len_list = None
+        self.user_scan_path_func = None
+        self.igor_gui_ver = None
+        self.user_comment = None
+        self.user_objective = None
+
         # Other params
         self.wparams_other = None
 
@@ -120,7 +205,7 @@ class ScanMRecording:
     def __load_from_h5_file(self):
         with h5py.File(self.filepath, 'r', driver="stdio") as h5_file:
             ch_stacks = read_h5_utils.extract_all_stack_from_h5(h5_file)
-            wparams = read_h5_utils.extract_wparams(h5_file)
+            wparams = read_h5_utils.extract_wparams(h5_file, lower_keys=False)
             roi_mask = read_h5_utils.extract_roi_mask(
                 h5_file, ignore_not_found=self.roi_mask_ignore_not_found)
             trigger_times, trigger_values = read_h5_utils.extract_triggers(
@@ -141,7 +226,7 @@ class ScanMRecording:
                 self.trigger_valid = self.trigger_times.size == self.ntrigger_rep
 
     def __load_from_smp_file(self):
-        ch_stacks, wparams = read_smp_utils.load_all_stacks_and_wparams(self.filepath)
+        ch_stacks, wparams = read_smp_utils.load_all_stacks_and_wparams(self.filepath, lower_keys=False)
 
         # Channel info
         self.ch_stacks = ch_stacks
@@ -155,49 +240,65 @@ class ScanMRecording:
     def extract_wparams_info(self, wparams):
         # Scan type
         self.scan_type = wparams_utils.get_scan_type(wparams)
-        self.scan_type_id = wparams.pop("user_scantype")
+        self.scan_type_id = wparams.pop("User_ScanType")
 
         # Pixel info
-        self.pix_n_retrace = int(wparams.pop("user_npixretrace"))
-        self.pix_n_line_offset = int(wparams.pop("user_nxpixlineoffs"))
-        self.pix_nx_full = int(wparams.pop("user_dxpix"))
+        self.pix_n_retrace = int(wparams.pop("User_nPixRetrace"))
+        self.pix_n_line_offset = int(wparams.pop("User_nXPixLineOffs"))
+        self.pix_nx_full = int(wparams.pop("User_dxPix"))
         self.pix_nx = max(0, int(self.pix_nx_full - self.pix_n_retrace - self.pix_n_line_offset))
-        self.pix_ny = int(wparams.pop("user_dypix", 0))
-        self.pix_nz = int(wparams.pop("user_dzpix", 0))
-        self.pix_n_artifact = setup_utils.get_npixartifact(setupid=self.setup_id)
+        self.pix_ny = int(wparams.pop("User_dyPix", 0))
+        self.pix_nz = int(wparams.pop("User_dzPix", 0))
+        self.pix_n_artifact = setup_utils.get_npixartifact(setupid=self.setup_id) if self.setup_id is not None else None
 
         # Scan info
-        self.real_pixel_duration = wparams.pop('realpixdur') * 1e-6
+        self.real_pixel_duration = wparams.pop('RealPixDur') * 1e-6
         self.scan_line_duration = self.pix_nx_full * self.real_pixel_duration
         self.scan_n_lines = self.pix_nz if self.scan_type == 'xz' else self.pix_ny
         self.scan_period = self.scan_line_duration * self.scan_n_lines
         self.scan_frequency = 1. / self.scan_period
 
         # Objective info
-        self.obj_zoom = wparams.pop("zoom")
-        self.obj_angle_deg = wparams.pop("angle_deg")
+        self.obj_zoom = wparams.pop("Zoom")
+        self.obj_angle_deg = wparams.pop("Angle_deg")
 
         # Pixel sizes
-        if self.pix_nx > 0:
+        if self.pix_nx > 0 and self.setup_id is not None:
             self.pix_dx_um = setup_utils.get_pixel_size_xy_um(
                 zoom=self.obj_zoom, setupid=self.setup_id, npix=self.pix_nx)
         else:
             self.pix_dx_um = 0.
 
         if self.scan_type in ['xy', 'xyz']:
-            if wparams.get("user_aspectratiofr", 1.) != 1.:
+            if wparams.get("User_AspectRatioFr", 1.) != 1.:
                 raise NotImplementedError(f"Aspect ratio is not 1 for {self.scan_type} scan.")
             self.pix_dy_um = self.pix_dx_um
 
-        if self.scan_type in ['xz', 'xyz']:
-            self.pix_dz_um = wparams['zstep_um']
+        self.pix_dz_um = wparams.pop('ZStep_um')
 
         # Position data
-        self.pos_x_um = wparams.pop("xcoord_um")
-        self.pos_y_um = wparams.pop("ycoord_um")
-        self.pos_z_um = wparams.pop("zcoord_um")
+        self.pos_x_um = wparams.pop("XCoord_um")
+        self.pos_y_um = wparams.pop("YCoord_um")
+        self.pos_z_um = wparams.pop("ZCoord_um")
 
-        # Other parameters
+        # Meta parameters
+        self.guid = wparams.pop("GUID", "")
+        self.computer_name = wparams.pop("ComputerName", "")
+        self.user_name = wparams.pop("UserName", "")
+        self.orig_pix_data_filename = wparams.pop("OrigPixDataFileName", "")
+        self.date_stamp_d_m_y = wparams.pop("DateStamp_d_m_y", "")
+        self.time_stamp_h_m_s_ms = wparams.pop("TimeStamp_h_m_s_ms", "")
+        self.scanm_pver_targetos = wparams.pop("ScanM_PVer_TargetOS", "")
+        self.calling_process_path = wparams.pop("CallingProcessPath", "")
+        self.calling_process_ver = wparams.pop("CallingProcessVer", "")
+        self.stim_buf_len_list = wparams.pop("StimBufLenList", "")
+        self.targeted_stim_dur_list = wparams.pop("TargetedStimDurList", "")
+        self.in_chan_pix_buf_len_list = wparams.pop("InChan_PixBufLenList", "")
+        self.user_scan_path_func = wparams.pop("User_ScanPathFunc", "")
+        self.igor_gui_ver = wparams.pop("IgorGUIVer", "")
+        self.user_comment = wparams.pop("User_Comment", "")
+        self.user_objective = wparams.pop("User_Objective", "")
+
         self.wparams_other = wparams
 
     def compute_frame_times(self, time_precision=None):
@@ -233,14 +334,14 @@ class ScanMRecording:
             self.ntrigger_rep = ntrigger_rep
 
         if self.stimulator_delay is None:
-            if self.date is None:
+            if self.date is None or self.setup_id is None:
                 raise ValueError("Please specify `date` or `stimulator_delay`.")
             self.stimulator_delay = setup_utils.get_stimulator_delay(self.date, setupid=self.setup_id)
 
         if self.frame_times is None or (time_precision != self.time_precision):
             self.compute_frame_times(time_precision=time_precision)
 
-        if trigger_threshold == 'auto':
+        if self.trigger_threshold == 'auto':
             self.set_auto_trigger_threshold()
 
         if self.ntrigger_rep is None or self.ntrigger_rep > 0:
@@ -258,3 +359,87 @@ class ScanMRecording:
                 self.trigger_valid = self.trigger_times.size % self.ntrigger_rep == 0
             else:
                 self.trigger_valid = self.trigger_times.size == self.ntrigger_rep
+
+    def to_h5(self, filepath, include_wparams_num=True, include_wparams_str=True, include_triggers=True,
+              overwrite=False):
+        if not overwrite and os.path.isfile(filepath):
+            raise FileExistsError(f"File already exists: {filepath}. Set `overwrite=True` to overwrite.")
+
+        if include_triggers and (self.trigger_times is None or self.trigger_values is None):
+            warnings.warn("Triggers are not computed yet. Doing that now...")
+            self.compute_triggers()
+
+        import h5py
+
+        wparams_num = dict()
+        if include_wparams_num:
+            wparams_num.update(self.get_wparams_num_dict())
+
+        wparams_str = dict()
+        if include_wparams_str:
+            wparams_str.update(self.get_wparams_str_dict())
+
+        with h5py.File('data.h5', 'w') as f:
+            for k, v in self.ch_stacks.items():
+                f.create_dataset(k, data=v)
+
+            if include_wparams_num:
+                # TODO: Don't use groups but what Igor is using.
+                wparams_num_group = f.create_group('wParamsNum')
+                for key, value in wparams_num.items():
+                    wparams_num_group.attrs[key] = value
+
+            if include_wparams_str:
+                # TODO: Don't use groups but what Igor is using.
+                wparams_str_group = f.create_group('wParamsStr')
+                for key, value in wparams_str.items():
+                    wparams_str_group.attrs[key] = value
+
+            if include_triggers:
+                f.create_dataset('Triggertimes', data=self.trigger_times, dtype='f4')
+                f.create_dataset('Triggervalues', data=self.trigger_values, dtype='f4')
+
+    def get_wparams_num_dict(self, lower_keys=False):
+        wparams_num = dict()
+        wparams_num['User_dxPix'] = self.pix_nx_full
+        wparams_num['User_dyPix'] = self.pix_ny
+        wparams_num['User_dzPix'] = self.pix_nz
+        wparams_num['User_nPixRetrace'] = self.pix_n_retrace
+        wparams_num['User_nXPixLineOffs'] = self.pix_n_line_offset
+        wparams_num['RealPixDur'] = self.real_pixel_duration
+        wparams_num['Zoom'] = self.obj_zoom
+        wparams_num['Angle_deg'] = self.obj_angle_deg
+        wparams_num['XCoord_um'] = self.pos_x_um
+        wparams_num['YCoord_um'] = self.pos_y_um
+        wparams_num['ZCoord_um'] = self.pos_z_um
+        wparams_num['ZStep_um'] = self.pix_dz_um
+        wparams_num['User_ScanType'] = self.scan_type_id
+
+        if lower_keys:
+            wparams_num = {k.lower(): v for k, v in wparams_num.items()}
+
+        return wparams_num
+
+    def get_wparams_str_dict(self, lower_keys=False):
+        wparams_str = dict()
+
+        wparams_str['GUID'] = self.guid
+        wparams_str['ComputerName'] = self.computer_name
+        wparams_str['UserName'] = self.user_name
+        wparams_str['OrigPixDataFileName'] = self.orig_pix_data_filename
+        wparams_str['DateStamp_d_m_y'] = self.date_stamp_d_m_y
+        wparams_str['TimeStamp_h_m_s_ms'] = self.time_stamp_h_m_s_ms
+        wparams_str['ScanM_PVer_TargetOS'] = self.scanm_pver_targetos
+        wparams_str['CallingProcessPath'] = self.calling_process_path
+        wparams_str['CallingProcessVer'] = self.calling_process_ver
+        wparams_str['StimBufLenList'] = self.stim_buf_len_list
+        wparams_str['TargetedStimDurList'] = self.targeted_stim_dur_list
+        wparams_str['InChan_PixBufLenList'] = self.in_chan_pix_buf_len_list
+        wparams_str['User_ScanPathFunc'] = self.user_scan_path_func
+        wparams_str['IgorGUIVer'] = self.igor_gui_ver
+        wparams_str['User_Comment'] = self.user_comment
+
+        if lower_keys:
+            wparams_str = {k.lower(): v for k, v in wparams_str.items()}
+
+        return wparams_str
