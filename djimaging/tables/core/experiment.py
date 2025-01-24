@@ -138,14 +138,22 @@ class ExperimentTemplate(dj.Computed):
         if not os.path.isdir(raw_data_path):
             warnings.warn(f"Folder `{raw_data_dir}` not found in {header_path}")
 
-        exp_key = deepcopy(primary_key)
-        exp_key["header_path"] = header_path + "/"
-        exp_key["header_name"] = header_name
+        exp_entry = deepcopy(primary_key)
+        exp_entry["header_path"] = header_path + "/"
+        exp_entry["header_name"] = header_name
 
         # Populate ExpInfo table for this experiment
-        expinfo_key = deepcopy(primary_key)
+        info_entry = deepcopy(primary_key)
+        info_keys = [
+            "projname", "setupid", "prep", "preprem", "darkadapt_hrs", "slicethickness_um", "bathtemp_degc"]
+        info_entry.update({k: header_dict.get(k, "") for k in info_keys})
 
-        eye = header_dict["eye"] if header_dict["eye"] != "" else "unknown"
+        if info_entry["prep"] == "":
+            info_entry["prep"] = "wholemount"
+
+        eye = header_dict.get("eye", "unknown")
+        if 'eye' == '':
+            eye = 'unknown'
 
         if (
                 (eye in ["Right", "right"] and (exp_num == 1 or 'left' in header_name.lower())) or
@@ -156,28 +164,21 @@ class ExperimentTemplate(dj.Computed):
                 f"but exp_num is {exp_num} and header_file_name is '{header_name}'. "
                 f"Use exp_num=1 for left eye and exp_num=2 for right eye. "
                 f"To overwrite this, use all-caps in .ini file which is then used.")
+        info_entry["eye"] = eye
 
-        expinfo_key["eye"] = eye.lower()
-        expinfo_key["projname"] = header_dict["projname"]
-        expinfo_key["setupid"] = header_dict["setupid"]
-        expinfo_key["prep"] = header_dict["prep"]
-        expinfo_key["preprem"] = header_dict["preprem"]
-        expinfo_key["darkadapt_hrs"] = header_dict["darkadapt_hrs"]
-        expinfo_key["slicethickness_um"] = header_dict["slicethickness_um"]
-        expinfo_key["bathtemp_degc"] = header_dict["bathtemp_degc"]
-
-        if header_dict["prepwmorient"] == "":
+        prepwmorient_str = header_dict.get("prepwmorient", "")
+        if prepwmorient_str == "":
             prepwmorient = 0  # Default to zero if not specified
-        elif str(header_dict["prepwmorient"]).lower() == "unknown" or int(header_dict["prepwmorient"]) == 111:
+        elif prepwmorient_str == "unknown" or prepwmorient_str == "111":
             prepwmorient = -1
         else:
-            prepwmorient = int(header_dict["prepwmorient"])
-        expinfo_key["prepwmorient"] = prepwmorient
+            prepwmorient = int(prepwmorient_str)
+        info_entry["prepwmorient"] = prepwmorient
 
         # find optic disk information if available
         odx, ody, odz, od_ini_flag = 0, 0, 0, 0
 
-        odpos_string = header_dict["prepwmopticdiscpos"].strip('() ')
+        odpos_string = header_dict.get("prepwmopticdiscpos", "").strip('() ')
         if len(odpos_string) > 0:
             odpos_list = odpos_string.split(";" if ';' in odpos_string else ',')
 
@@ -195,57 +196,45 @@ class ExperimentTemplate(dj.Computed):
                     except IndexError:
                         odz = 0
 
-        expinfo_key["odx"] = odx
-        expinfo_key["ody"] = ody
-        expinfo_key["odz"] = odz
-        expinfo_key["od_ini_flag"] = od_ini_flag
+        info_entry["odx"] = odx
+        info_entry["ody"] = ody
+        info_entry["odz"] = odz
+        info_entry["od_ini_flag"] = od_ini_flag
 
-        # Populate Animal table for this experiment
-        animal_key = deepcopy(primary_key)
-        animal_key["genline"] = header_dict["genline"]
-        animal_key["genbkglinerem"] = header_dict["genbkglinerem"]
-        animal_key["genline_reporter"] = header_dict["genline_reporter"]
-        animal_key["genline_reporterrem"] = header_dict["genline_reporterrem"]
-        animal_key["animspecies"] = header_dict["animspecies"].lower() if header_dict["animspecies"] != "" else "mouse"
-        animal_key["animgender"] = header_dict["animgender"]
-        animal_key["animdob"] = header_dict["animdob"]
-        animal_key["animrem"] = header_dict["animrem"]
+        # Create animal entry
+        animal_entry = deepcopy(primary_key)
+        animal_keys = [
+            "genline", "genbkglinerem", "genline_reporter", "genline_reporterrem",
+            "animspecies", "animgender", "animdob", "animrem"]
+        animal_entry.update({k: header_dict.get(k, "") for k in animal_keys})
 
-        # Populate Indicator table for this experiment
-        indicator_key = deepcopy(primary_key)
-        indicator_key["isepored"] = header_dict["isepored"]
-        indicator_key["eporrem"] = header_dict["eporrem"]
-        indicator_key["epordye"] = header_dict["epordye"]
-        indicator_key["isvirusinject"] = header_dict["isvirusinject"]
-        indicator_key["virusvect"] = header_dict["virusvect"]
-        indicator_key["virusserotype"] = header_dict["virusserotype"]
-        indicator_key["virustransprotein"] = header_dict["virustransprotein"]
-        indicator_key["virusinjectq"] = header_dict["virusinjectq"]
-        indicator_key["virusinjectrem"] = header_dict["virusinjectrem"]
-        indicator_key["tracer"] = header_dict["tracer"]
-        indicator_key["isbraininject"] = header_dict["isbraininject"]
-        indicator_key["braininjectrem"] = header_dict["braininjectrem"]
-        indicator_key["braininjectq"] = header_dict["braininjectq"]
+        # Create indicator entry
+        indicator_entry = deepcopy(primary_key)
+        indicator_keys = [
+            "isepored", "eporrem", "epordye",
+            "isvirusinject", "virusvect", "virusserotype", "virustransprotein", "virusinjectq", "virusinjectrem",
+            "tracer", "isbraininject", "braininjectq", "braininjectrem"]
+        indicator_entry.update({k: header_dict.get(k, "") for k in indicator_keys})
 
-        # Populate Pharmacology table for this experiment
-        pharminfo_key = deepcopy(primary_key)
+        # Create pharmacology entry
+        pharminfo_entry = deepcopy(primary_key)
         drug = header_dict.get("pharmdrug", "").lower()
         if drug.lower() in ["", "none"]:
             drug = "none"
-        pharminfo_key['drug'] = drug
-        pharminfo_key["pharmaflag"] = 0 if drug == 'none' else 1
-        pharminfo_key['pharmconc'] = header_dict.get("pharmdrugconc_um", "")
-        pharminfo_key['preapptime'] = header_dict.get("pretime", "")
-        pharminfo_key['pharmcom'] = header_dict.get("pharmrem", "")
+        pharminfo_entry['drug'] = drug
+        pharminfo_entry["pharmaflag"] = 0 if drug == 'none' else 1
+        pharminfo_entry['pharmconc'] = header_dict.get("pharmdrugconc_um", "")
+        pharminfo_entry['preapptime'] = header_dict.get("pretime", "")
+        pharminfo_entry['pharmcom'] = header_dict.get("pharmrem", "")
 
         if verboselvl > 0:
             print('\t\tAdding:', primary_key)
 
-        self.insert1(exp_key, allow_direct_insert=True)
-        self.ExpInfo().insert1(expinfo_key)
-        self.Animal().insert1(animal_key)
-        self.Indicator().insert1(indicator_key)
-        self.PharmInfo().insert1(pharminfo_key)
+        self.insert1(exp_entry, allow_direct_insert=True)
+        self.ExpInfo().insert1(info_entry)
+        self.Animal().insert1(animal_entry)
+        self.Indicator().insert1(indicator_entry)
+        self.PharmInfo().insert1(pharminfo_entry)
 
     class ExpInfo(dj.Part):
         @property

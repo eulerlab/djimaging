@@ -1,7 +1,6 @@
 import os
 
 import h5py
-import matplotlib.pyplot as plt
 import numpy as np
 
 from djimaging.utils.scanm import read_h5_utils, read_smp_utils, wparams_utils, setup_utils, traces_and_triggers_utils
@@ -154,7 +153,6 @@ class ScanMRecording:
         self.ch_n_frames = ch_stacks[self.ch_names[0]].shape[-1]
 
     def extract_wparams_info(self, wparams):
-
         # Scan type
         self.scan_type = wparams_utils.get_scan_type(wparams)
         self.scan_type_id = wparams.pop("user_scantype")
@@ -163,9 +161,9 @@ class ScanMRecording:
         self.pix_n_retrace = int(wparams.pop("user_npixretrace"))
         self.pix_n_line_offset = int(wparams.pop("user_nxpixlineoffs"))
         self.pix_nx_full = int(wparams.pop("user_dxpix"))
-        self.pix_nx = int(self.pix_nx_full - self.pix_n_retrace - self.pix_n_line_offset)
-        self.pix_ny = int(wparams.pop("user_dypix"))
-        self.pix_nz = int(wparams.pop("user_dzpix"))
+        self.pix_nx = max(0, int(self.pix_nx_full - self.pix_n_retrace - self.pix_n_line_offset))
+        self.pix_ny = int(wparams.pop("user_dypix", 0))
+        self.pix_nz = int(wparams.pop("user_dzpix", 0))
         self.pix_n_artifact = setup_utils.get_npixartifact(setupid=self.setup_id)
 
         # Scan info
@@ -180,7 +178,11 @@ class ScanMRecording:
         self.obj_angle_deg = wparams.pop("angle_deg")
 
         # Pixel sizes
-        self.pix_dx_um = setup_utils.get_pixel_size_xy_um(zoom=self.obj_zoom, setupid=self.setup_id, npix=self.pix_nx)
+        if self.pix_nx > 0:
+            self.pix_dx_um = setup_utils.get_pixel_size_xy_um(
+                zoom=self.obj_zoom, setupid=self.setup_id, npix=self.pix_nx)
+        else:
+            self.pix_dx_um = 0.
 
         if self.scan_type in ['xy', 'xyz']:
             if wparams.get("user_aspectratiofr", 1.) != 1.:

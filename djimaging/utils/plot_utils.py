@@ -65,7 +65,15 @@ def plot_field(main_ch_average, alt_ch_average, scan_type='xy', roi_mask=None, r
         _roi_ch_average[:npixartifact] = np.nan
 
         ax.imshow(_roi_ch_average.T, cmap='viridis', origin='lower', extent=extent)
-        rois_us = np.repeat(np.repeat(rois, 10, axis=0), 10, axis=1)
+
+        if max(rois.shape) < 100:
+            fus = 5
+        elif max(rois.shape) < 200:
+            fus = 2
+        else:
+            fus = 1
+
+        rois_us = np.repeat(np.repeat(rois, fus, axis=0), fus, axis=1)
         vmin = np.min(rois)
         vmax = np.max(rois)
         plt.colorbar(roi_mask_im, ax=ax)

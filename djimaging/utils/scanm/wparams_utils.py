@@ -9,9 +9,9 @@ def get_scan_type(wparams: dict, assume_lower=False) -> str:
     if assume_lower:
         wparams = {k.lower(): v for k, v in wparams.items()}
 
-    npix_x = int(wparams['user_dxpix'])
-    npix_y = int(wparams['user_dypix'])
-    npix_z = int(wparams['user_dzpix'])
+    npix_x = int(wparams.get('user_dxpix', 0))
+    npix_y = int(wparams.get('user_dypix', 0))
+    npix_z = int(wparams.get('user_dzpix', 0))
 
     if (npix_x > 1) and (npix_y > 1) and (npix_z <= 1):
         return 'xy'

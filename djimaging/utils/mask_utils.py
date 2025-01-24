@@ -501,6 +501,12 @@ def as_python_format(roi_mask):
 
 
 def to_python_format(roi_mask):
+    # Some ROI masks have 11 instead of 1's for some reason
+    rm_vals = np.unique(roi_mask)
+    if set(rm_vals[rm_vals > 0]) == {1, 11}:
+        roi_mask = roi_mask.copy()
+        roi_mask[roi_mask == 11] = 1
+
     assert_igor_format(roi_mask)
 
     vmax = np.max(roi_mask)

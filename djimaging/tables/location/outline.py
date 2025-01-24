@@ -33,6 +33,7 @@ from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import get_primary_key
@@ -104,7 +105,12 @@ class OutlineAbsTemplate(dj.Computed):
         data_folder = (self.userinfo_table & exp_key).fetch1("raw_data_dir" if from_raw_data else "pre_data_dir")
         user_dict = (self.userinfo_table & exp_key).fetch1()
 
-        file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
+        if os.path.isdir(os.path.join(header_path, data_folder)):
+            file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
+        else:
+            warnings.warn(f"Data folder {data_folder} not found for key {exp_key}")
+            return pd.DataFrame()
+
         file_info_df = file_info_df[file_info_df['kind'] == 'outline']
 
         if len(file_info_df) == 0:
