@@ -9,6 +9,6 @@ from .sinespot.sinespot_features import SineSpotFeaturesTemplate
 
 from .orientation_v1 import OsDsIndexesTemplate as OsDsIndexesTemplateV1
 from .orientation_v2 import OsDsIndexesTemplate as OsDsIndexesTemplateV2
-from .csl import CslMetricsTemplate
+from .csl.csl import CslMetricsTemplate
 from .response_quality import RepeatQITemplate
 from .presentation_quality import RepeatQIPresentationTemplate

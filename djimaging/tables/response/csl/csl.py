@@ -15,7 +15,8 @@ class CslMetrics(response.CslMetricsTemplate):
     presentation_table = Presentation
     traces_table = Traces
 
-    _w_zero_fit = 0 # Or 1
+    _kind = 'naka_rushton'
+    _w_zero_fit = True
     _dt_order = 3
     _dt_window = 60
     _peak_q = 98
@@ -31,13 +32,15 @@ CslMetrics().populate(make_kwargs=dict(plot=True))
 
 from abc import abstractmethod
 
-from djimaging.utils.dj_utils import get_primary_key
-from djimaging.tables.core.preprocesstraces import process_trace
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
 import datajoint as dj
+import matplotlib.pyplot as plt
+import numpy as np
 
+from djimaging.tables.core.preprocesstraces import process_trace
+from djimaging.tables.response.csl.naka_rushton_utils import fit_naka_rushton
+from djimaging.tables.response.csl.sigmoid_utils import fit_sigmoid
+from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.math_utils import normalize_zero_one
 from djimaging.utils.snippet_utils import split_trace_by_reps
 
 
@@ -45,6 +48,7 @@ class CslMetricsTemplate(dj.Computed):
     database = ""
     _stim_restriction = dict(stim_name='csl')
 
+    _fit_kind = 'naka_rushton'
     _w_zero_fit = 1
     _dt_order = 3
     _dt_window = 60
@@ -65,19 +69,19 @@ class CslMetricsTemplate(dj.Computed):
         snippets: longblob  # Baseline corrected snippets (times x repetitions)
         fs: float  # Sampling frequency in which average and snippets are stored
         fs_metrics: float  # Sampling frequency used to compute metrics
-        qidx: float  # Quality index as in Baden et al 2016
+        qidx_full: float  # Quality index for full trace (as in Baden et al 2016)
+        qidx_contrast: float  # Quality index for contrast steps only (i.e. excluding half-steps)
         on_off_index: float  # Index indicating light preference (-1 Off, 1 On)
         contrast_sensitivity: float  # Relating step responses to contrast responses
         tonic_release_index: float  # Tonic release index as in Franke et al 2017, but for last contrast step
         plateau_index: float  # Plateau index (a - b) / (a + b), similar to Franke et al 2017
-        ub_half_amp: float  # Upper bound half amplitude
-        ub_half_amp_x: float  # Upper bound half amplitude x
-        ub_slope_half_amp: float  # Upper bound slope at half amplitude
-        lb_half_amp: float  # Lower bound half amplitude
-        lb_half_amp_x: float  # Lower bound half amplitude x
-        lb_slope_half_amp: float  # Lower bound slope at half amplitude
+        contrast_aucs: blob  # Area under the curve for each contrast, incl. baseline at i=0 if _w_zero_fit=1
+        fit_half_amp_y = NULL : float  # y at half amplitude of fit
+        fit_half_amp_x = NULL : float  # x at half amplitude of fit
+        fit_half_amp_slope = NULL : float  # Slope at half amplitude of fit
         droppedlastrep_flag: tinyint unsigned  # Was the last repetition incomplete and therefore dropped?
         '''
+
         return definition
 
     @property
@@ -119,8 +123,8 @@ class CslMetricsTemplate(dj.Computed):
 
         d_csl = analyse_csl_response(
             trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, fs_resample, plot=plot,
-            w_zero_fit=self._w_zero_fit, dt_order=self._dt_order,
-            dt_window=self._dt_window, peak_q=self._peak_q,
+            w_zero_fit=self._w_zero_fit, fit_kind=self._fit_kind,
+            dt_order=self._dt_order, dt_window=self._dt_window, peak_q=self._peak_q,
             contrast_levels=self._contrast_levels, dt_breaks=self._dt_breaks,
             dt_baseline_a=self._dt_baseline_a, dt_baseline_b=self._dt_baseline_b,
             dt_window_plateau=self._dt_window_plateau
@@ -132,17 +136,17 @@ class CslMetricsTemplate(dj.Computed):
         avg = d_csl['avg'][::n_lines]
 
         entry = dict(
-            key, average=avg, snippets=bc_snippets, fs=fs, fs_metrics=fs_resample, qidx=d_csl['qidx'],
+            **key, average=avg, snippets=bc_snippets, fs=fs, fs_metrics=fs_resample,
+            qidx_full=d_csl['qidx_full'], qidx_contrast=d_csl['qidx_contrast'],
             on_off_index=d_csl['on_off_index'], contrast_sensitivity=d_csl['contrast_sensitivity'],
             tonic_release_index=d_csl['tonic_release_index'], plateau_index=d_csl['plateau_index'],
-            ub_half_amp=d_csl['ub_fit'][0], ub_half_amp_x=d_csl['ub_fit'][1], ub_slope_half_amp=d_csl['ub_fit'][2],
-            lb_half_amp=d_csl['lb_fit'][0], lb_half_amp_x=d_csl['lb_fit'][1], lb_slope_half_amp=d_csl['lb_fit'][2],
-            droppedlastrep_flag=d_csl['droppedlastrep_flag']
+            fit_half_amp_y=d_csl['fit'][0], fit_half_amp_x=d_csl['fit'][1], fit_half_amp_slope=d_csl['fit'][2],
+            contrast_aucs=d_csl['contrast_aucs'], droppedlastrep_flag=d_csl['droppedlastrep_flag']
         )
 
         return entry
 
-    def make(self, key, plot=False, verbose=False):
+    def make(self, key, plot=False, verbose=False, DEBUG=False):
         if verbose:
             print(f'Populating {key}')
 
@@ -153,88 +157,28 @@ class CslMetricsTemplate(dj.Computed):
             return
 
         entry = self._make_fetch_and_compute(key, plot=plot)
+        if DEBUG:
+            return
         self.insert1(entry)
 
-    def plot1(self, key):
+    def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
         old_entry = (self & key).fetch1()
         new_entry = self._make_fetch_and_compute(key, plot=True)
 
-        if np.all([old_entry[k] == new_entry[k] for k in ['tonic_release_index', 'plateau_index', 'qidx']]):
-            raise ValueError('Plotted values are not identical to stored values.')
+        for k in ['qidx_full', 'qidx_contrast',
+                  'on_off_index', 'contrast_sensitivity', 'tonic_release_index', 'plateau_index',
+                  'fit_half_amp_y', 'fit_half_amp_x', 'fit_half_amp_slope']:
+            if not np.isclose(old_entry[k], new_entry[k], atol=1e-3):
+                raise ValueError(f'Plotted value {new_entry[k]} does not match database value {old_entry[k]}')
 
 
-def sigmoid(x, x0, k, a):
-    """Define sigmoid function"""
-    y = a / (1 + np.exp(-k * (x - x0)))
-    return y
-
-
-def init_sigmoid_params(x_data, y_data):
-    """Initialize sigmoid parameters"""
-    p0 = [x_data[np.argmax(y_data > (y_data.max() / 2))], 10., np.percentile(y_data, 90)]
-    bounds = [(x_data[0], 1e-9, np.min(y_data)), (x_data[-1], np.inf, 1.2 * np.max(y_data))]
-    return p0, bounds
-
-
-def fit_sigmoid_with_retry(x_data, y_data, max_tries=3):
-    p00, bounds = init_sigmoid_params(x_data, y_data)
-
-    for i in range(max_tries):
-        try:
-            p0 = p00 if i == 0 else [np.random.uniform(a, np.minimum(b, 100)) for a, b in np.array(bounds).T]
-            popt = curve_fit(sigmoid, x_data, y_data, p0=p0, bounds=bounds)[0]
-            return popt
-        except RuntimeError:
-            pass
-    return p00
-
-
-def fit_sigmoid(y_data, x_data=None, sign=1, ax=None):
-    """Fit sigmoid function to data, and estimate half amp"""
-    np.random.seed(42)
-
-    if x_data is None:
-        x_data = np.arange(y_data.size)
-
-    y_data = y_data * sign
-
-    # Fit sigmoid curve to the data
-    popt = fit_sigmoid_with_retry(x_data, y_data, max_tries=3)
-    x0_fit, k_fit, a_fit = popt
-
-    if (x0_fit > x_data.max()) | (x0_fit < x_data.min()):
-        x0_fit = 0
-
-    # Calculate half amplitude x value
-    half_amplitude = a_fit / 2
-    half_amplitude_x = x0_fit
-    slope_at_half_amplitude = k_fit * half_amplitude * (1 - half_amplitude / a_fit)
-
-    half_amplitude *= sign
-    slope_at_half_amplitude *= sign
-
-    if ax is not None:
-        x_data_us = np.linspace(x_data[0], x_data[-1], x_data.size * 20)
-        ax.scatter(x_data, y_data * sign, label='Data')
-        ax.plot(x_data_us, sigmoid(x_data_us, *popt) * sign, 'r-',
-                label='Fit: x0=%5.3f, k=%5.3f, A=%5.3f' % tuple(popt))
-        ax.plot(half_amplitude_x, half_amplitude, 'gD', linestyle='--',
-                label=f'x(Half Amplitude)={half_amplitude_x:.2f}')
-        dt = np.min(np.diff(x_data))
-        ax.plot([half_amplitude_x - 0.5 * dt, half_amplitude_x + 0.5 * dt],
-                [half_amplitude - 0.5 * dt * slope_at_half_amplitude,
-                 half_amplitude + 0.5 * dt * slope_at_half_amplitude],
-                color='k', label=f'slope={slope_at_half_amplitude:.2f}')
-        ax.legend(fontsize=6)
-
-    return half_amplitude, half_amplitude_x, slope_at_half_amplitude
-
-
-def analyse_csl_response(trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, fs_resample, plot=False,
-                         w_zero_fit=1, dt_order=3, dt_window=60, peak_q=98,
-                         contrast_levels=(0.10, 0.20, 0.40, 0.60, 0.80, 1.00),
-                         dt_breaks=3., dt_baseline_a=1.6, dt_baseline_b=2.9, dt_window_plateau=1.0):
+def analyse_csl_response(
+        trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, fs_resample, plot=False,
+        w_zero_fit=1, fit_kind='naka_rushton',
+        dt_order=3, dt_window=60, peak_q=98,
+        contrast_levels=(0.10, 0.20, 0.40, 0.60, 0.80, 1.00),
+        dt_breaks=3., dt_baseline_a=1.6, dt_baseline_b=2.9, dt_window_plateau=1.0):
     """Normalize contrast step light response. Detrend, resample, split, normalize, and extract features.
     Fit a sigmoid to the upper and lower bounds of the contrast steps.
     """
@@ -243,8 +187,8 @@ def analyse_csl_response(trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, 
 
     if plot:
         fig, axs = plt.subplot_mosaic(
-            [['A'] * 2, ['B'] * 2, ['C'] * 2, ['D'] * 2, ['E'] * 2, ['F'] * 2, ['G'] * 2, ['H', 'I']],
-            figsize=(10, 10), height_ratios=[1] * 7 + [2])
+            [['A'], ['B'], ['C'], ['D'], ['E'], ['F'], ['G'], ['H']],
+            figsize=(10, 15), height_ratios=[1] * 7 + [2])
 
     pp_trace, pp_smoothed_trace, pp_dt = process_trace(
         trace=trace, trace_t0=trace_t0, trace_dt=trace_dt,
@@ -284,7 +228,13 @@ def analyse_csl_response(trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, 
     bc_snippets /= scale
 
     # Quality index - See Baden et al 2016
-    qidx = np.var(np.mean(bc_snippets, axis=1)) / np.mean(np.var(bc_snippets, axis=0))
+    qidx_full = (np.var(np.mean(bc_snippets, axis=1)) /
+                 np.mean(np.var(bc_snippets, axis=0)))
+
+    idx_contrast_a, idx_contrast_b = idxs_cs_a[0], idxs_base_b[-1]
+
+    qidx_contrast = (np.var(np.mean(bc_snippets[idx_contrast_a:idx_contrast_b, :], axis=1)) /
+                     np.mean(np.var(bc_snippets[idx_contrast_a:idx_contrast_b, :], axis=0)))
 
     # Tonic release index
     avg_100 = avg[idxs_cs_a[-1]:idxs_cs_b[-1]]
@@ -319,16 +269,21 @@ def analyse_csl_response(trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, 
     amp_100 = np.maximum(0, np.percentile(avg[idxs_cs_a[-1]:idxs_cs_b[-1]], q=peak_q))
     contrast_sensitivity = amp_100 / np.maximum(amp_100 + amp_step, 1e-9)
 
-    # Envelope sigmoid fit
-    cs_bounds = np.array(
-        [(np.percentile(avg[ia:ib], q=100 - peak_q), np.percentile(avg[ia:ib], q=peak_q))
-         for ia, ib in zip(idxs_cs_a, idxs_cs_b)])
+    # Fit curve to responses
+    contrast_aucs = np.array([np.mean(np.abs(avg[ia:ib])) for ia, ib in zip(idxs_cs_a, idxs_cs_b)])
+    if w_zero_fit:
+        zero_value = np.mean(np.abs(avg[idxs_baseline]))
+        contrast_aucs = np.append(zero_value, contrast_aucs)
+        contrast_levels = np.append(0, contrast_levels)
 
-    x_data = np.append(np.zeros(w_zero_fit), contrast_levels)
-    ub_fit = fit_sigmoid(y_data=np.append(np.zeros(w_zero_fit), cs_bounds[:, 1]), x_data=x_data,
-                         ax=None if not plot else axs['H'], sign=+1)
-    lb_fit = fit_sigmoid(y_data=np.append(np.zeros(w_zero_fit), cs_bounds[:, 0]), x_data=x_data,
-                         ax=None if not plot else axs['I'], sign=-1)
+    if fit_kind == 'naka_rushton':
+        fit = fit_naka_rushton(
+            y_data=normalize_zero_one(contrast_aucs), x_data=contrast_levels, ax=None if not plot else axs['H'])
+    elif fit_kind == 'sigmoid':
+        fit = fit_sigmoid(
+            y_data=normalize_zero_one(contrast_aucs), x_data=contrast_levels, ax=None if not plot else axs['H'])
+    else:
+        raise ValueError(f'Unknown fit_kind={fit_kind}')
 
     if plot:
         ax = axs['A']
@@ -344,19 +299,23 @@ def analyse_csl_response(trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, 
         ax.axhline(0, c='dimgray', ls='--')
 
         ax = axs['C']
-        ax.set_title(f'Snippets & Local baselines; qidx={qidx:.2f}')
+        ax.set_title(f'Snippets & Local baselines')
         for i, (snip, base) in enumerate(zip(snippets.T, baselines.T)):
             ax.plot(rel_time, snip, alpha=0.5, c=f'C{i}')
             ax.plot(rel_time, base, alpha=1, c=f'C{i}')
         ax.vlines(rel_triggertimes, np.min(snippets), np.max(snippets), color='r')
         for ia, ib in zip(idxs_base_a, idxs_base_b):
-            ax.plot([rel_time[ia], rel_time[ib]], [np.mean(baselines)] * 2, 'k|-')
+            ax.plot([rel_time[ia], rel_time[ib]], [np.mean(baselines)] * 2, '|-', color='magenta')
+        for ia, ib in zip(idxs_cs_a, idxs_cs_b):
+            ax.plot([rel_time[ia], rel_time[ib]], [np.mean(baselines) - 0.2] * 2, '|-', color='k')
 
         ax = axs['D']
-        ax.set_title('Normalized Baseline-corrected snippets & Average')
+        ax.set_title(f'Normalized baseline-corrected snippets & Average: '
+                     f'qidx_full={qidx_full:.2f} & qidx_contrast={qidx_contrast:.2f}')
         ax.plot(rel_time, bc_snippets, alpha=0.5)
         ax.plot(rel_time, avg, c='k')
         ax.vlines(rel_triggertimes, np.min(bc_snippets), np.max(bc_snippets), color='r')
+        # ax.plot([rel_time[idx_contrast_a], rel_time[idx_contrast_b]], [np.mean(baselines) - 0.2] * 2, '|-', color='k')
 
         ax = axs['E']
         ax.set_title(f'TRi={tonic_release_index:.2f}; RPi={plateau_index:.2f}')
@@ -368,10 +327,12 @@ def analyse_csl_response(trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, 
                         color='r', alpha=0.5, zorder=10)
         ax.fill_between(rel_time[idxs_cs_a[-1]:idxs_cs_b[-1]], np.clip(avg_100, 0, None),
                         color='g', alpha=0.5, zorder=10)
+        ax.axhline(0, ls=':', color='gray')
 
         # RPi- Response plateau index
         ax.plot([rel_time[idx_pt1_a], rel_time[idx_pt1_b]], [pt1_amp] * 2, 'X-', c='k')
         ax.plot([rel_time[idx_pt2_a], rel_time[idx_pt2_b]], [pt2_amp] * 2, 'X-', c='gray')
+        ax.axhline(0, ls=':', color='gray')
 
         # On off index and contrast sensitivity
         ax = axs['F']
@@ -381,25 +342,37 @@ def analyse_csl_response(trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, 
         ax.plot([rel_time[idxs_cs_a[-1]], rel_time[idxs_cs_b[-1]]], [amp_100] * 2, 'gX-', label='100%')
         ax.plot(rel_time, avg, c='k')
         ax.legend(loc='upper center')
+        ax.axhline(0, ls=':', color='gray')
 
+        # Fit
         ax = axs['G']
-        ax.set_title('Upper and lower bounds for contrast steps')
-        ax.plot(rel_time, avg, c='k')
-        ax.plot(rel_time[(idxs_cs_a + idxs_cs_b) // 2], cs_bounds[:, 0], 'rX')
-        ax.plot(rel_time[(idxs_cs_a + idxs_cs_b) // 2], cs_bounds[:, 1], 'gX')
-        for ia, ib, (lb, ub) in zip(idxs_cs_a, idxs_cs_b, cs_bounds):
-            ax.fill_between([rel_time[ia], rel_time[ib]], [lb] * 2, [ub] * 2, color='c')
+        ax.set_title('Response metric for contrast steps')
+        ax.plot(rel_time, avg, c='k', lw=0.8, alpha=0.8)
 
-        axs['H'].set_title('Sigmoid fit UB')
-        axs['I'].set_title('Sigmoid fit LB')
+        if w_zero_fit:
+            for i, (ia, ib) in enumerate(zip(idxs_base_a, idxs_base_b)):
+                ax.fill_between(rel_time[ia:ib], np.zeros_like(avg[ia:ib]), avg[ia:ib], color='C0', lw=0)
+
+        for i, (ia, ib) in enumerate(zip(idxs_cs_a, idxs_cs_b)):
+            ax.fill_between(rel_time[ia:ib], np.zeros_like(avg[ia:ib]), avg[ia:ib], color=f'C{i + 1}', lw=0)
+
+        ax.axhline(0, ls=':', color='gray')
+        ax2 = ax.twinx()
+        ax2.bar(x=rel_time[(idxs_cs_a + idxs_cs_b) // 2], height=contrast_aucs[-len(idxs_cs_a):], color='k', alpha=0.5)
+        vabsmax = np.max(np.abs(contrast_aucs[-len(idxs_cs_a):]))
+        ax2.set_ylim(-vabsmax * 1.1, vabsmax * 1.1)
+        ax2.axhline(0, ls='--', color='gray')
+
+        axs['H'].set_title('Fit')
 
         plt.tight_layout()
         plt.show()
 
     result_dict = dict(
-        bc_snippets=bc_snippets, avg=avg, qidx=qidx, tonic_release_index=tonic_release_index,
+        bc_snippets=bc_snippets, avg=avg, qidx_full=qidx_full, qidx_contrast=qidx_contrast,
+        tonic_release_index=tonic_release_index,
         plateau_index=plateau_index, on_off_index=on_off_index, contrast_sensitivity=contrast_sensitivity,
-        ub_fit=ub_fit, lb_fit=lb_fit, droppedlastrep_flag=droppedlastrep_flag
+        contrast_aucs=contrast_aucs, fit=fit, droppedlastrep_flag=droppedlastrep_flag
     )
 
     return result_dict
