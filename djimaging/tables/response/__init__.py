@@ -7,8 +7,7 @@ from .chirp.chirp_surround_v2 import ChirpSurroundTemplate as ChirpSurroundTempl
 from .sinespot.sinespot_qi import SineSpotQITemplate
 from .sinespot.sinespot_features import SineSpotFeaturesTemplate
 
-from .orientation_v1 import OsDsIndexesTemplate as OsDsIndexesTemplateV1
-from .orientation_v2 import OsDsIndexesTemplate as OsDsIndexesTemplateV2
+from .movingbar.orientation import OsDsIndexesTemplate, OsDsIndexesTemplateV1, OsDsIndexesTemplateV2
 from .csl.csl import CslMetricsTemplate
 from .response_quality import RepeatQITemplate
 from .presentation_quality import RepeatQIPresentationTemplate

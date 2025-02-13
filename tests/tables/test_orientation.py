@@ -3,7 +3,7 @@ import pickle as pkl
 
 import numpy as np
 
-from djimaging.tables.response.orientation_v2 import compute_os_ds_idxs
+from djimaging.tables.response.movingbar.orientation_utils_v2 import compute_os_ds_idxs
 
 
 def load_test_data(cell_type, path='test_mb.pkl'):

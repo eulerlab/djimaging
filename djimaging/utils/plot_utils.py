@@ -111,11 +111,11 @@ def plot_field_and_traces(main_ch_average, alt_ch_average, roi_mask, title='', f
     plt.tight_layout()
 
 
-def prep_long_title(title=None):
+def prep_long_title(title=None, nmax=50):
     if title is None:
         return
     title = str(title)
-    if '\n' not in title and len(title) > 50:
+    if '\n' not in title and len(title) > nmax:
         title = title[:len(title) // 2] + '\n' + title[len(title) // 2:]
     return title
 
