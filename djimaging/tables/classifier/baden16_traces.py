@@ -19,7 +19,7 @@ class Baden16TracesTemplate(dj.Computed):
     database = ""
 
     _shift_chirp = 1
-    _shift_bar = -4
+    _shift_bar = -4  # How much the moving bar is shifted. It's actually better to use delay in the Stimulus table.
 
     _stim_name_chirp = 'gChirp'
     _stim_name_bar = 'movingbar'

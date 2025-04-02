@@ -46,6 +46,7 @@ import os
 import pickle as pkl
 import warnings
 from abc import abstractmethod
+from functools import lru_cache
 from typing import Mapping, Dict, Any
 
 import datajoint as dj
@@ -90,50 +91,55 @@ class ClassifierTrainingDataTemplate(dj.Manual):
         # holds feature basis and training data for classifier
         training_data_hash     :   varchar(63)     # hash of the classifier training data files
         ---
-        project                :   enum("True", "False")     # flag whether to project data onto features anew or not
         output_path            :   varchar(191)
+        baden_data_file        :   filepath@{store}
         chirp_feats_file       :   filepath@{store}
         bar_feats_file         :   filepath@{store}
-        baden_data_file        :   filepath@{store}
-        training_data_file     :   filepath@{store}
         """.format(store=self._store)
         return definition
 
-    def add_default(self, training_data_file='training_all.pkl', skip_duplicates=False):
+    def add_default(self, skip_duplicates=False):
         ipath = dj.config['stores']["classifier_input"]["location"] + '/'
         opath = dj.config['stores']["classifier_output"]["location"] + '/'
 
         self.add_trainingdata(
-            project="False",
             output_path=opath,
+            baden_data_file=ipath + 'RGCData_postprocessed.mat',
             chirp_feats_file=ipath + 'chirp_feats.npz',
             bar_feats_file=ipath + 'bar_feats.npz',
-            baden_data_file=ipath + 'RGCData_postprocessed.mat',
-            training_data_file=ipath + training_data_file,
             skip_duplicates=skip_duplicates,
         )
 
-    def add_trainingdata(self, project: str, output_path: str, chirp_feats_file: str, bar_feats_file: str,
-                         baden_data_file: str, training_data_file: str, skip_duplicates: bool = False) -> None:
-
+    def add_trainingdata(self, output_path: str, chirp_feats_file: str, bar_feats_file: str,
+                         baden_data_file: str, skip_duplicates: bool = False) -> None:
         key = dict(
-            project=project,
             output_path=output_path,
             chirp_feats_file=chirp_feats_file,
             bar_feats_file=bar_feats_file,
-            baden_data_file=baden_data_file,
-            training_data_file=training_data_file)
+            baden_data_file=baden_data_file
+        )
         key["training_data_hash"] = make_hash(key)
         self.insert1(key, skip_duplicates=skip_duplicates)
 
     def get_training_data(self, key: Key):
-        if (self & key).fetch1("project") == "True":
-            raise NotImplementedError
-        else:
-            training_data_file = (self & key).fetch1("training_data_file")
-            with open(training_data_file, "rb") as f:
-                training_data = pkl.load(f)
-            return training_data
+        baden_data_file, chirp_feats_file, bar_feats_file = (self & key).fetch1(
+            'baden_data_file', 'chirp_feats_file', 'bar_feats_file')
+
+        b_c_labels, b_g_labels, b_s_labels, b_c_traces, b_c_qi, b_mb_traces, b_mb_qi, b_mb_dsi, b_mb_dp, b_soma_um2 = \
+            load_baden_data(baden_data_file)
+        chirp_features = np.load(chirp_feats_file)
+        bar_features = np.load(bar_feats_file)
+
+        features = extract_features(
+            preproc_chirps=b_c_traces,
+            preproc_bars=b_mb_traces,
+            bar_ds_pvalues=b_mb_dp,
+            roi_size_um2s=b_soma_um2,
+            chirp_features=chirp_features,
+            bar_features=bar_features,
+        )
+
+        return features, b_c_labels, b_g_labels, b_s_labels
 
 
 class ClassifierMethodTemplate(dj.Lookup):
@@ -144,6 +150,7 @@ class ClassifierMethodTemplate(dj.Lookup):
         definition = """
         classifier_params_hash  : varchar(63)     # hash of the classifier params config
         ---
+        label_kind              : enum('cluster', 'group', 'super')  # Predict group or cluster labels from Baden et al. 16
         classifier_fn           : varchar(191)    # path to classifier method fn
         classifier_config       : longblob        # method configuration object
         classifier_seed         : int
@@ -158,7 +165,7 @@ class ClassifierMethodTemplate(dj.Lookup):
     def classifier_training_data_table(self):
         pass
 
-    def add_default(self, skip_duplicates=False):
+    def add_default(self, label_kind='group', skip_duplicates=False):
         classifier_fn = "sklearn.ensemble.RandomForestClassifier"
         classifier_config = {
             'class_weight': 'balanced',
@@ -172,10 +179,10 @@ class ClassifierMethodTemplate(dj.Lookup):
             'n_jobs': 20,
         }
 
-        self.add_classifier(classifier_fn, classifier_config, comment="Default classifier",
+        self.add_classifier(label_kind, classifier_fn, classifier_config, comment="Default classifier",
                             skip_duplicates=skip_duplicates)
 
-    def add_classifier(self, classifier_fn: str, classifier_config: Mapping,
+    def add_classifier(self, label_kind: str, classifier_fn: str, classifier_config: Mapping,
                        comment: str = "", skip_duplicates: bool = False, classifier_seed: int = 42) -> None:
         if classifier_config is None:
             classifier_config = {
@@ -190,41 +197,75 @@ class ClassifierMethodTemplate(dj.Lookup):
                 'n_jobs': 20,
             }
 
+        all_config = classifier_config.copy()
+        all_config['label_kind'] = label_kind
+        all_config['classifier_fn'] = classifier_fn
+        classifier_params_hash = make_hash(all_config)
+
         self.insert1(
             dict(
+                label_kind=label_kind,
                 classifier_fn=classifier_fn,
-                classifier_params_hash=make_hash(classifier_config),
+                classifier_params_hash=classifier_params_hash,
                 classifier_config=classifier_config,
                 classifier_seed=classifier_seed,
                 comment=comment),
             skip_duplicates=skip_duplicates)
 
     def train_classifier(self, key: Key):
-        classifier_fn, classifier_config, classifier_seed = \
-            (self & key).fetch1("classifier_fn", "classifier_config", "classifier_seed")
+        from sklearn.model_selection import train_test_split
+
+        label_kind, classifier_fn, classifier_config, classifier_seed = \
+            (self & key).fetch1("label_kind", "classifier_fn", "classifier_config", "classifier_seed")
         classifier_config["random_state"] = classifier_seed
 
+        print(f'Train classifier: {classifier_fn} {key["classifier_params_hash"]}')
+
         classifier_fn = self.import_func(*split_module_name(classifier_fn))
-        training_data = self.classifier_training_data_table().get_training_data(key)
+        features, b_c_labels, b_g_labels, b_s_labels = self.classifier_training_data_table().get_training_data(key)
+
+        if label_kind == 'cluster':
+            labels = b_c_labels
+        elif label_kind == 'group':
+            labels = b_g_labels
+        elif label_kind == 'super':
+            labels = b_s_labels
+        else:
+            raise NotImplementedError(label_kind)
+
+        print(f'Use `{label_kind}`-labels with n={np.unique(labels).size} labels')
+
+        print(f'Splitting data n={labels.size} ...')
+        X_train, X_test, y_train, y_test = train_test_split(
+            features, labels, test_size=0.2, random_state=2001)
+
+        print('Fitting classifier on training data ...')
         classifier = classifier_fn(**classifier_config)
-        classifier.fit(X=training_data["X"], y=training_data["y"])
-        score = classifier.score(X=training_data["X"], y=training_data["y"])
-        return classifier, score
+        classifier.fit(X=X_train, y=y_train)
+
+        print('Evaluate classifier on train and test data ...')
+        score_train = classifier.score(X=X_train, y=y_train)
+        score_test = classifier.score(X=X_test, y=y_test)
+        print('Train score: {:.3f}'.format(score_train))
+        print('Test score: {:.3f}'.format(score_test))
+
+        print('Refitting classifier on all data ...')
+        classifier = classifier_fn(**classifier_config)
+        classifier.fit(X=features, y=labels)
+        print('Evaluate classifier on all data ...')
+        score_final = classifier.score(X=features, y=labels)
+        print('Final score: {:.3f}\n'.format(score_final))
+        return classifier, score_train, score_test, score_final
 
 
-def classify_cell(preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2,
-                  chirp_features, bar_features, classifier):
-    # feature activation matrix
+def extract_feature(preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2, chirp_features, bar_features):
     feature_activation_chirp = np.dot(preproc_chirp, chirp_features)
     feature_activation_bar = np.dot(preproc_bar, bar_features)
 
-    features = np.concatenate(
+    feature = np.concatenate(
         [feature_activation_chirp, feature_activation_bar, np.array([bar_ds_pvalue]), np.array([roi_size_um2])])
 
-    confidence_scores = classifier.predict_proba(features[np.newaxis, :]).flatten()
-    celltype = np.argmax(confidence_scores) + 1
-
-    return celltype, confidence_scores
+    return feature
 
 
 def extract_features(preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, chirp_features, bar_features):
@@ -238,14 +279,24 @@ def extract_features(preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s
     return features
 
 
+def classify_cell(preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2,
+                  chirp_features, bar_features, classifier):
+    feature = extract_feature(
+        preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2, chirp_features, bar_features)
+    confidence_scores = classifier.predict_proba(feature[np.newaxis, :]).flatten()
+    cell_label = confidence_scores.argmax(axis=1)
+    cell_label = classifier.classes_[cell_label][0]
+    return cell_label, confidence_scores
+
+
 def classify_cells(preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s,
                    chirp_features, bar_features, classifier):
     features = extract_features(
         preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, chirp_features, bar_features)
     confidence_scores = classifier.predict_proba(features)
-    celltypes = np.argmax(confidence_scores, axis=1) + 1
-
-    return celltypes, confidence_scores
+    cell_labels = confidence_scores.argmax(axis=1)
+    cell_labels = classifier.classes_[cell_labels]
+    return cell_labels, confidence_scores
 
 
 class ClassifierTemplate(dj.Computed):
@@ -259,14 +310,16 @@ class ClassifierTemplate(dj.Computed):
         -> self.classifier_method_table
         ---
         classifier_file         :   attach@{store}
-        score_train : float
+        score_train : float  # Train split data score
+        score_test : float  # Test split score
+        score_final : float  # Score after retraining on all data (the final classifier)
         """.format(store=self.store)
         return definition
 
     @property
     def key_source(self):
         try:
-            return self.classifier_training_data_table().proj() * self.classifier_method_table.proj()
+            return self.classifier_method_table.proj() * self.classifier_training_data_table().proj()
         except (AttributeError, TypeError):
             pass
 
@@ -282,14 +335,15 @@ class ClassifierTemplate(dj.Computed):
 
     def make(self, key):
         output_path = (self.classifier_training_data_table() & key).fetch1("output_path")
-        classifier_file = os.path.join(output_path, 'rgc_classifier.pkl')
-        classifier, score_train = self.classifier_method_table().train_classifier(key)
+        classifier_file = os.path.join(output_path, f'rgc_classifier_{key["classifier_params_hash"]}.pkl')
+        classifier, score_train, score_test, score_final = self.classifier_method_table().train_classifier(key)
 
-        print(f'Saving classifier to {classifier_file}')
+        print(f'Saving classifier to {classifier_file}\n')
         with open(classifier_file, "wb") as f:
             pkl.dump(classifier, f)
 
-        self.insert1(dict(key, classifier_file=classifier_file, score_train=score_train))
+        self.insert1(dict(key, classifier_file=classifier_file,
+                          score_train=score_train, score_test=score_test, score_final=score_final))
 
 
 class CelltypeAssignmentTemplate(dj.Computed):
@@ -302,7 +356,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
         -> self.baden_trace_table
         -> self.classifier_table
         ---
-        celltype:        int         # predicted group, without quality or confidence threshold
+        cell_label:      int         # predicted label with highest probability. Meaning of label depends on classifier
         max_confidence:  float       # confidence score for assigned celltype for easy restriction
         confidence:      blob        # confidence score (probability) for all celltypes
         """
@@ -388,11 +442,6 @@ class CelltypeAssignmentTemplate(dj.Computed):
         features_chirp = np.load(features_chirp_file)
         return features_chirp
 
-    @cached_property
-    def baden_data(self):
-        baden_data_file = (self.classifier_training_data_table() & self.current_model_key).fetch1("baden_data_file")
-        return load_baden_data(baden_data_file)
-
     def populate(
             self, *restrictions, suppress_errors=False,
             return_exception_objects=False, reserve_jobs=False, order="original", limit=None, max_calls=None,
@@ -400,7 +449,6 @@ class CelltypeAssignmentTemplate(dj.Computed):
     ):
         if processes > 1:
             warnings.warn('Parallel processing not implemented!')
-
         super().populate(
             *restrictions,
             suppress_errors=suppress_errors, return_exception_objects=return_exception_objects,
@@ -413,11 +461,11 @@ class CelltypeAssignmentTemplate(dj.Computed):
         if roi_keys is None:
             return
 
-        celltypes, confidence_scores = self._classify_cells(
+        cell_labels, confidence_scores = self._classify_cells(
             preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s)
 
-        for roi_key, celltype, confidence_scores_i in zip(roi_keys, celltypes, confidence_scores):
-            self.insert1(dict(**merge_keys(key, roi_key), celltype=celltype,
+        for roi_key, cell_label, confidence_scores_i in zip(roi_keys, cell_labels, confidence_scores):
+            self.insert1(dict(**merge_keys(key, roi_key), cell_label=cell_label,
                               confidence=confidence_scores_i, max_confidence=np.max(confidence_scores_i)))
 
     def _fetch_data(self, key, restriction=None):
@@ -442,10 +490,10 @@ class CelltypeAssignmentTemplate(dj.Computed):
         return roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s
 
     def _classify_cells(self, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s):
-        celltypes, confidence_scores = classify_cells(
+        cell_labels, confidence_scores = classify_cells(
             preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s,
             self.chirp_features, self.bar_features, self.classifier)
-        return celltypes, confidence_scores
+        return cell_labels, confidence_scores
 
     def plot(self, threshold_confidence: float):
         df = self.fetch(format='frame')
@@ -568,7 +616,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         if plot_baden_data:
             baden_data_file = (self.classifier_training_data_table() & key).fetch1('baden_data_file')
-            b_celltypes, b_chirp_traces, b_chirp_qi, b_bar_traces, b_bar_qi, b_bar_dsi, b_bar_dp, b_soma_size_um2 = \
+            b_c_labels, b_g_labels, b_s_labels, b_c_traces, b_c_qi, b_mb_traces, b_mb_qi, b_mb_dsi, b_mb_dp, b_soma_um2 = \
                 load_baden_data(baden_data_file)
 
             for ax_row, celltype in zip(axs, celltypes):
@@ -577,7 +625,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                     continue
 
                 ax = ax_row[0]
-                b_chirps = b_chirp_traces[b_celltypes == celltype]
+                b_chirps = b_c_traces[b_celltypes == celltype]
                 b_mean_chirp = np.mean(b_chirps, axis=0)
                 ax.plot(b_chirps.T, lw=0.5, c='gray', alpha=0.5, zorder=-200)
                 ax.plot(b_mean_chirp, c='k', lw=2, alpha=0.5, zorder=1)
@@ -586,7 +634,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                 ax.set(title=f"cc={np.corrcoef(mean_chirp, b_mean_chirp)[0, 1]:.2f}", xlim=xlim_chirp)
 
                 ax = ax_row[1]
-                b_bars = b_bar_traces[b_celltypes == celltype]
+                b_bars = b_mb_traces[b_celltypes == celltype]
                 b_mean_bar = np.mean(b_bars, axis=0)
                 ax.plot(b_bars.T, lw=0.5, c='gray', alpha=0.5, zorder=-200)
                 ax.plot(b_mean_bar, c='k', lw=2, alpha=0.5, zorder=1)
@@ -595,10 +643,10 @@ class CelltypeAssignmentTemplate(dj.Computed):
                 ax.set(title=f"cc={np.corrcoef(mean_bar, b_mean_bar)[0, 1]:.2f}", xlim=xlim_bar)
 
                 ax = ax_row[2].twinx()
-                ax.hist(b_bar_dp[b_celltypes == celltype], bar_ds_pvalues_bins, color='gray', alpha=0.5)
+                ax.hist(b_mb_dp[b_celltypes == celltype], bar_ds_pvalues_bins, color='gray', alpha=0.5)
 
                 ax = ax_row[3].twinx()
-                ax.hist(b_soma_size_um2[b_celltypes == celltype], bins=roi_size_um2s_bins, color='gray', alpha=0.5)
+                ax.hist(b_soma_um2[b_celltypes == celltype], bins=roi_size_um2s_bins, color='gray', alpha=0.5)
 
         for ax_row, celltype in zip(axs, celltypes):
             ax_row[0].set_ylabel(f"celltype={group_names[np.argmax(celltype == group_ticks)]}")
@@ -629,11 +677,12 @@ class CelltypeAssignmentTemplate(dj.Computed):
         plt.tight_layout()
 
 
-def load_baden_data(baden_data_file, merged_celltypes=True):
+@lru_cache(maxsize=None)
+def load_baden_data(baden_data_file, quality_filter=True):
     from scipy.io import loadmat
     baden_data = loadmat(baden_data_file, struct_as_record=True, matlab_compatible=False,
                          squeeze_me=True, simplify_cells=True)['data']
-    celltypes = baden_data['info']['final_idx']
+
     roi_size_um2 = baden_data['info']['area2d']
 
     chirp_traces = baden_data['chirp']['traces'].T
@@ -644,15 +693,24 @@ def load_baden_data(baden_data_file, merged_celltypes=True):
     bar_dsi = baden_data['ds']['dsi']
     bar_dp = baden_data['ds']['dP']
 
-    if merged_celltypes:
-        # TODO: Merging much come from training data; otherwise not flexible enough
-        celltypes = np.array([celltype2merged_celltype(celltype) for celltype in celltypes])
+    cluster_labels = np.asarray(baden_data['info']['final_idx']).flatten()
+    group_labels = np.array([baden_cluster_to_group(c_label) for c_label in cluster_labels])
+    super_labels = np.array([baden_group_to_supergroup(g_label) for g_label in group_labels])
 
-    return celltypes, chirp_traces, chirp_qi, bar_traces, bar_qi, bar_dsi, bar_dp, roi_size_um2
+    if quality_filter:
+        qidx = (cluster_labels > 0) & ((bar_qi > 0.6) | (chirp_qi > 0.45))
+    else:
+        qidx = np.ones(cluster_labels.size, dtype=bool)
+
+    return (
+        cluster_labels[qidx], group_labels[qidx], super_labels[qidx],
+        chirp_traces[qidx], chirp_qi[qidx], bar_traces[qidx], bar_qi[qidx], bar_dsi[qidx], bar_dp[qidx],
+        roi_size_um2[qidx],
+    )
 
 
-def celltype2merged_celltype(celltype):
-    _celltype2merged_celltype = {
+def baden_cluster_to_group(cluster_label):
+    _baden_cluster_to_group = {
         1: 1,
         2: 2,
         3: 3,
@@ -702,4 +760,42 @@ def celltype2merged_celltype(celltype):
         74: 46, 75: 46,
     }
 
-    return _celltype2merged_celltype.get(celltype, -1)
+    return _baden_cluster_to_group.get(cluster_label, -1)
+
+
+def baden_group_to_supergroup(group_label):
+    if group_label <= 0:
+        return -1
+    elif group_label <= 9:
+        return 1  # Off
+    elif group_label <= 14:
+        return 2  # On Off
+    elif group_label <= 20:
+        return 3  # Fast On
+    elif group_label <= 28:
+        return 4  # Slow On
+    elif group_label <= 32:
+        return 5  # Uncertain
+    elif group_label <= 46:
+        return 6  # dAC
+    else:
+        return -1
+
+
+def supergroup2str(supergroup_label):
+    if supergroup_label <= 0:
+        return 'none'
+    elif supergroup_label == 1:
+        return 'Off'
+    elif supergroup_label == 2:
+        return 'On Off'
+    elif supergroup_label == 3:
+        return 'Fast On'
+    elif supergroup_label == 4:
+        return 'Slow On'
+    elif supergroup_label == 5:
+        return 'Uncertain'
+    elif supergroup_label == 6:
+        return 'dAC'
+    else:
+        return 'Unknown'
