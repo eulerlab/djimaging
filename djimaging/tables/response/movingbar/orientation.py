@@ -13,8 +13,8 @@ class OsDsIndexes(response.OsDsIndexesTemplate):
     stimulus_table = Stimulus
     snippets_table = Snippets
 """
-
-from abc import abstractmethod, ABC
+import warnings
+from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
@@ -83,11 +83,15 @@ class OsDsIndexesTemplate(dj.Computed):
 
     def make(self, key):
         dir_order = (self.stimulus_table() & key).fetch1('trial_info')
-        snippets_t0, snippets_dt, snippets = (self.snippets_table() & key).fetch1(
-            'snippets_t0', 'snippets_dt', 'snippets')
+        snippets_dt, snippets = (self.snippets_table() & key).fetch1('snippets_dt', 'snippets')
 
         # Pick version
-        compute_os_ds_idxs = compute_os_ds_idxs_v1 if self._version == 1 else compute_os_ds_idxs_v2
+        if self._version == 1:
+            compute_os_ds_idxs = compute_os_ds_idxs_v1
+        elif self._version == 2:
+            compute_os_ds_idxs = compute_os_ds_idxs_v2
+        else:
+            raise ValueError(f"Version {self._version} not supported.")
 
         dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
             on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses = \
@@ -183,6 +187,36 @@ class OsDsIndexesTemplate(dj.Computed):
 class OsDsIndexesTemplateV1(OsDsIndexesTemplate):
     _version = 1
 
+    def __init__(self, *args, **kwargs):
+        warnings.warn("OsDsIndexesTemplateV1 is deprecated. Use OsDsIndexesTemplate with _version=1 instead.",
+                      DeprecationWarning, stacklevel=2)
+        super().__init__(*args, **kwargs)
+
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass
+
 
 class OsDsIndexesTemplateV2(OsDsIndexesTemplate):
     _version = 2
+
+    def __init__(self, *args, **kwargs):
+        warnings.warn("OsDsIndexesTemplateV1 is deprecated. Use OsDsIndexesTemplate with _version=2 instead.",
+                      DeprecationWarning, stacklevel=2)
+        super().__init__(*args, **kwargs)
+
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def snippets_table(self):
+        pass

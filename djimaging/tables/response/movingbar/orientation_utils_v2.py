@@ -6,6 +6,7 @@ import numpy as np
 
 from djimaging.tables.response.movingbar.orientation_utils import quality_index_ds, get_on_off_index, \
     preprocess_mb_snippets, get_si
+from djimaging.utils import math_utils
 
 
 def get_time_dir_kernels(sorted_responses: np.ndarray, dt: float):
@@ -58,8 +59,7 @@ def get_time_dir_kernels(sorted_responses: np.ndarray, dt: float):
     time_component -= np.mean(time_component[:first_second_idx])
     time_component = time_component / np.max(np.abs(time_component))
 
-    dir_component = dir_component - np.min(dir_component)
-    dir_component = dir_component / np.max(dir_component)
+    dir_component = math_utils.normalize_zero_one(dir_component)
 
     return time_component, dir_component
 

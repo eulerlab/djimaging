@@ -42,13 +42,18 @@ class ChirpFeaturesRgc(response.ChirpFeaturesRgcTemplate):
 
 
 @schema
-class OsDsIndexes(response.OsDsIndexesTemplateV2):
+class OsDsIndexes(response.OsDsIndexesTemplate):
+    _reduced_storage = True
+    _n_shuffles = 1000
+    _version = 2
+
     stimulus_table = Stimulus
     snippets_table = Snippets
 
 
 @schema
 class HighRes(misc.HighResTemplate):
+    raw_params_table = RawDataParams
     field_table = Field
     experiment_table = Experiment
     userinfo_table = UserInfo

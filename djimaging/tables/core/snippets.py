@@ -83,16 +83,19 @@ class SnippetsTemplate(dj.Computed):
             pass
 
     def make(self, key):
-        stim_name = (self.stimulus_table() & key).fetch1('stim_name')
-        ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
+        stim_name, stim_dict, ntrigger_rep = (self.stimulus_table() & key).fetch1(
+            'stim_name', 'stim_dict', 'ntrigger_rep')
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
         pp_trace_t0, pp_trace_dt, pp_trace = (self.preprocesstraces_table() & key).fetch1(
             'pp_trace_t0', 'pp_trace_dt', 'pp_trace')
 
+        delay = stim_dict.get('trigger_delay', 0.) if stim_dict is not None else 0
+
         pp_trace_times = np.arange(len(pp_trace)) * pp_trace_dt + pp_trace_t0
 
         snippets, snippets_times, triggertimes_snippets, droppedlastrep_flag = split_trace_by_reps(
-            pp_trace, pp_trace_times, triggertimes, ntrigger_rep, allow_drop_last=True, pad_trace=self._pad_trace)
+            pp_trace, pp_trace_times, triggertimes, ntrigger_rep,
+            delay=delay, allow_drop_last=True, pad_trace=self._pad_trace)
 
         dt_baseline = self.get_snippet_base_dt(stim_name)
         if dt_baseline is not None:

@@ -374,9 +374,11 @@ class InteractiveRoiCanvas(RoiCanvas):
             pixel_size_um=(1., 1.),
             max_shift=5,
             show_diagnostics=False,
+            swap_channels=False,
     ):
-        super().__init__(ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, pres_names=pres_names,
-                         bg_dict=bg_dict, n_artifact=n_artifact,
+        super().__init__(ch0_stacks=ch0_stacks if not swap_channels else ch1_stacks,
+                         ch1_stacks=ch1_stacks if not swap_channels else ch0_stacks,
+                         pres_names=pres_names, bg_dict=bg_dict, n_artifact=n_artifact,
                          initial_roi_mask=initial_roi_mask, shifts=shifts, main_stim_idx=main_stim_idx,
                          upscale=upscale, autorois_models=autorois_models,
                          output_files=output_files, pixel_size_um=pixel_size_um)

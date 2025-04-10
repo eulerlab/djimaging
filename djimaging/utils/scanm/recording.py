@@ -197,10 +197,10 @@ class ScanMRecording:
         return False
 
     def __load_from_file(self):
-        if self.filetype == '.smp':
-            self.__load_from_smp_file()
-        elif self.filetype == '.h5':
+        if self.filetype == '.h5':
             self.__load_from_h5_file()
+        else:
+            self.__load_from_smp_file()
 
     def __load_from_h5_file(self):
         with h5py.File(self.filepath, 'r', driver="stdio") as h5_file:
@@ -379,7 +379,7 @@ class ScanMRecording:
         if include_wparams_str:
             wparams_str.update(self.get_wparams_str_dict())
 
-        with h5py.File('data.h5', 'w') as f:
+        with h5py.File(filepath, 'w') as f:
             for k, v in self.ch_stacks.items():
                 f.create_dataset(k, data=v)
 

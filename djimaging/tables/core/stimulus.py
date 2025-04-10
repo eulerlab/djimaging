@@ -249,7 +249,7 @@ class StimulusTemplate(dj.Manual):
                       ntrigger_rep: int = 1, isrepeated: bool = 1, trial_info=None, framerate: float = 1 / 60.,
                       snippet_base_dt: float = None,
                       bardx: float = None, bardy: float = None, velumsec: float = None, tmovedurs: float = None,
-                      alias: str = None, skip_duplicates: bool = False):
+                      stim_dict_other=None, alias: str = None, skip_duplicates: bool = False):
 
         if trial_info is None:
             trial_info = np.array([0, 180, 45, 225, 90, 270, 135, 315])
@@ -267,6 +267,8 @@ class StimulusTemplate(dj.Manual):
             "velumsec": velumsec,
             "tmovedurs": tmovedurs,
         }
+        if stim_dict_other is not None:
+            stim_dict.update(stim_dict_other)
 
         self.add_stimulus(
             stim_name=stim_name,

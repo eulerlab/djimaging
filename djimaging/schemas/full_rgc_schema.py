@@ -17,7 +17,11 @@ class ChirpFeatures(response.ChirpFeaturesRgcTemplate):
 
 
 @schema
-class OsDsIndexes(response.OsDsIndexesTemplateV2):
+class OsDsIndexes(response.OsDsIndexesTemplate):
+    _reduced_storage = True
+    _n_shuffles = 1000
+    _version = 2
+
     stimulus_table = Stimulus
     snippets_table = Snippets
 

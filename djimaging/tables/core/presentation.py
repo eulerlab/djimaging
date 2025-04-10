@@ -324,7 +324,7 @@ class PresentationTemplate(dj.Computed):
         for name, stack in rec.ch_stacks.items():
             avg_entry = deepcopy(base_key)
             avg_entry["ch_name"] = name
-            avg_entry["ch_average"] = np.median(stack, 2).astype(np.float32)
+            avg_entry["ch_average"] = np.nanmedian(stack, 2).astype(np.float32)
             avg_entries.append(avg_entry)
 
         # extract params for scaninfo
