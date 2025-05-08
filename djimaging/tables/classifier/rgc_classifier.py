@@ -357,8 +357,8 @@ class CelltypeAssignmentTemplate(dj.Computed):
         -> self.classifier_table
         ---
         cell_label:      int         # predicted label with highest probability. Meaning of label depends on classifier
-        max_confidence:  float       # confidence score for assigned celltype for easy restriction
-        confidence:      blob        # confidence score (probability) for all celltypes
+        max_confidence:  float       # confidence score for assigned cell_label, can be celltype, supergroup etc.
+        confidence:      blob        # confidence scores (probabilities) for all celltypes
         """
         return definition
 
@@ -495,113 +495,82 @@ class CelltypeAssignmentTemplate(dj.Computed):
             self.chirp_features, self.bar_features, self.classifier)
         return cell_labels, confidence_scores
 
-    def plot(self, threshold_confidence: float):
+    def plot(self, threshold_confidence: float, classifier_level: str):
         df = self.fetch(format='frame')
         groups = df.groupby(['training_data_hash', 'classifier_params_hash', 'preprocess_id'])
 
         fig, axs = plt.subplots(len(groups), 1, figsize=(12, 3 * len(groups)), squeeze=False)
         axs = axs.flatten()
 
-        for ax, ((tdh, cph, pid), df) in zip(axs, groups):
-            celltypes = df.apply(
-                lambda row: row["celltype"] if row["max_confidence"] > threshold_confidence else -1, axis=1)
-
-            self.current_model_key = dict(classifier_params_hash=cph, training_data_hash=tdh)
-            training_data = self.classifier_training_data_table().get_training_data(self.current_model_key)
-            group_ticks = np.unique(training_data['y'])
-            group_names = training_data.get("group_name", group_ticks)
-
-            ax.hist(celltypes[celltypes > 0], bins=np.arange(group_ticks.min(), group_ticks.max() + 1, 0.5),
-                    align='left')
-            ax.set_xticks(group_ticks)
-            ax.set_xticklabels([f"{gn} [{gt}]" for gt, gn in zip(group_ticks, group_names)], rotation=90)
-            ax.set(ylabel='Count', xlabel='Group-Name [Group-Num]')
-            ax.set_title(
-                f"training_data_hash={tdh}\n"
-                f"classifier_params_hash={cph}\n"
-                f"preprocess_id={pid}\n"
-                f"{np.sum(celltypes == -1)}={np.mean(celltypes == -1):.0%} were not classified", loc='left')
+        for ax, ((tdh, cph, pid), df_group) in zip(axs, groups):
+            self._plot_key(ax=ax, df=df_group,
+                           classifier_params_hash=cph, training_data_hash=tdh, preprocess_id=pid,
+                           threshold_confidence=threshold_confidence,
+                           classifier_level=classifier_level)
 
         plt.tight_layout()
         plt.show()
 
-    def plot_features(self, threshold_confidence: float,
-                      key=None, celltypes=None, n_celltypes_max=3, features=None, n_features_max=5):
-        key = get_primary_key(self.classifier_table, key)
+    def _plot_key(self, ax, df, classifier_params_hash, training_data_hash, preprocess_id,
+                  threshold_confidence, classifier_level):
+        celltypes = df.apply(
+            lambda row: row['cell_label'] if row["max_confidence"] > threshold_confidence else -1, axis=1)
 
-        # Get training data
-        self.current_model_key = dict(classifier_params_hash=key["classifier_params_hash"],
-                                      training_data_hash=key["training_data_hash"])
-        training_data = self.classifier_training_data_table().get_training_data(self.current_model_key)
-        group_ticks = np.unique(training_data['y'])
-        group_names = training_data.get("group_name", group_ticks)
+        self.current_model_key = dict(classifier_params_hash=classifier_params_hash,
+                                      training_data_hash=training_data_hash)
+        b_features, b_c_labels, b_g_labels, b_s_labels = self.classifier_training_data_table().get_training_data(
+            self.current_model_key)
+        if classifier_level == 'cluster':
+            b_celltypes = b_c_labels
+        elif classifier_level == 'group':
+            b_celltypes = b_g_labels
+        elif classifier_level == 'super':
+            b_celltypes = b_s_labels
+        else:
+            raise NotImplementedError(classifier_level)
 
-        roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = self._fetch_data(
-            key, restriction=(self & f'max_confidence>={threshold_confidence}'))
-        data_celltypes = (self & roi_keys).fetch('celltype')
-        data_celltypes = [group_names[np.argmax(celltype == group_ticks)] for celltype in data_celltypes]
+        ax.hist(celltypes[celltypes > 0], bins=np.arange(b_celltypes.min(), b_celltypes.max() + 1, 0.5),
+                align='left')
+        ax.set(ylabel='Count', xlabel='cell_label', xticks=np.arange(b_celltypes.min(), b_celltypes.max() + 1))
+        ax.set_title(
+            f"training_data_hash={training_data_hash}\n"
+            f"classifier_params_hash={classifier_params_hash}\n"
+            f"preprocess_id={preprocess_id}\n"
+            f"{np.sum(celltypes == -1)}={np.mean(celltypes == -1):.0%} were not classified", loc='left')
 
-        data_features = extract_features(
-            preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, self.chirp_features, self.bar_features)
+    def plot_group_traces(self, threshold_confidence: float, classifier_level: str,
+                          celltypes=None, n_celltypes_max=32,
+                          xlim_chirp=None, xlim_bar=None, plot_baden_data=True):
+        df = self.fetch(format='frame')
+        groups = df.groupby(['training_data_hash', 'classifier_params_hash', 'preprocess_id'])
 
-        if celltypes is None:
-            celltypes = group_ticks
-        if features is None:
-            features = np.arange(0, training_data['X'].shape[1])
+        for (tdh, cph, pid), df_group in groups:
+            self._plot_group_traces_key(classifier_params_hash=cph, training_data_hash=tdh, preprocess_id=pid,
+                                        threshold_confidence=threshold_confidence,
+                                        classifier_level=classifier_level,
+                                        celltypes=celltypes, n_celltypes_max=n_celltypes_max,
+                                        xlim_chirp=xlim_chirp, xlim_bar=xlim_bar, plot_baden_data=plot_baden_data)
 
-        celltypes = sorted(set(celltypes).intersection(set(data_celltypes)))
-
-        if n_celltypes_max is not None and len(celltypes) > n_celltypes_max:
-            celltypes = sorted(np.random.choice(celltypes, n_celltypes_max, replace=False))
-        if n_features_max is not None and len(features) > n_features_max:
-            features = np.sort(np.random.choice(features, n_features_max, replace=False))
-
-        n_celltypes = len(celltypes)
-        n_features = len(features)
-
-        # Plot
-        fig, axs = plt.subplots(n_celltypes, n_features,
-                                figsize=(np.minimum(3 * n_features, 20), np.minimum(2 * n_celltypes, 20)),
-                                squeeze=False)
-
-        for ax_row, celltype in zip(axs, celltypes):
-            ax_row[0].set_ylabel(f"celltype={group_names[np.argmax(celltype == group_ticks)]}")
-            for ax, feature_i in zip(ax_row, features):
-                ax.set_title(f"feature={feature_i}")
-                bins = np.linspace(training_data['X'][:, feature_i].min(), training_data['X'][:, feature_i].max(), 51)
-                ax.hist(training_data['X'][training_data['y'] == celltype, feature_i],
-                        bins=bins, color='gray', alpha=1, label='train')
-
-                if np.any(data_celltypes == celltype):
-                    ax = ax.twinx()
-                    ax.hist(data_features[data_celltypes == celltype, feature_i],
-                            bins=bins, color='r', alpha=0.5, label='new')
-
-        axs[0, 0].legend()
-
-        plt.tight_layout()
-
-    def plot_group_traces(self, threshold_confidence: float, key=None, celltypes=None, n_celltypes_max=32,
-                          plot_baden_data=True, xlim_chirp=None, xlim_bar=None,
-                          debug_shift_chirp=0, debug_shift_bar=0):
-        key = get_primary_key(self.classifier_table, key)
+    def _plot_group_traces_key(self, threshold_confidence: float, classifier_level: str,
+                               classifier_params_hash, training_data_hash, preprocess_id,
+                               celltypes=None, n_celltypes_max=32, xlim_chirp=None, xlim_bar=None,
+                               plot_baden_data=True):
+        key = dict(classifier_params_hash=classifier_params_hash,
+                   training_data_hash=training_data_hash,
+                   preprocess_id=preprocess_id)
 
         # Get new data
         roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = self._fetch_data(
-            key, restriction=(self & f'max_confidence>={threshold_confidence}'))
-        data_celltypes = (self & roi_keys).fetch('celltype')
+            key=key, restriction=(self & f'max_confidence>={threshold_confidence}'))
+        data_celltypes = (self & roi_keys).fetch('cell_label')
 
         # Get training data
-        self.current_model_key = dict(classifier_params_hash=key["classifier_params_hash"],
-                                      training_data_hash=key["training_data_hash"])
-        training_data = self.classifier_training_data_table().get_training_data(self.current_model_key)
-        group_ticks = np.unique(training_data['y'])
-        group_names = training_data.get("group_name", group_ticks)
-
-        if celltypes is None:
-            celltypes = group_ticks
-
-        celltypes = sorted(set(celltypes).intersection(set(data_celltypes)))
+        self.current_model_key = dict(classifier_params_hash=classifier_params_hash,
+                                      training_data_hash=training_data_hash)
+        if celltypes is not None:
+            celltypes = sorted(set(celltypes).intersection(set(data_celltypes)))
+        else:
+            celltypes = sorted(set(data_celltypes))
 
         if n_celltypes_max is not None and len(celltypes) > n_celltypes_max:
             celltypes = sorted(np.random.choice(celltypes, n_celltypes_max, replace=False))
@@ -619,18 +588,27 @@ class CelltypeAssignmentTemplate(dj.Computed):
             b_c_labels, b_g_labels, b_s_labels, b_c_traces, b_c_qi, b_mb_traces, b_mb_qi, b_mb_dsi, b_mb_dp, b_soma_um2 = \
                 load_baden_data(baden_data_file)
 
+            if classifier_level == 'cluster':
+                b_celltypes = b_c_labels
+            elif classifier_level == 'group':
+                b_celltypes = b_g_labels
+            elif classifier_level == 'super':
+                b_celltypes = b_s_labels
+            else:
+                raise NotImplementedError(classifier_level)
+
             for ax_row, celltype in zip(axs, celltypes):
 
                 if not np.any(data_celltypes == celltype):
                     continue
 
                 ax = ax_row[0]
-                b_chirps = b_c_traces[b_celltypes == celltype]
+                b_chirps = b_c_traces[b_g_labels == celltype]
                 b_mean_chirp = np.mean(b_chirps, axis=0)
                 ax.plot(b_chirps.T, lw=0.5, c='gray', alpha=0.5, zorder=-200)
                 ax.plot(b_mean_chirp, c='k', lw=2, alpha=0.5, zorder=1)
 
-                mean_chirp = np.roll(np.mean(preproc_chirps[data_celltypes == celltype], axis=0), debug_shift_chirp)
+                mean_chirp = np.mean(preproc_chirps[data_celltypes == celltype], axis=0)
                 ax.set(title=f"cc={np.corrcoef(mean_chirp, b_mean_chirp)[0, 1]:.2f}", xlim=xlim_chirp)
 
                 ax = ax_row[1]
@@ -639,7 +617,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
                 ax.plot(b_bars.T, lw=0.5, c='gray', alpha=0.5, zorder=-200)
                 ax.plot(b_mean_bar, c='k', lw=2, alpha=0.5, zorder=1)
 
-                mean_bar = np.roll(np.mean(preproc_bars[data_celltypes == celltype], axis=0), debug_shift_bar)
+                mean_bar = np.mean(preproc_bars[data_celltypes == celltype], axis=0)
                 ax.set(title=f"cc={np.corrcoef(mean_bar, b_mean_bar)[0, 1]:.2f}", xlim=xlim_bar)
 
                 ax = ax_row[2].twinx()
@@ -649,18 +627,18 @@ class CelltypeAssignmentTemplate(dj.Computed):
                 ax.hist(b_soma_um2[b_celltypes == celltype], bins=roi_size_um2s_bins, color='gray', alpha=0.5)
 
         for ax_row, celltype in zip(axs, celltypes):
-            ax_row[0].set_ylabel(f"celltype={group_names[np.argmax(celltype == group_ticks)]}")
+            ax_row[0].set_ylabel(celltype)
 
             if not np.any(data_celltypes == celltype):
                 continue
 
             ax = ax_row[0]
-            ct_chirps = np.roll(preproc_chirps[data_celltypes == celltype], debug_shift_chirp, axis=1)
+            ct_chirps = preproc_chirps[data_celltypes == celltype]
             ax.plot(ct_chirps.T, lw=0.5, c='r', alpha=0.5, zorder=-100)
             ax.plot(np.mean(ct_chirps, axis=0), c='darkred', lw=2, zorder=2)
 
             ax = ax_row[1]
-            ct_bars = np.roll(preproc_bars[data_celltypes == celltype], debug_shift_bar, axis=1)
+            ct_bars = preproc_bars[data_celltypes == celltype]
             ax.plot(ct_bars.T, lw=0.5, c='r', alpha=0.5, zorder=-100)
             ax.plot(np.mean(ct_bars, axis=0), c='darkred', lw=2, zorder=2)
 
