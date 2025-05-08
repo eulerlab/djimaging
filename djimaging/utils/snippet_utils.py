@@ -9,7 +9,6 @@ from djimaging.utils.trace_utils import find_closest, find_closest_before
 def compute_t_idxs(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.128,
                    allow_drop_last=True, pad_trace=False, all_reps_same_length=True):
     """
-
     Compute t_idxs, n_frames_per_rep, and dropped_last_rep_flag based on the given parameters.
 
     :param trace: ndarray, input trace data

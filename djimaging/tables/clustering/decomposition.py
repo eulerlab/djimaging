@@ -236,8 +236,13 @@ def compute_features(traces: list, ncomps: list, kind: str, params_dict: dict,
 
 
 def compute_variance_explained_sparse_pca(X: np.ndarray, P: np.ndarray) -> (float, float):
-    """Camacho et al. (2019): explained here https://github.com/scikit-learn/scikit-learn/issues/11512"""
-    Xc = X - X.mean(axis=0)  # center data
+    """Compute the variance explained variance of sparse PCA
+    Code based on: https://github.com/scikit-learn/scikit-learn/issues/11512#issuecomment-1354299118
+    Original Author: https://github.com/qbilius
+    scikit-learn license: BSD 3-Clause (https://opensource.org/licenses/BSD-3-Clause)
+    Idea based on: Camacho et al. (2019): explained here"""
+
+    Xc = X - np.mean(X, axis=0)  # center data
     T = Xc @ P @ np.linalg.pinv(P.T @ P)
 
     explained_variance = np.trace(P @ T.T @ T @ P.T)

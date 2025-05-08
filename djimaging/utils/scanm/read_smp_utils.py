@@ -2,7 +2,7 @@ import warnings
 
 import numpy as np
 
-from djimaging.utils.misc_utils import CapturePrints
+from djimaging.utils.misc_utils import NoPrints
 
 
 def load_smp_file(raw_file_path):
@@ -14,7 +14,7 @@ def load_smp_file(raw_file_path):
 
     raw_file = SMP()
 
-    with CapturePrints():
+    with NoPrints():
         raw_file.loadSMH(raw_file_path, verbose=False)
         raw_file.loadSMP(raw_file_path)
 

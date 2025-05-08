@@ -56,7 +56,25 @@ def split_strf(strf, method='SVD', blur_std: float = 0, blur_npix: int = 1, upsa
 def split_rf_svd(strf):
     """
     Assuming an RF is time-space separable, get spatial and temporal filters using SVD.
-    From RFEst.
+
+    This function was modified from RFEst, which is licensed under
+    the GNU General Public License version 3.0 (GNU GPL v3.0).
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+    For details see: https://github.com/berenslab/RFEst
+
     """
     dims = strf.shape
 
