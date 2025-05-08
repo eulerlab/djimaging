@@ -55,7 +55,7 @@ from cached_property import cached_property
 from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import make_hash, merge_keys, get_primary_key
-from djimaging.utils.import_helpers import dynamic_import, split_module_name
+from djimaging.utils.import_helpers import extract_class_info, load_class
 
 Key = Dict[str, Any]
 
@@ -158,7 +158,7 @@ class ClassifierMethodTemplate(dj.Lookup):
         """
         return definition
 
-    import_func = staticmethod(dynamic_import)
+    import_func = staticmethod(load_class)
 
     @property
     @abstractmethod
@@ -221,7 +221,7 @@ class ClassifierMethodTemplate(dj.Lookup):
 
         print(f'Train classifier: {classifier_fn} {key["classifier_params_hash"]}')
 
-        classifier_fn = self.import_func(*split_module_name(classifier_fn))
+        classifier_fn = self.import_func(*extract_class_info(classifier_fn))
         features, b_c_labels, b_g_labels, b_s_labels = self.classifier_training_data_table().get_training_data(key)
 
         if label_kind == 'cluster':

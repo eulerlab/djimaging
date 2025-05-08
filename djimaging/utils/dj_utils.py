@@ -1,9 +1,8 @@
 import hashlib
+import json
 import os
 import random
 import sys
-from collections import OrderedDict
-from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
 
 import datajoint as dj
@@ -23,65 +22,78 @@ def get_input_tables(definition):
 
 
 def activate_schema(schema, schema_name=None, create_schema=True, create_tables=True):
-    # Based on https://github.com/datajoint/element-lab
+    """Based on: https://github.com/datajoint/element-lab"""
+    config_schema_name = dj.config.get('schema_name', None)
+
+    if not schema_name and not config_schema_name:
+        raise ValueError('Must provide schema_name in config or as parameter')
+    elif schema_name and config_schema_name and schema_name != config_schema_name:
+        raise ValueError('Schema name in config must match schema_name parameter')
+
+    schema.activate(schema_name or config_schema_name, create_schema=create_schema, create_tables=create_tables)
+
+
+def make_hash(obj) -> str:
     """
-    activate(schema, schema_name=None, create_schema=True, create_tables=True)
-        :param schema: schema objec
-        :param schema_name: schema name on the database server to activate the
-                            `lab` element
-        :param create_schema: when True (default), create schema in the
-                              database if it does not yet exist
-        :param create_tables: when True (default), create tables in the
-                              database if they do not yet exist
+    Creates a 32-character hash that uniquely identifies the content of a Python object.
+
+    This function handles arbitrarily nested objects (dictionaries, lists, etc.) by
+    recursively processing the structure and generating a consistent hash based on content.
+
+    Parameters:
+    -----------
+    obj : Any
+        The Python object to hash. Can be a primitive type or a complex nested structure
+        like dictionaries, lists, tuples, sets, etc.
+
+    Returns:
+    --------
+    str
+        A 32-character hexadecimal hash string that uniquely identifies the object content
+
+    Notes:
+    ------
+    - The function handles common Python data types including:
+      - Primitives (int, float, str, bool, None)
+      - Collections (dict, list, tuple, set)
+      - Nested combinations of the above
+    - Objects that aren't directly serializable will be converted to their string representation
+    - Dictionary keys are sorted to ensure consistent hashing regardless of key order
     """
-    if schema_name is None:
-        schema_name = dj.config.get('schema_name', '')
-        assert len(schema_name) > 0, 'Set schema name as parameter or in config file'
-    else:
-        config_schema_name = dj.config.get('schema_name', '')
-        assert len(config_schema_name) == 0 or schema_name == config_schema_name, \
-            'Trying to set two different schema names'
 
-    schema.activate(schema_name, create_schema=create_schema, create_tables=create_tables)
+    def _prepare_for_hashing(value):
+        """
+        Recursively prepares an object for hashing by converting to serializable form.
+        Handles nested structures and ensures consistent representation.
+        """
+        if isinstance(value, dict):
+            # Sort dictionary items by key for consistent ordering
+            return {
+                k: _prepare_for_hashing(v)
+                for k, v in sorted(value.items())
+            }
+        elif isinstance(value, (list, tuple)):
+            return [_prepare_for_hashing(item) for item in value]
+        elif isinstance(value, set):
+            # Convert set to sorted list for consistent ordering
+            return [_prepare_for_hashing(item) for item in sorted(value)]
+        elif isinstance(value, (int, float, str, bool)) or value is None:
+            # Primitive types can be used directly
+            return value
+        else:
+            # For other types, use their string representation
+            return str(value)
 
+    # Prepare the object by handling nested structures and ensuring consistent representation
+    prepared_obj = _prepare_for_hashing(obj)
 
-def make_hash(obj: object) -> str:
-    """
-    Given a Python object, returns a 32 character hash string to uniquely identify
-    the content of the object. The object can be arbitrary nested (i.e. dictionary
-    of dictionary of list etc), and hashing is applied recursively to uniquely
-    identify the content.
+    # Convert to a JSON string with sorted keys for consistent serialization
+    json_str = json.dumps(prepared_obj, sort_keys=True)
 
-    For dictionaries (at any level), the key order is ignored when hashing
-    so that {"a":5, "b": 3, "c": 4} and {"b": 3, "a": 5, "c": 4} will both
-    give rise to the same hash. Exception to this rule is when an OrderedDict
-    is passed, in which case difference in key order is respected. To keep
-    compatible with previous versions of Python and the assumed general
-    intentions, key order will be ignored even in Python 3.7+ where the
-    default dictionary is officially an ordered dictionary.
+    # Generate MD5 hash (32 characters) of the JSON string
+    hash_obj = hashlib.md5(json_str.encode('utf-8'))
 
-    :param obj: A (potentially nested) Python object
-    :return: hash: str - a 32 charcter long hash string to uniquely identify the object.
-    """
-    hashed = hashlib.md5()
-
-    if isinstance(obj, str):
-        hashed.update(obj.encode())
-    elif isinstance(obj, OrderedDict):
-        for k, v in obj.items():
-            hashed.update(str(k).encode())
-            hashed.update(make_hash(v).encode())
-    elif isinstance(obj, Mapping):
-        for k in sorted(obj, key=str):
-            hashed.update(str(k).encode())
-            hashed.update(make_hash(obj[k]).encode())
-    elif isinstance(obj, Iterable):
-        for v in obj:
-            hashed.update(make_hash(v).encode())
-    else:
-        hashed.update(str(obj).encode())
-
-    return hashed.hexdigest()
+    return hash_obj.hexdigest()
 
 
 def get_primary_key(table, key=None):

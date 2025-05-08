@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 
 from djimaging.utils.alias_utils import check_shared_alias_str
 from djimaging.utils.scanm import read_h5_utils
+from djimaging.utils.cellpose_utils import intersection_over_union
 
 
 def create_circular_mask(h, w, center, radius):
@@ -19,7 +20,17 @@ def create_circular_mask(h, w, center, radius):
 
 
 def extract_connected_mask(mask, i, j):
-    """https://stackoverflow.com/questions/35224094/extract-connected-pixels-in-a-binary-image-using-python"""
+    """
+    This code contains content from Stack Overflow
+    Source: https://stackoverflow.com/a/35224850
+
+    Stack Overflow content is licensed under CC BY-SA 3.0
+    (Creative Commons Attribution-ShareAlike 3.0 Unported License)
+    https://creativecommons.org/licenses/by-sa/3.0/
+
+    Code by Stack Overflow user: https://stackoverflow.com/users/4613543/philokey
+    Modified: Only minor modifications from original code
+    """
 
     mask = mask.copy()
 
@@ -379,26 +390,6 @@ def add_rois(rois_to_add, rois, connectivity=2, plot=False):
         warnings.warn(f"Expected {n_output_rois_expected} ROIs, obtained {n_output_rois} ROIs")
 
     return output_labeled, output_new_labeled
-
-
-def intersection_over_union(masks_true, masks_pred):
-    """Copied from cellpose"""
-    overlap = label_overlap(masks_true, masks_pred)
-    n_pixels_pred = np.sum(overlap, axis=0, keepdims=True)
-    n_pixels_true = np.sum(overlap, axis=1, keepdims=True)
-    iou = overlap / (n_pixels_pred + n_pixels_true - overlap)
-    iou[np.isnan(iou)] = 0.0
-    return iou
-
-
-def label_overlap(x, y):
-    """Copied from cellpose"""
-    x = x.ravel()
-    y = y.ravel()
-    overlap = np.zeros((1 + x.max(), 1 + y.max()), dtype=np.uint)
-    for i in range(len(x)):
-        overlap[x[i], y[i]] += 1
-    return overlap
 
 
 def generate_roi_suggestions(mask_pred, mask_true, n_artifact, threshold=0.1, verbose=False):
