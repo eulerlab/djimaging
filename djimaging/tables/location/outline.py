@@ -13,6 +13,7 @@ class OutlineAbs(location.OutlineAbsTemplate):
     experiment_table = Experiment
     userinfo_table = UserInfo
 
+
     class OutlineAbsField(location.OutlineAbsTemplate.OutlineAbsField):
         pass
 
@@ -298,21 +299,21 @@ class OutlineRelTemplate(dj.Computed):
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
-        outline_abs_xy = (self.outline_abs_table & key).fetch1('outline_abs_xy')
-        outline_rel_xy = (self & key).fetch1('outline_rel_xy')
-        outline_retina_xy = (self & key).fetch1('outline_retina_xy')
+        outline_abs_xy = np.asarray((self.outline_abs_table & key).fetch1('outline_abs_xy'))
+        outline_rel_xy = np.asarray((self & key).fetch1('outline_rel_xy'))
+        outline_retina_xy = np.asarray((self & key).fetch1('outline_retina_xy'))
 
         fields, relxs, relys = (self.OutlineRelField & key).fetch('field', 'relx', 'rely')
 
         fig, axs = plt.subplots(1, 3, figsize=(12, 3))
 
         ax = axs[0]
-        ax.plot(*np.array(outline_abs_xy).T, '.-')
+        ax.plot(outline_abs_xy[:, 0], outline_abs_xy[:, 1], '.-')
         ax.set(title='Absolute', xlabel='absx_um', ylabel='absy_um')
         ax.set_aspect(aspect="equal", adjustable="datalim")
 
         ax = axs[1]
-        ax.plot(*np.array(outline_rel_xy).T, '.-')
+        ax.plot(outline_rel_xy[:, 0], outline_rel_xy[:, 1], '.-')
         ax.set(title='Relative', xlabel='relx_um', ylabel='rely_um')
         ax.set_aspect(aspect="equal", adjustable="datalim")
 
@@ -320,7 +321,7 @@ class OutlineRelTemplate(dj.Computed):
             ax.text(relx, rely, field)
 
         ax = axs[2]
-        ax.plot(*np.array(outline_retina_xy).T, '.-')
+        ax.plot(outline_retina_xy[:, 1], outline_retina_xy[:, 0], '.-')
         ax.set(title='Retina', xlabel='temporal_nasal_pos_um', ylabel='ventral_dorsal_pos_um')
         ax.set_aspect(aspect="equal", adjustable="datalim")
 
