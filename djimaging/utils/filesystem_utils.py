@@ -78,7 +78,7 @@ def print_tree(startpath, include_types=None, exclude_types=None, nmax=200):
     if include_types is not None:
         include_types = [t.lower().strip('.') for t in include_types]
 
-    paths = sorted(os.walk(startpath))
+    paths = sorted(os.walk(startpath, followlinks=True))
 
     for root, dirs, files in paths[:nmax]:
         level = root.replace(startpath, '').count(os.sep)
@@ -108,7 +108,7 @@ def find_folders_with_file_of_type(data_dir: str, ending: str = '.ini', ignore_h
     :return: List of header files.
     """
     os_walk_output = []
-    for folder, subfolders, files in os.walk(data_dir):
+    for folder, subfolders, files in os.walk(data_dir, followlinks=True):
         if np.any([f.endswith(ending) and not (ignore_hidden and f.startswith('.')) for f in files]):
             os_walk_output.append(folder)
     return os_walk_output
