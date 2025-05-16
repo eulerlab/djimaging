@@ -7,7 +7,7 @@ from djimaging.tables import spike_estimation
 
 @schema
 class CascadeTraceParams(spike_estimation.CascadeTracesParamsTemplate):
-    pass
+    stimulus_table = Stimulus
 
 @schema
 class CascadeTraces(spike_estimation.CascadeTracesTemplate):
