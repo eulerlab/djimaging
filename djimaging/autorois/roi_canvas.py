@@ -1407,7 +1407,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         return stim, condition
 
     def insert_database(self, roi_mask_tab, field_key):
-        from djimaging.utils.mask_utils import to_igor_format, compare_roi_masks
+        from djimaging.utils.mask_utils import compare_roi_masks
+        from djimaging.utils.mask_format_utils import to_igor_format
 
         pres_and_roi_mask = []
         for pres_key in self.pres_names:

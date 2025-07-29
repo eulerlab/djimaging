@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 
 from djimaging.utils.scanm.wparams_utils import check_dims_ch_stack_wparams
-from djimaging.utils.scanm.roi_utils import get_roi2trace
+from djimaging.utils.scanm.roi_utils import get_roi2trace, extract_roi_ids
 
 
 def load_stacks_and_wparams(filepath, ch_names=('wDataCh0', 'wDataCh1')) -> (dict, dict):
@@ -54,9 +54,17 @@ def load_roi2trace(filepath: str, roi_ids: np.ndarray):
     try:
         with h5py.File(filepath, "r", driver="stdio") as h5_file:
             traces, traces_times = extract_traces(h5_file)
+            roi_ids_traces = extract_roi_ids(extract_roi_mask(h5_file, ignore_not_found=False), npixartifact=0)
     except OSError as e:
         raise OSError(f"Error loading file {filepath}: {e}")
-    roi2trace = get_roi2trace(traces=traces, traces_times=traces_times, roi_ids=roi_ids)
+
+    if not set(roi_ids).issubset(set(roi_ids_traces)):
+        raise ValueError(f"roi_ids {roi_ids} do not match roi_ids in traces {roi_ids_traces}")
+    if traces.shape[-1] != len(roi_ids_traces):
+        raise ValueError(f"Number of roi_ids {len(roi_ids_traces)} does not match traces shape {traces.shape[-1]}.")
+
+    roi2trace = get_roi2trace(traces=traces, traces_times=traces_times,
+                              roi_ids_traces=roi_ids_traces, roi_ids_subset=roi_ids)
     frame_dt = np.mean(np.diff(traces_times, axis=0))
     return roi2trace, frame_dt
 

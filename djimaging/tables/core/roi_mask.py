@@ -12,8 +12,9 @@ from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 
 from djimaging.utils.filesystem_utils import as_pre_filepath
 from djimaging.utils.dj_utils import get_primary_key, check_unique_one
-from djimaging.utils.mask_utils import to_igor_format, to_python_format, to_roi_mask_file, sort_roi_mask_files, \
+from djimaging.utils.mask_utils import to_roi_mask_file, sort_roi_mask_files, \
     load_preferred_roi_mask_igor, load_preferred_roi_mask_pickle, compare_roi_masks
+from djimaging.utils.mask_format_utils import to_igor_format, to_python_format
 from djimaging.utils.plot_utils import plot_field
 
 
