@@ -1,7 +1,7 @@
 import numpy as np
 
 from djimaging.tables.motion_correction import motion_utils
-from djimaging.utils.mask_utils import assert_igor_format
+from djimaging.utils.mask_format_utils import assert_igor_format
 from djimaging.utils.scanm import roi_utils, wparams_utils, read_utils
 
 
@@ -84,18 +84,18 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, preci
         wparams=wparams, n_frames=stack.shape[2], precision=precision)
 
     n_frames = stack.shape[2]
-    roi_idxs = roi_utils.extract_roi_idxs(roi_mask, npixartifact=0)
+    roi_ids = roi_utils.extract_roi_ids(roi_mask, npixartifact=0)
 
-    traces_times = np.full((n_frames, roi_idxs.size), np.nan)
-    traces = np.full((n_frames, roi_idxs.size), np.nan)
-    t0s = np.array([np.median(frame_dt_offset[roi_mask == roi_idx]) for roi_idx in roi_idxs])
+    traces_times = np.full((n_frames, roi_ids.size), np.nan)
+    traces = np.full((n_frames, roi_ids.size), np.nan)
+    t0s = np.array([np.median(frame_dt_offset[roi_mask == roi_idx]) for roi_idx in roi_ids])
 
-    for i, roi_idx in enumerate(roi_idxs):
-        roi_mask_i = roi_mask == roi_idx
+    for i, roi_id in enumerate(roi_ids):
+        roi_mask_i = roi_mask == roi_id
         traces_times[:, i] = frame_times + t0s[i]
         traces[:, i] = np.mean(stack[roi_mask_i], axis=0)
 
-    return traces, traces_times, frame_dt
+    return roi_ids, traces, traces_times, frame_dt
 
 
 def roi2trace_from_stack(
@@ -112,9 +112,14 @@ def roi2trace_from_stack(
         stack = motion_utils.correct_shifts_in_stack(
             stack=stack, shifts_x=shifts_x, shifts_y=shifts_y, cval=np.min, **shift_kws)
 
-    traces, traces_times, frame_dt = compute_traces(
+    roi_ids_from_mask, traces, traces_times, frame_dt = compute_traces(
         stack=stack, roi_mask=roi_mask, wparams=wparams, precision=precision)
-    roi2trace = roi_utils.get_roi2trace(traces=traces, traces_times=traces_times, roi_ids=roi_ids)
+
+    if not set(abs(roi_ids)).issubset(set(abs(roi_ids_from_mask))):
+        raise ValueError(f"roi_ids from mask {roi_ids_from_mask} do not match provided roi_ids {roi_ids}")
+
+    roi2trace = roi_utils.get_roi2trace(traces=traces, traces_times=traces_times,
+                                        roi_ids_traces=abs(roi_ids_from_mask), roi_ids_subset=abs(roi_ids))
 
     return roi2trace, frame_dt
 

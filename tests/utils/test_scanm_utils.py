@@ -105,7 +105,7 @@ def _test_compute_tracetimes(filepath, stack_name, precision, atol):
         # In Igor this was wrongly added, so remove it again
         igor_traces_times -= os_params['stimulatordelay'] / 1000
 
-    _, traces_times, _ = traces_and_triggers_utils.compute_traces(
+    _, _, traces_times, _ = traces_and_triggers_utils.compute_traces(
         stack=stack, roi_mask=roi_mask, wparams=wparams, precision=precision)
 
     assert igor_traces_times.shape == traces_times.shape
@@ -125,7 +125,7 @@ def test_compute_traces(
         stack = np.copy(h5_file[stack_name])
         roi_mask = read_h5_utils.extract_roi_mask(h5_file)
 
-    traces, _, _ = traces_and_triggers_utils.compute_traces(
+    _, traces, _, _ = traces_and_triggers_utils.compute_traces(
         stack=stack, roi_mask=roi_mask, wparams=wparams)
 
     assert igor_traces.shape == traces.shape

@@ -5,7 +5,7 @@ import numpy as np
 
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
-from djimaging.utils.scanm.roi_utils import extract_roi_idxs
+from djimaging.utils.scanm.roi_utils import extract_roi_ids
 
 
 class RoiTemplate(dj.Computed):
@@ -59,7 +59,7 @@ class RoiTemplate(dj.Computed):
         if not np.any(roi_mask):
             return
 
-        roi_idxs = extract_roi_idxs(roi_mask)
+        roi_idxs = extract_roi_ids(roi_mask)
 
         # add every roi to list and the bulk add to roi table
         for roi_idx in roi_idxs:

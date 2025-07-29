@@ -24,8 +24,8 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.utils import mask_format_utils
 from djimaging.utils.scanm import read_utils
-from djimaging.utils import mask_utils
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -133,7 +133,7 @@ class SrIndexTemplate(dj.Computed):
 
 def compute_sr_idxs(ch1_stack, roi_ids, roi_mask, npixartifact):
     """Compute SR index for each ROI in roi_ids. SR index is defined as """
-    roi_mask = mask_utils.as_python_format(roi_mask)
+    roi_mask = mask_format_utils.as_python_format(roi_mask)
 
     ch1_avg = np.mean(ch1_stack, axis=2)
 
@@ -154,7 +154,7 @@ def compute_sr_idxs(ch1_stack, roi_ids, roi_mask, npixartifact):
 
 def plot_stack_sr_idxs(ch0_avg, ch1_avg, roi_mask, roi_ids, sr_idxs, sr_threshold=0.5):
     """Plot SR idxs on top of stack averages."""
-    roi_mask = mask_utils.as_python_format(roi_mask)
+    roi_mask = mask_format_utils.as_python_format(roi_mask)
 
     binary_sr_mask = np.isin(roi_mask, roi_ids[sr_idxs >= sr_threshold])
 

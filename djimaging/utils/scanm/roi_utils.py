@@ -2,16 +2,16 @@ import warnings
 
 import numpy as np
 
-from djimaging.utils.mask_utils import assert_igor_format
+from djimaging.utils.mask_format_utils import assert_igor_format
 
 
-def extract_roi_idxs(roi_mask, npixartifact=0):
+def extract_roi_ids(roi_mask, npixartifact=0):
     """Return roi idxs as in ROI mask (i.e. negative values)"""
     assert roi_mask.ndim == 2
-    roi_idxs = np.unique(roi_mask[npixartifact:, :])
-    roi_idxs = roi_idxs[roi_idxs < 0]  # remove background indexes (0 or 1)
-    roi_idxs = roi_idxs[np.argsort(np.abs(roi_idxs))]  # Sort by value
-    return roi_idxs.astype(int)
+    roi_ids = np.unique(roi_mask[npixartifact:, :])
+    roi_ids = roi_ids[roi_ids < 0]  # remove background indexes (0 or 1)
+    roi_ids = roi_ids[np.argsort(np.abs(roi_ids))]  # Sort by value
+    return roi_ids.astype(int)
 
 
 def fix_first_or_last_n_nan(trace, n):
@@ -25,22 +25,32 @@ def fix_first_or_last_n_nan(trace, n):
     return trace
 
 
-def get_roi2trace(traces, traces_times, roi_ids):
+def get_roi2trace(traces, traces_times, roi_ids_traces, roi_ids_subset=None):
     """Get dict that holds traces and times accessible by roi_id"""
-    assert np.all(roi_ids >= 1)
+    roi_ids_subset = roi_ids_traces if roi_ids_subset is not None else roi_ids_subset
+
+    assert np.all(roi_ids_traces >= 1)
+    assert np.all(roi_ids_subset >= 1)
+
+    if traces.shape != traces_times.shape:
+        raise ValueError(f"traces shape {traces.shape} does not match traces_times shape {traces_times.shape}.")
+
+    if traces.shape[-1] != len(roi_ids_traces):
+        warnings.warn(f"Number of roi_ids {len(roi_ids_traces)} does not match traces shape {traces.shape[-1]}.")
 
     roi2trace = dict()
 
-    for roi_id in roi_ids:
-        idx = roi_id - 1
+    for i, roi_id in enumerate(roi_ids_traces):
+        if roi_id not in roi_ids_subset:
+            continue
 
-        if traces.ndim == 3 and idx < traces.shape[-1]:
-            trace = traces[:, :, idx]
-            trace_times = traces_times[:, :, idx]
+        if traces.ndim == 3 and i < traces.shape[-1]:
+            trace = traces[:, :, i]
+            trace_times = traces_times[:, :, i]
             trace_valid = 1
-        elif traces.ndim == 2 and idx < traces.shape[-1]:
-            trace = traces[:, idx]
-            trace_times = traces_times[:, idx]
+        elif traces.ndim == 2 and i < traces.shape[-1]:
+            trace = traces[:, i]
+            trace_times = traces_times[:, i]
             trace_valid = 1
         else:
             trace_valid = 0
