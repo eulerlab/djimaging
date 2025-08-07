@@ -207,7 +207,7 @@ class OsDsIndexesTemplateV2(OsDsIndexesTemplate):
     _version = 2
 
     def __init__(self, *args, **kwargs):
-        warnings.warn("OsDsIndexesTemplateV1 is deprecated. Use OsDsIndexesTemplate with _version=2 instead.",
+        warnings.warn("OsDsIndexesTemplateV2 is deprecated. Use OsDsIndexesTemplate with _version=2 instead.",
                       DeprecationWarning, stacklevel=2)
         super().__init__(*args, **kwargs)
 

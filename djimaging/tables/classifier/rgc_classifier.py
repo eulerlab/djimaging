@@ -480,8 +480,12 @@ class CelltypeAssignmentTemplate(dj.Computed):
         if len(roi_keys) == 0:
             return None, None, None, None, None
 
-        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = (
-                self.baden_trace_table * self.os_ds_table * self.roi_table & key & restriction).fetch(
+        if self.os_ds_table is not None:
+            data_tab = (self.baden_trace_table & key & restriction) * self.os_ds_table * self.roi_table
+        else:
+            data_tab = (self.baden_trace_table & key & restriction) * self.roi_table
+
+        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = data_tab.fetch(
             'preproc_chirp', 'preproc_bar', 'ds_pvalue', 'roi_size_um2')
 
         preproc_chirps = np.vstack(preproc_chirps)
