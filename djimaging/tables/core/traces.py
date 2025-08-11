@@ -74,7 +74,7 @@ class TracesTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            key_source = self.presentation_table.proj() \
+            key_source = (self.presentation_table.proj() & self.roi_table.proj()) \
                          * self.raw_params_table.proj() \
                          * self.roi_mask_table.RoiMaskPresentation.proj()
 
@@ -108,6 +108,8 @@ class TracesTemplate(dj.Computed):
             if not include_artifacts and roi_data.get('incl_artifact', False):
                 continue
 
+            assert roi_id in roi_ids, f"ROI ID {roi_id} not found in ROI IDs for key {key}"
+
             try:
                 trace_key = key.copy()
                 trace_key['roi_id'] = roi_id
@@ -127,10 +129,10 @@ class TracesTemplate(dj.Computed):
 
     def _compute_roi2trace_from_stack(self, key, filepath, roi_ids, trace_precision, from_raw_data, verboselvl=0):
         data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
-        roi_mask = (self.roi_mask_table.RoiMaskPresentation & key).fetch1("roi_mask")
+        roi_mask, as_field_mask = (self.roi_mask_table.RoiMaskPresentation & key).fetch1("roi_mask", "as_field_mask")
         n_artifact = (self.presentation_table & key).fetch1("npixartifact")
 
-        if (self.roi_mask_table.RoiMaskPresentation & key).fetch1('as_field_mask') == 'different':
+        if as_field_mask == 'different':
             raise ValueError(f'Tried to populate traces with inconsistent roi mask for key=\n{key}\n' +
                              'Compare ROI mask of Field and Presentation.')
 
@@ -146,7 +148,8 @@ class TracesTemplate(dj.Computed):
         else:
             roi2trace, frame_dt = roi2trace_from_stack(
                 filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
-                data_stack_name=data_stack_name, precision=trace_precision, from_raw_data=from_raw_data)
+                data_stack_name=data_stack_name, precision=trace_precision, from_raw_data=from_raw_data,
+                accept_missing_rois=as_field_mask != 'same')
 
         for roi_id, roi_data in roi2trace.items():
             if np.any(-roi_mask[:n_artifact, :] == roi_id):

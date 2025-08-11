@@ -102,7 +102,7 @@ def roi2trace_from_stack(
         filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray,
         data_stack_name: str, precision: str, from_raw_data: bool = False,
         shifts_x: np.ndarray = None, shifts_y: np.ndarray = None,
-        shift_kws: dict = None):
+        shift_kws: dict = None, accept_missing_rois: bool = False) -> (dict, float):
     ch_stacks, wparams = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_stack_name,))
     stack = ch_stacks[data_stack_name]
 
@@ -116,7 +116,10 @@ def roi2trace_from_stack(
         stack=stack, roi_mask=roi_mask, wparams=wparams, precision=precision)
 
     if not set(abs(roi_ids)).issubset(set(abs(roi_ids_from_mask))):
-        raise ValueError(f"roi_ids from mask {roi_ids_from_mask} do not match provided roi_ids {roi_ids}")
+        if not accept_missing_rois:
+            raise ValueError(
+                f"roi_ids from mask do not match provided roi_ids. "
+                f"These ROIs are missing in the mask: {sorted(set(abs(roi_ids)) - set(abs(roi_ids_from_mask)))}.")
 
     roi2trace = roi_utils.get_roi2trace(traces=traces, traces_times=traces_times,
                                         roi_ids_traces=abs(roi_ids_from_mask), roi_ids_subset=abs(roi_ids))
