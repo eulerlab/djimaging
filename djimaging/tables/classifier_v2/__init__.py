@@ -1,0 +1,2 @@
+from .rgc_classifier_v2 import ClassifierV2Template
+from .baden16_traces_v2 import Baden16TracesV2Template
