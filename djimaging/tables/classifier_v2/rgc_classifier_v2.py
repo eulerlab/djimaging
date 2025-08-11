@@ -1,34 +1,4 @@
-"""
-Improved classifier for RGCs used Baden et al. 2016 dataset.
-
-Example usage:
-
-from djimaging.tables import classifier_v2
-
-@schema
-class Baden16TracesV2(classifier_v2.Baden16TracesV2Template):
-    _stim_name_chirp = 'gChirp'
-    _stim_name_bar = 'movingbar'
-
-    traces_table = Traces
-    presentation_table = Presentation
-    stimulus_table = Stimulus
-
-
-@schema
-class ClassifierV2(classifier_v2.ClassifierV2Template):
-    classifier_training_data_table = ClassifierTrainingData
-    classifier_method_table = ClassifierMethod
-
-
-@schema
-class CelltypeAssignmentV2(classifier_v2.CelltypeAssignmentV2Template):
-    classifier_table = Classifier
-    baden_trace_table = Baden16Traces
-    field_table = Field
-"""
 import pickle
-from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
@@ -54,49 +24,6 @@ class ClassifierV2Template(dj.Manual):
         self.insert1(dict(
             classifier_id=classifier_id,
             classifier_file=classifier_file))
-
-
-class CelltypeAssignmentV2Template(dj.Computed):
-    database = ""
-
-    @property
-    def definition(self):
-        definition = """
-        -> self.baden_trace_table
-        -> self.classifier_table
-        ---
-        cluster_id :       tinyint unsigned      # cluster ID, ranging from 1 to 75
-        group_id :         tinyint unsigned      # group ID, ranging from 1 to 46
-        supergroup_id :    enum("OFF", "ON-OFF", "Fast ON", "Slow ON", "Uncertain RGCs", "ACs")
-        prob_cluster :     float                 # probability of being in the given cluster
-        prob_group :       float                 # aggregated probability of being in the given group
-        prob_supergroup :  float                 # aggregated probability of being in the given supergroup
-        prob_rgc           float                 # aggregated probability of being an RGC
-        probs_per_cluster : blob                 # probabilities for each cluster, e.g. [0.1, 0.9, 0.05, ...]
-        """
-        return definition
-
-    @property
-    def key_source(self):
-        try:
-            return self.classifier_table.proj() * self.field_table.proj()
-        except (AttributeError, TypeError):
-            pass
-
-    @property
-    @abstractmethod
-    def classifier_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def baden_trace_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def field_table(self):
-        pass
 
 
 def load_classifier_from_file(classifier_file):
@@ -153,17 +80,3 @@ def save_classifier_to_file(classifier, chirp_feats, bar_feats, feature_names, t
 
     with open(classifier_file, 'wb') as f:
         pickle.dump(clf_dict, f)
-
-
-def extract_features(preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, chirp_features, bar_features):
-    features = np.concatenate([
-        np.dot(preproc_chirps, chirp_features),
-        np.dot(preproc_bars, bar_features),
-        bar_ds_pvalues[:, np.newaxis],
-        roi_size_um2s[:, np.newaxis]
-    ], axis=-1)
-
-    feature_names = [f'chirp_{i}' for i in range(chirp_features.shape[1])] + \
-                    [f'bar_{i}' for i in range(bar_features.shape[1])] + ['bar_ds_pvalue', 'roi_size_um2']
-
-    return features, feature_names
