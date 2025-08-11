@@ -27,10 +27,10 @@ def fix_first_or_last_n_nan(trace, n):
 
 def get_roi2trace(traces, traces_times, roi_ids_traces, roi_ids_subset=None):
     """Get dict that holds traces and times accessible by roi_id"""
-    roi_ids_subset = roi_ids_traces if roi_ids_subset is not None else roi_ids_subset
+    roi_ids_subset = roi_ids_traces if roi_ids_subset is None else roi_ids_subset
 
-    assert np.all(roi_ids_traces >= 1)
-    assert np.all(roi_ids_subset >= 1)
+    assert np.all(roi_ids_traces >= 1), f"roi_ids_traces {roi_ids_traces} should be >= 1."
+    assert np.all(roi_ids_subset >= 1), f"roi_ids_subset {roi_ids_subset} should be >= 1."
 
     if traces.shape != traces_times.shape:
         raise ValueError(f"traces shape {traces.shape} does not match traces_times shape {traces_times.shape}.")
