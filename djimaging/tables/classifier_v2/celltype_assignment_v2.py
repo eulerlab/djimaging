@@ -20,12 +20,12 @@ class CelltypeAssignmentV2Template(dj.Computed):
         ---
         cluster_id :       tinyint unsigned      # cluster ID, ranging from 1 to 75
         group_id :         tinyint unsigned      # group ID, ranging from 1 to 46
-        supergroup_id :    enum("OFF", "ON-OFF", "Fast ON", "Slow ON", "Uncertain RGCs", "ACs")
+        supergroup_id :    enum('OFF', 'ON-OFF', 'Fast ON', 'Slow ON', 'Uncertain RGCs', 'ACs')
         prob_cluster :     float                 # probability of being in the given cluster
         prob_group :       float                 # aggregated probability of being in the given group
         prob_supergroup :  float                 # aggregated probability of being in the given supergroup
-        prob_rgc           float                 # aggregated probability of being an RGC
-        probs_per_cluster : blob                 # probabilities for each cluster, e.g. [0.1, 0.9, 0.05, ...]
+        prob_rgc :         float                 # aggregated probability of being an RGC
+        probs_per_cluster : blob                 # probabilities for each cluster
         """
         return definition
 
@@ -100,10 +100,11 @@ class CelltypeAssignmentV2Template(dj.Computed):
         make_kwargs['chirp_feats'] = clf_dict['chirp_feats']
         make_kwargs['bar_feats'] = clf_dict['bar_feats']
 
-        if not np.all(make_kwargs['classifier'].classes_, self.__expected_classes):
+        if not np.all(make_kwargs['classifier'].classes_ == self.__expected_classes):
             raise ValueError("The classifier's classes do not match the expected classes.")
 
-        self.populate(
+        # populate
+        super().populate(
             *restrictions,
             keys=keys,
             suppress_errors=suppress_errors,
@@ -114,7 +115,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
             max_calls=max_calls,
             display_progress=display_progress,
             processes=processes,
-            make_kwargs=make_kwargs,
+            make_kwargs=make_kwargs
         )
 
     def make(self, key, classifier, chirp_feats, bar_feats):
@@ -125,15 +126,15 @@ class CelltypeAssignmentV2Template(dj.Computed):
             chirps, bars, ds_pvalues, roi_size_um2s,
             chirp_features=chirp_feats, bar_features=bar_feats, classifier=classifier)
 
-        for roi_key, prob in zip(roi_keys, probs):
+        for roi_key, roi_probs in zip(roi_keys, probs):
             cluster_id, group_id, supergroup_id, prob_cluster, prob_group, prob_supergroup, prob_rgc = probs_to_info(
-                probs)
+                roi_probs)
 
             self.insert1(dict(**merge_keys(key, roi_key),
                               cluster_id=cluster_id, group_id=group_id, supergroup_id=supergroup_id,
                               prob_cluster=prob_cluster, prob_group=prob_group,
                               prob_supergroup=prob_supergroup, prob_rgc=prob_rgc,
-                              probs_per_cluster=probs.tolist()))
+                              probs_per_cluster=roi_probs))
 
     def _fetch_data(self, key, restriction=None):
         if restriction is None:
@@ -151,7 +152,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
 
 def classify_cells(preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s,
                    chirp_features, bar_features, classifier):
-    features = extract_features(
+    features, feature_names = extract_features(
         preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, chirp_features, bar_features)
     probs = classifier.predict_proba(features)
     return probs
