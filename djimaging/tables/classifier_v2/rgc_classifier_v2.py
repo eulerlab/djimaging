@@ -16,7 +16,7 @@ class ClassifierV2Template(dj.Manual):
         """
         return definition
 
-    def add(self, classifier_file, classifier_id=1):
+    def add(self, classifier_file='/gpfs01/euler/data/Resources/Classifier_v2/rgc_classifier_v2.pkl', classifier_id=1):
         # Test if classifier is valid
         clf_dict = load_classifier_from_file(classifier_file)
         check_classifier_dict(clf_dict)

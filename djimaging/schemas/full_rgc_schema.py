@@ -1,3 +1,4 @@
+import djimaging.tables.classifier.celltype_assignment
 from djimaging.schemas.core_schema import *
 from djimaging.tables import response, classifier, receptivefield, location
 
@@ -55,7 +56,7 @@ class Classifier(classifier.ClassifierTemplate):
 
 
 @schema
-class CelltypeAssignment(classifier.CelltypeAssignmentTemplate):
+class CelltypeAssignment(djimaging.tables.classifier.celltype_assignment.CelltypeAssignmentTemplate):
     classifier_training_data_table = ClassifierTrainingData
     classifier_table = Classifier
     baden_trace_table = Baden16Traces
