@@ -7,6 +7,9 @@ from djimaging.tables import location
 
 @schema
 class OpticDisk(location.OpticDiskTemplate):
+    incl_region = True # Include region as primary key? If so you have to provide the field_table:
+    field_table = Field
+
     userinfo_table = UserInfo
     experiment_table = Experiment
     raw_params_table = RawDataParams
