@@ -177,7 +177,7 @@ class TracesTemplate(dj.Computed):
 
         @widgets.interact(left=w_left, right=w_right, save=w_save)
         def plot_fit(left=0, right=trace.size - 1, save=False):
-            nonlocal title, key
+            nonlocal title
 
             plot_left_right_clipping(trace, trace_t, left, right, title)
 
