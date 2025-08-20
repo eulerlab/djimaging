@@ -98,7 +98,7 @@ class IplBordersTemplate(dj.Manual):
 
         @widgets.interact(bot=w_bot, top=w_top, thick=w_thick, save=w_save)
         def plot_fit(left=left0, right=right0, thick=thick0, save=False):
-            nonlocal title, key, add_or_update
+            nonlocal title
 
             plot_field_and_fit(left, right, thick, ch0_avg, ch1_avg, figsize=figsize, extent=extent, title=title)
 
