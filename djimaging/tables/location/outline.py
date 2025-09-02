@@ -122,12 +122,20 @@ class OutlineAbsTemplate(dj.Computed):
 
         return file_info_df
 
-    def make(self, key):
+    def make(self, key, verbose=False):
         setupid = (self.experiment_table().ExpInfo & key).fetch1("setupid")
 
         file_info_df = self.load_exp_file_info_df(key)
+
         if len(file_info_df) == 0:
+            if verbose:
+                print('=' * 60)
+                print(f'No outline files found for {key}')
             return
+
+        if verbose:
+            print('=' * 60)
+            print(f"Found n={file_info_df.shape[0]} outline files:\n{list(file_info_df.filepath)}")
 
         outline_abs_xy = []
         field_entries = []
@@ -138,13 +146,24 @@ class OutlineAbsTemplate(dj.Computed):
             field_key = key.copy()
             field_key['field'] = row['field']
 
+            if verbose:
+                print('\tParsing file:', row.filepath)
+
             if self._num_loc is not None:
+                info = str(os.path.splitext(os.path.basename(row['filepath']))[0].split('_')[self._num_loc])
+
                 try:
-                    num = str(os.path.splitext(os.path.basename(row['filepath']))[0].split('_')[self._num_loc])
-                    num = ''.join(filter(str.isdigit, num))
+                    num = ''.join(filter(str.isdigit, info))
                     num = int(num)
-                except ValueError:
-                    raise ValueError(f'Could not extract number from {row["filepath"]}')
+
+                    if verbose:
+                        print(f"Inferred number: {num}")
+
+                except ValueError as e:
+                    if verbose:
+                        print(f"Failed to infer number. Error: {e}. Use raw info instead.")
+                    num = info
+
                 nums.append(num)
 
             field_entry = self.complete_key(field_key, rec)

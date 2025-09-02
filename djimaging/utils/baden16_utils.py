@@ -82,6 +82,55 @@ BADEN_CLUSTER_INFO = np.array([
     [75, '46b', 46, 'dAC', ],
 ])
 
+BADEN_GROUP_ID_NAMES = {
+    1: 'Off local, OS',
+    2: 'Off DS',
+    3: 'Off step',
+    4: 'Off slow',
+    5: 'Off alpha sustained',
+    6: '(On-)Off "JAM-B" mix',
+    7: 'Off sustained',
+    8: 'Off alpha transient',
+    9: 'Off "mini" alpha transient',
+    10: 'On-Off local-edge "W3"',
+    11: 'On-Off local',
+    12: 'On-Off DS 1',
+    13: 'On-Off DS 2',
+    14: '(On-)Off local, OS',
+    15: 'On step',
+    16: 'On DS transient',
+    17: 'On local transient, OS',
+    18: 'On transient',
+    19: 'On alpha transient',
+    20: 'On high frequency',
+    21: 'On low frequency',
+    22: 'On sustained',
+    23: 'On "mini" alpha',
+    24: 'On alpha sustained',
+    25: 'On DS sustained 1',
+    26: 'On DS sustained 2',
+    27: 'On slow',
+    28: 'On contrast suppressed',
+    29: 'On DS sustained 3',
+    30: 'On local sustained, OS',
+    31: 'Off suppressed 1',
+    32: 'Off suppressed 2',
+    33: 'Off',
+    34: 'On high frequency sustained 1',
+    35: 'On high frequency transient',
+    36: 'On-Off high frequency',
+    37: 'On high frequency sustained 2',
+    38: 'On sustained 1',
+    39: 'On sustained 2',
+    40: 'On sustained 3',
+    41: 'On sustained 4',
+    42: 'On "starburst"',
+    43: 'On-Off local',
+    44: 'On step',
+    45: 'On local 1',
+    46: 'On local 2',
+}
+
 
 @lru_cache(maxsize=None)
 def load_baden_data(baden_data_file, quality_filter=True):
@@ -163,3 +212,21 @@ def baden_group_id_to_supergroup(group_id):
     supergroups = BADEN_CLUSTER_INFO[:, 3].astype(str)
     i = np.where(group_ids == group_id)[0][0]
     return supergroups[i]
+
+
+def baden_group_id_to_group_name(group_id, shorten=False):
+    group_id = int(group_id)
+    if group_id < 1 or group_id > 46:
+        return 'Unknown'
+    group_name = BADEN_GROUP_ID_NAMES[group_id]
+    if shorten:
+        group_name = shorten_baden_name(group_name)
+    return group_name
+
+
+def shorten_baden_name(name):
+    name = name.replace('frequency', 'freq.')
+    name = name.replace('sustained', 'sus.')
+    name = name.replace('transient', 'trans.')
+    name = name.replace('suppressed', 'suppr.')
+    return name

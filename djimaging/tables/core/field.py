@@ -131,13 +131,13 @@ class FieldTemplate(dj.Computed):
 
             # Set defaults
             if self.incl_cond1:
-                file_info_df['cond1'].fillna('control', inplace=True)
+                file_info_df['cond1'] = file_info_df['cond1'].fillna('control')
             if self.incl_cond2:
-                file_info_df['cond2'].fillna('control', inplace=True)
+                file_info_df['cond2'] = file_info_df['cond2'].fillna('control')
             if self.incl_cond3:
-                file_info_df['cond3'].fillna('control', inplace=True)
+                file_info_df['cond3'] = file_info_df['cond3'].fillna('control')
             if self.incl_region:
-                file_info_df['region'].fillna('N/A', inplace=True)
+                file_info_df['region'] = file_info_df['region'].fillna('N/A')
 
         return file_info_df
 
