@@ -28,7 +28,7 @@ def fit_sigmoid_with_retry(x_data, y_data, max_tries=3):
     return p00
 
 
-def fit_sigmoid(y_data, x_data=None, sign=1, ax=None):
+def fit_sigmoid(y_data, x_data=None, sign=1, n: int = 3, ax=None):
     """Fit sigmoid function to data, and estimate half amp"""
     np.random.seed(42)
 
@@ -38,7 +38,7 @@ def fit_sigmoid(y_data, x_data=None, sign=1, ax=None):
     y_data = y_data * sign
 
     # Fit sigmoid curve to the data
-    popt = fit_sigmoid_with_retry(x_data, y_data, max_tries=3)
+    popt = fit_sigmoid_with_retry(x_data, y_data, max_tries=n)
     x0_fit, k_fit, a_fit = popt
 
     if (x0_fit > x_data.max()) | (x0_fit < x_data.min()):

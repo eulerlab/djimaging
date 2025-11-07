@@ -106,7 +106,7 @@ def fit_naka_rushton_repeated(x_data: np.ndarray, y_data: np.ndarray, n: int = 3
     return popt_best
 
 
-def fit_naka_rushton(x_data: np.ndarray, y_data: np.ndarray, ax=None):
+def fit_naka_rushton(x_data: np.ndarray, y_data: np.ndarray, n: int = 3, ax=None):
     """
     Fit Naka-Rushton function to data and estimate half-maximum metrics.
     This function will use a linear fit if the Naka-Rushton fit is not good.
@@ -117,6 +117,7 @@ def fit_naka_rushton(x_data: np.ndarray, y_data: np.ndarray, ax=None):
     Args:
         x_data (array-like): Stimulus data.
         y_data (array-like): Response data.
+        n (int): Number of retries.
         ax (matplotlib.axes.Axes, optional): Axis for plotting. Defaults to None.
 
     Returns:
@@ -124,7 +125,7 @@ def fit_naka_rushton(x_data: np.ndarray, y_data: np.ndarray, ax=None):
     """
     np.random.seed(42)
 
-    popt = fit_naka_rushton_repeated(x_data, y_data, n=3)
+    popt = fit_naka_rushton_repeated(x_data, y_data, n=n)
     R0_fit, Rm_fit, S50_fit, n_fit = popt
 
     # Compare MSE of linear fit

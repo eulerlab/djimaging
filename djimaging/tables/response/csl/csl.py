@@ -15,7 +15,9 @@ class CslMetrics(response.CslMetricsTemplate):
     presentation_table = Presentation
     traces_table = Traces
 
+    _stim_frequency = 2.0  # Hz
     _kind = 'naka_rushton'
+    _metric_kind = 'auc'
     _w_zero_fit = True
     _dt_order = 3
     _dt_window = 60
@@ -25,6 +27,8 @@ class CslMetrics(response.CslMetricsTemplate):
     _dt_baseline_a = 1.6
     _dt_baseline_b = 2.9
     _dt_window_plateau = 1.0
+
+    _n_fit_repeats = 3
 
 # Populate with plots:
 CslMetrics().populate(make_kwargs=dict(plot=True))
@@ -48,7 +52,9 @@ class CslMetricsTemplate(dj.Computed):
     database = ""
     _stim_restriction = dict(stim_name='csl')
 
+    _stim_frequency = 2.0  # Hz
     _fit_kind = 'naka_rushton'
+    _metric_kind = 'auc'
     _w_zero_fit = 1
     _dt_order = 3
     _dt_window = 60
@@ -59,9 +65,11 @@ class CslMetricsTemplate(dj.Computed):
     _dt_baseline_b = 2.9
     _dt_window_plateau = 1.0
 
+    _n_fit_repeats = 3
+
     @property
     def definition(self):
-        definition = '''
+        definition = f'''
         # Normalized contrast step light response
         -> self.traces_table
         ---
@@ -75,8 +83,12 @@ class CslMetricsTemplate(dj.Computed):
         contrast_sensitivity: float  # Relating step responses to contrast responses
         tonic_release_index: float  # Tonic release index as in Franke et al 2017, but for last contrast step
         plateau_index: float  # Plateau index (a - b) / (a + b), similar to Franke et al 2017
-        contrast_aucs: blob  # Area under the curve for each contrast, incl. baseline at i=0 if _w_zero_fit=1
-        fit_half_amp_y = NULL : float  # y at half amplitude of fit
+        contrast_{self._metric_kind}s: blob  # Metric per contrast (e.g., auc or fft_f1), incl. baseline at i=0 if _w_zero_fit=1
+        '''
+        # Add an optional phases field when using FFT metric
+        if getattr(self, '_metric_kind', 'auc') == 'fft_f1':
+            definition += '        contrast_fft_f1_phases: blob  # Phase of F1 (degrees) per contrast; baseline at i=0 if present\n'
+        definition += f'''        fit_half_amp_y = NULL : float  # y at half amplitude of fit
         fit_half_amp_x = NULL : float  # x at half amplitude of fit
         fit_half_amp_slope = NULL : float  # Slope at half amplitude of fit
         droppedlastrep_flag: tinyint unsigned  # Was the last repetition incomplete and therefore dropped?
@@ -123,7 +135,8 @@ class CslMetricsTemplate(dj.Computed):
 
         d_csl = analyse_csl_response(
             trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, fs_resample, plot=plot,
-            w_zero_fit=self._w_zero_fit, fit_kind=self._fit_kind,
+            w_zero_fit=self._w_zero_fit, fit_kind=self._fit_kind, metric_kind=self._metric_kind,
+            stim_frequency=self._stim_frequency, n_fit_repeats=self._n_fit_repeats,
             dt_order=self._dt_order, dt_window=self._dt_window, peak_q=self._peak_q,
             contrast_levels=self._contrast_levels, dt_breaks=self._dt_breaks,
             dt_baseline_a=self._dt_baseline_a, dt_baseline_b=self._dt_baseline_b,
@@ -135,14 +148,19 @@ class CslMetricsTemplate(dj.Computed):
         bc_snippets = d_csl['bc_snippets'][::n_lines, :]
         avg = d_csl['avg'][::n_lines]
 
+        metric_field = f"contrast_{self._metric_kind}s"
         entry = dict(
             **key, average=avg, snippets=bc_snippets, fs=fs, fs_metrics=fs_resample,
             qidx_full=d_csl['qidx_full'], qidx_contrast=d_csl['qidx_contrast'],
             on_off_index=d_csl['on_off_index'], contrast_sensitivity=d_csl['contrast_sensitivity'],
             tonic_release_index=d_csl['tonic_release_index'], plateau_index=d_csl['plateau_index'],
             fit_half_amp_y=d_csl['fit'][0], fit_half_amp_x=d_csl['fit'][1], fit_half_amp_slope=d_csl['fit'][2],
-            contrast_aucs=d_csl['contrast_aucs'], droppedlastrep_flag=d_csl['droppedlastrep_flag']
+            droppedlastrep_flag=d_csl['droppedlastrep_flag']
         )
+        entry[metric_field] = d_csl['contrast_metrics']
+        # Optionally store phases when using fft_f1 metric
+        if getattr(self, '_metric_kind', 'auc') == 'fft_f1' and 'contrast_phases_deg' in d_csl:
+            entry['contrast_fft_f1_phases'] = d_csl['contrast_phases_deg']
 
         return entry
 
@@ -175,7 +193,8 @@ class CslMetricsTemplate(dj.Computed):
 
 def analyse_csl_response(
         trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, fs_resample, plot=False,
-        w_zero_fit=1, fit_kind='naka_rushton',
+        w_zero_fit=1, fit_kind='naka_rushton', metric_kind='auc',
+        stim_frequency=6.0, n_fit_repeats=3,
         dt_order=3, dt_window=60, peak_q=98,
         contrast_levels=(0.10, 0.20, 0.40, 0.60, 0.80, 1.00),
         dt_breaks=3., dt_baseline_a=1.6, dt_baseline_b=2.9, dt_window_plateau=1.0):
@@ -269,19 +288,42 @@ def analyse_csl_response(
     amp_100 = np.maximum(0, np.percentile(avg[idxs_cs_a[-1]:idxs_cs_b[-1]], q=peak_q))
     contrast_sensitivity = amp_100 / np.maximum(amp_100 + amp_step, 1e-9)
 
-    # Fit curve to responses
-    contrast_aucs = np.array([np.mean(np.abs(avg[ia:ib])) for ia, ib in zip(idxs_cs_a, idxs_cs_b)])
-    if w_zero_fit:
-        zero_value = np.mean(np.abs(avg[idxs_baseline]))
-        contrast_aucs = np.append(zero_value, contrast_aucs)
-        contrast_levels = np.append(0, contrast_levels)
+    # Compute contrast metrics
+    if metric_kind == 'auc':
+        contrast_metrics = np.array([np.mean(np.abs(avg[ia:ib])) for ia, ib in zip(idxs_cs_a, idxs_cs_b)])
+        if w_zero_fit:
+            zero_value = np.mean(np.abs(avg[idxs_baseline]))
+            contrast_metrics = np.append(zero_value, contrast_metrics)
+            contrast_levels = np.append(0, contrast_levels)
+    elif metric_kind == 'fft_f1':
+        # Contrast windows
+        amps = []
+        phases = []
+        for ia, ib in zip(idxs_cs_a, idxs_cs_b):
+            a, p = f1_amp_phase(
+                avg[ia:ib], stim_frequency=stim_frequency, trace_frequency=fs_resample)
+            amps.append(a)
+            phases.append(p)
+        contrast_metrics = np.array(amps, dtype=float)
+        contrast_phases_deg = np.array(phases, dtype=float)
+        if w_zero_fit:
+            zero_a, zero_p = f1_amp_phase(
+                avg[idxs_baseline], stim_frequency=stim_frequency, trace_frequency=fs_resample)
+            contrast_metrics = np.append(zero_a, contrast_metrics)
+            contrast_phases_deg = np.append(zero_p, contrast_phases_deg)
+            contrast_levels = np.append(0, contrast_levels)
+    else:
+        raise ValueError(f"Unknown metric_kind={metric_kind}")
 
+    # Fit curve to metric-vs-contrast
     if fit_kind == 'naka_rushton':
         fit = fit_naka_rushton(
-            y_data=normalize_zero_one(contrast_aucs), x_data=contrast_levels, ax=None if not plot else axs['H'])
+            y_data=normalize_zero_one(contrast_metrics), x_data=contrast_levels, n=n_fit_repeats,
+            ax=None if not plot else axs['H'])
     elif fit_kind == 'sigmoid':
         fit = fit_sigmoid(
-            y_data=normalize_zero_one(contrast_aucs), x_data=contrast_levels, ax=None if not plot else axs['H'])
+            y_data=normalize_zero_one(contrast_metrics), x_data=contrast_levels, n=n_fit_repeats,
+            ax=None if not plot else axs['H'])
     else:
         raise ValueError(f'Unknown fit_kind={fit_kind}')
 
@@ -358,8 +400,9 @@ def analyse_csl_response(
 
         ax.axhline(0, ls=':', color='gray')
         ax2 = ax.twinx()
-        ax2.bar(x=rel_time[(idxs_cs_a + idxs_cs_b) // 2], height=contrast_aucs[-len(idxs_cs_a):], color='k', alpha=0.5)
-        vabsmax = np.max(np.abs(contrast_aucs[-len(idxs_cs_a):]))
+        ax2.bar(x=rel_time[(idxs_cs_a + idxs_cs_b) // 2], height=contrast_metrics[-len(idxs_cs_a):], color='k',
+                alpha=0.5)
+        vabsmax = np.max(np.abs(contrast_metrics[-len(idxs_cs_a):]))
         ax2.set_ylim(-vabsmax * 1.1, vabsmax * 1.1)
         ax2.axhline(0, ls='--', color='gray')
 
@@ -372,7 +415,46 @@ def analyse_csl_response(
         bc_snippets=bc_snippets, avg=avg, qidx_full=qidx_full, qidx_contrast=qidx_contrast,
         tonic_release_index=tonic_release_index,
         plateau_index=plateau_index, on_off_index=on_off_index, contrast_sensitivity=contrast_sensitivity,
-        contrast_aucs=contrast_aucs, fit=fit, droppedlastrep_flag=droppedlastrep_flag
+        contrast_metrics=contrast_metrics, fit=fit, droppedlastrep_flag=droppedlastrep_flag
     )
+    if metric_kind == 'fft_f1':
+        # Attach phases if they were computed
+        try:
+            result_dict['contrast_phases_deg'] = contrast_phases_deg
+        except NameError:
+            pass
 
     return result_dict
+
+
+def f1_amp_phase(seg, stim_frequency, trace_frequency):
+    """ First harmonic at the stimulation frequency within each window."""
+    x = np.asarray(seg)
+    N = x.size
+    if N < 3:
+        return 0.0, 0.0
+    # make N odd to avoid Nyquist ambiguity and mimic Igor behavior
+    if (N % 2) == 0:
+        x = x[:-1]
+        N = x.size
+    # Choose FFT bin closest to stim_frequency
+    k = int(np.round(stim_frequency * N / trace_frequency))
+
+    # rfft length is N//2 + 1; clamp k into valid range
+    kmax = N // 2
+    k = int(np.clip(k, 0, kmax))
+    X = np.fft.rfft(x)
+
+    # Handle edge cases
+    if k == 0:  # DC component
+        return 0.0, 0.0
+
+    # Single-sided amplitude scaling: DC=|X0|/N; k>0: 2*|Xk|/N
+    # At Nyquist (k == kmax), no 2x factor needed
+    if k == kmax:
+        amp = np.abs(X[k]) / N
+    else:
+        amp = (2.0 * np.abs(X[k])) / N
+
+    phase_deg = float(np.degrees(np.angle(X[k])))
+    return float(amp), phase_deg
