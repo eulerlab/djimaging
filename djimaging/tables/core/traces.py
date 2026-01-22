@@ -6,15 +6,20 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.core.preprocesstraces import plot_left_right_clipping
-from djimaging.utils.scanm.traces_and_triggers_utils import roi2trace_from_stack, check_valid_triggers_rel_to_tracetime
-from djimaging.utils.scanm.read_h5_utils import load_roi2trace
 from djimaging.utils import plot_utils, math_utils, trace_utils
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger, prep_long_title
+from djimaging.utils.scanm.read_h5_utils import load_roi2trace
+from djimaging.utils.scanm.traces_and_triggers_utils import roi2trace_from_stack, check_valid_triggers_rel_to_tracetime
 
 
 class TracesTemplate(dj.Computed):
     database = ""
+
+    # Channel information
+    _channels_name_id = None  # if not None, then e.g. [('wDataCh0', 0), ('wDataCh1', 1)]
+
+    # Motion correction parameters
     _include_motion_correction = False
     _mc_fupsample = 10
     _mc_f_cutoff = 3
@@ -31,7 +36,14 @@ class TracesTemplate(dj.Computed):
             definition += """
         -> self.motion_detection_table
         """
-
+        if self._channels_name_id is not None:
+            assert len(self._channels_name_id) > 0, "_channels_name_id must be a non-empty list"
+            for ch_name_id in self._channels_name_id:
+                assert isinstance(ch_name_id, tuple) and len(ch_name_id) == 2, \
+                    "_channels_name_id must be a list of tuples (channel_name, channel_id)"
+            definition += """
+        ch_id : tinyint unsigned  # imaging channel
+        """
         definition += """
         ---
         trace          :longblob              # array of raw trace
@@ -98,37 +110,50 @@ class TracesTemplate(dj.Computed):
         triggertimes = (self.presentation_table & key).fetch1("triggertimes")
         roi_ids = (self.roi_table & key).fetch("roi_id")
 
-        if compute_from_stack:
-            roi2trace, frame_dt = self._compute_roi2trace_from_stack(
-                key, filepath, roi_ids, trace_precision, from_raw_data, verboselvl=verboselvl)
+        if self._channels_name_id is None:
+            data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
+            channels_name_id = [(data_stack_name, None)]
         else:
-            roi2trace, frame_dt = load_roi2trace(filepath, roi_ids)
+            channels_name_id = self._channels_name_id
 
-        for roi_id, roi_data in roi2trace.items():
-            if not include_artifacts and roi_data.get('incl_artifact', False):
-                continue
+        for ch_name, ch_id in channels_name_id:
+            if compute_from_stack:
+                roi2trace, frame_dt = self._compute_roi2trace_from_stack(
+                    key, filepath, roi_ids, trace_precision, from_raw_data,
+                    data_stack_name=ch_name,
+                    verboselvl=verboselvl)
+            else:
+                roi2trace, frame_dt = load_roi2trace(filepath, roi_ids)
 
-            assert roi_id in roi_ids, f"ROI ID {roi_id} not found in ROI IDs for key {key}"
+            for roi_id, roi_data in roi2trace.items():
+                if not include_artifacts and roi_data.get('incl_artifact', False):
+                    continue
 
-            try:
-                trace_key = key.copy()
-                trace_key['roi_id'] = roi_id
-                trace_key['trace'] = roi_data['trace']
-                trace_key['trace_t0'] = roi_data['trace_times'][0]
-                trace_key['trace_dt'] = frame_dt
-                trace_key['trace_valid'] = roi_data['trace_valid']
-                trace_key['trigger_valid'] = check_valid_triggers_rel_to_tracetime(
-                    trace_valid=roi_data['trace_valid'], trace_times=roi_data['trace_times'], triggertimes=triggertimes)
+                assert roi_id in roi_ids, f"ROI ID {roi_id} not found in ROI IDs for key {key}"
 
-                self.insert1(trace_key)
-            except Exception as e:
-                if roi_data['trace_valid']:
-                    raise e
-                else:
-                    warnings.warn(f"Skipping invalid trace for {key} and roi_id={roi_id}")
+                try:
+                    trace_key = key.copy()
+                    trace_key['roi_id'] = roi_id
+                    trace_key['trace'] = roi_data['trace']
+                    trace_key['trace_t0'] = roi_data['trace_times'][0]
+                    trace_key['trace_dt'] = frame_dt
+                    trace_key['trace_valid'] = roi_data['trace_valid']
+                    trace_key['trigger_valid'] = check_valid_triggers_rel_to_tracetime(
+                        trace_valid=roi_data['trace_valid'], trace_times=roi_data['trace_times'],
+                        triggertimes=triggertimes)
 
-    def _compute_roi2trace_from_stack(self, key, filepath, roi_ids, trace_precision, from_raw_data, verboselvl=0):
-        data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
+                    if ch_id is not None:
+                        trace_key['ch_id'] = ch_id
+
+                    self.insert1(trace_key)
+                except Exception as e:
+                    if roi_data['trace_valid']:
+                        raise e
+                    else:
+                        warnings.warn(f"Skipping invalid trace for {key} and roi_id={roi_id}")
+
+    def _compute_roi2trace_from_stack(self, key, filepath, roi_ids, trace_precision, from_raw_data, data_stack_name,
+                                      verboselvl=0):
         roi_mask, as_field_mask = (self.roi_mask_table.RoiMaskPresentation & key).fetch1("roi_mask", "as_field_mask")
         n_artifact = (self.presentation_table & key).fetch1("npixartifact")
 
@@ -196,29 +221,61 @@ class TracesTemplate(dj.Computed):
 
     def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(table=self, key=key)
-        trace_t0, trace_dt, trace = (self & key).fetch1("trace_t0", "trace_dt", "trace")
-        triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
-        trace_times = np.arange(len(trace)) * trace_dt + trace_t0
 
-        ax = plot_trace_and_trigger(
-            time=trace_times, trace=trace, triggertimes=triggertimes, title=str(key))
-        ax.set(xlim=xlim, ylim=ylim)
+        if self._channels_name_id is not None:
+            key.pop('ch_id')
+
+        if self._channels_name_id is None:
+            ch_ids = [None]
+        else:
+            ch_ids = np.unique((self & key).fetch('ch_id'))
+        n_chs = len(ch_ids)
+
+        fig, axs = plt.subplots(n_chs, 1, figsize=(10, 2 * n_chs), squeeze=False, sharex=True)
+
+        plot_utils.set_long_title(fig=fig, title=str(key), fontsize=8)
+
+        for i, ch_id in enumerate(ch_ids):
+            ax = axs.flat[i]
+            if ch_id is not None:
+                key['ch_id'] = ch_id
+            trace_t0, trace_dt, trace = (self & key).fetch1("trace_t0", "trace_dt", "trace")
+            triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+            trace_times = np.arange(len(trace)) * trace_dt + trace_t0
+
+            ax = plot_trace_and_trigger(
+                ax=ax, time=trace_times, trace=trace, triggertimes=triggertimes)
+
+            ax.set(xlim=xlim, ylim=ylim, title=f'trace[{ch_id=}]' if ch_id is not None else 'trace')
+        plt.tight_layout()
 
     def plot(self, restriction=None, sort=True):
         if restriction is None:
             restriction = dict()
 
-        traces = (self & restriction).fetch("trace")
+        if self._channels_name_id is None:
+            ch_ids = [None]
+        else:
+            ch_ids = np.unique((self & restriction).fetch('ch_id'))
+        n_chs = len(ch_ids)
 
-        traces = math_utils.padded_vstack(traces, cval=np.nan)
-        n = traces.shape[0]
+        traces = {}
+        for ch_id in ch_ids:
+            ch_restriction = dict() if ch_id is None else f"ch_id={ch_id}"
+            ch_traces = (self & restriction & ch_restriction).fetch("trace")
+            ch_traces = math_utils.padded_vstack(ch_traces, cval=np.nan)
+            traces[ch_id] = ch_traces
 
-        fig, ax = plt.subplots(1, 1, figsize=(10, 1 + np.minimum(n * 0.1, 10)))
+        n = traces[ch_ids[0]].shape[0]
+        sort_idxs = trace_utils.argsort_traces(traces[ch_ids[0]], ignore_nan=True) if sort else np.arange(n)
+
+        fig, axs = plt.subplots(1, n_chs, figsize=(10, 1 + np.minimum(n * 0.1, 10)),
+                                squeeze=False, sharey=True)
         if len(restriction) > 0:
             plot_utils.set_long_title(fig=fig, title=restriction)
 
-        sort_idxs = trace_utils.argsort_traces(traces, ignore_nan=True) if sort else np.arange(n)
-
-        ax.set_title('traces')
-        plot_utils.plot_signals_heatmap(ax=ax, signals=traces[sort_idxs, :], symmetric=False)
+        for i, ax in enumerate(axs.flat):
+            ch_id = ch_ids[i]
+            ax.set_title(f'traces[{ch_id=}]')
+            plot_utils.plot_signals_heatmap(ax=ax, signals=traces[ch_id][sort_idxs, :], symmetric=False)
         plt.show()

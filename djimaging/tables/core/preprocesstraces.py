@@ -168,32 +168,76 @@ class PreprocessTracesTemplate(dj.Computed):
     def plot1(self, key=None, xlim=None, ylim=None):
         key = get_primary_key(self, key)
 
-        pp_trace_t0, pp_trace_dt, pp_trace, smoothed_trace = (self & key).fetch1(
-            "pp_trace_t0", "pp_trace_dt", "pp_trace", "smoothed_trace")
-        trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1("trace_t0", "trace_dt", "trace")
-        triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+        # --- channel logic (taken from first plot1) ---
+        if self.traces_table._channels_name_id is not None:
+            key.pop('ch_id', None)
 
-        trace_times = np.arange(trace.size) * trace_dt + pp_trace_t0
-        pp_trace_times = np.arange(pp_trace.size) * pp_trace_dt + pp_trace_t0
+        if self.traces_table._channels_name_id is None:
+            ch_ids = [None]
+        else:
+            ch_ids = np.unique((self & key).fetch('ch_id'))
 
-        fig, axs = plt.subplots(3, 1, figsize=(10, 6), sharex='all')
+        n_chs = len(ch_ids)
 
-        ax = axs[0]
-        plot_trace_and_trigger(time=trace_times, trace=trace - np.mean(smoothed_trace),
-                               triggertimes=triggertimes, ax=ax, title=str(key))
-        ax.set(ylabel='mean subtracted\nraw trace')
+        fig, axs = plt.subplots(
+            3, n_chs,
+            figsize=(10, 6),
+            sharex=True,
+            squeeze=False
+        )
 
-        ax = axs[1]
-        plot_trace_and_trigger(time=trace_times, trace=smoothed_trace - np.mean(smoothed_trace),
-                               triggertimes=triggertimes, ax=ax)
-        ax.set(ylabel='mean subtracted\ntrend')
+        plot_utils.set_long_title(fig=fig, title=str(key), fontsize=8)
 
-        ax = axs[2]
-        plot_trace_and_trigger(time=pp_trace_times, trace=pp_trace, triggertimes=triggertimes, ax=ax)
-        ax.set(ylabel='preprocessed\ntrace')
+        # --- per-channel plotting ---
+        for i, ch_id in enumerate(ch_ids):
+            if ch_id is not None:
+                key['ch_id'] = ch_id
 
-        ax.set(xlim=xlim, ylim=ylim)
+            pp_trace_t0, pp_trace_dt, pp_trace, smoothed_trace = (self & key).fetch1(
+                "pp_trace_t0", "pp_trace_dt", "pp_trace", "smoothed_trace"
+            )
+            trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1(
+                "trace_t0", "trace_dt", "trace"
+            )
+            triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
 
+            trace_times = np.arange(trace.size) * trace_dt + trace_t0
+            pp_trace_times = np.arange(pp_trace.size) * pp_trace_dt + pp_trace_t0
+
+            # --- raw trace ---
+            ax = axs[0, i]
+            plot_trace_and_trigger(
+                time=trace_times,
+                trace=trace - np.mean(smoothed_trace),
+                triggertimes=triggertimes,
+                ax=ax,
+                title=f'raw trace [{ch_id=}]' if ch_id is not None else 'raw trace'
+            )
+            ax.set(ylabel='mean subtracted\nraw trace')
+
+            # --- smoothed trace ---
+            ax = axs[1, i]
+            plot_trace_and_trigger(
+                time=trace_times,
+                trace=smoothed_trace - np.mean(smoothed_trace),
+                triggertimes=triggertimes,
+                ax=ax
+            )
+            ax.set(ylabel='mean subtracted\ntrend')
+
+            # --- preprocessed trace ---
+            ax = axs[2, i]
+            plot_trace_and_trigger(
+                time=pp_trace_times,
+                trace=pp_trace,
+                triggertimes=triggertimes,
+                ax=ax
+            )
+            ax.set(ylabel='preprocessed\ntrace')
+
+            ax.set(xlim=xlim, ylim=ylim)
+
+        plt.tight_layout()
         plt.show()
 
     def plot(self, restriction=None, sort=True):
