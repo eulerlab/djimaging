@@ -118,7 +118,7 @@ class DNoiseTraceTemplate(dj.Computed):
 
         stim_idxs, trace, dt, t0, dt_rel_error = prepare_noise_data(
             trace=trace, tracetime=tracetime, stim=stim_idxs, triggertimes=triggertimes,
-            ntrigger_per_frame=stim_dict.get('ntrigger_per_frame', 1),
+            ntrigger_per_frame=stim_dict.get('ntrigger_per_frame', 1) if stim_dict else 1,
             fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim, ref_time=ref_time,
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
             pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s)
