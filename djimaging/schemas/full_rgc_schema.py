@@ -1,5 +1,5 @@
 from djimaging.schemas.core_schema import *
-from djimaging.tables import response, classifier, receptivefield, location
+from djimaging.tables import response, classifier_v2, receptivefield, location
 
 
 # Classifier
@@ -17,47 +17,36 @@ class ChirpFeatures(response.ChirpFeaturesRgcTemplate):
 
 
 @schema
-class OsDsIndexes(response.OsDsIndexesTemplateV2):
+class OsDsIndexes(response.OsDsIndexesTemplate):
+    _reduced_storage = True
+    _n_shuffles = 1000
+    _version = 2
+
     stimulus_table = Stimulus
     snippets_table = Snippets
 
 
 @schema
-class Baden16Traces(classifier.Baden16TracesTemplate):
-    _shift_chirp = 1
-    _shift_bar = -4
-
+class Baden16TracesV2(classifier_v2.Baden16TracesV2Template):
     _stim_name_chirp = 'gChirp'
     _stim_name_bar = 'movingbar'
 
-    averages_table = Averages
-    os_ds_table = OsDsIndexes
+    traces_table = Traces
+    presentation_table = Presentation
+    stimulus_table = Stimulus
 
 
 @schema
-class ClassifierTrainingData(classifier.ClassifierTrainingDataTemplate):
+class ClassifierV2(classifier_v2.ClassifierV2Template):
     pass
 
 
 @schema
-class ClassifierMethod(classifier.ClassifierMethodTemplate):
-    classifier_training_data_table = ClassifierTrainingData
-
-
-@schema
-class Classifier(classifier.ClassifierTemplate):
-    classifier_training_data_table = ClassifierTrainingData
-    classifier_method_table = ClassifierMethod
-
-
-@schema
-class CelltypeAssignment(classifier.CelltypeAssignmentTemplate):
-    classifier_training_data_table = ClassifierTrainingData
-    classifier_table = Classifier
-    baden_trace_table = Baden16Traces
+class CelltypeAssignmentV2(classifier_v2.CelltypeAssignmentV2Template):
+    classifier_table = ClassifierV2
+    baden_trace_table = Baden16TracesV2
     field_table = Field
     roi_table = Roi
-    os_ds_table = OsDsIndexes
 
 
 # Receptive fields

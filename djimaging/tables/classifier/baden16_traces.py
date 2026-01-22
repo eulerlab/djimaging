@@ -8,8 +8,6 @@ from abc import abstractmethod
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.utils.trace_utils import get_mean_dt
-
 from djimaging.utils.dj_utils import get_primary_key
 from scipy import interpolate
 import datajoint as dj
@@ -19,7 +17,7 @@ class Baden16TracesTemplate(dj.Computed):
     database = ""
 
     _shift_chirp = 1
-    _shift_bar = -4
+    _shift_bar = -4  # How much the moving bar is shifted. It's actually better to use delay in the Stimulus table.
 
     _stim_name_chirp = 'gChirp'
     _stim_name_bar = 'movingbar'

@@ -17,7 +17,6 @@ try:
 
     jax.config.update('jax_platform_name', 'cpu')
 except ImportError:
-    warnings.warn('Failed to import RFEst: Cannot compute receptive fields.')
     rfest = None
     jax = None
 

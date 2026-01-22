@@ -178,6 +178,28 @@ class FastStaTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
+    def prepare_sta_params(self, *restrictions):
+        restrictions = [{}] if len(restrictions) == 0 else restrictions
+        if len(self.params_table() & [*restrictions]) != 1:
+            raise NotImplementedError("Only one parameter set supported. Provide `restrictions` that selects one.")
+
+        (x_stimulus, dt, rf_time, burn_in, shift, kind, dims, fupsample_stim, fupsample_trace,
+         fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s) = (
+                self.params_table & [*restrictions]).fetch1(
+            'x_stimulus', 'dt', 'rf_time', 'burn_in', 'shift', 'fit_kind', 'dims', 'fupsample_stim',
+            "fupsample_trace", "fit_kind", "lowpass_cutoff", "pre_blur_sigma_s", "post_blur_sigma_s")
+
+        x_stimulus = np.ascontiguousarray(x_stimulus.astype(np.float32))
+
+        sta_params = dict(
+            x_stimulus=x_stimulus, rf_time=rf_time, burn_in=burn_in, shift=shift, kind=kind, dims=dims,
+            dt=dt, fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
+            fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
+            pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s,
+        )
+
+        return sta_params
+
     def populate(
             self,
             *restrictions,
@@ -195,23 +217,9 @@ class FastStaTemplate(dj.Computed):
         if len(self.params_table() & [*restrictions]) != 1:
             raise NotImplementedError("Only one parameter set supported. Provide `restrictions` that selects one.")
 
-        (x_stimulus, dt, rf_time, burn_in, shift, kind, dims, fupsample_stim, fupsample_trace,
-         fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s) = (
-                self.params_table & [*restrictions]).fetch1(
-            'x_stimulus', 'dt', 'rf_time', 'burn_in', 'shift', 'fit_kind', 'dims', 'fupsample_stim',
-            "fupsample_trace", "fit_kind", "lowpass_cutoff", "pre_blur_sigma_s", "post_blur_sigma_s")
-
         if make_kwargs is None:
             make_kwargs = dict()
-
-        x_stimulus = np.ascontiguousarray(x_stimulus.astype(np.float32))
-
-        make_kwargs['sta_params'] = dict(
-            x_stimulus=x_stimulus, rf_time=rf_time, burn_in=burn_in, shift=shift, kind=kind, dims=dims,
-            dt=dt, fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
-            fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
-            pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s,
-        )
+        make_kwargs['sta_params'] = self.prepare_sta_params(*restrictions)
 
         super().populate(
             *restrictions,
@@ -226,7 +234,7 @@ class FastStaTemplate(dj.Computed):
             make_kwargs=make_kwargs,
         )
 
-    def make(self, key, verbose=False, plot=False, sta_params=None):
+    def make_compute(self, key, sta_params=None):
         if isinstance(sta_params, dict):
             x_stimulus = sta_params['x_stimulus']
             dims = sta_params['dims']
@@ -266,6 +274,10 @@ class FastStaTemplate(dj.Computed):
                 dims, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s)
             rf_entries.append({**key, **rf_key, "rf": rf})
 
+        return rf_entries
+
+    def make(self, key, sta_params=None):
+        rf_entries = self.make_compute(key=key, sta_params=sta_params)
         self.insert(rf_entries)
 
     @staticmethod

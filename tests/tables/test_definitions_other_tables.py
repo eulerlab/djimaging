@@ -1,3 +1,4 @@
+import djimaging.tables.classifier.celltype_assignment
 from djimaging.tables import classifier, response, location, misc
 from djimaging.utils.dj_utils import get_input_tables, get_class_attributes
 

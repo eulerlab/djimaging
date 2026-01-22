@@ -200,12 +200,20 @@ class RfRoiOffsetTemplate(dj.Computed):
 
         setupid = (self.experiment_tab.ExpInfo & key).fetch1('setupid')
 
+        # If you stand in front of the setup:
+        # -rely is this axis: → (left to right)
+        # +relx is this axis: ↑ (front to back, typically ventral to dorsal)
+
+        # For the RF x and y can have different meaning,
+        # dependent in which direction the dense noise stimulus was provided by the user.
+
+        # TODO: find a solution to make this robust.
         if str(setupid) == "1":
-            relx_rf_roi_um = + rf_dy_um - relx_wrt_field  # RF y is aligned with relx axis
             rely_rf_roi_um = - rf_dx_um - rely_wrt_field  # RF x is aligned with -rely axis
+            relx_rf_roi_um = + rf_dy_um - relx_wrt_field  # RF y is aligned with relx axis
         elif str(setupid) == "3":
-            relx_rf_roi_um = + rf_dy_um - relx_wrt_field  # RF y is aligned with relx axis
             rely_rf_roi_um = - rf_dx_um - rely_wrt_field  # RF x is aligned with -rely axis
+            relx_rf_roi_um = - rf_dy_um - relx_wrt_field  # RF y is aligned with relx axis
         else:
             raise NotImplementedError
 
@@ -261,7 +269,8 @@ class RfRoiOffsetTemplate(dj.Computed):
 
         return fig, ax
 
-    def plot_field(self, key, rf_qidx_thresh=0.45, n_std=1, gamma=0.7):
+    def plot_field(self, key, rf_qidx_thresh=0.45, n_std=1, gamma=0.7,
+                   adjust_rfs=(0, 0), plot_offset=True, plot_outline=True):
         from matplotlib.patches import Ellipse
         import seaborn as sns
 
@@ -309,24 +318,31 @@ class RfRoiOffsetTemplate(dj.Computed):
                 roi_xy = rely_wrt_field, -relz_wrt_field / 5
             else:
                 raise NotImplementedError(scan_type)
-            rf_xy = roi_xy[0] + rely_rf_roi_um, roi_xy[1] - relx_rf_roi_um
+            rf_xy = roi_xy[0] + rely_rf_roi_um + adjust_rfs[0], roi_xy[1] - relx_rf_roi_um + adjust_rfs[1]
 
             ax.plot(*roi_xy, 'X', zorder=100, ms=3, c=colors[i])
-            ax.plot([roi_xy[0], rf_xy[0]], [roi_xy[1], rf_xy[1]], '-', zorder=100, ms=3, c=colors[i])
 
-            if isinstance(self.rf_fit_tab(), FitGauss2DRFTemplate):
-                srf_params = (self.rf_fit_tab & roi_key).fetch1("srf_params")
-            elif isinstance(self.rf_fit_tab(), FitDoG2DRFTemplate):
-                srf_params = (self.rf_fit_tab & roi_key).fetch1("srf_eff_center_params")
-            else:
-                srf_params = None
+            if plot_offset:
+                ax.plot([roi_xy[0], rf_xy[0]], [roi_xy[1], rf_xy[1]], '-', zorder=100, ms=3, c=colors[i])
 
-            if srf_params is not None:
-                ax.add_patch(Ellipse(
-                    xy=rf_xy,
-                    width=n_std * 2 * srf_params['x_stddev'] * pix_scale_x_um,
-                    height=n_std * 2 * srf_params['y_stddev'] * pix_scale_y_um,
-                    angle=np.rad2deg(srf_params['theta']), color=colors[i], fill=False, alpha=0.5))
+            if plot_outline:
+                if isinstance(self.rf_fit_tab(), FitGauss2DRFTemplate):
+                    srf_params = (self.rf_fit_tab & roi_key).fetch1("srf_params")
+                elif isinstance(self.rf_fit_tab(), FitDoG2DRFTemplate):
+                    srf_params = (self.rf_fit_tab & roi_key).fetch1("srf_eff_center_params")
+                else:
+                    srf_params = None
 
-        ax.set_xlabel('µm')
-        ax.set_ylabel('µm')
+                if srf_params is not None:
+                    ax.add_patch(Ellipse(
+                        xy=rf_xy,
+                        width=n_std * 2 * srf_params['x_stddev'] * pix_scale_x_um,
+                        height=n_std * 2 * srf_params['y_stddev'] * pix_scale_y_um,
+                        angle=np.rad2deg(srf_params['theta']), color=colors[i], fill=False, alpha=0.5))
+
+        if scan_type == 'xy':
+            ax.set_xlabel('relY [µm]')
+            ax.set_ylabel('relX [µm]')
+        else:
+            ax.set_xlabel('µm')
+            ax.set_ylabel('µm')

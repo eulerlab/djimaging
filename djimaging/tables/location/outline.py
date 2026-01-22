@@ -13,6 +13,7 @@ class OutlineAbs(location.OutlineAbsTemplate):
     experiment_table = Experiment
     userinfo_table = UserInfo
 
+
     class OutlineAbsField(location.OutlineAbsTemplate.OutlineAbsField):
         pass
 
@@ -33,6 +34,7 @@ from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import get_primary_key
@@ -104,7 +106,12 @@ class OutlineAbsTemplate(dj.Computed):
         data_folder = (self.userinfo_table & exp_key).fetch1("raw_data_dir" if from_raw_data else "pre_data_dir")
         user_dict = (self.userinfo_table & exp_key).fetch1()
 
-        file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
+        if os.path.isdir(os.path.join(header_path, data_folder)):
+            file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
+        else:
+            warnings.warn(f"Data folder {data_folder} not found for key {exp_key}")
+            return pd.DataFrame()
+
         file_info_df = file_info_df[file_info_df['kind'] == 'outline']
 
         if len(file_info_df) == 0:
@@ -115,12 +122,20 @@ class OutlineAbsTemplate(dj.Computed):
 
         return file_info_df
 
-    def make(self, key):
+    def make(self, key, verbose=False):
         setupid = (self.experiment_table().ExpInfo & key).fetch1("setupid")
 
         file_info_df = self.load_exp_file_info_df(key)
+
         if len(file_info_df) == 0:
+            if verbose:
+                print('=' * 60)
+                print(f'No outline files found for {key}')
             return
+
+        if verbose:
+            print('=' * 60)
+            print(f"Found n={file_info_df.shape[0]} outline files:\n{list(file_info_df.filepath)}")
 
         outline_abs_xy = []
         field_entries = []
@@ -131,13 +146,24 @@ class OutlineAbsTemplate(dj.Computed):
             field_key = key.copy()
             field_key['field'] = row['field']
 
+            if verbose:
+                print('\tParsing file:', row.filepath)
+
             if self._num_loc is not None:
+                info = str(os.path.splitext(os.path.basename(row['filepath']))[0].split('_')[self._num_loc])
+
                 try:
-                    num = str(os.path.splitext(os.path.basename(row['filepath']))[0].split('_')[self._num_loc])
-                    num = ''.join(filter(str.isdigit, num))
+                    num = ''.join(filter(str.isdigit, info))
                     num = int(num)
-                except ValueError:
-                    raise ValueError(f'Could not extract number from {row["filepath"]}')
+
+                    if verbose:
+                        print(f"Inferred number: {num}")
+
+                except ValueError as e:
+                    if verbose:
+                        print(f"Failed to infer number. Error: {e}. Use raw info instead.")
+                    num = info
+
                 nums.append(num)
 
             field_entry = self.complete_key(field_key, rec)
@@ -292,21 +318,21 @@ class OutlineRelTemplate(dj.Computed):
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
-        outline_abs_xy = (self.outline_abs_table & key).fetch1('outline_abs_xy')
-        outline_rel_xy = (self & key).fetch1('outline_rel_xy')
-        outline_retina_xy = (self & key).fetch1('outline_retina_xy')
+        outline_abs_xy = np.asarray((self.outline_abs_table & key).fetch1('outline_abs_xy'))
+        outline_rel_xy = np.asarray((self & key).fetch1('outline_rel_xy'))
+        outline_retina_xy = np.asarray((self & key).fetch1('outline_retina_xy'))
 
         fields, relxs, relys = (self.OutlineRelField & key).fetch('field', 'relx', 'rely')
 
         fig, axs = plt.subplots(1, 3, figsize=(12, 3))
 
         ax = axs[0]
-        ax.plot(*np.array(outline_abs_xy).T, '.-')
+        ax.plot(outline_abs_xy[:, 0], outline_abs_xy[:, 1], '.-')
         ax.set(title='Absolute', xlabel='absx_um', ylabel='absy_um')
         ax.set_aspect(aspect="equal", adjustable="datalim")
 
         ax = axs[1]
-        ax.plot(*np.array(outline_rel_xy).T, '.-')
+        ax.plot(outline_rel_xy[:, 0], outline_rel_xy[:, 1], '.-')
         ax.set(title='Relative', xlabel='relx_um', ylabel='rely_um')
         ax.set_aspect(aspect="equal", adjustable="datalim")
 
@@ -314,7 +340,7 @@ class OutlineRelTemplate(dj.Computed):
             ax.text(relx, rely, field)
 
         ax = axs[2]
-        ax.plot(*np.array(outline_retina_xy).T, '.-')
+        ax.plot(outline_retina_xy[:, 1], outline_retina_xy[:, 0], '.-')
         ax.set(title='Retina', xlabel='temporal_nasal_pos_um', ylabel='ventral_dorsal_pos_um')
         ax.set_aspect(aspect="equal", adjustable="datalim")
 

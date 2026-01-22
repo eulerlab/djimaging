@@ -1,10 +1,12 @@
 import os
+import warnings
 from abc import abstractmethod
 from copy import deepcopy
 from typing import Optional
 
 import datajoint as dj
 import numpy as np
+import pandas as pd
 
 from djimaging.utils.filesystem_utils import get_file_info_df
 from djimaging.utils.dj_utils import get_primary_key
@@ -110,7 +112,11 @@ class FieldTemplate(dj.Computed):
         data_folder = (self.userinfo_table & exp_key).fetch1("raw_data_dir" if from_raw_data else "pre_data_dir")
         user_dict = (self.userinfo_table & exp_key).fetch1()
 
-        file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
+        if os.path.isdir(os.path.join(header_path, data_folder)):
+            file_info_df = get_file_info_df(os.path.join(header_path, data_folder), user_dict, from_raw_data)
+        else:
+            warnings.warn(f"Data folder {data_folder} not found for key {exp_key}")
+            return pd.DataFrame()
 
         if with_field_only and len(file_info_df) > 0:
             file_info_df = file_info_df[file_info_df['field'].notnull()]
@@ -125,13 +131,13 @@ class FieldTemplate(dj.Computed):
 
             # Set defaults
             if self.incl_cond1:
-                file_info_df['cond1'].fillna('control', inplace=True)
+                file_info_df['cond1'] = file_info_df['cond1'].fillna('control')
             if self.incl_cond2:
-                file_info_df['cond2'].fillna('control', inplace=True)
+                file_info_df['cond2'] = file_info_df['cond2'].fillna('control')
             if self.incl_cond3:
-                file_info_df['cond3'].fillna('control', inplace=True)
+                file_info_df['cond3'] = file_info_df['cond3'].fillna('control')
             if self.incl_region:
-                file_info_df['region'].fillna('N/A', inplace=True)
+                file_info_df['region'] = file_info_df['region'].fillna('N/A')
 
         return file_info_df
 
@@ -267,7 +273,7 @@ class FieldTemplate(dj.Computed):
         for name, stack in rec.ch_stacks.items():
             avg_entry = deepcopy(base_key)
             avg_entry["ch_name"] = name
-            avg_entry["ch_average"] = np.median(stack, 2).astype(np.float32)
+            avg_entry["ch_average"] = np.nanmedian(stack, 2).astype(np.float32)
             avg_entries.append(avg_entry)
 
         return field_entry, avg_entries
