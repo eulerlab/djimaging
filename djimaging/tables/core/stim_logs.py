@@ -94,8 +94,12 @@ class QdsPyLogTemplate(dj.Computed):
         """Override this property to specify the experiment table."""
         raise NotImplementedError("Subclasses must implement the experiment_table property.")
 
-    def make(self, key, verbose: bool = False):
+    def make(self, key, root_dir=None, verbose: bool = False):
         log_path = (self.log_file_table & key).fetch1('log_path')
+        if root_dir is not None:
+            import os
+            log_path = os.path.join(root_dir, log_path)
+
         stims, stats = parse_stimulus_log(log_path=log_path, verbose=verbose)
 
         row = key.copy()
@@ -119,9 +123,9 @@ class QdsPyLogTemplate(dj.Computed):
                 't_start': stim['t_start'],
                 't_end': stim['t_end'],
                 'aborted': stim['aborted'],
-                't_dur_s': stim['t_dur_s'],
-                't_dur_s_calc': stim['t_dur_s_calc'],
-                'n_dropped_frames': stim['nDroppedFrames'],
+                't_dur_s': stim.get('t_dur_s', -1),
+                't_dur_s_calc': stim.get('t_dur_s_calc', -1),
+                'n_dropped_frames': stim.get('nDroppedFrames', -1),
                 'params': stim.get('params', dict()),
                 'other_info': {k: v for k, v in stim.items() if k not in [
                     'stimFileName', 'stimPath', 'stimMD5', 't_abs_s', 't_since_last_s',
