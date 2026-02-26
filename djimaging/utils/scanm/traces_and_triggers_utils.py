@@ -51,6 +51,11 @@ def compute_frame_times(n_frames: int, pix_dt: int, npix_x: int, npix_2nd: int,
     """Compute timepoints of frames and relative delay of individual pixels.
     npix_2nd can be npix_y (xy-scan) or npix_z (xz-scan)
     """
+    if npix_x_offset_left < 0:
+        raise ValueError(f"npix_x_offset_left has to be positive or 0, but was {npix_x_offset_left}")
+    if npix_x_offset_right < 0:
+        raise ValueError(f"npix_x_offset_right has to be positive or 0, but was {npix_x_offset_right}")
+
     frame_dt = pix_dt * npix_x * npix_2nd
 
     frame_dt_offset = (np.arange(npix_x * npix_2nd) * pix_dt).reshape(npix_2nd, npix_x).T
@@ -58,7 +63,8 @@ def compute_frame_times(n_frames: int, pix_dt: int, npix_x: int, npix_2nd: int,
     if precision == 'line':
         frame_dt_offset = np.tile(frame_dt_offset[0, :], (npix_x, 1))
 
-    frame_dt_offset = frame_dt_offset[npix_x_offset_left:-npix_x_offset_right]
+    npix_x_offset_right_idx = npix_x_offset_left if npix_x_offset_left > 0 else None
+    frame_dt_offset = frame_dt_offset[npix_x_offset_left:-npix_x_offset_right_idx]
 
     frame_times = np.arange(n_frames) * frame_dt
 
