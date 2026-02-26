@@ -71,4 +71,4 @@ def check_dims_ch_stack_wparams(ch_stack, wparams):
     nzpix = wparams.get("user_dzpix", 0)
 
     if not (ch_stack.shape[:2] in [(nxpix, nypix), (nxpix, nzpix)]):
-        ValueError(f'Stack shape error: {ch_stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]')
+        raise ValueError(f'Stack shape error: {ch_stack.shape} not in [{(nxpix, nypix)}, {(nxpix, nzpix)}]')
