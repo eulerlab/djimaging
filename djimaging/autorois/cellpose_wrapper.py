@@ -1,3 +1,4 @@
+from multiprocessing import Value
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -55,6 +56,8 @@ class CellposeWrapper:
 
         if isinstance(masks, list):
             if len(masks) == 0:
+                raise ValueError("Empty masks")
+            elif len(masks) == 1:
                 roi_mask = masks[0]
             else:
                 roi_mask = np.max(masks, axis=0)
