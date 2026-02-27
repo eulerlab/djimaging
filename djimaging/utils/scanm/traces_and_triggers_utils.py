@@ -63,7 +63,7 @@ def compute_frame_times(n_frames: int, pix_dt: int, npix_x: int, npix_2nd: int,
     if precision == 'line':
         frame_dt_offset = np.tile(frame_dt_offset[0, :], (npix_x, 1))
 
-    npix_x_offset_right_idx = npix_x_offset_left if npix_x_offset_left > 0 else None
+    npix_x_offset_right_idx = npix_x_offset_right if npix_x_offset_right > 0 else None
     frame_dt_offset = frame_dt_offset[npix_x_offset_left:-npix_x_offset_right_idx]
 
     frame_times = np.arange(n_frames) * frame_dt
