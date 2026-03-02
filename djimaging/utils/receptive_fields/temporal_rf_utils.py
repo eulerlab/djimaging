@@ -138,7 +138,7 @@ def compute_polarity_and_peak_idxs(trf, nstd=1., npeaks_max=None, rf_time=None, 
     trf = trf.copy()
     std_trf = np.std(trf)
 
-    if (rf_time is not None) or (np.isfinite(max_dt_future)):
+    if (rf_time is not None) and (np.isfinite(max_dt_future)):
         trf[rf_time > max_dt_future] = 0.
 
     pos_peak_idxs, _ = find_peaks(trf, prominence=nstd * std_trf / 2., height=nstd * std_trf)

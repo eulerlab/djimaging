@@ -152,7 +152,7 @@ class ExperimentTemplate(dj.Computed):
             info_entry["prep"] = "wholemount"
 
         eye = header_dict.get("eye", "unknown")
-        if 'eye' == '':
+        if eye == '':
             eye = 'unknown'
 
         if (

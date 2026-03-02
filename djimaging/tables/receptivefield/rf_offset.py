@@ -73,7 +73,7 @@ class RfOffsetTemplate(dj.Computed):
         """Compute offset w.r.t. stimulus center in microns"""
         stim_dict = (self.stimulus_tab & key).fetch1('stim_dict')
 
-        if ('pix_scale_x_um' not in stim_dict) or ('pix_scale_x_um' not in stim_dict):
+        if ('pix_scale_x_um' not in stim_dict) or ('pix_scale_y_um' not in stim_dict):
             raise ValueError("Pixel size not found in stimulus dict")
 
         pix_scale_x_um, pix_scale_y_um = stim_dict['pix_scale_x_um'], stim_dict['pix_scale_y_um']

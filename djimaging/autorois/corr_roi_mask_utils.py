@@ -126,7 +126,7 @@ def corr_map_rois(stack, cut_x, cut_z, n_pix_max_x=5, n_pix_max_z=5, n_pix_max=2
         ignore_map[corr_map < line_threshold] = True
     ignore_map[:cut_x[0], :] = True
     ignore_map[nx - cut_x[1]:, :] = True
-    ignore_map[:, cut_z[0]] = True
+    ignore_map[:, :cut_z[0]] = True
     ignore_map[:, nz - cut_z[1]:] = True
 
     p_threshold = grow_threshold if grow_threshold is not None else line_threshold
