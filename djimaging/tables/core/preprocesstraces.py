@@ -36,9 +36,48 @@ class PreprocessParamsTemplate(dj.Lookup):
     def stimulus_table(self):
         pass
 
-    def add_default(self, preprocess_id=1, stim_names=None, window_length=60, poly_order=3, non_negative=False,
-                    subtract_baseline=True, standardize=1, f_cutoff=None, fs_resample=None,
-                    skip_duplicates=False):
+    def add_default(
+            self,
+            preprocess_id: int = 1,
+            stim_names: list | None = None,
+            window_length: int = 60,
+            poly_order: int = 3,
+            non_negative: bool = False,
+            subtract_baseline: bool = True,
+            standardize: int = 1,
+            f_cutoff: float | None = None,
+            fs_resample: float | None = None,
+            skip_duplicates: bool = False,
+    ) -> None:
+        """Add default preprocessing parameters for all (or specified) stimuli.
+
+        Parameters
+        ----------
+        preprocess_id : int, optional
+            Unique identifier for this parameter set. Default is 1.
+        stim_names : list | None, optional
+            List of stimulus names to add parameters for. If None, uses all
+            stimuli in the stimulus table. Default is None.
+        window_length : int, optional
+            Window length in seconds for the Savitzky-Golay filter. Default is 60.
+        poly_order : int, optional
+            Polynomial order for the Savitzky-Golay filter. Default is 3.
+        non_negative : bool, optional
+            If True, clip negative values of the trace. Default is False.
+        subtract_baseline : bool, optional
+            If True, subtract the pre-stimulus baseline. Default is True.
+        standardize : int, optional
+            Standardization mode: 0 = none, 1 = by baseline std, 2 = by trace std.
+            Default is 1.
+        f_cutoff : float | None, optional
+            Low-pass filter cutoff frequency in Hz. Applied only when > 0.
+            Default is None (no filtering).
+        fs_resample : float | None, optional
+            Target resampling frequency in Hz. Applied only when > 0.
+            Default is None (no resampling).
+        skip_duplicates : bool, optional
+            If True, silently skip duplicate entries. Default is False.
+        """
         if stim_names is None:
             stim_names = (self.stimulus_table()).fetch('stim_name')
 
@@ -100,7 +139,19 @@ class PreprocessTracesTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Preprocess a raw trace and store the result.
+
+        Fetches preprocessing parameters and the raw trace, applies
+        detrending, optional baseline subtraction, optional standardisation,
+        optional low-pass filtering and optional resampling, then inserts the
+        processed trace.
+
+        Parameters
+        ----------
+        key : dict
+            The primary key identifying the entry to populate.
+        """
         window_len_seconds, poly_order, subtract_baseline, non_negative, standardize, f_cutoff, fs_resample = \
             (self.preprocessparams_table() & key).fetch1(
                 'window_length', 'poly_order', 'subtract_baseline', 'non_negative', 'standardize',
@@ -130,8 +181,16 @@ class PreprocessTracesTemplate(dj.Computed):
             smoothed_trace=smoothed_trace.astype(np.float32)
         ))
 
-    def gui_clip_trace(self, key):
-        """GUI to clip traces. Note that this can not be easily undone for now."""
+    def gui_clip_trace(self, key: dict) -> None:
+        """Launch an interactive GUI for clipping a preprocessed trace.
+
+        Note that this can not be easily undone for now.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key identifying the trace to clip.
+        """
 
         trace, smoothed_trace, trace_t0, trace_dt = (self & key).fetch1(
             'pp_trace', 'smoothed_trace', 'pp_trace_t0', 'pp_trace_dt')
@@ -161,11 +220,45 @@ class PreprocessTracesTemplate(dj.Computed):
                 title = f'SAVED: left={left}, right={right}\n{prep_long_title(key)}'
                 w_save.value = False
 
-    def update_key_from_gui(self, key, trace, smoothed_trace, trace_t0, trace_dt):
+    def update_key_from_gui(
+            self,
+            key: dict,
+            trace: np.ndarray,
+            smoothed_trace: np.ndarray,
+            trace_t0: float,
+            trace_dt: float,
+    ) -> None:
+        """Update an existing preprocessed trace entry after GUI editing.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key identifying the entry to update.
+        trace : np.ndarray
+            Updated preprocessed trace.
+        smoothed_trace : np.ndarray
+            Updated smoothed (trend) trace.
+        trace_t0 : float
+            Start time of the updated trace.
+        trace_dt : float
+            Sampling interval of the updated trace in seconds.
+        """
         entry = dict(**key, pp_trace=trace, smoothed_trace=smoothed_trace, pp_trace_t0=trace_t0, pp_trace_dt=trace_dt)
         self.update1(entry)
 
-    def plot1(self, key=None, xlim=None, ylim=None):
+    def plot1(self, key: dict | None = None, xlim: tuple | None = None, ylim: tuple | None = None) -> None:
+        """Plot raw trace, trend, and preprocessed trace for a single entry.
+
+        Parameters
+        ----------
+        key : dict | None, optional
+            Primary key identifying the entry to plot. If None, the first
+            available key is used.
+        xlim : tuple | None, optional
+            x-axis limits. Default is None (auto).
+        ylim : tuple | None, optional
+            y-axis limits for the preprocessed trace panel. Default is None (auto).
+        """
         key = get_primary_key(self, key)
 
         pp_trace_t0, pp_trace_dt, pp_trace, smoothed_trace = (self & key).fetch1(
@@ -196,7 +289,16 @@ class PreprocessTracesTemplate(dj.Computed):
 
         plt.show()
 
-    def plot(self, restriction=None, sort=True):
+    def plot(self, restriction: dict | None = None, sort: bool = True) -> None:
+        """Plot a heatmap of all preprocessed traces matching the restriction.
+
+        Parameters
+        ----------
+        restriction : dict | None, optional
+            Restriction applied before fetching traces. Default is None (all).
+        sort : bool, optional
+            Whether to sort traces before plotting. Default is True.
+        """
         if restriction is None:
             restriction = dict()
 
@@ -215,10 +317,34 @@ class PreprocessTracesTemplate(dj.Computed):
         plt.show()
 
 
-def drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace: bool = False):
+def drop_left_and_right(
+        trace: np.ndarray,
+        drop_nmin_lr: tuple = (0, 0),
+        drop_nmax_lr: tuple = (3, 3),
+        inplace: bool = False,
+) -> np.ndarray:
     """Drop left and right most values if they are out of limits of the rest of the trace.
-    This is necessary because the first few and last few points may be affected by artifacts.
-    This is relatively conservative.
+
+    This is necessary because the first few and last few points may be affected
+    by artifacts. This is relatively conservative.
+
+    Parameters
+    ----------
+    trace : np.ndarray
+        1-D trace array to process.
+    drop_nmin_lr : tuple, optional
+        Minimum number of samples to replace at the (left, right) ends.
+        Default is (0, 0).
+    drop_nmax_lr : tuple, optional
+        Maximum number of samples to examine for out-of-range replacement at
+        the (left, right) ends. Default is (3, 3).
+    inplace : bool, optional
+        If True, modify `trace` in place. Default is False.
+
+    Returns
+    -------
+    np.ndarray
+        Trace with edge artifacts replaced by the nearest non-artifact value.
     """
     if not inplace:
         trace = trace.copy()
@@ -257,7 +383,33 @@ def drop_left_and_right(trace, drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3), inplace
     return trace
 
 
-def detrend_trace(trace, window_len_seconds, fs, poly_order):
+def detrend_trace(
+        trace: np.ndarray,
+        window_len_seconds: float,
+        fs: float,
+        poly_order: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Detrend a trace using a Savitzky-Golay filter.
+
+    Parameters
+    ----------
+    trace : np.ndarray
+        1-D trace array.
+    window_len_seconds : float
+        Length of the filter window in seconds.
+    fs : float
+        Sampling frequency in Hz.
+    poly_order : int
+        Polynomial order for the Savitzky-Golay filter.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        detrended_trace : np.ndarray
+            Trace with the smooth trend subtracted.
+        smoothed_trace : np.ndarray
+            Estimated smooth trend (output of the Savitzky-Golay filter).
+    """
     window_len_frames = np.ceil(window_len_seconds * fs)
 
     if window_len_frames % 2 == 0:
@@ -269,8 +421,36 @@ def detrend_trace(trace, window_len_seconds, fs, poly_order):
     return detrended_trace, smoothed_trace
 
 
-def extract_baseline(trace, trace_times, stim_start: float, max_dt=np.inf):
-    """Compute baseline for trace"""
+def extract_baseline(
+        trace: np.ndarray,
+        trace_times: np.ndarray,
+        stim_start: float,
+        max_dt: float = np.inf,
+) -> np.ndarray:
+    """Compute baseline for trace by extracting pre-stimulus samples.
+
+    Parameters
+    ----------
+    trace : np.ndarray
+        1-D trace array.
+    trace_times : np.ndarray
+        Time stamps corresponding to each sample in `trace`.
+    stim_start : float
+        Stimulus onset time. Baseline is taken from samples before this time.
+    max_dt : float, optional
+        Maximum duration of the baseline window in seconds (measured backwards
+        from `stim_start`). Default is np.inf (use all pre-stimulus samples).
+
+    Returns
+    -------
+    np.ndarray
+        Baseline samples extracted from `trace`.
+
+    Raises
+    ------
+    ValueError
+        If no samples in `trace_times` occur before `stim_start`.
+    """
     if not np.any(trace_times < stim_start):
         raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
 
@@ -280,8 +460,21 @@ def extract_baseline(trace, trace_times, stim_start: float, max_dt=np.inf):
     return baseline
 
 
-def non_negative_trace(trace, inplace: bool = False):
-    """Make trace positive, remove lowest 2.5 percentile (and standardize by STD of baseline)"""
+def non_negative_trace(trace: np.ndarray, inplace: bool = False) -> np.ndarray:
+    """Make trace non-negative by removing the lowest 2.5 percentile.
+
+    Parameters
+    ----------
+    trace : np.ndarray
+        1-D trace array.
+    inplace : bool, optional
+        If True, modify `trace` in place. Default is False.
+
+    Returns
+    -------
+    np.ndarray
+        Trace shifted so that its minimum is zero.
+    """
     if not inplace:
         trace = trace.copy()
 
@@ -292,8 +485,33 @@ def non_negative_trace(trace, inplace: bool = False):
     return trace
 
 
-def subtract_baseline_trace(trace, trace_times, stim_start: float, inplace: bool = False, max_dt=np.inf):
-    """Subtract baseline of trace (and standardize by STD of baseline)"""
+def subtract_baseline_trace(
+        trace: np.ndarray,
+        trace_times: np.ndarray,
+        stim_start: float,
+        inplace: bool = False,
+        max_dt: float = np.inf,
+) -> np.ndarray:
+    """Subtract the median pre-stimulus baseline from a trace.
+
+    Parameters
+    ----------
+    trace : np.ndarray
+        1-D trace array.
+    trace_times : np.ndarray
+        Time stamps corresponding to each sample in `trace`.
+    stim_start : float
+        Stimulus onset time; baseline is taken from samples before this.
+    inplace : bool, optional
+        If True, modify `trace` in place. Default is False.
+    max_dt : float, optional
+        Maximum baseline window duration in seconds. Default is np.inf.
+
+    Returns
+    -------
+    np.ndarray
+        Trace with its pre-stimulus median subtracted.
+    """
     if not inplace:
         trace = trace.copy()
 
@@ -306,14 +524,79 @@ def subtract_baseline_trace(trace, trace_times, stim_start: float, inplace: bool
     return trace
 
 
-def process_trace(trace, trace_t0, trace_dt,
-                  poly_order=3, window_len_seconds=0,
-                  subtract_baseline: bool = False, standardize: int = 0,
-                  non_negative: bool = False, stim_start: float = None,
-                  f_cutoff: float = None, fs_resample: float = None,
-                  drop_nmin_lr=(0, 0), drop_nmax_lr=(3, 3),
-                  baseline_max_dt=np.inf):
-    """Detrend and preprocess trace"""
+def process_trace(
+        trace: np.ndarray,
+        trace_t0: float,
+        trace_dt: float,
+        poly_order: int = 3,
+        window_len_seconds: float = 0,
+        subtract_baseline: bool = False,
+        standardize: int = 0,
+        non_negative: bool = False,
+        stim_start: float | None = None,
+        f_cutoff: float | None = None,
+        fs_resample: float | None = None,
+        drop_nmin_lr: tuple = (0, 0),
+        drop_nmax_lr: tuple = (3, 3),
+        baseline_max_dt: float = np.inf,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Detrend and preprocess a trace.
+
+    Applies, in order: edge-artifact removal, optional low-pass filtering,
+    optional Savitzky-Golay detrending, optional baseline subtraction,
+    optional non-negativity clipping, optional standardization, and optional
+    resampling.
+
+    Parameters
+    ----------
+    trace : np.ndarray
+        1-D raw trace array.
+    trace_t0 : float
+        Time of the first sample in seconds.
+    trace_dt : float
+        Sampling interval in seconds.
+    poly_order : int, optional
+        Polynomial order for the Savitzky-Golay filter. Default is 3.
+    window_len_seconds : float, optional
+        Window length in seconds for the Savitzky-Golay filter. If 0, no
+        detrending is applied. Default is 0.
+    subtract_baseline : bool, optional
+        If True, subtract the pre-stimulus median. Default is False.
+    standardize : int, optional
+        0 = none, 1 = divide by baseline std, 2 = divide by trace std.
+        Default is 0.
+    non_negative : bool, optional
+        If True, clip and shift trace to be non-negative. Default is False.
+    stim_start : float | None, optional
+        Stimulus onset time used for baseline estimation. Default is None.
+    f_cutoff : float | None, optional
+        Low-pass filter cutoff frequency in Hz. Applied only when > 0.
+        Default is None.
+    fs_resample : float | None, optional
+        Target resampling frequency in Hz. Applied only when > 0. Default is None.
+    drop_nmin_lr : tuple, optional
+        Minimum samples to replace at (left, right) edges. Default is (0, 0).
+    drop_nmax_lr : tuple, optional
+        Maximum samples to examine for edge replacement. Default is (3, 3).
+    baseline_max_dt : float, optional
+        Maximum baseline window duration in seconds. Default is np.inf.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, float]
+        trace : np.ndarray
+            Preprocessed trace.
+        smoothed_trace : np.ndarray
+            Smooth trend that was subtracted (zeros if no detrending).
+        trace_dt_new : float
+            Sampling interval of the returned trace (may differ if resampled).
+
+    Raises
+    ------
+    ValueError
+        If `standardize` is not in [0, 1, 2], or if `stim_start` is None
+        when required by `subtract_baseline` or `standardize`.
+    """
     assert standardize in [0, 1, 2], standardize
 
     trace_times = np.arange(trace.size) * trace_dt + trace_t0
@@ -366,7 +649,28 @@ def process_trace(trace, trace_t0, trace_dt,
     return trace, smoothed_trace, trace_dt_new
 
 
-def plot_left_right_clipping(trace_, trace_t_, left_, right_, title_):
+def plot_left_right_clipping(
+        trace_: np.ndarray,
+        trace_t_: np.ndarray,
+        left_: int,
+        right_: int,
+        title_: str,
+) -> None:
+    """Plot a trace with vertical lines indicating the selected clip boundaries.
+
+    Parameters
+    ----------
+    trace_ : np.ndarray
+        1-D trace array to display.
+    trace_t_ : np.ndarray
+        Time stamps corresponding to each sample in `trace_`.
+    left_ : int
+        Index of the left clip boundary.
+    right_ : int
+        Index of the right clip boundary.
+    title_ : str
+        Title string for the plot.
+    """
     fig, ax = plt.subplots(figsize=(12, 3))
     ax.set_title(title_)
     ax.plot(trace_t_, trace_)

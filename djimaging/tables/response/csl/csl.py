@@ -118,7 +118,22 @@ class CslMetricsTemplate(dj.Computed):
     def stimulus_table(self):
         pass
 
-    def _make_fetch_and_compute(self, key, plot=False):
+    def _make_fetch_and_compute(self, key: dict, plot: bool = False) -> dict:
+        """Fetch data and compute CSL metrics for the given key.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        plot : bool, optional
+            If True, create diagnostic plots. Default is False.
+
+        Returns
+        -------
+        dict
+            Dictionary with all computed fields ready for insertion, including
+            average, snippets, quality indices, response indices, and fit parameters.
+        """
         trace_dt, trace_t0, trace = (self.traces_table & key).fetch1('trace_dt', 'trace_t0', 'trace')
 
         if len(trace) == 0:
@@ -164,7 +179,24 @@ class CslMetricsTemplate(dj.Computed):
 
         return entry
 
-    def make(self, key, plot=False, verbose=False, DEBUG=False):
+    def make(self, key: dict, plot: bool = False, verbose: bool = False, DEBUG: bool = False) -> None:
+        """Compute and insert normalized CSL response metrics into the table.
+
+        Detrends, resamples, and segments the raw trace, then extracts quality indices,
+        on-off index, tonic release index, plateau index, contrast sensitivity, and fits
+        a curve to the contrast-response relationship.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to populate.
+        plot : bool, optional
+            If True, create diagnostic plots during computation. Default is False.
+        verbose : bool, optional
+            If True, print progress messages. Default is False.
+        DEBUG : bool, optional
+            If True, compute but do not insert into the table. Default is False.
+        """
         if verbose:
             print(f'Populating {key}')
 
@@ -179,7 +211,19 @@ class CslMetricsTemplate(dj.Computed):
             return
         self.insert1(entry)
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict | None = None) -> None:
+        """Plot diagnostic figures and verify against stored values.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint primary key. If None, uses the first available key.
+
+        Raises
+        ------
+        ValueError
+            If any computed scalar values deviate from the stored values by more than 1e-3.
+        """
         key = get_primary_key(table=self, key=key)
         old_entry = (self & key).fetch1()
         new_entry = self._make_fetch_and_compute(key, plot=True)
@@ -192,14 +236,87 @@ class CslMetricsTemplate(dj.Computed):
 
 
 def analyse_csl_response(
-        trace, trace_t0, trace_dt, triggertimes, ntrigger_rep, fs_resample, plot=False,
-        w_zero_fit=1, fit_kind='naka_rushton', metric_kind='auc',
-        stim_frequency=6.0, n_fit_repeats=3,
-        dt_order=3, dt_window=60, peak_q=98,
-        contrast_levels=(0.10, 0.20, 0.40, 0.60, 0.80, 1.00),
-        dt_breaks=3., dt_baseline_a=1.6, dt_baseline_b=2.9, dt_window_plateau=1.0):
-    """Normalize contrast step light response. Detrend, resample, split, normalize, and extract features.
-    Fit a sigmoid to the upper and lower bounds of the contrast steps.
+        trace: np.ndarray,
+        trace_t0: float,
+        trace_dt: float,
+        triggertimes: np.ndarray,
+        ntrigger_rep: int,
+        fs_resample: float,
+        plot: bool = False,
+        w_zero_fit: int = 1,
+        fit_kind: str = 'naka_rushton',
+        metric_kind: str = 'auc',
+        stim_frequency: float = 6.0,
+        n_fit_repeats: int = 3,
+        dt_order: int = 3,
+        dt_window: float = 60,
+        peak_q: float = 98,
+        contrast_levels: tuple = (0.10, 0.20, 0.40, 0.60, 0.80, 1.00),
+        dt_breaks: float = 3.,
+        dt_baseline_a: float = 1.6,
+        dt_baseline_b: float = 2.9,
+        dt_window_plateau: float = 1.0,
+) -> dict:
+    """Normalize contrast step light response and extract features.
+
+    Detrends, resamples, splits into repetitions, baseline-corrects, normalizes,
+    and extracts quality indices and response metrics. Fits a curve to the
+    contrast-response relationship.
+
+    Parameters
+    ----------
+    trace : np.ndarray
+        1D raw fluorescence trace.
+    trace_t0 : float
+        Start time of the trace in seconds.
+    trace_dt : float
+        Sampling interval of the trace in seconds.
+    triggertimes : np.ndarray
+        1D array of trigger times in seconds.
+    ntrigger_rep : int
+        Number of triggers per stimulus repetition.
+    fs_resample : float
+        Target sampling frequency for resampling in Hz.
+    plot : bool, optional
+        If True, create diagnostic plots. Default is False.
+    w_zero_fit : int, optional
+        If non-zero, prepend a baseline (zero contrast) data point when fitting. Default is 1.
+    fit_kind : str, optional
+        Curve-fitting model to use. One of 'naka_rushton' or 'sigmoid'. Default is 'naka_rushton'.
+    metric_kind : str, optional
+        Contrast response metric. One of 'auc' or 'fft_f1'. Default is 'auc'.
+    stim_frequency : float, optional
+        Stimulus modulation frequency in Hz (used for fft_f1 metric). Default is 6.0.
+    n_fit_repeats : int, optional
+        Number of fitting retries with random initialisation. Default is 3.
+    dt_order : int, optional
+        Polynomial order for detrending. Default is 3.
+    dt_window : float, optional
+        Window length for detrending in seconds. Default is 60.
+    peak_q : float, optional
+        Percentile used to estimate peak responses. Default is 98.
+    contrast_levels : tuple, optional
+        Contrast values for each step. Default is (0.10, 0.20, 0.40, 0.60, 0.80, 1.00).
+    dt_breaks : float, optional
+        Duration of the transient period after each contrast step onset in seconds. Default is 3.0.
+    dt_baseline_a : float, optional
+        Start of the baseline window relative to trigger in seconds. Default is 1.6.
+    dt_baseline_b : float, optional
+        End of the baseline window relative to trigger in seconds. Default is 2.9.
+    dt_window_plateau : float, optional
+        Duration of the plateau measurement window in seconds. Default is 1.0.
+
+    Returns
+    -------
+    dict
+        Dictionary with keys: bc_snippets, avg, qidx_full, qidx_contrast,
+        tonic_release_index, plateau_index, on_off_index, contrast_sensitivity,
+        contrast_metrics, fit, droppedlastrep_flag, and optionally contrast_phases_deg.
+
+    Raises
+    ------
+    ValueError
+        If trace is empty, or if fit_kind or metric_kind is unknown.
     """
 
     contrast_levels = np.asarray(contrast_levels)
@@ -427,8 +544,24 @@ def analyse_csl_response(
     return result_dict
 
 
-def f1_amp_phase(seg, stim_frequency, trace_frequency):
-    """ First harmonic at the stimulation frequency within each window."""
+def f1_amp_phase(seg: np.ndarray, stim_frequency: float, trace_frequency: float) -> tuple:
+    """Compute the first harmonic amplitude and phase at the stimulation frequency.
+
+    Parameters
+    ----------
+    seg : np.ndarray
+        1D array containing the signal segment.
+    stim_frequency : float
+        Stimulation frequency in Hz.
+    trace_frequency : float
+        Sampling frequency of the trace in Hz.
+
+    Returns
+    -------
+    tuple
+        Tuple of (amplitude, phase_deg) where amplitude is the single-sided
+        amplitude of the first harmonic and phase_deg is the phase in degrees.
+    """
     x = np.asarray(seg)
     N = x.size
     if N < 3:

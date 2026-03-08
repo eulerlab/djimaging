@@ -23,10 +23,58 @@ from numba import jit
 from tqdm.notebook import tqdm
 
 
-def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
-                      filter_dur_s_past, filter_dur_s_future=0.,
-                      kind='sta', threshold_pred=False, dtype=np.float32,
-                      batch_size_n=6_000_000, verbose=False):
+def compute_linear_rf(dt: float, trace: np.ndarray, stim: np.ndarray,
+                      frac_train: float, frac_dev: float,
+                      filter_dur_s_past: float, filter_dur_s_future: float = 0.,
+                      kind: str = 'sta', threshold_pred: bool = False,
+                      dtype: type = np.float32,
+                      batch_size_n: int = 6_000_000,
+                      verbose: bool = False) -> tuple:
+    """Compute a linear receptive field (STA or MLE) from stimulus and response.
+
+    Parameters
+    ----------
+    dt : float
+        Time step in seconds.
+    trace : np.ndarray
+        Neural response trace, shape (n_frames,).
+    stim : np.ndarray
+        Stimulus array, shape (n_frames, ...).
+    frac_train : float
+        Fraction of data used for training.
+    frac_dev : float
+        Fraction of data used for development/validation.
+    filter_dur_s_past : float
+        Duration of the filter in the past (seconds).
+    filter_dur_s_future : float, optional
+        Duration of the filter in the future (seconds). Default is 0.
+    kind : str, optional
+        Estimation method: 'sta' or 'mle'. Default is 'sta'.
+    threshold_pred : bool, optional
+        Whether to clip predictions at zero. Default is False.
+    dtype : type, optional
+        Data type for computations. Default is np.float32.
+    batch_size_n : int, optional
+        Maximum number of elements before switching to batch mode. Default is 6_000_000.
+    verbose : bool, optional
+        Whether to print progress. Default is False.
+
+    Returns
+    -------
+    tuple
+        rf : np.ndarray
+            Estimated receptive field reshaped to (dim_t, ...).
+        rf_time : np.ndarray
+            Time axis for the RF.
+        model_eval : dict
+            Evaluation metrics including predictions and correlation coefficients.
+        x : dict
+            Split stimulus data.
+        y : dict
+            Split trace data.
+        shift : int
+            Temporal shift applied during design matrix construction.
+    """
     kind = kind.lower()
 
     assert trace.size == stim.shape[0]
@@ -60,9 +108,51 @@ def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
     return rf, rf_time, model_eval, x, y, shift
 
 
-def compute_linear_rf_single_or_batch(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred,
-                                      stim_shape, batch_size_n=6_000_000, is_design_matrix=False, dtype=np.float32,
-                                      verbose=False):
+def compute_linear_rf_single_or_batch(x_train: np.ndarray, y_train: np.ndarray,
+                                      dim_t: int, shift: int, burn_in: int,
+                                      kind: str, threshold_pred: bool,
+                                      stim_shape: tuple,
+                                      batch_size_n: int = 6_000_000,
+                                      is_design_matrix: bool = False,
+                                      dtype: type = np.float32,
+                                      verbose: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    """Compute linear RF either in one pass or in batches depending on data size.
+
+    Parameters
+    ----------
+    x_train : np.ndarray
+        Training stimulus data.
+    y_train : np.ndarray
+        Training neural response data.
+    dim_t : int
+        Number of temporal filter taps.
+    shift : int
+        Temporal shift for the design matrix.
+    burn_in : int
+        Number of initial frames to skip.
+    kind : str
+        Estimation method: 'sta' or 'mle'.
+    threshold_pred : bool
+        Whether to clip predictions at zero.
+    stim_shape : tuple
+        Original shape of the stimulus array.
+    batch_size_n : int, optional
+        Maximum number of elements before switching to batch mode. Default is 6_000_000.
+    is_design_matrix : bool, optional
+        Whether x_train is already a design matrix. Default is False.
+    dtype : type, optional
+        Data type for computations. Default is np.float32.
+    verbose : bool, optional
+        Whether to print progress. Default is False.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        rf : np.ndarray
+            Estimated receptive field.
+        y_pred_train : np.ndarray
+            Predicted training responses.
+    """
     if np.product(stim_shape) <= batch_size_n:
         rf, y_pred_train = _compute_linear_rf_single_batch(
             x_train=x_train, y_train=y_train, kind=kind, dim_t=dim_t, shift=shift, burn_in=burn_in,
@@ -77,8 +167,42 @@ def compute_linear_rf_single_or_batch(x_train, y_train, dim_t, shift, burn_in, k
     return rf, y_pred_train
 
 
-def _compute_linear_rf_single_batch(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred,
-                                    is_design_matrix=False, dtype=np.float32):
+def _compute_linear_rf_single_batch(x_train: np.ndarray, y_train: np.ndarray,
+                                    dim_t: int, shift: int, burn_in: int,
+                                    kind: str, threshold_pred: bool,
+                                    is_design_matrix: bool = False,
+                                    dtype: type = np.float32) -> tuple[np.ndarray, np.ndarray]:
+    """Compute linear RF from a single batch of training data.
+
+    Parameters
+    ----------
+    x_train : np.ndarray
+        Training stimulus data or design matrix.
+    y_train : np.ndarray
+        Training neural response data.
+    dim_t : int
+        Number of temporal filter taps.
+    shift : int
+        Temporal shift for the design matrix.
+    burn_in : int
+        Number of initial frames to skip.
+    kind : str
+        Estimation method: 'sta' or 'mle'.
+    threshold_pred : bool
+        Whether to clip predictions at zero.
+    is_design_matrix : bool, optional
+        Whether x_train is already a design matrix. Default is False.
+    dtype : type, optional
+        Data type for computations. Default is np.float32.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        rf : np.ndarray
+            Estimated receptive field.
+        y_pred_train : np.ndarray
+            Predicted training responses.
+    """
     if is_design_matrix:
         x_train_dm = x_train[burn_in:].astype(dtype)
     else:
@@ -99,8 +223,48 @@ def _compute_linear_rf_single_batch(x_train, y_train, dim_t, shift, burn_in, kin
     return rf, y_pred_train
 
 
-def _compute_sta_batchwise(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred,
-                           batch_size=400, is_design_matrix=False, dtype=np.float32, verbose=False):
+def _compute_sta_batchwise(x_train: np.ndarray, y_train: np.ndarray,
+                           dim_t: int, shift: int, burn_in: int,
+                           kind: str, threshold_pred: bool,
+                           batch_size: int = 400,
+                           is_design_matrix: bool = False,
+                           dtype: type = np.float32,
+                           verbose: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    """Compute STA receptive field in batches over feature dimensions.
+
+    Parameters
+    ----------
+    x_train : np.ndarray
+        Training stimulus data, shape (n_frames, ...).
+    y_train : np.ndarray
+        Training neural response data, shape (n_frames,).
+    dim_t : int
+        Number of temporal filter taps.
+    shift : int
+        Temporal shift for the design matrix.
+    burn_in : int
+        Number of initial frames to skip.
+    kind : str
+        Estimation method: 'sta' or 'mle'.
+    threshold_pred : bool
+        Whether to clip predictions at zero.
+    batch_size : int, optional
+        Number of features per batch. Default is 400.
+    is_design_matrix : bool, optional
+        Whether x_train is already a design matrix. Default is False.
+    dtype : type, optional
+        Data type for computations. Default is np.float32.
+    verbose : bool, optional
+        Whether to display a progress bar. Default is False.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        rf : np.ndarray
+            Estimated receptive field, shape (dim_t, ...).
+        y_pred_train : np.ndarray
+            Summed predicted training responses across batches.
+    """
     x_shape = x_train.shape
     n_frames = x_shape[0]
     n_features = np.product(x_shape[1:])
@@ -150,7 +314,32 @@ def _compute_sta_batchwise(x_train, y_train, dim_t, shift, burn_in, kind, thresh
     return rf, y_pred_train
 
 
-def get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt):
+def get_rf_timing_params(filter_dur_s_past: float,
+                         filter_dur_s_future: float,
+                         dt: float) -> tuple[np.ndarray, int, int, int]:
+    """Compute temporal parameters for the receptive field filter.
+
+    Parameters
+    ----------
+    filter_dur_s_past : float
+        Duration of the filter extending into the past (seconds).
+    filter_dur_s_future : float
+        Duration of the filter extending into the future (seconds).
+    dt : float
+        Time step in seconds.
+
+    Returns
+    -------
+    tuple[np.ndarray, int, int, int]
+        rf_time : np.ndarray
+            Time axis of the filter (seconds), negative = past.
+        dim_t : int
+            Total number of temporal filter taps.
+        shift : int
+            Temporal shift (negative for future components).
+        burn_in : int
+            Number of initial frames to discard.
+    """
     n_t_past = int(np.ceil(filter_dur_s_past / dt))
     n_t_future = int(np.ceil(filter_dur_s_future / dt))
     shift = -n_t_future
@@ -161,22 +350,68 @@ def get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt):
 
 
 @jit(nopython=True)
-def compute_rf_sta(X, y):
-    """From RFEst"""
+def compute_rf_sta(X: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Compute spike-triggered average (STA) receptive field. From RFEst.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Design matrix, shape (n_samples, n_features).
+    y : np.ndarray
+        Neural response vector, shape (n_samples,).
+
+    Returns
+    -------
+    np.ndarray
+        STA receptive field, shape (n_features,).
+    """
     w = (X.T @ y) / np.sum(y)
     return w
 
 
 @jit(nopython=True)
-def compute_rf_mle(X, y):
-    """From RFEst"""
+def compute_rf_mle(X: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Compute maximum likelihood estimate (MLE) receptive field. From RFEst.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Design matrix, shape (n_samples, n_features).
+    y : np.ndarray
+        Neural response vector, shape (n_samples,).
+
+    Returns
+    -------
+    np.ndarray
+        MLE receptive field, shape (n_features,).
+    """
     XtY = X.T @ y
     XtX = X.T @ X
     w = np.linalg.lstsq(XtX, XtY)[0]
     return w
 
 
-def predict_linear_rf_response(rf, stim_design_matrix, threshold=False, dtype=np.float32):
+def predict_linear_rf_response(rf: np.ndarray, stim_design_matrix: np.ndarray,
+                                threshold: bool = False,
+                                dtype: type = np.float32) -> np.ndarray:
+    """Predict neural response using a linear receptive field and design matrix.
+
+    Parameters
+    ----------
+    rf : np.ndarray
+        Receptive field weights, shape (n_features,).
+    stim_design_matrix : np.ndarray
+        Stimulus design matrix, shape (n_samples, n_features).
+    threshold : bool, optional
+        Whether to clip negative predictions to zero. Default is False.
+    dtype : type, optional
+        Output data type. Default is np.float32.
+
+    Returns
+    -------
+    np.ndarray
+        Predicted neural response, shape (n_samples,).
+    """
     y_pred = stim_design_matrix @ rf
 
     if threshold:
@@ -185,9 +420,37 @@ def predict_linear_rf_response(rf, stim_design_matrix, threshold=False, dtype=np
     return y_pred.astype(dtype)
 
 
-def split_data(x, y, frac_train=0.8, frac_dev=0.1, as_dict=False):
-    """ Split data into training, development and test set.
-     Modified from RFEst"""
+def split_data(x: np.ndarray, y: np.ndarray,
+               frac_train: float = 0.8, frac_dev: float = 0.1,
+               as_dict: bool = False):
+    """Split data into training, development and test set.
+
+    Modified from RFEst.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Input data (e.g. stimulus), shape (n_samples, ...).
+    y : np.ndarray
+        Target data (e.g. response), shape (n_samples, ...).
+    frac_train : float, optional
+        Fraction of data for training. Default is 0.8.
+    frac_dev : float, optional
+        Fraction of data for development/validation. Default is 0.1.
+    as_dict : bool, optional
+        If True, return dicts keyed by split name. Default is False.
+
+    Returns
+    -------
+    tuple or tuple[dict, dict]
+        If as_dict is False: ((x_trn, y_trn), (x_dev, y_dev), (x_tst, y_tst)).
+        If as_dict is True: (x_dict, y_dict) with keys 'train', 'dev', 'test'.
+
+    Raises
+    ------
+    AssertionError
+        If x and y have different lengths or fractions exceed 1.
+    """
     assert x.shape[0] == y.shape[0], 'X and y must be of same length.'
     assert frac_train + frac_dev <= 1, '`frac_train` + `frac_dev` must be < 1.'
 
@@ -216,10 +479,30 @@ def split_data(x, y, frac_train=0.8, frac_dev=0.1, as_dict=False):
         return x_dict, y_dict
 
 
-def build_design_matrix(X, n_lag, shift=0, n_c=1, dtype=None):
-    """
-    Build design matrix.
+def build_design_matrix(X: np.ndarray, n_lag: int, shift: int = 0,
+                        n_c: int = 1, dtype: type = None) -> np.ndarray:
+    """Build design matrix for linear RF estimation.
+
     Modified from RFEst.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Stimulus array, shape (n_frames, ...).
+    n_lag : int
+        Number of temporal lags to include.
+    shift : int, optional
+        Temporal shift applied to the design matrix (negative shifts into future). Default is 0.
+    n_c : int, optional
+        Number of color channels (adds an extra dimension if > 1). Default is 1.
+    dtype : type, optional
+        Output data type. If None, uses X.dtype.
+
+    Returns
+    -------
+    np.ndarray
+        Design matrix, shape (n_frames, n_lag * n_feature) or
+        (n_frames, n_lag * n_feature / n_c, n_c) if n_c > 1.
     """
     if dtype is None:
         dtype = X.dtype

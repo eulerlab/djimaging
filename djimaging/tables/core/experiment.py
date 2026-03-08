@@ -33,6 +33,16 @@ class ExperimentTemplate(dj.Computed):
         pass
 
     def make(self, key: dict) -> None:
+        """Populate experiment entries by scanning the filesystem for header files.
+
+        Fetches the data directories from the userinfo table and delegates to
+        `add_experiments` to locate and insert experiment records.
+
+        Parameters
+        ----------
+        key : dict
+            The primary key identifying the experimenter entry.
+        """
         data_dir, pre_data_dir, raw_data_dir = (self.userinfo_table() & key).fetch1(
             "data_dir", "pre_data_dir", "raw_data_dir")
         self.add_experiments(key=key, data_dir=data_dir, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
@@ -48,10 +58,19 @@ class ExperimentTemplate(dj.Computed):
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 1, suppress_errors: bool = False,
                           restr_headers: Optional[list] = None) -> None:
         """Scan filesystem for new experiments and add them to the database.
-        :param restrictions: Restriction to users table, e.g. to scan only for specific user(s)
-        :param verboselvl: Print (0) no / (1) only new data / (2) all data information
-        :param suppress_errors: Stop on errors or only print?
-        :param restr_headers: List of headers to be included
+
+        Parameters
+        ----------
+        restrictions : dict, optional
+            Restriction to users table, e.g. to scan only for specific user(s).
+            Default is None (no restriction).
+        verboselvl : int, optional
+            Print (0) no / (1) only new data / (2) all data information.
+            Default is 1.
+        suppress_errors : bool, optional
+            Stop on errors (False) or only print them (True). Default is False.
+        restr_headers : list | None, optional
+            List of header paths to be included. Default is None (all headers).
         """
 
         if restrictions is None:
@@ -70,8 +89,41 @@ class ExperimentTemplate(dj.Computed):
                 only_new=True, restrictions=restrictions, restr_headers=restr_headers,
                 verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir,
-                        only_new, restrictions, restr_headers=None, verboselvl=0, suppress_errors=False):
+    def add_experiments(
+            self,
+            key: dict,
+            data_dir: str,
+            pre_data_dir: str,
+            raw_data_dir: str,
+            only_new: bool,
+            restrictions: dict | None,
+            restr_headers: list | None = None,
+            verboselvl: int = 0,
+            suppress_errors: bool = False,
+    ) -> None:
+        """Find all experiment folders under `data_dir` and add them to the database.
+
+        Parameters
+        ----------
+        key : dict
+            Base primary key (e.g. experimenter).
+        data_dir : str
+            Root directory to search for `.ini` header files.
+        pre_data_dir : str
+            Sub-directory name for pre-processed data (relative to header_path).
+        raw_data_dir : str
+            Sub-directory name for raw data (relative to header_path).
+        only_new : bool
+            If True, skip experiments that are already in the database.
+        restrictions : dict | None
+            Restriction dict applied when checking for existing entries.
+        restr_headers : list | None, optional
+            If provided, only process header paths in this list. Default is None.
+        verboselvl : int, optional
+            Verbosity level (0 = silent). Default is 0.
+        suppress_errors : bool, optional
+            If True, print errors instead of raising. Default is False.
+        """
 
         header_paths = find_folders_with_file_of_type(data_dir, ending='.ini', ignore_hidden=True)
 
@@ -90,7 +142,39 @@ class ExperimentTemplate(dj.Computed):
                 else:
                     raise e
 
-    def add_experiment(self, key, header_path, pre_data_dir, raw_data_dir, only_new, restrictions, verboselvl):
+    def add_experiment(
+            self,
+            key: dict,
+            header_path: str,
+            pre_data_dir: str,
+            raw_data_dir: str,
+            only_new: bool,
+            restrictions: dict | None,
+            verboselvl: int,
+    ) -> None:
+        """Parse a single experiment folder and insert all related sub-table entries.
+
+        Reads the `.ini` header file, extracts metadata (date, experiment number,
+        preparation info, animal info, indicator info, pharmacology info) and
+        inserts them into the master and part tables.
+
+        Parameters
+        ----------
+        key : dict
+            Base primary key (e.g. experimenter).
+        header_path : str
+            Absolute path to the experiment folder containing the `.ini` file.
+        pre_data_dir : str
+            Sub-directory name for pre-processed data.
+        raw_data_dir : str
+            Sub-directory name for raw data.
+        only_new : bool
+            If True, skip if this experiment already exists in the database.
+        restrictions : dict | None
+            Restriction dict applied when checking for existing entries.
+        verboselvl : int
+            Verbosity level (0 = silent).
+        """
 
         if verboselvl > 0:
             print('\theader_path:', header_path)

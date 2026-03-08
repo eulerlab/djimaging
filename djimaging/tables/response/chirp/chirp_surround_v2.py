@@ -70,7 +70,23 @@ class ChirpSurroundTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def compute_entry(self, key, plot=False):
+    def compute_entry(self, key: dict, plot: bool = False) -> tuple:
+        """Compute surround index and per-repetition response means for lChirp and gChirp.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        plot : bool, optional
+            If True, create diagnostic plots. Default is False.
+
+        Returns
+        -------
+        tuple
+            Tuple of (surround_index, l_response_mus, g_response_mus) where
+            surround_index is a scalar float and the response arrays have shape
+            (n_repetitions,).
+        """
         l_key = {**key, 'stim_name': self._l_name}
         g_key = {**key, 'stim_name': self._g_name}
 
@@ -184,7 +200,19 @@ class ChirpSurroundTemplate(dj.Computed):
 
         return surround_index, l_response_mus, g_response_mus
 
-    def make(self, key, plot=False):
+    def make(self, key: dict, plot: bool = False) -> None:
+        """Compute and insert chirp surround index into the table.
+
+        Fetches lChirp and gChirp snippet data, computes per-repetition response
+        means and the surround index, and inserts the result into the table.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to populate.
+        plot : bool, optional
+            If True, create diagnostic plots during computation. Default is False.
+        """
         surround_index, l_response_mus, g_response_mus = self.compute_entry(key, plot=plot)
 
         self.insert1(dict(
@@ -194,6 +222,13 @@ class ChirpSurroundTemplate(dj.Computed):
             g_response_mus=g_response_mus,
         ))
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict | None = None) -> None:
+        """Plot diagnostic figures for the given key.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint primary key. If None, uses the first available key.
+        """
         key = get_primary_key(table=self, key=key)
         self.compute_entry(key, plot=True)

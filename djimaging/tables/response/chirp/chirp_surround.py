@@ -44,10 +44,24 @@ class ChirpSurroundTemplate(dj.Computed):
         pass
 
     def _l_table(self):
+        """Return the local chirp (lChirp) snippet table projection.
+
+        Returns
+        -------
+        datajoint.expression.QueryExpression
+            Projected snippets table restricted to lChirp stimulus.
+        """
         secondary_keys = get_secondary_keys(self.snippets_table)
         return (self.snippets_table & dict(stim_name="lChirp")).proj(*secondary_keys, lChirp='stim_name')
 
     def _g_table(self):
+        """Return the global chirp (gChirp) snippet table projection.
+
+        Returns
+        -------
+        datajoint.expression.QueryExpression
+            Projected snippets table restricted to gChirp stimulus.
+        """
         secondary_keys = get_secondary_keys(self.snippets_table)
         return (self.snippets_table & dict(stim_name="gChirp")).proj(*secondary_keys, gChirp='stim_name')
 
@@ -58,7 +72,21 @@ class ChirpSurroundTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def compute_entry(self, key, plot=False):
+    def compute_entry(self, key: dict, plot: bool = False) -> tuple:
+        """Compute surround strength and polarity indices for lChirp and gChirp.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        plot : bool, optional
+            If True, create diagnostic plots. Default is False.
+
+        Returns
+        -------
+        tuple
+            Tuple of (surround_strength, l_polarity_index, g_polarity_index).
+        """
         l_snippets_t0, l_snippets_dt, l_snippets, l_triggertimes_snippets = (self._l_table() & key).fetch1(
             "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
         g_snippets_t0, g_snippets_dt, g_snippets, g_triggertimes_snippets = (self._g_table() & key).fetch1(
@@ -111,7 +139,19 @@ class ChirpSurroundTemplate(dj.Computed):
 
         return surround_strength, l_polarity_index, g_polarity_index
 
-    def make(self, key, plot=False):
+    def make(self, key: dict, plot: bool = False) -> None:
+        """Compute and insert surround strength and polarity indices into the table.
+
+        Fetches lChirp and gChirp snippet data, computes the local and global polarity
+        indices and the surround strength, and inserts the result into the table.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to populate.
+        plot : bool, optional
+            If True, create diagnostic plots during computation. Default is False.
+        """
         surround_strength, l_polarity_index, g_polarity_index = self.compute_entry(key, plot=plot)
 
         self.insert1(dict(
@@ -121,7 +161,19 @@ class ChirpSurroundTemplate(dj.Computed):
             g_polarity_index=g_polarity_index,
         ))
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict | None = None) -> None:
+        """Plot diagnostic figures and verify against stored values.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint primary key. If None, uses the first available key.
+
+        Raises
+        ------
+        ValueError
+            If computed values do not match the stored values in the table.
+        """
         key = get_primary_key(table=self, key=key)
         surround_strength, l_polarity_index, g_polarity_index = \
             (self & key).fetch1('surround_strength', 'l_polarity_index', 'g_polarity_index')
@@ -133,22 +185,43 @@ class ChirpSurroundTemplate(dj.Computed):
             raise ValueError("Computed values do not match stored values")
 
 
-def compute_step_response_index(average, fs, alpha=2, t_on_step=2, t_off_step=5, color=None, plot=None):
-    """
-    # TODO: Merge with compute_polarity_index
-    Calculate step response and the polarity index (POi) from Franke et al. 2017.
+def compute_step_response_index(
+        average: np.ndarray,
+        fs: float,
+        alpha: float = 2,
+        t_on_step: float = 2,
+        t_off_step: float = 5,
+        color: str | None = None,
+        plot: plt.Axes | bool | None = None,
+) -> tuple:
+    """Calculate step response and the polarity index (POi) from Franke et al. 2017.
 
     Note: In the paper it's not clear how they treated negative values, we clip them to zero.
 
-    :param average: A 1d numpy array of trace
-    :param fs: Sampling rate of the data in Hz.
-    :param alpha: Duration of the response window in seconds.
-    :param t_on_step: Time of the on-step of the stimulus in seconds.
-    :param t_off_step: Time of the off-step of the stimulus in seconds.
-    :param color: Color of the plot.
-    :param plot: If True, plot the average trace and the response window.
+    # TODO: Merge with compute_polarity_index
 
-    :return: Polarity index (POi) for each ROI.
+    Parameters
+    ----------
+    average : np.ndarray
+        A 1D array of the average response trace.
+    fs : float
+        Sampling rate of the data in Hz.
+    alpha : float, optional
+        Duration of the response window in seconds. Default is 2.
+    t_on_step : float, optional
+        Time of the on-step of the stimulus in seconds. Default is 2.
+    t_off_step : float, optional
+        Time of the off-step of the stimulus in seconds. Default is 5.
+    color : str or None, optional
+        Matplotlib color for the trace plot. Default is None.
+    plot : matplotlib.axes.Axes or bool or None, optional
+        If a matplotlib Axes instance, plot into it. If True, create a new figure.
+        If None or False, no plot is produced. Default is None.
+
+    Returns
+    -------
+    tuple
+        Tuple of (avg_on, avg_off, polarity_index).
     """
 
     idx_on_start = int(np.floor(t_on_step * fs))
@@ -181,22 +254,42 @@ def compute_step_response_index(average, fs, alpha=2, t_on_step=2, t_off_step=5,
     return avg_on, avg_off, polarity_index
 
 
-def compute_surround_strength(lchirp_on, gchirp_on, lchirp_off, gchirp_off,
-                              lchirp_polarity_index, gchirp_polarity_index, plot=None):
-    """
-    Calculate the polarity index (SSt) from Hsiang et al. 2024.
+def compute_surround_strength(
+        lchirp_on: float,
+        gchirp_on: float,
+        lchirp_off: float,
+        gchirp_off: float,
+        lchirp_polarity_index: float,
+        gchirp_polarity_index: float,
+        plot: plt.Axes | bool | None = None,
+) -> float:
+    """Calculate the surround strength (SSt) from Hsiang et al. 2024.
 
     Note: In the paper they only calculated the surround strength for On bipolar cells.
 
-    :param lchirp_on: Light increment response of the local chirp stimulus.
-    :param gchirp_on: Light increment response of the global chirp stimulus.
-    :param lchirp_off: Light decrement response of the local chirp stimulus.
-    :param gchirp_off: Light decrement response of the global chirp stimulus.
-    :param lchirp_polarity_index: Polarity index of the local chirp stimulus.
-    :param gchirp_polarity_index: Polarity index of the global chirp stimulus.
-    :param plot: If True, plot the responses. Can be a matplotlib axis.
+    Parameters
+    ----------
+    lchirp_on : float
+        Light increment response of the local chirp stimulus.
+    gchirp_on : float
+        Light increment response of the global chirp stimulus.
+    lchirp_off : float
+        Light decrement response of the local chirp stimulus.
+    gchirp_off : float
+        Light decrement response of the global chirp stimulus.
+    lchirp_polarity_index : float
+        Polarity index of the local chirp stimulus.
+    gchirp_polarity_index : float
+        Polarity index of the global chirp stimulus.
+    plot : matplotlib.axes.Axes or bool or None, optional
+        If a matplotlib Axes instance, plot into it. If True, create a new figure.
+        If None or False, no plot is produced. Default is None.
 
-    :return: Surround strength (SSt) for each ROI.
+    Returns
+    -------
+    float
+        Surround strength (SSt), or np.nan if polarity indices have opposite signs
+        or the local response is too small.
     """
 
     if (lchirp_polarity_index > 0) & (gchirp_polarity_index > 0):

@@ -1,24 +1,48 @@
 import itertools
+from typing import Callable
 
 import numpy as np
 
 
-def correlation_on_centered(x_centered, y_centered, axis=2):
+def correlation_on_centered(
+        x_centered: np.ndarray,
+        y_centered: np.ndarray,
+        axis: int = 2,
+) -> np.ndarray:
+    """Compute normalised cross-correlation of two mean-centered arrays along an axis.
+
+    Parameters
+    ----------
+    x_centered : np.ndarray
+        Mean-centered array.
+    y_centered : np.ndarray
+        Mean-centered array with the same shape as ``x_centered``.
+    axis : int, optional
+        Axis along which to sum for the dot product. Default is 2.
+
+    Returns
+    -------
+    np.ndarray
+        Array of correlation coefficients with the ``axis`` dimension reduced.
+    """
     return np.sum(x_centered * y_centered, axis=axis) / (
             np.sqrt(np.sum(x_centered ** 2, axis=axis)) * np.sqrt(np.sum(y_centered ** 2, axis=axis)))
 
 
-def compute_corr_map(stack):
-    """
-    Calculate the local neighboring pixel correlation matrix for a 3D stack (x, y, t).
+def compute_corr_map(stack: np.ndarray) -> np.ndarray:
+    """Calculate the local neighbouring-pixel correlation map for a 3-D stack.
 
-    Input:
-    stack (numpy.ndarray): 3D spatiotemporal data, the first two dimensions (nx, ny) correspond to spatial dimensions,
-    and the third dimension (_) represents the time series.
+    Parameters
+    ----------
+    stack : np.ndarray
+        3-D spatiotemporal data with shape (nx, ny, nt). The first two
+        dimensions are the spatial axes and the third is the time axis.
 
-    Output:
-    corr_map (numpy.ndarray): 2D array with normalized cross-correlations for each pixel in the spatial domain.
-    The values represent the local similarity of each pixel to its neighbors within predefined shifts.
+    Returns
+    -------
+    np.ndarray
+        2-D array of shape (nx, ny) with the mean local correlation of each
+        pixel to its 8 neighbours (horizontal, vertical and diagonal).
     """
     stack_centered = (stack.T - np.mean(stack, axis=2).T).T
 
@@ -55,17 +79,50 @@ def compute_corr_map(stack):
     return corr_map
 
 
-def compute_corr_map_match_indexes(corr_map, ref_corr_map, shift_max=20, metric='mse', verbose=False,
-                                   plot=False, fun_progress=None):
-    """Calculate the match_indexes between a stack_corr image and its shifted versions.
+def compute_corr_map_match_indexes(
+        corr_map: np.ndarray,
+        ref_corr_map: np.ndarray,
+        shift_max: int = 20,
+        metric: str = 'mse',
+        verbose: bool = False,
+        plot: bool = False,
+        fun_progress: Callable | None = None,
+) -> np.ndarray:
+    """Compute a match-score matrix by comparing a correlation map to shifted versions of a reference.
 
-    Input:
-    shifted_video (numpy.ndarray): input video as 3D numpy array (frames, height, width).
-    stack_corr (numpy.ndarray): 2D reference image for cross-correlation.
-    shift_max (int): maximum shift value in both x and y directions.
+    Parameters
+    ----------
+    corr_map : np.ndarray
+        2-D correlation map to be matched against ``ref_corr_map``.
+    ref_corr_map : np.ndarray
+        2-D reference correlation map.
+    shift_max : int, optional
+        Maximum shift in both x and y directions (inclusive). Default is 20.
+    metric : str, optional
+        Similarity metric. ``'mse'`` uses negative mean squared error
+        (higher is better); ``'corr'`` uses Pearson correlation.
+        Default is ``'mse'``.
+    verbose : bool, optional
+        If ``True``, print the detected shift and maximum score. Default is
+        ``False``.
+    plot : bool, optional
+        If ``True``, plot each shift comparison using matplotlib. Default is
+        ``False``.
+    fun_progress : callable or None, optional
+        Optional callback accepting a ``percent`` keyword argument that is
+        called at each iteration to report progress. Default is ``None``.
 
-    Output:
-    corr_map (array): cross-correlation matrix with shape (2*shift_max+1, 2*shift_max+1).
+    Returns
+    -------
+    np.ndarray
+        2-D match-score array of shape (2*shift_max+1, 2*shift_max+1). Entry
+        ``[i, j]`` contains the score for shift
+        ``(i - shift_max, j - shift_max)``.
+
+    Raises
+    ------
+    NotImplementedError
+        If ``metric`` is not ``'corr'`` or ``'mse'``.
     """
 
     # Initialize the cross-correlation matrix with zeros
@@ -130,7 +187,22 @@ def compute_corr_map_match_indexes(corr_map, ref_corr_map, shift_max=20, metric=
     return match_indexes
 
 
-def extract_best_shift(match_indexes):
+def extract_best_shift(match_indexes: np.ndarray) -> tuple[int, int]:
+    """Extract the best (x, y) shift from a match-score matrix.
+
+    Parameters
+    ----------
+    match_indexes : np.ndarray
+        2-D match-score array as returned by
+        :func:`compute_corr_map_match_indexes`. The centre entry corresponds
+        to zero shift.
+
+    Returns
+    -------
+    tuple[int, int]
+        A tuple ``(shift_x, shift_y)`` with the shift that maximises the
+        match score.
+    """
     # Calculate image statistics
     rel_x_max, rel_y_max = np.unravel_index(np.argmax(match_indexes), match_indexes.shape)
 
@@ -141,7 +213,35 @@ def extract_best_shift(match_indexes):
     return shift_x, shift_y
 
 
-def shift_img(img, shift_x, shift_y, fun_cval=np.median, cval=None):
+def shift_img(
+        img: np.ndarray,
+        shift_x: int,
+        shift_y: int,
+        fun_cval: Callable = np.median,
+        cval: float | None = None,
+) -> np.ndarray:
+    """Shift a 2-D image by ``(shift_x, shift_y)`` pixels and fill the border.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        2-D image to shift.
+    shift_x : int
+        Number of pixels to shift along axis 0 (positive = down).
+    shift_y : int
+        Number of pixels to shift along axis 1 (positive = right).
+    fun_cval : callable, optional
+        Function applied to ``img`` to derive the fill value when ``cval`` is
+        ``None``. Default is ``np.median``.
+    cval : float or None, optional
+        Constant fill value for the border. If ``None``, ``fun_cval`` is used.
+        Default is ``None``.
+
+    Returns
+    -------
+    np.ndarray
+        Shifted image with the same shape as ``img``.
+    """
     # TODO: merge with mask_utils.shift_image
 
     shifted_img = np.roll(img, shift=shift_x, axis=0)

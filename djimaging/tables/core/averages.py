@@ -24,7 +24,7 @@ class AveragesTemplate(dj.Computed):
         average_norm        :longblob  # normalized array of snippet average (time)
         average_t0          :float     # time of the first sample of the average
         average_dt          :float     # time between samples of the average
-        triggertimes_rel    :longblob  # array of relative triggertimes 
+        triggertimes_rel    :longblob  # array of relative triggertimes
         """
         return definition
 
@@ -40,7 +40,24 @@ class AveragesTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def normalize_average(self, average):
+    def normalize_average(self, average: np.ndarray) -> np.ndarray:
+        """Normalize the average trace according to the configured normalization kind.
+
+        Parameters
+        ----------
+        average : np.ndarray
+            The average trace to normalize.
+
+        Returns
+        -------
+        np.ndarray
+            The normalized average trace.
+
+        Raises
+        ------
+        NotImplementedError
+            If `_norm_kind` is not one of 'zscore', 'zero_one', 'amp_one', or 'amp_std'.
+        """
         if self._norm_kind == 'zscore':
             average_norm = math_utils.normalize_zscore(average)
         elif self._norm_kind == 'zero_one':
@@ -54,7 +71,18 @@ class AveragesTemplate(dj.Computed):
 
         return average_norm
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute and store the average of snippets for a given key.
+
+        Fetches snippets from the snippets table, aligns them in time,
+        computes the mean across repetitions, normalizes the average, and
+        inserts the result into this table.
+
+        Parameters
+        ----------
+        key : dict
+            The primary key identifying the entry to populate.
+        """
         snippets_t0, snippets_dt, snippets = (self.snippets_table() & key).fetch1(
             'snippets_t0', 'snippets_dt', 'snippets')
         triggertimes_snippets = (self.snippets_table() & key).fetch1('triggertimes_snippets')
@@ -82,7 +110,17 @@ class AveragesTemplate(dj.Computed):
             triggertimes_rel=triggertimes_rel.astype(np.float32),
         ))
 
-    def plot1(self, key=None, xlim=None):
+    def plot1(self, key: dict | None = None, xlim: tuple | None = None) -> None:
+        """Plot snippets and average trace for a single entry.
+
+        Parameters
+        ----------
+        key : dict | None, optional
+            Primary key identifying the entry to plot. If None, the first
+            available key is used.
+        xlim : tuple | None, optional
+            x-axis limits for the plot. Default is None (auto).
+        """
         key = get_primary_key(table=self, key=key)
 
         snippets_t0, snippets_dt, snippets = (self.snippets_table & key).fetch1(
@@ -109,7 +147,17 @@ class AveragesTemplate(dj.Computed):
 
         plt.show()
 
-    def plot(self, restriction=None, sort=True):
+    def plot(self, restriction: dict | None = None, sort: bool = True) -> None:
+        """Plot heatmaps of all averages matching the given restriction.
+
+        Parameters
+        ----------
+        restriction : dict | None, optional
+            Restriction to apply to the table before fetching. Default is None
+            (all entries).
+        sort : bool, optional
+            Whether to sort traces before plotting. Default is True.
+        """
         if restriction is None:
             restriction = dict()
 
@@ -155,7 +203,18 @@ class ResampledAveragesTemplate(AveragesTemplate):
     def snippets_table(self):
         pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute and store the resampled average of snippets for a given key.
+
+        Fetches snippets, resamples them to `_f_resample` Hz, computes the
+        mean across repetitions after temporal alignment, normalizes the
+        average, and inserts the result into this table.
+
+        Parameters
+        ----------
+        key : dict
+            The primary key identifying the entry to populate.
+        """
         snippets_t0, snippets_dt, snippets = (self.snippets_table() & key).fetch1(
             'snippets_t0', 'snippets_dt', 'snippets')
 
@@ -182,7 +241,17 @@ class ResampledAveragesTemplate(AveragesTemplate):
             triggertimes_rel=triggertimes_rel,
         ))
 
-    def plot1(self, key=None, xlim=None):
+    def plot1(self, key: dict | None = None, xlim: tuple | None = None) -> None:
+        """Plot resampled snippets and average trace for a single entry.
+
+        Parameters
+        ----------
+        key : dict | None, optional
+            Primary key identifying the entry to plot. If None, the first
+            available key is used.
+        xlim : tuple | None, optional
+            x-axis limits for the plot. Default is None (auto).
+        """
         key = get_primary_key(table=self, key=key)
 
         snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table & key).fetch1(
@@ -207,7 +276,38 @@ class ResampledAveragesTemplate(AveragesTemplate):
         plt.show()
 
 
-def compute_upsampled_average(snippets, snippets_times, triggertimes_snippets, f_resample=500):
+def compute_upsampled_average(
+        snippets: np.ndarray,
+        snippets_times: np.ndarray,
+        triggertimes_snippets: np.ndarray,
+        f_resample: float = 500,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute a temporally resampled average across snippet repetitions.
+
+    Each repetition is interpolated onto a common time grid defined by
+    `f_resample` and the median stimulus duration, then averaged.
+
+    Parameters
+    ----------
+    snippets : np.ndarray
+        2-D array of snippet traces with shape (n_time, n_reps).
+    snippets_times : np.ndarray
+        2-D array of absolute time stamps with shape (n_time, n_reps).
+    triggertimes_snippets : np.ndarray
+        2-D array of trigger times with shape (n_triggers, n_reps).
+    f_resample : float, optional
+        Target sampling frequency in Hz. Default is 500.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, np.ndarray]
+        average : np.ndarray
+            Mean trace across repetitions on the resampled grid, shape (n_resampled,).
+        average_times : np.ndarray
+            Time axis of the resampled grid, shape (n_resampled,).
+        snippets_resampled : np.ndarray
+            Resampled individual snippets, shape (n_resampled, n_reps).
+    """
     dt = 1 / f_resample
     stim_dur = np.median(np.diff(triggertimes_snippets[0]))
     resampled_n = int(np.ceil(stim_dur * f_resample))
