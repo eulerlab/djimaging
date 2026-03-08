@@ -2,5 +2,41 @@
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "djimaging"
+version = "1.2.0"
+description = "DataJoint for 2P imaging data"
+authors = [{ name = "Jonathan Oesterle", email = "jonathan.oesterle@uni-tuebingen.de" }]
+requires-python = ">=3.7"
+dependencies = [
+    "datajoint>=0.13",
+    "numpy",
+    "h5py",
+    "scipy",
+    "cached_property",
+    "matplotlib",
+    "pandas",
+    "seaborn",
+    "scikit-learn",
+    "opencv-python",
+    "astropy",
+    "ipython",
+    "numba",
+]
+
+[project.optional-dependencies]
+autorois = [
+    "pytorch_lightning",
+    "torch",
+    "ipywidgets",
+    "ipycanvas",
+]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+
 [tool.pytest.ini_options]
 markers = ["dependency: mark a test as a dependency"]

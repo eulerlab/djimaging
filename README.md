@@ -21,17 +21,16 @@ Download the package:
 git clone https://github.com/eulerlab/djimaging.git
 ````
 
-Install the package e.g. using pip as an editable package:
+Install the package as an editable package using [uv](https://docs.astral.sh/uv/):
 
 ```bash
 cd djimaging
-pip install -r requirements.txt
-pip install -e .
+uv pip install -e .
 ```
 
-If you want to use autorois, also install the following:
-```
-pip install -r requirements-autorois.txt
+If you want to use autorois, install with the optional extras:
+```bash
+uv pip install -e ".[autorois]"
 ```
 
 > ❗ To test if the package was successfully installed, e.g.
