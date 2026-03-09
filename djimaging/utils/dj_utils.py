@@ -239,11 +239,11 @@ def is_equal(v1: Any, v2: Any) -> bool:
         True if `v1` and `v2` are considered equal, False otherwise.
     """
     try:
-        if v1 == v2:
-            return True
-        elif np.asarray(v1) == np.asarray(v2):
-            return True
-    except:
+        result = v1 == v2
+        if isinstance(result, np.ndarray):
+            return bool(result.all())
+        return bool(result)
+    except Exception:
         pass
     return False
 
