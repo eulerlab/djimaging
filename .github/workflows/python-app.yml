@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install --system flake8 pytest
-          if [ -f requirements.txt ]; then uv pip install --system -r requirements.txt; fi
+          uv pip install --system -e .
 
       - name: Lint with flake8
         run: |
