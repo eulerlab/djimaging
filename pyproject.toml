@@ -22,7 +22,6 @@ dependencies = [
     "astropy",
     "ipython",
     "numba",
-    "rfest>=2.1.2",
     "scanm-support",
 ]
 
@@ -32,6 +31,11 @@ autorois = [
     "torch",
     "ipywidgets",
     "ipycanvas",
+]
+rf = [
+    "rfest>=2.1.2",
+    "jax",
+    "jaxlib",
 ]
 dev = [
     "pytest",
