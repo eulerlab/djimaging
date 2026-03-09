@@ -33,9 +33,25 @@ class FeaturesParamsTemplate(dj.Lookup):
         """
         return definition
 
-    def add(self, features_id=1, kind='sparse_pca', params_dict=None, norm_trace: bool = False,
-            stim_names='gChirp_lChirp', ncomps='20_20', pre_standardize=False, post_standardize=True,
-            skip_duplicates=False):
+    def add(self, features_id: int = 1, kind: str = 'sparse_pca', params_dict: dict = None,
+            norm_trace: bool = False, stim_names: str = 'gChirp_lChirp', ncomps: str = '20_20',
+            pre_standardize: bool = False, post_standardize: bool = True,
+            skip_duplicates: bool = False) -> None:
+        """Insert a feature-extraction parameter set into the table.
+
+        Args:
+            features_id: Unique integer identifier for this parameter set.
+            kind: Decomposition algorithm; one of ``'sparse_pca'``, ``'pca'``, or ``'none'``.
+            params_dict: Algorithm-specific keyword arguments. Defaults to an empty dict.
+            norm_trace: If True, use normalised averages instead of raw averages.
+            stim_names: Stimulus names to include, joined by ``'_'``
+                (e.g. ``'gChirp_lChirp'``).
+            ncomps: Number of components per stimulus, joined by ``'_'``
+                (e.g. ``'20_20'``).
+            pre_standardize: If True, standardise traces before decomposition.
+            post_standardize: If True, standardise features after decomposition.
+            skip_duplicates: If True, silently skip insertion when the key already exists.
+        """
         if params_dict is None:
             params_dict = dict()
         assert isinstance(params_dict, dict)
@@ -85,7 +101,20 @@ class FeaturesTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def fetch_traces(self, key, rtol=0.15):
+    def fetch_traces(self, key: dict, rtol: float = 0.15) -> tuple:
+        """Fetch and align per-stimulus average traces for all ROIs matching *key*.
+
+        Args:
+            key: DataJoint primary key dict used to restrict the query.
+            rtol: Relative tolerance passed to :func:`truncated_vstack` for length
+                alignment across ROIs.
+
+        Returns:
+            A 4-tuple ``(traces, times, roi_keys, stim_names)`` where *traces* and
+            *times* are lists of 2-D arrays (one per stimulus), *roi_keys* is a list
+            of dicts with the primary key of each ROI, and *stim_names* is a list of
+            stimulus name strings.
+        """
         norm_trace, stim_names = (self.params_table & key).fetch1('norm_trace', 'stim_names')
         average_key = 'average_norm' if norm_trace else 'average'
         stim_names = stim_names.split('_')
@@ -113,7 +142,13 @@ class FeaturesTemplate(dj.Computed):
         roi_keys = tab.fetch(*self.roi_table.primary_key, as_dict=True)
         return traces, times, roi_keys, stim_names
 
-    def make(self, key, verboselvl=1):
+    def make(self, key: dict, verboselvl: int = 1) -> None:
+        """Compute decomposition features for all ROIs and populate the table.
+
+        Args:
+            key: DataJoint primary key dict identifying a unique feature parameter set.
+            verboselvl: Verbosity level forwarded to :func:`compute_features`.
+        """
         kind, params_dict, ncomps, pre_standardize, post_standardize = (self.params_table & key).fetch1(
             'kind', 'params_dict', 'ncomps', 'pre_standardize', 'post_standardize')
 
@@ -146,7 +181,13 @@ class FeaturesTemplate(dj.Computed):
             """
             return definition
 
-    def plot1_components(self, key=None, sort=False):
+    def plot1_components(self, key: dict = None, sort: bool = False) -> None:
+        """Plot decomposition components as heatmaps for a single entry.
+
+        Args:
+            key: DataJoint primary key dict. If None, prompts for selection.
+            sort: If True, sort components by the position of their cumulative weight centre.
+        """
         key = get_primary_key(table=self, key=key)
         decomp_infos = (self & key).fetch1('decomp_infos')
 
@@ -205,8 +246,29 @@ class FeaturesTemplate(dj.Computed):
 
 
 def compute_features(traces: list, ncomps: list, kind: str, params_dict: dict,
-                     pre_standardize=False, post_standardize=False, verboselvl=0) -> (list, list, list):
-    """Reduce dimension of traces to features and stack them to feature matrix"""
+                     pre_standardize: bool = False, post_standardize: bool = False,
+                     verboselvl: int = 0) -> tuple:
+    """Reduce dimension of traces to features and stack them to feature matrix.
+
+    Args:
+        traces: List of 2-D arrays, one per stimulus, each of shape
+            ``(n_samples, n_timepoints)``.
+        ncomps: List of ints specifying the number of components per stimulus.
+        kind: Decomposition algorithm; one of ``'sparse_pca'``, ``'pca'``, or ``'none'``.
+        params_dict: Algorithm-specific keyword arguments forwarded to the chosen
+            decomposition function.
+        pre_standardize: If True, standardise each stimulus trace matrix before fitting.
+        post_standardize: If True, standardise the resulting feature matrices after
+            decomposition using ``StandardScaler``.
+        verboselvl: Verbosity level forwarded to the decomposition function.
+
+    Returns:
+        A 3-tuple ``(features, traces_reconstructed, infos)`` where each element is a
+        list of per-stimulus arrays/dicts.
+
+    Raises:
+        NotImplementedError: If *kind* is not recognised.
+    """
     kind = kind.lower()
 
     if verboselvl:
@@ -235,12 +297,22 @@ def compute_features(traces: list, ncomps: list, kind: str, params_dict: dict,
     return features, traces_reconstructed, infos
 
 
-def compute_variance_explained_sparse_pca(X: np.ndarray, P: np.ndarray) -> (float, float):
-    """Compute the variance explained variance of sparse PCA
+def compute_variance_explained_sparse_pca(X: np.ndarray, P: np.ndarray) -> tuple:
+    """Compute the variance explained by sparse PCA components.
+
     Code based on: https://github.com/scikit-learn/scikit-learn/issues/11512#issuecomment-1354299118
     Original Author: https://github.com/qbilius
     scikit-learn license: BSD 3-Clause (https://opensource.org/licenses/BSD-3-Clause)
-    Idea based on: Camacho et al. (2019): explained here"""
+    Idea based on: Camacho et al. (2019): explained here
+
+    Args:
+        X: 2-D data matrix of shape ``(n_samples, n_features)``.
+        P: Component matrix of shape ``(n_features, n_components)`` (i.e. the transpose
+            of ``SparsePCA.components_``).
+
+    Returns:
+        A tuple ``(explained_variance, total_variance)`` of floats.
+    """
 
     Xc = X - np.mean(X, axis=0)  # center data
     T = Xc @ P @ np.linalg.pinv(P.T @ P)
@@ -252,7 +324,24 @@ def compute_variance_explained_sparse_pca(X: np.ndarray, P: np.ndarray) -> (floa
 
 
 def compute_features_sparse_pca(
-        traces: list, ncomps: list, alpha=1, standardize=False, verboselvl=1) -> (list, list, list):
+        traces: list, ncomps: list, alpha: float = 1, standardize: bool = False,
+        verboselvl: int = 1) -> tuple:
+    """Extract sparse PCA features for a list of stimulus trace matrices.
+
+    Args:
+        traces: List of 2-D arrays, one per stimulus, each of shape
+            ``(n_samples, n_timepoints)``.
+        ncomps: List of ints specifying the number of sparse PCA components per stimulus.
+        alpha: Sparsity controlling parameter forwarded to ``SparsePCA``.
+        standardize: If True, standardise each trace matrix with ``StandardScaler``
+            before fitting and invert the transform on reconstruction.
+        verboselvl: Verbosity level forwarded to ``SparsePCA``.
+
+    Returns:
+        A 3-tuple ``(features, traces_reconstructed, infos)`` where each element is a
+        list with one entry per stimulus. *infos* contains dicts with keys
+        ``'components'``, ``'explained_variance'``, and ``'explained_variance_ratio'``.
+    """
     from sklearn.decomposition import SparsePCA
 
     features, traces_reconstructed, infos = [], [], []
@@ -291,7 +380,21 @@ def compute_features_sparse_pca(
     return features, traces_reconstructed, infos
 
 
-def compute_features_pca(traces: list, ncomps: list, standardize=False) -> (list, list, list):
+def compute_features_pca(traces: list, ncomps: list, standardize: bool = False) -> tuple:
+    """Extract PCA features for a list of stimulus trace matrices.
+
+    Args:
+        traces: List of 2-D arrays, one per stimulus, each of shape
+            ``(n_samples, n_timepoints)``.
+        ncomps: List of ints specifying the number of PCA components per stimulus.
+        standardize: If True, standardise each trace matrix with ``StandardScaler``
+            before fitting and invert the transform on reconstruction.
+
+    Returns:
+        A 3-tuple ``(features, traces_reconstructed, infos)`` where each element is a
+        list with one entry per stimulus. *infos* contains dicts with keys
+        ``'components'``, ``'explained_variance'``, and ``'explained_variance_ratio'``.
+    """
     from sklearn.decomposition import PCA
 
     features, traces_reconstructed, infos = [], [], []

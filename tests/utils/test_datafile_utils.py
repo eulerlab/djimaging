@@ -1,3 +1,4 @@
+import os
 import pytest
 
 from djimaging.utils.filesystem_utils import as_pre_filepath
@@ -11,7 +12,7 @@ def test_as_pre_filepath():
         raw_filepath, raw_data_dir='Raw', pre_data_dir='Pre',
         raw_suffix='.smp', pre_suffix='.h5', pre_prefix='SMP_')
 
-    assert obs_filepath == pre_filepath
+    assert os.path.normpath(obs_filepath) == os.path.normpath(pre_filepath)
 
 
 def test_as_pre_filepath_no_change():
@@ -21,7 +22,7 @@ def test_as_pre_filepath_no_change():
         pre_filepath, raw_data_dir='Raw', pre_data_dir='Pre',
         raw_suffix='.smp', pre_suffix='.h5', pre_prefix='SMP_')
 
-    assert obs_filepath == pre_filepath
+    assert os.path.normpath(obs_filepath) == os.path.normpath(pre_filepath)
 
 
 def test_as_pre_filepath_error_raw_path():

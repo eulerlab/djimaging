@@ -1,3 +1,4 @@
+import os
 import os.path
 
 import numpy as np
@@ -6,6 +7,13 @@ import pytest
 from djimaging.autorois.autoshift_utils import compute_corr_map, compute_corr_map_match_indexes, \
     shift_img, extract_best_shift
 from djimaging.utils.scanm import read_h5_utils
+
+_TEST_DATA_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'test_data'))
+
+pytestmark = pytest.mark.skipif(
+    not os.path.isdir(_TEST_DATA_PATH),
+    reason="test_data directory not found (skipped on CI)"
+)
 
 params_test_shit_img = [
     (0, 0),
@@ -52,7 +60,9 @@ def test_shit_img(shift_x, shift_y):
     assert np.all(crop == shifted_crop)
 
 
-filename_stack1 = '/gpfs01/euler/data/Data/DataJointTestData/xy-RGCs/20220125/2/Pre/SMP_M1_RR_GCL0_chirp_C1.h5'
+filename_stack1 = os.path.join(
+    _TEST_DATA_PATH, 'xy-RGCs-minimal', '20220125', '2', 'Pre', 'SMP_M1_RR_GCL0_chirp_C1.h5'
+)
 
 if os.path.isfile(filename_stack1):
     ch_stacks, wparams = read_h5_utils.load_stacks_and_wparams(filename_stack1, ch_names=('wDataCh0',))

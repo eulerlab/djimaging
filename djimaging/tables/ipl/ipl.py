@@ -64,11 +64,28 @@ class IplBordersTemplate(dj.Manual):
         except (AttributeError, TypeError):
             pass
 
-    def list_missing_keys(self):
+    def list_missing_keys(self) -> list:
+        """Return a list of primary key dicts for which no IPL border entry exists yet.
+
+        Returns:
+            List of dicts, each representing one key in the key source that has not
+            yet been entered in this table.
+        """
         missing_keys = (self.key_source - self.proj()).fetch(as_dict=True)
         return missing_keys
 
-    def fetch1_and_norm_ch_avgs(self, key, q_clip0=0.0, q_clip1=0.0):
+    def fetch1_and_norm_ch_avgs(self, key: dict, q_clip0: float = 0.0,
+                                q_clip1: float = 0.0) -> tuple:
+        """Fetch and soft-normalise the two channel averages for *key*.
+
+        Args:
+            key: DataJoint primary key dict identifying a field or presentation entry.
+            q_clip0: Quantile used for soft normalisation of the data channel average.
+            q_clip1: Quantile used for soft normalisation of the alternate channel average.
+
+        Returns:
+            A tuple ``(ch0_avg, ch1_avg)`` of normalised 2-D arrays.
+        """
         data_stack_name, alt_stack_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
 
         ch0_avg = (self.field_or_pres_table.StackAverages & key & dict(ch_name=data_stack_name)).fetch1('ch_average')
@@ -79,7 +96,22 @@ class IplBordersTemplate(dj.Manual):
 
         return ch0_avg, ch1_avg
 
-    def gui(self, key, figsize=(8, 5), left0=12, right0=12, thick0=30, q_clip0=2.0, q_clip1=2.0):
+    def gui(self, key: dict, figsize: tuple = (8, 5), left0: int = 12, right0: int = 12,
+            thick0: int = 30, q_clip0: float = 2.0, q_clip1: float = 2.0) -> None:
+        """Launch an interactive ipywidgets GUI for manually annotating IPL borders.
+
+        The widget lets the user adjust the GCL/IPL border intercepts and IPL thickness
+        and optionally save them to the table.
+
+        Args:
+            key: DataJoint primary key dict identifying the field or presentation entry.
+            figsize: Width and height of the preview figure in inches.
+            left0: Initial pixel index for the GCL/IPL border on the left side of the image.
+            right0: Initial pixel index for the GCL/IPL border on the right side of the image.
+            thick0: Initial pixel width of the IPL.
+            q_clip0: Quantile clipping for the data channel normalisation.
+            q_clip1: Quantile clipping for the alternate channel normalisation.
+        """
         import ipywidgets as widgets
 
         ch0_avg, ch1_avg = self.fetch1_and_norm_ch_avgs(key, q_clip0=q_clip0, q_clip1=q_clip1)
@@ -107,7 +139,15 @@ class IplBordersTemplate(dj.Manual):
                 title = f'SAVED: left={left}, right={right}, thick={thick} ### {str(key)}'
                 w_save.value = False
 
-    def add_or_update(self, key, left, right, thick):
+    def add_or_update(self, key: dict, left: int, right: int, thick: int) -> None:
+        """Insert or update the IPL border annotation for *key*.
+
+        Args:
+            key: DataJoint primary key dict identifying the field or presentation entry.
+            left: Pixel index of the GCL/IPL border on the left side of the image.
+            right: Pixel index of the GCL/IPL border on the right side of the image.
+            thick: Pixel width of the IPL.
+        """
         if len((self & key).proj()) == 0:
             self.insert1(dict(**key, left=left, right=right, thick=thick))
         else:
@@ -150,7 +190,12 @@ class RoiIplDepthTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute IPL depth for all ROIs in the field identified by *key*.
+
+        Args:
+            key: DataJoint primary key dict shared by the IPL border and ROI mask entries.
+        """
         left, right, thick = (self.ipl_border_table & key).fetch1('left', 'right', 'thick')
 
         roi_mask = (self.roimask_table & key).fetch1('roi_mask')
@@ -167,7 +212,16 @@ class RoiIplDepthTemplate(dj.Computed):
 
             self.insert1(dict(**key, roi_id=roi_id, ipl_depth=ipl_depth))
 
-    def plot_field(self, key=None, figsize=(8, 5), q_clip0=0.0, q_clip1=0.0):
+    def plot_field(self, key: dict = None, figsize: tuple = (8, 5),
+                   q_clip0: float = 0.0, q_clip1: float = 0.0) -> None:
+        """Overlay IPL border lines and ROI centres (colour-coded by depth) on channel images.
+
+        Args:
+            key: DataJoint primary key dict. If None, selects the first available entry.
+            figsize: Width and height of the figure in inches.
+            q_clip0: Quantile clipping for the data channel normalisation.
+            q_clip1: Quantile clipping for the alternate channel normalisation.
+        """
         if key is None:
             key = get_primary_key(self.key_source & self)
 
@@ -205,14 +259,40 @@ class RoiIplDepthTemplate(dj.Computed):
             cbar.set_label('IPL depth')
 
 
-def get_line(points):
+def get_line(points: list) -> tuple:
+    """Fit a line through two or more (x, y) points using least squares.
+
+    Args:
+        points: Sequence of ``(x, y)`` pairs used to fit the line.
+
+    Returns:
+        A tuple ``(m, c)`` where *m* is the slope and *c* is the intercept.
+    """
     x_coords, y_coords = zip(*points)
     a = np.vstack([x_coords, np.ones(len(x_coords))]).T
     m, c = np.linalg.lstsq(a, y_coords, rcond=None)[0]
     return m, c
 
 
-def plot_field_and_fit(left, right, thick, ch0_avg, ch1_avg, figsize=(8, 5), extent=None, title=''):
+def plot_field_and_fit(left: int, right: int, thick: int, ch0_avg: np.ndarray,
+                       ch1_avg: np.ndarray, figsize: tuple = (8, 5),
+                       extent: tuple = None, title: str = '') -> tuple:
+    """Plot two channel averages with overlaid GCL/IPL border lines.
+
+    Args:
+        left: Pixel index of the GCL/IPL border on the left side of the image.
+        right: Pixel index of the GCL/IPL border on the right side of the image.
+        thick: Pixel width of the IPL used to draw the INL border.
+        ch0_avg: 2-D normalised image of the data channel.
+        ch1_avg: 2-D normalised image of the alternate channel.
+        figsize: Width and height of the figure in inches.
+        extent: Image extent ``(xmin, xmax, ymin, ymax)`` passed to ``imshow``.
+            Computed from *ch0_avg* shape if None.
+        title: Figure suptitle string.
+
+    Returns:
+        A tuple ``(fig, axs)`` with the matplotlib Figure and Axes array.
+    """
     if extent is None:
         extent = (0, ch0_avg.shape[0], 0, ch0_avg.shape[1])
 

@@ -4,19 +4,26 @@ import numpy as np
 from scipy.optimize import curve_fit
 
 
-def naka_rushton(S: np.ndarray, R_base: float, R_max: float, S50: float, n: float):
-    """
-    Naka-Rushton function.
+def naka_rushton(S: np.ndarray, R_base: float, R_max: float, S50: float, n: float) -> np.ndarray:
+    """Evaluate the Naka-Rushton function.
 
-    Args:
-        S (np.ndarray): Stimulus intensity.
-        R_base (float): Baseline response.
-        R_max (float): Maximum response.
-        S50 (float): Half-maximum stimulus.
-        n (float): Slope parameter.
+    Parameters
+    ----------
+    S : np.ndarray
+        Stimulus intensity values.
+    R_base : float
+        Baseline response.
+    R_max : float
+        Maximum response above baseline.
+    S50 : float
+        Half-maximum stimulus intensity.
+    n : float
+        Slope (Hill) parameter.
 
-    Returns:
-        np.ndarray: Response values.
+    Returns
+    -------
+    np.ndarray
+        Response values with the same shape as S.
     """
     if S50 == 0.0:
         return np.full_like(S, R_max * 0.5 + R_base)
@@ -26,17 +33,23 @@ def naka_rushton(S: np.ndarray, R_base: float, R_max: float, S50: float, n: floa
     return nr
 
 
-def init_naka_rushton(x_data: np.ndarray, y_data: np.ndarray, noise=False):
-    """
-    Initialize parameters for the Naka-Rushton function.
+def init_naka_rushton(x_data: np.ndarray, y_data: np.ndarray, noise: bool = False) -> tuple:
+    """Initialize parameters for the Naka-Rushton function.
 
-    Args:
-        x_data (np.ndarray): Array of stimulus intensity values.
-        y_data (np.ndarray): Array of response values.
-        noise (bool): If True, adds random perturbations to initial estimates.
+    Parameters
+    ----------
+    x_data : np.ndarray
+        Array of stimulus intensity values.
+    y_data : np.ndarray
+        Array of response values.
+    noise : bool, optional
+        If True, adds random perturbations to the initial estimates. Default is False.
 
-    Returns:
-        tuple: Initial estimates for R_base, R_max, S50, and n.
+    Returns
+    -------
+    tuple
+        Tuple of (p_initial, p_bounds) where p_initial is (R_base, R_max, S50, n)
+        and p_bounds is a list of [(lower,), (upper,)] bounds.
     """
     # Base parameter estimates
     x_min, x_max = np.min(x_data), np.max(x_data)

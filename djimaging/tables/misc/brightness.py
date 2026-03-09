@@ -22,10 +22,12 @@ from djimaging.utils import math_utils
 
 
 class RoiBrightnessTemplate(dj.Computed):
+    """DataJoint computed table template that stores per-ROI brightness values."""
+
     database = ""
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = """
         # ROI brightness, can be used to estimate how strongly a cell has be labeled
         # Computed as mean brightness in [0, 1] of ROI normalized to min and max of stack average
@@ -64,7 +66,12 @@ class RoiBrightnessTemplate(dj.Computed):
     def roi_table(self):
         pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute and insert brightness values for both channels for a given ROI.
+
+        Args:
+            key: DataJoint primary key dict identifying the presentation and ROI entry.
+        """
         roi_mask = (self.roimask_table & key).fetch1('roi_mask')
 
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')

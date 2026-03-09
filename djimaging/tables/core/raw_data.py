@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import abstractmethod
 
 import datajoint as dj
@@ -23,13 +25,44 @@ class RawDataParamsTemplate(dj.Lookup):
 
     @property
     @abstractmethod
-    def userinfo_table(self):
+    def userinfo_table(self) -> dj.Table:
+        """Return the user info table."""
         pass
 
-    def add_default(self, raw_id=1, experimenter_list=None,
-                    from_raw_data=False, compute_from_stack=True, include_artifacts=False,
-                    trace_precision='line', trigger_precision='line', igor_roi_masks="yes", skip_duplicates=True):
-        """Add default preprocess parameter to table"""
+    def add_default(
+            self,
+            raw_id: int = 1,
+            experimenter_list: list = None,
+            from_raw_data: bool = False,
+            compute_from_stack: bool = True,
+            include_artifacts: bool = False,
+            trace_precision: str = 'line',
+            trigger_precision: str = 'line',
+            igor_roi_masks: str = "yes",
+            skip_duplicates: bool = True,
+    ) -> None:
+        """Add default raw-data parameters for all (or specified) experimenters.
+
+        Args:
+            raw_id: Unique identifier for this parameter set. Default is 1.
+            experimenter_list: List of experimenter names to add parameters
+                for. If None, all experimenters in the userinfo table are used.
+            from_raw_data: If True, load raw ScanM data instead of h5 files.
+                Default is False.
+            compute_from_stack: If True, compute traces from the imaging stack.
+                Otherwise, try to import traces from Igor. Default is True.
+            include_artifacts: If True, include ROIs that overlap with the
+                light-artifact region. Default is False.
+            trace_precision: Precision mode for trace computation, either
+                'line' or 'pixel'. Default is 'line'.
+            trigger_precision: Precision mode for trigger computation, either
+                'line' or 'pixel'. Default is 'line'.
+            igor_roi_masks: How to handle Igor ROI masks: 'yes' loads them,
+                'init' uses them only for initialisation, 'no' ignores them.
+                Default is 'yes'.
+            skip_duplicates: If True, silently skip duplicate entries.
+                Default is True.
+        """
         if experimenter_list is None:
             experimenter_list = self.userinfo_table.fetch('experimenter')
 

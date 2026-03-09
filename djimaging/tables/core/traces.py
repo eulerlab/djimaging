@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import warnings
 from abc import abstractmethod
 
@@ -44,35 +46,42 @@ class TracesTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def raw_params_table(self):
+    def raw_params_table(self) -> dj.Table:
+        """Return the raw data parameters lookup table."""
         pass
 
     @property
     @abstractmethod
-    def presentation_table(self):
+    def presentation_table(self) -> dj.Table:
+        """Return the presentation table."""
         pass
 
     @property
     @abstractmethod
-    def roi_mask_table(self):
+    def roi_mask_table(self) -> dj.Table:
+        """Return the ROI mask table."""
         pass
 
     @property
     @abstractmethod
-    def roi_table(self):
+    def roi_table(self) -> dj.Table:
+        """Return the ROI table."""
         pass
 
     @property
     @abstractmethod
-    def userinfo_table(self):
+    def userinfo_table(self) -> dj.Table:
+        """Return the user info table."""
         pass
 
     @property
-    def motion_detection_table(self):
+    def motion_detection_table(self) -> None:
+        """Return the motion detection table, or None if not used."""
         return None
 
     @property
     def key_source(self):
+        """Return the key source combining presentation, ROI, params, and mask tables."""
         try:
             key_source = (self.presentation_table.proj() & self.roi_table.proj()) \
                          * self.raw_params_table.proj() \
@@ -85,7 +94,13 @@ class TracesTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key, verboselvl=0):
+    def make(self, key: dict, verboselvl: int = 0) -> None:
+        """Extract and insert raw traces for all ROIs in the given presentation.
+
+        Args:
+            key: Primary key dict identifying the presentation to populate.
+            verboselvl: Verbosity level controlling diagnostic output.
+        """
         include_artifacts, compute_from_stack, trace_precision, from_raw_data = (self.raw_params_table & key).fetch1(
             "include_artifacts", "compute_from_stack", "trace_precision", "from_raw_data")
 
@@ -127,7 +142,30 @@ class TracesTemplate(dj.Computed):
                 else:
                     warnings.warn(f"Skipping invalid trace for {key} and roi_id={roi_id}")
 
-    def _compute_roi2trace_from_stack(self, key, filepath, roi_ids, trace_precision, from_raw_data, verboselvl=0):
+    def _compute_roi2trace_from_stack(
+            self,
+            key: dict,
+            filepath: str,
+            roi_ids: np.ndarray,
+            trace_precision: str,
+            from_raw_data: bool,
+            verboselvl: int = 0,
+    ) -> tuple[dict, float]:
+        """Compute ROI traces from the imaging stack for one presentation.
+
+        Args:
+            key: Primary key dict for the presentation.
+            filepath: Absolute path to the ScanM recording file.
+            roi_ids: Array of ROI integer IDs to extract traces for.
+            trace_precision: Precision mode, either 'line' or 'pixel'.
+            from_raw_data: If True, read from raw ScanM files instead of h5.
+            verboselvl: Verbosity level controlling diagnostic output.
+
+        Returns:
+            A 2-tuple of (roi2trace, frame_dt) where roi2trace is a dict
+            mapping roi_id to a dict of trace data, and frame_dt is the
+            inter-frame interval in seconds.
+        """
         data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
         roi_mask, as_field_mask = (self.roi_mask_table.RoiMaskPresentation & key).fetch1("roi_mask", "as_field_mask")
         n_artifact = (self.presentation_table & key).fetch1("npixartifact")
@@ -159,8 +197,14 @@ class TracesTemplate(dj.Computed):
 
         return roi2trace, frame_dt
 
-    def gui_clip_trace(self, key):
-        """GUI to clip traces. Note that this can not be easily undone for now."""
+    def gui_clip_trace(self, key: dict) -> None:
+        """Launch an interactive GUI for clipping a raw trace.
+
+        Note that this can not be easily undone for now.
+
+        Args:
+            key: Primary key identifying the trace to clip.
+        """
         trace, trace_t0, trace_dt, valid_trace, valid_trigger = (self & key).fetch1(
             'trace', 'trace_t0', 'trace_dt', 'trace_valid', 'trigger_valid')
         trace_t = np.arange(trace.size) * trace_dt + trace_t0
@@ -189,12 +233,38 @@ class TracesTemplate(dj.Computed):
                 title = f'SAVED: left={left}, right={right}\n{prep_long_title(key)}'
                 w_save.value = False
 
-    def add_or_update(self, key, trace, trace_t0, trace_dt, valid_trace, valid_trigger):
+    def add_or_update(
+            self,
+            key: dict,
+            trace: np.ndarray,
+            trace_t0: float,
+            trace_dt: float,
+            valid_trace: int,
+            valid_trigger: int,
+    ) -> None:
+        """Update an existing trace entry with new trace data.
+
+        Args:
+            key: Primary key dict identifying the trace entry.
+            trace: Updated raw trace array.
+            trace_t0: Start time of the updated trace in seconds.
+            trace_dt: Sampling interval of the updated trace in seconds.
+            valid_trace: 1 if trace values are valid, 0 otherwise.
+            valid_trigger: 1 if trigger times are inside trace times, 0 otherwise.
+        """
         entry = dict(**key, trace=trace, trace_t0=trace_t0, trace_dt=trace_dt,
                      trace_valid=valid_trace, trigger_valid=valid_trigger)
         self.update1(entry)
 
-    def plot1(self, key=None, xlim=None, ylim=None):
+    def plot1(self, key: dict = None, xlim: tuple = None, ylim: tuple = None) -> None:
+        """Plot the raw trace with trigger times for one ROI presentation.
+
+        Args:
+            key: Primary key identifying the entry to plot. If None, the first
+                available key is used.
+            xlim: x-axis limits.
+            ylim: y-axis limits.
+        """
         key = get_primary_key(table=self, key=key)
         trace_t0, trace_dt, trace = (self & key).fetch1("trace_t0", "trace_dt", "trace")
         triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
@@ -204,7 +274,14 @@ class TracesTemplate(dj.Computed):
             time=trace_times, trace=trace, triggertimes=triggertimes, title=str(key))
         ax.set(xlim=xlim, ylim=ylim)
 
-    def plot(self, restriction=None, sort=True):
+    def plot(self, restriction: dict = None, sort: bool = True) -> None:
+        """Plot a heatmap of all raw traces matching the restriction.
+
+        Args:
+            restriction: Restriction applied before fetching traces. Default
+                is None (all entries).
+            sort: Whether to sort traces before plotting. Default is True.
+        """
         if restriction is None:
             restriction = dict()
 

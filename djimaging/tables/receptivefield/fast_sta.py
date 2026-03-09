@@ -64,12 +64,40 @@ class FastStaParamsTemplate(dj.Lookup):
         pass
 
     def add_default(
-            self, stim_names=None, dnoise_params_id=1, fit_kind="gradient",
-            fupsample_trace=10, fupsample_stim=10, lowpass_cutoff=0,
-            pre_blur_sigma_s=0, post_blur_sigma_s=0,
-            filter_dur_s_past=1., filter_dur_s_future=0.,
-            skip_duplicates=False, verbose=True):
-        """Add default preprocess parameter to table"""
+            self, stim_names: list | None = None, dnoise_params_id: int = 1, fit_kind: str = "gradient",
+            fupsample_trace: int = 10, fupsample_stim: int = 10, lowpass_cutoff: float = 0,
+            pre_blur_sigma_s: float = 0, post_blur_sigma_s: float = 0,
+            filter_dur_s_past: float = 1., filter_dur_s_future: float = 0.,
+            skip_duplicates: bool = False, verbose: bool = True) -> None:
+        """Add default preprocess parameter to table.
+
+        Parameters
+        ----------
+        stim_names : list or None, optional
+            Names of noise stimuli to add parameters for. If None, all noise stimuli are used.
+        dnoise_params_id : int, optional
+            Unique parameter set ID. Default is 1.
+        fit_kind : str, optional
+            Kind of fitting procedure. Default is "gradient".
+        fupsample_trace : int, optional
+            Multiplier of sampling frequency using linear interpolation. Default is 10.
+        fupsample_stim : int, optional
+            Multiplier of sampling stimulus using repeat. Default is 10.
+        lowpass_cutoff : float, optional
+            Cutoff frequency for low pass filter; applied if larger than 0. Default is 0.
+        pre_blur_sigma_s : float, optional
+            Gaussian blur sigma applied after low pass filter (in seconds). Default is 0.
+        post_blur_sigma_s : float, optional
+            Gaussian blur sigma applied after all other steps (in seconds). Default is 0.
+        filter_dur_s_past : float, optional
+            Filter duration in seconds into the past. Default is 1.0.
+        filter_dur_s_future : float, optional
+            Filter duration in seconds into the future. Default is 0.0.
+        skip_duplicates : bool, optional
+            If True, skip duplicate entries. Default is False.
+        verbose : bool, optional
+            If True, print progress information. Default is True.
+        """
 
         if stim_names is None:
             stim_names = (self.stimulus_table() & "stim_family='noise'").fetch('stim_name')
@@ -126,8 +154,32 @@ class FastStaParamsTemplate(dj.Lookup):
             self.insert1(new_key, skip_duplicates=skip_duplicates)
 
     @staticmethod
-    def prepare_stimulus(stim, triggertimes, ntrigger_per_frame, fupsample_stim, filter_dur_s_past,
-                         filter_dur_s_future):
+    def prepare_stimulus(
+            stim: np.ndarray, triggertimes: np.ndarray, ntrigger_per_frame: int,
+            fupsample_stim: int, filter_dur_s_past: float,
+            filter_dur_s_future: float) -> tuple:
+        """Preprocess stimulus and build the design matrix.
+
+        Parameters
+        ----------
+        stim : np.ndarray
+            Raw stimulus array.
+        triggertimes : np.ndarray
+            Array of trigger timestamps.
+        ntrigger_per_frame : int
+            Number of triggers per stimulus frame.
+        fupsample_stim : int
+            Upsampling factor for the stimulus.
+        filter_dur_s_past : float
+            Filter duration in seconds into the past.
+        filter_dur_s_future : float
+            Filter duration in seconds into the future.
+
+        Returns
+        -------
+        tuple
+            Tuple of (x_stimulus, rf_time, dims, burn_in, shift, dt, t0).
+        """
         stimtime, stim = preprocess_stimulus(stim, triggertimes, ntrigger_per_frame, fupsample_stim)
         dt, dt_rel_error = get_mean_dt(stimtime, rtol_error=np.inf, rtol_warning=0.5)
         t0 = stimtime[0]
@@ -178,7 +230,24 @@ class FastStaTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def prepare_sta_params(self, *restrictions):
+    def prepare_sta_params(self, *restrictions) -> dict:
+        """Fetch and prepare STA parameters from the params table.
+
+        Parameters
+        ----------
+        *restrictions : dict
+            Optional DataJoint restrictions to select a unique parameter set.
+
+        Returns
+        -------
+        dict
+            Dictionary containing all STA parameters needed for computation.
+
+        Raises
+        ------
+        NotImplementedError
+            If the restrictions do not select exactly one parameter set.
+        """
         restrictions = [{}] if len(restrictions) == 0 else restrictions
         if len(self.params_table() & [*restrictions]) != 1:
             raise NotImplementedError("Only one parameter set supported. Provide `restrictions` that selects one.")
@@ -203,16 +272,46 @@ class FastStaTemplate(dj.Computed):
     def populate(
             self,
             *restrictions,
-            suppress_errors=False,
-            return_exception_objects=False,
-            reserve_jobs=False,
-            order="original",
-            limit=None,
-            max_calls=None,
-            display_progress=False,
-            processes=1,
-            make_kwargs=None,
-    ):
+            suppress_errors: bool = False,
+            return_exception_objects: bool = False,
+            reserve_jobs: bool = False,
+            order: str = "original",
+            limit: int | None = None,
+            max_calls: int | None = None,
+            display_progress: bool = False,
+            processes: int = 1,
+            make_kwargs: dict | None = None,
+    ) -> None:
+        """Populate the table, precomputing STA parameters shared across all entries.
+
+        Parameters
+        ----------
+        *restrictions : dict
+            Optional DataJoint restrictions. Must select exactly one parameter set.
+        suppress_errors : bool, optional
+            If True, suppress errors during population. Default is False.
+        return_exception_objects : bool, optional
+            If True, return exception objects instead of raising them. Default is False.
+        reserve_jobs : bool, optional
+            If True, use DataJoint job reservation. Default is False.
+        order : str, optional
+            Order in which to populate entries. Default is "original".
+        limit : int or None, optional
+            Maximum number of entries to populate. Default is None.
+        max_calls : int or None, optional
+            Maximum number of make() calls. Default is None.
+        display_progress : bool, optional
+            If True, show a progress bar. Default is False.
+        processes : int, optional
+            Number of parallel processes. Default is 1.
+        make_kwargs : dict or None, optional
+            Additional keyword arguments passed to make(). Default is None.
+
+        Raises
+        ------
+        NotImplementedError
+            If the restrictions do not select exactly one parameter set.
+        """
         restrictions = [{}] if len(restrictions) == 0 else restrictions
         if len(self.params_table() & [*restrictions]) != 1:
             raise NotImplementedError("Only one parameter set supported. Provide `restrictions` that selects one.")
@@ -234,7 +333,26 @@ class FastStaTemplate(dj.Computed):
             make_kwargs=make_kwargs,
         )
 
-    def make_compute(self, key, sta_params=None):
+    def make_compute(self, key: dict, sta_params: dict | None = None) -> list | None:
+        """Compute receptive fields for all traces matching the given key.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        sta_params : dict or None, optional
+            Pre-computed STA parameters. Must be a dict. Default is None.
+
+        Returns
+        -------
+        list or None
+            List of dicts with computed RF entries, or None if no traces found.
+
+        Raises
+        ------
+        NotImplementedError
+            If sta_params is not a dict.
+        """
         if isinstance(sta_params, dict):
             x_stimulus = sta_params['x_stimulus']
             dims = sta_params['dims']
@@ -276,14 +394,55 @@ class FastStaTemplate(dj.Computed):
 
         return rf_entries
 
-    def make(self, key, sta_params=None):
+    def make(self, key: dict, sta_params: dict | None = None) -> None:
+        """Compute and insert receptive fields for all traces matching the given key.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        sta_params : dict or None, optional
+            Pre-computed STA parameters dictionary. Default is None.
+        """
         rf_entries = self.make_compute(key=key, sta_params=sta_params)
         self.insert(rf_entries)
 
     @staticmethod
-    def _compute_rf(tracetime, trace, stimtime, x_stimulus,
-                    dims, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s,
-                    post_blur_sigma_s):
+    def _compute_rf(
+            tracetime: np.ndarray, trace: np.ndarray, stimtime: np.ndarray,
+            x_stimulus: np.ndarray, dims: tuple, fupsample_trace: int,
+            fit_kind: str, lowpass_cutoff: float, pre_blur_sigma_s: float,
+            post_blur_sigma_s: float) -> np.ndarray:
+        """Compute the receptive field for a single trace.
+
+        Parameters
+        ----------
+        tracetime : np.ndarray
+            Timestamps corresponding to the trace samples.
+        trace : np.ndarray
+            1-D neural response trace.
+        stimtime : np.ndarray
+            Timestamps corresponding to the stimulus frames.
+        x_stimulus : np.ndarray
+            Stimulus design matrix of shape (n_frames, n_features).
+        dims : tuple
+            Target shape of the computed receptive field.
+        fupsample_trace : int
+            Upsampling factor for the trace.
+        fit_kind : str
+            Kind of fitting procedure (e.g. "gradient").
+        lowpass_cutoff : float
+            Cutoff frequency for the low-pass filter.
+        pre_blur_sigma_s : float
+            Gaussian blur sigma applied before STA (in seconds).
+        post_blur_sigma_s : float
+            Gaussian blur sigma applied after STA (in seconds).
+
+        Returns
+        -------
+        np.ndarray
+            Receptive field array reshaped to `dims`.
+        """
 
         tracetime, trace = preprocess_trace(
             tracetime, trace, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s)
@@ -298,16 +457,48 @@ class FastStaTemplate(dj.Computed):
 
         return rf
 
-    def plot1(self, key=None, downsample=1):
+    def plot1(self, key: dict | None = None, downsample: int = 1) -> None:
+        """Plot the receptive field as frames.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        downsample : int, optional
+            Downsampling factor for the frames. Default is 1.
+        """
         self.plot1_frames(key=key, downsample=downsample)
 
-    def plot1_frames(self, key=None, downsample=1):
+    def plot1_frames(self, key: dict | None = None, downsample: int = 1) -> None:
+        """Plot the receptive field as individual frames.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        downsample : int, optional
+            Downsampling factor for the frames. Default is 1.
+        """
         key = get_primary_key(table=self, key=key)
         rf_time = (self.params_table & key).fetch1('rf_time')
         rf = (self & key).fetch1('rf')
         plot_rf_frames(rf, rf_time, downsample=downsample)
 
-    def plot1_video(self, key=None, fps=10):
+    def plot1_video(self, key: dict | None = None, fps: int = 10):
+        """Plot the receptive field as a video animation.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        fps : int, optional
+            Frames per second for the animation. Default is 10.
+
+        Returns
+        -------
+        matplotlib.animation.Animation
+            Animation object of the RF video.
+        """
         key = get_primary_key(table=self, key=key)
         rf_time = (self.params_table & key).fetch1('rf_time')
         rf = (self & key).fetch1('rf')

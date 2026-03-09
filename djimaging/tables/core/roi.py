@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import abstractmethod
 
 import datajoint as dj
@@ -27,27 +29,37 @@ class RoiTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def field_table(self):
+    def field_table(self) -> dj.Table:
+        """Return the field table."""
         pass
 
     @property
     @abstractmethod
-    def roi_mask_table(self):
+    def roi_mask_table(self) -> dj.Table:
+        """Return the ROI mask table."""
         pass
 
     @property
     @abstractmethod
-    def userinfo_table(self):
+    def userinfo_table(self) -> dj.Table:
+        """Return the user info table."""
         pass
 
     @property
     def key_source(self):
+        """Return the key source derived from the ROI mask table."""
         try:
             return self.roi_mask_table.proj()
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Extract ROI properties from the mask and insert one row per ROI.
+
+        Args:
+            key: Primary key dict identifying the field whose ROI mask should
+                be processed.
+        """
         # load roi_mask for insert roi for a specific experiment and field
         roi_mask = (self.roi_mask_table & key).fetch1("roi_mask")
 
@@ -82,7 +94,14 @@ class RoiTemplate(dj.Computed):
                 'roi_size_um2': roi_size_um2,
                 'roi_dia_um': roi_dia_um})
 
-    def plot1(self, key=None, gamma=0.7):
+    def plot1(self, key: dict = None, gamma: float = 0.7) -> None:
+        """Plot the field stack average with the ROI mask and highlighted ROI.
+
+        Args:
+            key: Primary key identifying the ROI entry to plot. If None, the
+                first available key is used.
+            gamma: Gamma correction value for display. Default is 0.7.
+        """
         key = get_primary_key(table=self, key=key)
 
         npixartifact, scan_type = (self.field_table & key).fetch1("npixartifact", "scan_type")

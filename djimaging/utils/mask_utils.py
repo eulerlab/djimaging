@@ -2,6 +2,7 @@ import os
 import pickle
 import queue
 import warnings
+from typing import Callable
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -12,16 +13,34 @@ from djimaging.utils.scanm import read_h5_utils
 from djimaging.utils.cellpose_utils import intersection_over_union
 
 
-def create_circular_mask(h, w, center, radius):
-    """Create a binary mask"""
+def create_circular_mask(h: int, w: int, center: tuple, radius: float) -> np.ndarray:
+    """Create a binary circular mask for a 2-D grid.
+
+    Parameters
+    ----------
+    h : int
+        Height of the grid (number of rows).
+    w : int
+        Width of the grid (number of columns).
+    center : tuple
+        ``(x, y)`` coordinates of the circle centre within the grid.
+    radius : float
+        Radius of the circle in pixels.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean array of shape ``(w, h)`` that is True inside the circle.
+    """
     xs, ys = np.ogrid[:w, :h]
     dist_from_center = np.sqrt((xs - center[0]) ** 2 + (ys - center[1]) ** 2)
     mask = np.asarray(dist_from_center <= radius)
     return mask
 
 
-def extract_connected_mask(mask, i, j):
-    """
+def extract_connected_mask(mask: np.ndarray, i: int, j: int) -> np.ndarray:
+    """Extract the connected component containing pixel ``(i, j)`` from a binary mask.
+
     This code contains content from Stack Overflow
     Source: https://stackoverflow.com/a/35224850
 
@@ -31,8 +50,22 @@ def extract_connected_mask(mask, i, j):
 
     Code by Stack Overflow user: https://stackoverflow.com/users/4613543/philokey
     Modified: Only minor modifications from original code
-    """
 
+    Parameters
+    ----------
+    mask : np.ndarray
+        2-D binary integer mask (values 0 or 1).
+    i : int
+        Row index of the seed pixel.
+    j : int
+        Column index of the seed pixel.
+
+    Returns
+    -------
+    np.ndarray
+        Binary mask of the same shape as `mask` containing only the connected
+        component that includes pixel ``(i, j)``.
+    """
     mask = mask.copy()
 
     nx, ny = mask.shape
@@ -65,7 +98,39 @@ def extract_connected_mask(mask, i, j):
     return mask
 
 
-def get_mask_by_cc(seed_ix, seed_iy, data, seed_trace=None, thresh=0.2, max_pixel_dist=10, plot=False):
+def get_mask_by_cc(seed_ix: int, seed_iy: int, data: np.ndarray,
+                   seed_trace: np.ndarray | None = None, thresh: float = 0.2,
+                   max_pixel_dist: int = 10, plot: bool = False) -> np.ndarray:
+    """Generate an ROI mask by cross-correlating pixels with a seed trace.
+
+    Pixels within `max_pixel_dist` of the seed whose correlation with
+    `seed_trace` exceeds `thresh` are included; the result is further trimmed
+    to the largest connected component containing the seed pixel.
+
+    Parameters
+    ----------
+    seed_ix : int
+        Row index of the seed pixel.
+    seed_iy : int
+        Column index of the seed pixel.
+    data : np.ndarray
+        3-D data array of shape ``(nx, ny, n_frames)``.
+    seed_trace : np.ndarray | None, optional
+        1-D reference trace. If None, the trace at ``data[seed_ix, seed_iy]``
+        is used.
+    thresh : float, optional
+        Minimum Pearson correlation coefficient to include a pixel.
+        Default is 0.2.
+    max_pixel_dist : int, optional
+        Maximum pixel distance from the seed to consider. Default is 10.
+    plot : bool, optional
+        If True, diagnostic plots are shown. Default is False.
+
+    Returns
+    -------
+    np.ndarray
+        Binary mask of shape ``(nx, ny)`` for the extracted ROI.
+    """
     nx = data.shape[0]
     ny = data.shape[1]
 
@@ -118,8 +183,39 @@ def get_mask_by_cc(seed_ix, seed_iy, data, seed_trace=None, thresh=0.2, max_pixe
     return mask_connected
 
 
-def get_mask_by_bg(seed_ix, seed_iy, data, ref_value=None, thresh=0.2, max_pixel_dist=10, plot=False):
-    """Get mask based on background image pixel values"""
+def get_mask_by_bg(seed_ix: int, seed_iy: int, data: np.ndarray,
+                   ref_value: float | None = None, thresh: float = 0.2,
+                   max_pixel_dist: int = 10, plot: bool = False) -> np.ndarray:
+    """Get mask based on background image pixel values.
+
+    Pixels within `max_pixel_dist` of the seed whose absolute difference from
+    `ref_value` is at most `thresh` are included; the result is trimmed to the
+    connected component containing the seed pixel.
+
+    Parameters
+    ----------
+    seed_ix : int
+        Row index of the seed pixel.
+    seed_iy : int
+        Column index of the seed pixel.
+    data : np.ndarray
+        2-D background image array of shape ``(nx, ny)``.
+    ref_value : float | None, optional
+        Reference intensity value. If None, the value at
+        ``data[seed_ix, seed_iy]`` is used.
+    thresh : float, optional
+        Maximum absolute difference from `ref_value` to include a pixel.
+        Default is 0.2.
+    max_pixel_dist : int, optional
+        Maximum pixel distance from the seed to consider. Default is 10.
+    plot : bool, optional
+        If True, diagnostic plots are shown. Default is False.
+
+    Returns
+    -------
+    np.ndarray
+        Binary mask of shape ``(nx, ny)`` for the extracted ROI.
+    """
     assert data.ndim == 2
 
     nx = data.shape[0]
@@ -171,7 +267,26 @@ def get_mask_by_bg(seed_ix, seed_iy, data, ref_value=None, thresh=0.2, max_pixel
     return mask_connected
 
 
-def relabel_mask(mask, connectivity, return_num=False):
+def relabel_mask(mask: np.ndarray, connectivity: int,
+                 return_num: bool = False) -> np.ndarray | tuple[np.ndarray, int]:
+    """Relabel connected components of a mask using ``skimage.measure.label``.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        2-D integer mask to relabel.
+    connectivity : int
+        Pixel connectivity: 1 for NSEW neighbours only, 2 to include diagonals.
+    return_num : bool, optional
+        If True, also return the number of connected components. Default is False.
+
+    Returns
+    -------
+    np.ndarray
+        Relabelled mask array.
+    tuple[np.ndarray, int]
+        ``(relabelled_mask, n_components)`` when `return_num` is True.
+    """
     from skimage.measure import label
 
     if return_num:
@@ -181,15 +296,36 @@ def relabel_mask(mask, connectivity, return_num=False):
         return label(mask.T, connectivity=connectivity).T
 
 
-def fix_disconnected_rois(mask, connectivity=2, verbose=True, return_num=False):
-    """
-    re-labels ROI mask using `skimage.measure.label()`:
-    all connected pixels with the same value get the same label
+def fix_disconnected_rois(mask: np.ndarray, connectivity: int = 2,
+                          verbose: bool = True,
+                          return_num: bool = False) -> np.ndarray | tuple[np.ndarray, int]:
+    """Re-label a mask so that each connected component gets a unique label.
+
+    Uses ``skimage.measure.label()``; all connected pixels with the same
+    value receive the same label.
 
     connectivity=1: only NSEW neighbors count as connections
     connectivity=2: NSEW neighbors and diagonal neighbors count as connections
-    """
 
+    Parameters
+    ----------
+    mask : np.ndarray
+        2-D integer ROI mask to process.
+    connectivity : int, optional
+        Pixel connectivity. Default is 2 (8-connected).
+    verbose : bool, optional
+        If True, prints information about disconnected ROIs. Default is True.
+    return_num : bool, optional
+        If True, also return the total number of connected components.
+        Default is False.
+
+    Returns
+    -------
+    np.ndarray
+        Relabelled mask.
+    tuple[np.ndarray, int]
+        ``(relabelled_mask, n_components)`` when `return_num` is True.
+    """
     if return_num:
         mask_new, n_comps = relabel_mask(mask, connectivity=connectivity, return_num=return_num)
     else:
@@ -211,9 +347,22 @@ def fix_disconnected_rois(mask, connectivity=2, verbose=True, return_num=False):
         return mask_new
 
 
-def remove_small_rois(mask, min_size=3, verbose=True):
-    """
-    Removes all ROIs below the minimum size from the mask.
+def remove_small_rois(mask: np.ndarray, min_size: int = 3, verbose: bool = True) -> np.ndarray:
+    """Remove all ROIs below the minimum pixel count from the mask.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        2-D integer ROI mask (0 = background).
+    min_size : int, optional
+        Minimum number of pixels required to keep an ROI. Default is 3.
+    verbose : bool, optional
+        If True, a warning is issued listing removed ROIs. Default is True.
+
+    Returns
+    -------
+    np.ndarray
+        Modified mask with small ROIs replaced by background (0).
     """
     mask = mask.copy()
     roi_ids, roi_sizes = np.unique(mask, return_counts=True)
@@ -226,7 +375,24 @@ def remove_small_rois(mask, min_size=3, verbose=True):
     return mask
 
 
-def shrink_light_artifact_rois(mask, n_artifact, verbose=True):
+def shrink_light_artifact_rois(mask: np.ndarray, n_artifact: int, verbose: bool = True) -> np.ndarray:
+    """Set the top `n_artifact` rows of a mask to background to remove light-artifact ROIs.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        2-D integer ROI mask.
+    n_artifact : int
+        Number of rows at the top of the mask that form the light-artifact
+        region.
+    verbose : bool, optional
+        If True, prints how many ROIs were affected. Default is True.
+
+    Returns
+    -------
+    np.ndarray
+        Mask with the artifact region set to 0.
+    """
     mask = mask.copy()
 
     if verbose:
@@ -239,14 +405,34 @@ def shrink_light_artifact_rois(mask, n_artifact, verbose=True):
     return mask
 
 
-def clean_rois(mask, n_artifact, min_size=3, connectivity=2, verbose=True):
-    """
+def clean_rois(mask: np.ndarray, n_artifact: int, min_size: int = 3,
+               connectivity: int = 2, verbose: bool = True) -> np.ndarray:
+    """Clean an ROI mask by removing artifacts, splitting disconnected ROIs, and removing small ROIs.
+
     First, all light artifact regions (top `n_artifact` pixels) are set to background.
     Then splits all disconnected ROIs (according to connectivity rule).
     Then removes ROIs below the minimum size.
 
     connectivity=1: only NSEW neighbors count as connections
     connectivity=2: NSEW neighbors and diagnonal neighbors count as connections
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        2-D integer ROI mask to clean.
+    n_artifact : int
+        Number of rows at the top of the mask forming the light-artifact region.
+    min_size : int, optional
+        Minimum pixel count to keep an ROI. Default is 3.
+    connectivity : int, optional
+        Pixel connectivity used for splitting and relabelling. Default is 2.
+    verbose : bool, optional
+        If True, processing messages are printed/warned. Default is True.
+
+    Returns
+    -------
+    np.ndarray
+        Cleaned and relabelled ROI mask.
     """
     mask_new = shrink_light_artifact_rois(mask, n_artifact=n_artifact, verbose=verbose)
     mask_new = fix_disconnected_rois(mask_new, connectivity=connectivity, verbose=verbose)
@@ -256,9 +442,24 @@ def clean_rois(mask, n_artifact, min_size=3, connectivity=2, verbose=True):
     return mask_new
 
 
-def find_neighbor_labels(x, y, labels):
-    """For a given pixel coordinate in a 2D image, return the labels of the NSEW neighbors"""
+def find_neighbor_labels(x: int, y: int, labels: np.ndarray) -> np.ndarray:
+    """Return the NSEW neighbour labels for a given pixel in a 2-D label image.
 
+    Parameters
+    ----------
+    x : int
+        Column index of the pixel.
+    y : int
+        Row index of the pixel.
+    labels : np.ndarray
+        2-D integer label array of shape ``(height, width)``.
+
+    Returns
+    -------
+    np.ndarray
+        1-D integer array ``[north, south, east, west]`` containing the label
+        values of the four cardinal neighbours (0 for out-of-bounds).
+    """
     ymax, xmax = labels.shape
 
     if y == ymax - 1:
@@ -284,8 +485,10 @@ def find_neighbor_labels(x, y, labels):
     return np.array([north_neighbor, south_neighbor, east_neighbor, west_neighbor])
 
 
-def add_rois(rois_to_add, rois, connectivity=2, plot=False):
-    """
+def add_rois(rois_to_add: np.ndarray, rois: np.ndarray, connectivity: int = 2,
+             plot: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    """Add new ROIs from `rois_to_add` into an existing ROI mask `rois`.
+
     For each new ROI in `rois_to_add`, add to the existing ones in `rois` by
     performing the following steps:
         *check for intersections with existing ROIs
@@ -300,14 +503,25 @@ def add_rois(rois_to_add, rois, connectivity=2, plot=False):
         *if not, ignore all ROIs that are too small
         *add remaining ROIs to existing and continue
 
-    returns
-    ----
-    output_labeled:
-        contains the full output - new ROIs added to old
-    output_new_labeled:
-        contains only the ROIs that where added by this function
-    """
+    Parameters
+    ----------
+    rois_to_add : np.ndarray
+        2-D integer mask containing proposed new ROIs to be merged.
+    rois : np.ndarray
+        2-D integer mask of existing ROIs (0 = background).
+    connectivity : int, optional
+        Pixel connectivity for connected-component analysis. Default is 2.
+    plot : bool, optional
+        If True, show diagnostic plots whenever a proposed ROI is altered
+        before being added. Default is False.
 
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        ``(output_labeled, output_new_labeled)`` where ``output_labeled``
+        contains all ROIs (old + newly added) and ``output_new_labeled``
+        contains only the ROIs added by this function.
+    """
     orig_roi_ids = np.unique(rois)
     new_rois_ids = np.unique(rois_to_add)
     new_rois_ids = new_rois_ids[new_rois_ids > 0]  # remove background
@@ -318,7 +532,7 @@ def add_rois(rois_to_add, rois, connectivity=2, plot=False):
 
     output_rois = rois.copy()
     output_rois_new = np.zeros_like(output_rois)
-    for new_roi_id in zip(new_rois_ids):
+    for new_roi_id in new_rois_ids:
         suggested_roi = rois_to_add == new_roi_id
         new_rois_no_pruning = (output_rois.copy() > 0).astype(int)
         new_rois_no_pruning[suggested_roi] = 2  # 0:bg 1:old rois 2:new roi
@@ -393,11 +607,32 @@ def add_rois(rois_to_add, rois, connectivity=2, plot=False):
     return output_labeled, output_new_labeled
 
 
-def generate_roi_suggestions(mask_pred, mask_true, n_artifact, threshold=0.1, verbose=False):
-    """
-    Each predicted ROI that does not have IoU>`threshold` with any true ROI is considered a suggestion ROI.
-    Returns a mask with only the suggestion ROIs.
-    Light artifact region of the mask is set to background label.
+def generate_roi_suggestions(mask_pred: np.ndarray, mask_true: np.ndarray, n_artifact: int,
+                              threshold: float = 0.1, verbose: bool = False) -> np.ndarray:
+    """Generate suggested new ROIs from a predicted mask that are absent in the true mask.
+
+    Each predicted ROI that does not have IoU > `threshold` with any true ROI
+    is considered a suggestion ROI. Returns a mask with only the suggestion
+    ROIs. Light artifact region of the mask is set to background label.
+
+    Parameters
+    ----------
+    mask_pred : np.ndarray
+        2-D integer mask of predicted ROIs.
+    mask_true : np.ndarray
+        2-D integer mask of ground-truth ROIs.
+    n_artifact : int
+        Number of rows at the top of the mask forming the light-artifact region.
+    threshold : float, optional
+        IoU threshold below which a predicted ROI is considered a false positive
+        (suggestion). Default is 0.1.
+    verbose : bool, optional
+        If True, verbose output is passed to :func:`clean_rois`. Default is False.
+
+    Returns
+    -------
+    np.ndarray
+        Mask containing only the suggested (false-positive) ROIs; background is 0.
     """
     mask_pred = clean_rois(mask_pred, n_artifact=n_artifact, verbose=verbose)
     iou_matrix = intersection_over_union(mask_true, mask_pred)[1:, 1:]  # `[1:,1:]` to exclude background
@@ -418,10 +653,33 @@ def generate_roi_suggestions(mask_pred, mask_true, n_artifact, threshold=0.1, ve
     return rois_to_add
 
 
-def to_roi_mask_file(data_file, old_suffix=None, new_suffix='_ROIs.pkl',
-                     roi_mask_dir=None, old_prefix=None, new_prefix=None):
-    """Get ROI mask file path from data file path"""
+def to_roi_mask_file(data_file: str, old_suffix: str | None = None, new_suffix: str = '_ROIs.pkl',
+                     roi_mask_dir: str | None = None, old_prefix: str | None = None,
+                     new_prefix: str | None = None) -> str:
+    """Derive the ROI mask file path from a data file path.
 
+    Parameters
+    ----------
+    data_file : str
+        Full path to the data file.
+    old_suffix : str | None, optional
+        Suffix to strip from the filename. If None, the existing file extension
+        is used.
+    new_suffix : str, optional
+        Suffix to append after stripping `old_suffix`. Default is ``'_ROIs.pkl'``.
+    roi_mask_dir : str | None, optional
+        Subdirectory name where the mask file should be located. If None, the
+        same directory as `data_file` is used.
+    old_prefix : str | None, optional
+        Prefix to strip from the filename before constructing the mask path.
+    new_prefix : str | None, optional
+        Prefix to prepend to the mask filename.
+
+    Returns
+    -------
+    str
+        Full path to the corresponding ROI mask file.
+    """
     f_path, f_name = os.path.split(data_file)
     f_root, f_dir = os.path.split(f_path)
 
@@ -453,9 +711,30 @@ def to_roi_mask_file(data_file, old_suffix=None, new_suffix='_ROIs.pkl',
     return roi_mask_file
 
 
-def sort_roi_mask_files(files, mask_alias='', highres_alias='', as_index=False):
-    """Sort files by their relevance for the ROI masks given by the user"""
+def sort_roi_mask_files(files: list, mask_alias: str = '', highres_alias: str = '',
+                        as_index: bool = False) -> np.ndarray:
+    """Sort files by their relevance for the ROI masks given by the user.
 
+    Parameters
+    ----------
+    files : list
+        List of file paths to sort.
+    mask_alias : str, optional
+        Underscore-separated alias string that identifies preferred mask files.
+        Tokens earlier in the string receive lower (better) penalty scores.
+    highres_alias : str, optional
+        Alias string for high-resolution files, which receive a higher penalty
+        (lower preference) than regular mask files.
+    as_index : bool, optional
+        If True, return the sort index array instead of the sorted file list.
+        Default is False.
+
+    Returns
+    -------
+    np.ndarray
+        Sorted array of file paths, or integer sort-index array if `as_index`
+        is True.
+    """
     files_base = np.array([os.path.splitext(os.path.basename(f))[0].lower()
                            for f in files])
 
@@ -485,8 +764,25 @@ def sort_roi_mask_files(files, mask_alias='', highres_alias='', as_index=False):
         return np.asarray(files)[sort_idxs]
 
 
-def load_preferred_roi_mask_igor(files, mask_alias='', highres_alias=''):
-    """Load ROI mask for field"""
+def load_preferred_roi_mask_igor(files: list, mask_alias: str = '',
+                                  highres_alias: str = '') -> tuple[np.ndarray | None, str | None]:
+    """Load the most preferred ROI mask from a list of HDF5 files (Igor format).
+
+    Parameters
+    ----------
+    files : list
+        List of file paths to search.
+    mask_alias : str, optional
+        Alias string used to rank mask file preference.
+    highres_alias : str, optional
+        Alias string for high-resolution files (lower preference).
+
+    Returns
+    -------
+    tuple[np.ndarray | None, str | None]
+        ``(roi_mask, filepath)`` of the first successfully loaded mask, or
+        ``(None, None)`` if no valid mask is found.
+    """
     sorted_files = sort_roi_mask_files(files, mask_alias=mask_alias, highres_alias=highres_alias)
     for file in sorted_files:
         if os.path.isfile(file) and file.endswith('.h5'):
@@ -497,9 +793,32 @@ def load_preferred_roi_mask_igor(files, mask_alias='', highres_alias=''):
         return None, None
 
 
-def load_preferred_roi_mask_pickle(files, mask_alias='', highres_alias='',
-                                   roi_mask_dir=None, old_prefix=None, new_prefix=None):
-    """Load ROI mask for field"""
+def load_preferred_roi_mask_pickle(files: list, mask_alias: str = '', highres_alias: str = '',
+                                   roi_mask_dir: str | None = None, old_prefix: str | None = None,
+                                   new_prefix: str | None = None) -> tuple[np.ndarray | None, str | None]:
+    """Load the most preferred ROI mask from a list of files via pickle (Igor format).
+
+    Parameters
+    ----------
+    files : list
+        List of data file paths used to derive ROI mask file paths.
+    mask_alias : str, optional
+        Alias string used to rank mask file preference.
+    highres_alias : str, optional
+        Alias string for high-resolution files (lower preference).
+    roi_mask_dir : str | None, optional
+        Subdirectory override for locating pickle mask files.
+    old_prefix : str | None, optional
+        Prefix to strip when deriving the mask file name.
+    new_prefix : str | None, optional
+        Prefix to prepend when deriving the mask file name.
+
+    Returns
+    -------
+    tuple[np.ndarray | None, str | None]
+        ``(roi_mask, filepath)`` in Igor format for the first found mask, or
+        ``(None, None)`` if no mask is found.
+    """
     sorted_files = sort_roi_mask_files(files, mask_alias=mask_alias, highres_alias=highres_alias)
     for file in sorted_files:
         roimask_file = to_roi_mask_file(file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
@@ -512,8 +831,33 @@ def load_preferred_roi_mask_pickle(files, mask_alias='', highres_alias='',
         return None, None
 
 
-def shift_array(img, shift, inplace=False, cval=np.min, n_artifact=0):
-    """Shift >2d array in x and/or y. Fill borders with cval."""
+def shift_array(img: np.ndarray, shift: tuple, inplace: bool = False,
+                cval: float | Callable = np.min, n_artifact: int = 0) -> np.ndarray:
+    """Shift a ≥2-D array in x and/or y, filling borders with a constant value.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        Input array to shift (at least 2-D). First two axes are spatial.
+    shift : tuple
+        ``(shift_axis0, shift_axis1)`` integer shift amounts. Positive values
+        shift the content towards higher indices.
+    inplace : bool, optional
+        If False (default), a copy of `img` is modified. If True, `img` is
+        modified in place.
+    cval : float | callable, optional
+        Fill value for the newly exposed border pixels. If callable, it is
+        called with `img` as argument to determine the value. Default is
+        ``np.min``.
+    n_artifact : int, optional
+        Number of rows at the top of the array to set to `cval` before
+        shifting (light-artifact region). Default is 0.
+
+    Returns
+    -------
+    np.ndarray
+        Shifted array of the same shape as `img`.
+    """
     if not inplace:
         img = img.copy()
     img = np.asarray(img)
@@ -539,8 +883,34 @@ def shift_array(img, shift, inplace=False, cval=np.min, n_artifact=0):
     return img
 
 
-def compare_roi_masks(roi_mask: np.ndarray, ref_roi_mask: np.ndarray, max_shift=5, bg_val=1) -> (str, tuple):
-    """Test if two roi masks are the same"""
+def compare_roi_masks(roi_mask: np.ndarray, ref_roi_mask: np.ndarray,
+                      max_shift: int = 5, bg_val: int = 1) -> tuple[str, tuple]:
+    """Test whether two Igor-format ROI masks are the same, allowing for small shifts.
+
+    Parameters
+    ----------
+    roi_mask : np.ndarray
+        2-D ROI mask to compare (Igor format).
+    ref_roi_mask : np.ndarray
+        2-D reference ROI mask (Igor format).
+    max_shift : int, optional
+        Maximum pixel shift (in each axis) to try when testing for shifts.
+        Default is 5.
+    bg_val : int, optional
+        Background pixel value used when filling shifted borders. Default is 1.
+
+    Returns
+    -------
+    tuple[str, tuple]
+        ``(status, (dx, dy))`` where ``status`` is one of ``'same'``,
+        ``'shifted'``, or ``'different'``, and ``(dx, dy)`` is the detected
+        shift (0, 0) when the masks are identical or different.
+
+    Raises
+    ------
+    AssertionError
+        If either mask fails the Igor-format assertion.
+    """
     assert_igor_format(roi_mask)
     assert_igor_format(ref_roi_mask)
 

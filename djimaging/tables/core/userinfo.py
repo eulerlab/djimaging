@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from copy import deepcopy
 
@@ -36,13 +38,32 @@ class UserInfoTemplate(dj.Manual):
         """
         return definition
 
-    def upload_users(self, userdicts: list):
-        """Upload multiple users"""
+    def upload_users(self, userdicts: list) -> None:
+        """Upload multiple users to the table.
+
+        Args:
+            userdicts: List of user info dicts, each passed to
+                ``upload_user``.
+        """
         for userdict in userdicts:
             self.upload_user(userdict)
 
-    def upload_user(self, userdict: dict, verbose=1):
-        """Upload one user"""
+    def upload_user(self, userdict: dict, verbose: int = 1) -> None:
+        """Upload a single user entry to the table.
+
+        If the experimenter already exists, the existing entry is preserved and
+        a message is printed when verbose > 0.
+
+        Args:
+            userdict: Dict containing at minimum 'experimenter' and 'data_dir'
+                keys, plus any optional columns defined in the table schema.
+            verbose: Verbosity level. If > 0, print a message when the entry
+                already exists. Default is 1.
+
+        Raises:
+            AssertionError: If 'experimenter' or 'data_dir' are missing, or if
+                the data_dir path does not exist on the filesystem.
+        """
         assert "experimenter" in userdict, 'Set username'
         assert "data_dir" in userdict, 'Set data_dir'
         assert os.path.isdir(userdict['data_dir']), f"data_dir={userdict['data_dir']} is not a directory"

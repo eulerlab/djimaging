@@ -28,12 +28,14 @@ from djimaging.utils.snippet_utils import split_trace_by_reps
 
 
 class LightArtifactTemplate(dj.Computed):
+    """DataJoint computed table template for the normalized mean light artifact trace."""
+
     database = ""
     _use_main_channel = True
     _f_resample = 60.  # Hz
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = """
         -> self.presentation_table
         ---
@@ -69,7 +71,12 @@ class LightArtifactTemplate(dj.Computed):
     def stimulus_table(self):
         pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute and insert the normalized mean light artifact for a given presentation.
+
+        Args:
+            key: DataJoint primary key dict identifying the presentation entry.
+        """
         filepath = (self.presentation_table & key).fetch1('pres_data_file')
         from_raw_data = (self.raw_params_table & key).fetch1('from_raw_data')
         data_name = (self.userinfo_table & key).fetch1('data_stack_name'
@@ -93,7 +100,7 @@ class LightArtifactTemplate(dj.Computed):
 
         self.insert1(dict(key, light_artifact=average, triggertimes_rel=triggertimes_rel))
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict = None) -> None:
         key = get_primary_key(self, key=key)
         light_artifact = (self & key).fetch1('light_artifact')
         line_duration = (self.presentation_table.ScanInfo & key).fetch('line_duration')

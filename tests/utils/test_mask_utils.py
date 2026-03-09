@@ -1,3 +1,5 @@
+import os
+
 from djimaging.utils.mask_utils import to_roi_mask_file
 
 
@@ -7,7 +9,7 @@ def test_to_roi_mask_file_unchanged():
         data_file, old_suffix=None, new_suffix='_ROIs.pkl',
         roi_mask_dir=None, old_prefix=None, new_prefix=None)
 
-    assert roi_mask_file == '/Users/someone/Data/Pre/recording_ROIs.pkl'
+    assert os.path.normpath(roi_mask_file) == os.path.normpath('/Users/someone/Data/Pre/recording_ROIs.pkl')
 
 
 def test_to_roi_mask_file_change_dir():
@@ -16,7 +18,7 @@ def test_to_roi_mask_file_change_dir():
         data_file, old_suffix=None, new_suffix='_ROIs.pkl',
         roi_mask_dir='RoiMask', old_prefix=None, new_prefix=None)
 
-    assert roi_mask_file == '/Users/someone/Data/RoiMask/recording_ROIs.pkl'
+    assert os.path.normpath(roi_mask_file) == os.path.normpath('/Users/someone/Data/RoiMask/recording_ROIs.pkl')
 
 
 def test_to_roi_mask_file_rm_prefix():
@@ -25,4 +27,4 @@ def test_to_roi_mask_file_rm_prefix():
         data_file, old_suffix=None, new_suffix='_ROIs.pkl',
         roi_mask_dir='RoiMask', old_prefix='SMP_', new_prefix=None)
 
-    assert roi_mask_file == '/Users/someone/Data/RoiMask/recording_ROIs.pkl'
+    assert os.path.normpath(roi_mask_file) == os.path.normpath('/Users/someone/Data/RoiMask/recording_ROIs.pkl')

@@ -14,8 +14,22 @@ from djimaging.utils.import_helpers import extract_class_info, load_class
 Key = Dict[str, Any]
 
 
-def prepare_dj_config_rgc_classifier(output_folder,
-                                     input_folder="/gpfs01/euler/data/Resources/Classifier/rgc_classifier_v1"):
+def prepare_dj_config_rgc_classifier(
+        output_folder: str,
+        input_folder: str = "/gpfs01/euler/data/Resources/Classifier/rgc_classifier_v1",
+) -> None:
+    """Configure DataJoint file stores for the RGC classifier.
+
+    Sets up the ``classifier_input`` and ``classifier_output`` stores in
+    ``dj.config['stores']`` and enables filepath management and native blobs.
+
+    Args:
+        output_folder: Path to the directory where classifier output files will be stored.
+        input_folder: Path to the directory containing pre-trained classifier input files.
+
+    Raises:
+        AssertionError: If ``input_folder`` or ``output_folder`` do not exist on the filesystem.
+    """
     stores_dict = {
         "classifier_input": {"protocol": "file", "location": input_folder, "stage": input_folder},
         "classifier_output": {"protocol": "file", "location": output_folder, "stage": output_folder},
@@ -40,7 +54,7 @@ class ClassifierTrainingDataTemplate(dj.Manual):
     _store = "classifier_input"
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = """
         # holds feature basis and training data for classifier
         training_data_hash     :   varchar(63)     # hash of the classifier training data files
@@ -52,7 +66,12 @@ class ClassifierTrainingDataTemplate(dj.Manual):
         """.format(store=self._store)
         return definition
 
-    def add_default(self, skip_duplicates=False):
+    def add_default(self, skip_duplicates: bool = False) -> None:
+        """Insert the default training data entry using paths from ``dj.config['stores']``.
+
+        Args:
+            skip_duplicates: If ``True``, silently ignore duplicate entries.
+        """
         ipath = dj.config['stores']["classifier_input"]["location"] + '/'
         opath = dj.config['stores']["classifier_output"]["location"] + '/'
 
@@ -75,7 +94,21 @@ class ClassifierTrainingDataTemplate(dj.Manual):
         key["training_data_hash"] = make_hash(key)
         self.insert1(key, skip_duplicates=skip_duplicates)
 
-    def get_training_data(self, key: Key):
+    def get_training_data(self, key: Key) -> tuple:
+        """Fetch and assemble the feature matrix plus label arrays for the given key.
+
+        Loads the Baden reference data and feature bases from file, projects the
+        reference chirp and bar traces onto those bases, and returns the resulting
+        feature matrix together with cluster, group, and supergroup labels.
+
+        Args:
+            key: DataJoint key dictionary containing at least ``training_data_hash``.
+
+        Returns:
+            A tuple ``(features, b_c_labels, b_g_labels, b_s_labels)`` where
+            ``features`` is an ``np.ndarray`` of shape ``(n_cells, n_features)``
+            and the label arrays are 1-D ``np.ndarray`` objects.
+        """
         baden_data_file, chirp_feats_file, bar_feats_file = (self & key).fetch1(
             'baden_data_file', 'chirp_feats_file', 'bar_feats_file')
 
@@ -100,7 +133,7 @@ class ClassifierMethodTemplate(dj.Lookup):
     database = ""
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = """
         classifier_params_hash  : varchar(63)     # hash of the classifier params config
         ---
@@ -116,10 +149,17 @@ class ClassifierMethodTemplate(dj.Lookup):
 
     @property
     @abstractmethod
-    def classifier_training_data_table(self):
+    def classifier_training_data_table(self) -> dj.Manual:
         pass
 
-    def add_default(self, label_kind='group', skip_duplicates=False):
+    def add_default(self, label_kind: str = 'group', skip_duplicates: bool = False) -> None:
+        """Insert the default Random Forest classifier entry.
+
+        Args:
+            label_kind: Label granularity to predict; one of ``'cluster'``, ``'group'``,
+                or ``'super'``.
+            skip_duplicates: If ``True``, silently ignore duplicate entries.
+        """
         classifier_fn = "sklearn.ensemble.RandomForestClassifier"
         classifier_config = {
             'class_weight': 'balanced',
@@ -166,7 +206,20 @@ class ClassifierMethodTemplate(dj.Lookup):
                 comment=comment),
             skip_duplicates=skip_duplicates)
 
-    def train_classifier(self, key: Key):
+    def train_classifier(self, key: Key) -> tuple:
+        """Train a classifier for the given key and return it together with evaluation scores.
+
+        Loads training data, splits it into train/test sets, fits the classifier, evaluates
+        it, then refits on all data before returning.
+
+        Args:
+            key: DataJoint key dictionary containing at least ``classifier_params_hash``
+                and ``training_data_hash``.
+
+        Returns:
+            A tuple ``(classifier, score_train, score_test, score_final)`` where the scores
+            are floats between 0 and 1.
+        """
         from sklearn.model_selection import train_test_split
 
         label_kind, classifier_fn, classifier_config, classifier_seed = \
@@ -217,9 +270,9 @@ class ClassifierTemplate(dj.Computed):
     store = "classifier_output"
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = """
-        -> self.classifier_training_data_table 
+        -> self.classifier_training_data_table
         -> self.classifier_method_table
         ---
         classifier_file         :   attach@{store}
@@ -231,6 +284,7 @@ class ClassifierTemplate(dj.Computed):
 
     @property
     def key_source(self):
+        """Return the key source combining method and training-data table projections."""
         try:
             return self.classifier_method_table.proj() * self.classifier_training_data_table().proj()
         except (AttributeError, TypeError):
@@ -238,15 +292,20 @@ class ClassifierTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def classifier_training_data_table(self):
+    def classifier_training_data_table(self) -> dj.Manual:
         pass
 
     @property
     @abstractmethod
-    def classifier_method_table(self):
+    def classifier_method_table(self) -> dj.Lookup:
         pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Train the classifier for the given key, save it to disk, and insert the result.
+
+        Args:
+            key: DataJoint key dictionary identifying the training data and method to use.
+        """
         output_path = (self.classifier_training_data_table() & key).fetch1("output_path")
         classifier_file = os.path.join(output_path, f'rgc_classifier_{key["classifier_params_hash"]}.pkl')
         classifier, score_train, score_test, score_final = self.classifier_method_table().train_classifier(key)

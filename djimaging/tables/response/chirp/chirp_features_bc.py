@@ -82,7 +82,23 @@ class ChirpFeaturesBcTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def compute_entry(self, key, plot=False):
+    def compute_entry(self, key: dict, plot: bool = False) -> tuple:
+        """Compute Chirp BC feature indices for the given key.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        plot : bool, optional
+            If True, create diagnostic plots. Default is False.
+
+        Returns
+        -------
+        tuple
+            Tuple of (polarity_index, high_frequency_index, transience_index,
+            plateau_index, tonic_release_index, l_freq_response, h_freq_response,
+            lh_freq_index, l_contrast_response, h_contrast_response, lh_contrast_index).
+        """
         try:
             # Deprecated
             snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
@@ -144,7 +160,20 @@ class ChirpFeaturesBcTemplate(dj.Computed):
                 l_freq_response, h_freq_response, lh_freq_index,
                 l_contrast_response, h_contrast_response, lh_contrast_index)
 
-    def make(self, key, plot=False):
+    def make(self, key: dict, plot: bool = False) -> None:
+        """Compute and insert Chirp BC features into the table.
+
+        Computes polarity index, high frequency index, transience index, plateau index,
+        tonic release index, and frequency/contrast response metrics from chirp snippets,
+        then inserts the result into the table.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to populate.
+        plot : bool, optional
+            If True, create diagnostic plots during computation. Default is False.
+        """
         (polarity_index, high_frequency_index, transience_index, plateau_index, tonic_release_index,
          l_freq_response, h_freq_response, lh_freq_index,
          l_contrast_response, h_contrast_response, lh_contrast_index,
@@ -165,25 +194,46 @@ class ChirpFeaturesBcTemplate(dj.Computed):
             lh_contrast_index=lh_contrast_index,
         ))
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict | None = None) -> None:
+        """Plot diagnostic figures for the given key.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint primary key. If None, uses the first available key.
+        """
         key = get_primary_key(table=self, key=key)
         self.compute_entry(key, plot=True)
 
 
-def compute_high_frequency_index(snippets, fs, constant=1e4, plot=None):
-    """
-    Calculate the High Frequency Index (HFi) from Baden et al. 2013 and Franke et al. 2017.
+def compute_high_frequency_index(
+        snippets: np.ndarray,
+        fs: float,
+        constant: float = 1e4,
+        plot: plt.Axes | bool | None = None,
+) -> float:
+    """Calculate the High Frequency Index (HFi) from Baden et al. 2013 and Franke et al. 2017.
+
     This metric is invariant to linear transformations of the signal.
 
     Note: In the paper the ratio is flipped in the equation which is probably a typo.
 
+    Parameters
+    ----------
+    snippets : np.ndarray
+        A 2D (time x trial) array of response snippets.
+    fs : float
+        Sampling rate of the data in Hz.
+    constant : float, optional
+        A constant to scale the HFi before taking the log. Default is 1e4.
+    plot : matplotlib.axes.Axes or bool or None, optional
+        If a matplotlib Axes instance, plot into it. If True, create a new figure.
+        If None or False, no plot is produced. Default is None.
 
-    :param snippets: A 2d (time X trial) numpy array
-    :param fs: Sampling rate of the data in Hz.
-    :param constant: A constant to scale the HFi before taking the log.
-    :param plot: If True, plot the average trace and the frequency bands.
-
-    :return: High Frequency Index (HFi) for each ROI.
+    Returns
+    -------
+    float
+        High Frequency Index (HFi).
     """
 
     # Determine the number of points corresponding to the first 6 seconds
@@ -219,20 +269,38 @@ def compute_high_frequency_index(snippets, fs, constant=1e4, plot=None):
     return high_frequency_index
 
 
-def compute_polarity_index(average, fs, alpha=2, t_on_step=2, t_off_step=5, plot=None):
-    """
-    Calculate the polarity index (POi) from Franke et al. 2017.
+def compute_polarity_index(
+        average: np.ndarray,
+        fs: float,
+        alpha: float = 2,
+        t_on_step: float = 2,
+        t_off_step: float = 5,
+        plot: plt.Axes | bool | None = None,
+) -> float:
+    """Calculate the polarity index (POi) from Franke et al. 2017.
 
     Note: In the paper it's not clear how they treated negative values, we clip them to zero.
 
-    :param average: A 1d numpy array of trace
-    :param fs: Sampling rate of the data in Hz.
-    :param alpha: Duration of the response window in seconds.
-    :param t_on_step: Time of the on-step of the stimulus in seconds.
-    :param t_off_step: Time of the off-step of the stimulus in seconds.
-    :param plot: If True, plot the average trace and the response window.
+    Parameters
+    ----------
+    average : np.ndarray
+        A 1D array of the average response trace.
+    fs : float
+        Sampling rate of the data in Hz.
+    alpha : float, optional
+        Duration of the response window in seconds. Default is 2.
+    t_on_step : float, optional
+        Time of the on-step of the stimulus in seconds. Default is 2.
+    t_off_step : float, optional
+        Time of the off-step of the stimulus in seconds. Default is 5.
+    plot : matplotlib.axes.Axes or bool or None, optional
+        If a matplotlib Axes instance, plot into it. If True, create a new figure.
+        If None or False, no plot is produced. Default is None.
 
-    :return: Polarity index (POi) for each ROI.
+    Returns
+    -------
+    float
+        Polarity index (POi).
     """
 
     idx_on_start = int(np.floor(t_on_step * fs))
@@ -265,20 +333,51 @@ def compute_polarity_index(average, fs, alpha=2, t_on_step=2, t_off_step=5, plot
     return polarity_index
 
 
-def compute_peak_to_post_peak_ratio(average, fs, alpha, alpha_dt, t_on_step=2, t_max=6, invert=False,
-                                    plot=None, title=""):
-    """
-    :param average: A 1d numpy array of trace
-    :param fs: Sampling rate of the data in Hz.
-    :param alpha: Duration of the response delay in seconds.
-    :param alpha_dt: Plus-minus response window in seconds.
-    :param t_on_step: Time of the on-step of the stimulus in seconds.
-    :param t_max: Time of the offset of the response window in seconds.
-    :param invert: If True, use "1 - ratio" instead of "ratio"
-    :param plot: If True, plot the average trace and the response window.
-    :param title: Title of the plot.
+def compute_peak_to_post_peak_ratio(
+        average: np.ndarray,
+        fs: float,
+        alpha: float,
+        alpha_dt: float,
+        t_on_step: float = 2,
+        t_max: float = 6,
+        invert: bool = False,
+        plot: plt.Axes | bool | None = None,
+        title: str = "",
+) -> float:
+    """Compute the ratio of post-peak response to peak response.
 
-    :return: ratio = Post-Peak-Response / Peak-Response. (see also invert)
+    Parameters
+    ----------
+    average : np.ndarray
+        A 1D array of the average response trace.
+    fs : float
+        Sampling rate of the data in Hz.
+    alpha : float
+        Duration of the response delay in seconds.
+    alpha_dt : float
+        Plus-minus response window in seconds. Must be less than alpha.
+    t_on_step : float, optional
+        Time of the on-step of the stimulus in seconds. Default is 2.
+    t_max : float, optional
+        Time of the offset of the response window in seconds. Default is 6.
+    invert : bool, optional
+        If True, return ``1 - ratio`` instead of ``ratio``. Default is False.
+    plot : matplotlib.axes.Axes or bool or None, optional
+        If a matplotlib Axes instance, plot into it. If True, create a new figure.
+        If None or False, no plot is produced. Default is None.
+    title : str, optional
+        Title of the plot. Default is "".
+
+    Returns
+    -------
+    float
+        Ratio of post-peak response to peak response (or 1 - ratio if invert is True).
+        Returns -1 if the peak response is non-positive.
+
+    Raises
+    ------
+    ValueError
+        If alpha_dt is not smaller than alpha.
     """
     if alpha_dt >= alpha:
         raise ValueError(f"alpha_dt must be smaller than alpha, but is {alpha_dt} >= {alpha}")
@@ -323,21 +422,41 @@ def compute_peak_to_post_peak_ratio(average, fs, alpha, alpha_dt, t_on_step=2, t
     return response_index
 
 
-def compute_transience_index(average, fs, alpha=0.4, alpha_dt=0.15, t_on_step=2, t_max=6, plot=None):
-    """
-    Calculate the response transience index (RTi) from Franke et al. 2017.
+def compute_transience_index(
+        average: np.ndarray,
+        fs: float,
+        alpha: float = 0.4,
+        alpha_dt: float = 0.15,
+        t_on_step: float = 2,
+        t_max: float = 6,
+        plot: plt.Axes | bool | None = None,
+) -> float:
+    """Calculate the response transience index (RTi) from Franke et al. 2017.
 
     Note: In the paper it's not clear how they treated negative values.
 
-    :param average: A 1d numpy array of trace
-    :param fs: Sampling rate of the data in Hz.
-    :param alpha: Duration of the response delay in seconds.
-    :param alpha_dt: Plus-minus response window in seconds.
-    :param t_on_step: Time of the on-step of the stimulus in seconds.
-    :param t_max: Time of the offset of the response window in seconds.
-    :param plot: If True, plot the average trace and the response window.
+    Parameters
+    ----------
+    average : np.ndarray
+        A 1D array of the average response trace.
+    fs : float
+        Sampling rate of the data in Hz.
+    alpha : float, optional
+        Duration of the response delay in seconds. Default is 0.4.
+    alpha_dt : float, optional
+        Plus-minus response window in seconds. Default is 0.15.
+    t_on_step : float, optional
+        Time of the on-step of the stimulus in seconds. Default is 2.
+    t_max : float, optional
+        Time of the offset of the response window in seconds. Default is 6.
+    plot : matplotlib.axes.Axes or bool or None, optional
+        If a matplotlib Axes instance, plot into it. If True, create a new figure.
+        If None or False, no plot is produced. Default is None.
 
-    :return: Response transience index (RTi).
+    Returns
+    -------
+    float
+        Response transience index (RTi).
     """
 
     rti = compute_peak_to_post_peak_ratio(
@@ -346,22 +465,42 @@ def compute_transience_index(average, fs, alpha=0.4, alpha_dt=0.15, t_on_step=2,
     return rti
 
 
-def compute_plateau_index(average, fs, alpha=2., alpha_dt=0.15, t_on_step=2, t_max=6, plot=None):
-    """
-    Calculate the response plateau index (RPi) from Franke et al. 2017.
+def compute_plateau_index(
+        average: np.ndarray,
+        fs: float,
+        alpha: float = 2.,
+        alpha_dt: float = 0.15,
+        t_on_step: float = 2,
+        t_max: float = 6,
+        plot: plt.Axes | bool | None = None,
+) -> float:
+    """Calculate the response plateau index (RPi) from Franke et al. 2017.
 
     Note 1: The sign is as in the figure, but not as in the equation of Franke et al.
     Note 2: In the paper it's not clear how they treated negative values.
 
-    :param average: A 1d numpy array of trace
-    :param fs: Sampling rate of the data in Hz.
-    :param alpha: Duration of the response delay in seconds.
-    :param alpha_dt: Plus-minus response window in seconds.
-    :param t_on_step: Time of the on-step of the stimulus in seconds.
-    :param t_max: Time of the offset of the response window in seconds.
-    :param plot: If True, plot the average trace and the response window.
+    Parameters
+    ----------
+    average : np.ndarray
+        A 1D array of the average response trace.
+    fs : float
+        Sampling rate of the data in Hz.
+    alpha : float, optional
+        Duration of the response delay in seconds. Default is 2.0.
+    alpha_dt : float, optional
+        Plus-minus response window in seconds. Default is 0.15.
+    t_on_step : float, optional
+        Time of the on-step of the stimulus in seconds. Default is 2.
+    t_max : float, optional
+        Time of the offset of the response window in seconds. Default is 6.
+    plot : matplotlib.axes.Axes or bool or None, optional
+        If a matplotlib Axes instance, plot into it. If True, create a new figure.
+        If None or False, no plot is produced. Default is None.
 
-    :return: Response plateau index (RPi).
+    Returns
+    -------
+    float
+        Response plateau index (RPi).
     """
     rpi = compute_peak_to_post_peak_ratio(
         average=average, fs=fs, alpha=alpha, alpha_dt=alpha_dt,
@@ -369,18 +508,36 @@ def compute_plateau_index(average, fs, alpha=2., alpha_dt=0.15, t_on_step=2, t_m
     return rpi
 
 
-def compute_tonic_release_index(average, fs, t_flicker_start=10, t_flicker_end=29, dt_baseline=1, plot=None):
-    """
-    Calculate the tonic release index (TRi) from Franke et al. 2017.
+def compute_tonic_release_index(
+        average: np.ndarray,
+        fs: float,
+        t_flicker_start: float = 10,
+        t_flicker_end: float = 29,
+        dt_baseline: float = 1,
+        plot: plt.Axes | bool | None = None,
+) -> float:
+    """Calculate the tonic release index (TRi) from Franke et al. 2017.
 
-    :param average: A 1d numpy array of trace
-    :param fs: Sampling rate of the data in Hz.
-    :param t_flicker_start: Time of the onset of the flicker in seconds.
-    :param t_flicker_end: Time of the offset of the flicker in seconds.
-    :param dt_baseline: Duration of the baseline window in seconds.
-    :param plot: If True, plot the average trace and the response window.
+    Parameters
+    ----------
+    average : np.ndarray
+        A 1D array of the average response trace.
+    fs : float
+        Sampling rate of the data in Hz.
+    t_flicker_start : float, optional
+        Time of the onset of the flicker in seconds. Default is 10.
+    t_flicker_end : float, optional
+        Time of the offset of the flicker in seconds. Default is 29.
+    dt_baseline : float, optional
+        Duration of the baseline window before flicker onset in seconds. Default is 1.
+    plot : matplotlib.axes.Axes or bool or None, optional
+        If a matplotlib Axes instance, plot into it. If True, create a new figure.
+        If None or False, no plot is produced. Default is None.
 
-    :return: Tonic release index (TRi).
+    Returns
+    -------
+    float
+        Tonic release index (TRi).
     """
 
     idx_baseline_flicker_start = int(fs * (t_flicker_start - dt_baseline))
@@ -419,17 +576,34 @@ def compute_tonic_release_index(average, fs, t_flicker_start=10, t_flicker_end=2
     return tonic_release_index
 
 
-def compute_freq_response(average, fs, t_flicker_start=10, t_flicker_pause=18, plot=None):  # changed from 17 to 18
-    """
-    Calculate the low and high frequency response and the ratio of high to low frequency response.
+def compute_freq_response(
+        average: np.ndarray,
+        fs: float,
+        t_flicker_start: float = 10,
+        t_flicker_pause: float = 18,
+        plot: plt.Axes | bool | None = None,
+) -> tuple:  # changed from 17 to 18
+    """Calculate the low and high frequency response and the ratio of high to low frequency response.
 
-    :param average: A 1d numpy array of trace
-    :param fs: Sampling rate of the data in Hz.
-    :param t_flicker_start: Time of the onset of the flicker in seconds.
-    :param t_flicker_pause: Time of the pause of the flicker in seconds.
-    :param plot: If True, plot the average trace and the response window.
+    Parameters
+    ----------
+    average : np.ndarray
+        A 1D array of the average response trace.
+    fs : float
+        Sampling rate of the data in Hz.
+    t_flicker_start : float, optional
+        Time of the onset of the flicker in seconds. Default is 10.
+    t_flicker_pause : float, optional
+        Time of the pause of the flicker in seconds. Default is 18.
+    plot : matplotlib.axes.Axes or bool or None, optional
+        If a matplotlib Axes instance, plot into it. If True, create a new figure.
+        If None or False, no plot is produced. Default is None.
 
-    :return: Low frequency response, high frequency response, ratio of high to low frequency response.
+    Returns
+    -------
+    tuple
+        Tuple of (low_freq_response, high_freq_response, lh_freq_index) where
+        lh_freq_index is the normalized ratio (high - low) / max(|high| + |low|).
     """
 
     idx_l_start = int(fs * t_flicker_start)
@@ -477,17 +651,34 @@ def compute_freq_response(average, fs, t_flicker_start=10, t_flicker_pause=18, p
     return low_freq_response, high_freq_response, lh_freq_index
 
 
-def compute_contrast_response_ratio(average, fs, t_contrast_start=20, t_contrast_end=28, plot=None):
-    """
-    Calculate the low and high contrast response and the ratio of high to low contrast response.
+def compute_contrast_response_ratio(
+        average: np.ndarray,
+        fs: float,
+        t_contrast_start: float = 20,
+        t_contrast_end: float = 28,
+        plot: plt.Axes | bool | None = None,
+) -> tuple:
+    """Calculate the low and high contrast response and the ratio of high to low contrast response.
 
-    :param average: A 1d numpy array of trace
-    :param fs: Sampling rate of the data in Hz.
-    :param t_contrast_start: Time of the onset of the flicker in seconds.
-    :param t_contrast_end: Time of the pause of the flicker in seconds.
-    :param plot: If True, plot the average trace and the response window.
+    Parameters
+    ----------
+    average : np.ndarray
+        A 1D array of the average response trace.
+    fs : float
+        Sampling rate of the data in Hz.
+    t_contrast_start : float, optional
+        Time of the onset of the contrast ramp in seconds. Default is 20.
+    t_contrast_end : float, optional
+        Time of the end of the contrast ramp in seconds. Default is 28.
+    plot : matplotlib.axes.Axes or bool or None, optional
+        If a matplotlib Axes instance, plot into it. If True, create a new figure.
+        If None or False, no plot is produced. Default is None.
 
-    :return: Low contrast response, high contrast response, ratio of high to low contrast response.
+    Returns
+    -------
+    tuple
+        Tuple of (low_contrast_response, high_contrast_response, lh_contrast_index) where
+        lh_contrast_index is the normalized ratio (high - low) / max(|high| + |low|).
     """
 
     idx_l_contrast_start = int(fs * t_contrast_start)
@@ -535,7 +726,32 @@ def compute_contrast_response_ratio(average, fs, t_contrast_start=20, t_contrast
     return low_contrast_response, high_contrast_response, lh_contrast_index
 
 
-def compute_upsampled_average(snippets, snippets_times, triggertimes_snippets, f_resample=500):
+def compute_upsampled_average(
+        snippets: np.ndarray,
+        snippets_times: np.ndarray,
+        triggertimes_snippets: np.ndarray,
+        f_resample: float = 500,
+) -> tuple:
+    """Resample and average snippets at the given sampling frequency.
+
+    Parameters
+    ----------
+    snippets : np.ndarray
+        2D array of response snippets with shape (time, trials).
+    snippets_times : np.ndarray
+        2D array of timestamps for each snippet with shape (time, trials).
+    triggertimes_snippets : np.ndarray
+        2D array of trigger times for each snippet with shape (n_triggers, trials).
+    f_resample : float, optional
+        Target sampling frequency in Hz. Default is 500.
+
+    Returns
+    -------
+    tuple
+        Tuple of (average, average_times, snippets_resampled) where average is the
+        mean across trials, average_times is the time axis, and snippets_resampled
+        contains all resampled trials.
+    """
     dt = 1 / f_resample
     stim_dur = np.median(np.diff(triggertimes_snippets[0]))
     resampled_n = int(np.ceil(stim_dur * f_resample))

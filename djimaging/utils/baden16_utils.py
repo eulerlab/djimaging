@@ -133,7 +133,30 @@ BADEN_GROUP_ID_NAMES = {
 
 
 @lru_cache(maxsize=None)
-def load_baden_data(baden_data_file, quality_filter=True):
+def load_baden_data(
+        baden_data_file: str,
+        quality_filter: bool = True,
+) -> tuple:
+    """Load and preprocess Baden et al. 2016 retinal ganglion cell dataset.
+
+    Results are cached after the first call (LRU cache with no size limit).
+
+    Parameters
+    ----------
+    baden_data_file : str
+        Path to the MATLAB ``.mat`` data file containing the Baden dataset.
+    quality_filter : bool, optional
+        If True (default), only cells passing the quality index thresholds
+        (chirp QI > 0.45 or bar QI > 0.6) and with a valid cluster label are
+        returned.
+
+    Returns
+    -------
+    tuple
+        A tuple of arrays ``(cluster_labels, group_labels, super_labels,
+        chirp_traces, chirp_qi, bar_traces, bar_qi, bar_dsi, bar_dp,
+        roi_size_um2)``, each filtered according to `quality_filter`.
+    """
     from scipy.io import loadmat
     baden_data = loadmat(baden_data_file, struct_as_record=True, matlab_compatible=False,
                          squeeze_me=True, simplify_cells=True)['data']
@@ -164,7 +187,19 @@ def load_baden_data(baden_data_file, quality_filter=True):
     )
 
 
-def baden_cluster_id_to_cluster_name(cluster_id):
+def baden_cluster_id_to_cluster_name(cluster_id: int) -> str:
+    """Convert a Baden cluster ID to its cluster name string.
+
+    Parameters
+    ----------
+    cluster_id : int
+        Cluster identifier (1–75). Values outside this range return ``'Unknown'``.
+
+    Returns
+    -------
+    str
+        Cluster name (e.g. ``'4a'``) or ``'Unknown'`` if the ID is out of range.
+    """
     cluster_id = int(cluster_id)
     if cluster_id < 1 or cluster_id > 75:
         return 'Unknown'
@@ -174,7 +209,19 @@ def baden_cluster_id_to_cluster_name(cluster_id):
     return cluster_names[i]
 
 
-def baden_cluster_name_to_cluster_id(cluster_name):
+def baden_cluster_name_to_cluster_id(cluster_name: str) -> int:
+    """Convert a Baden cluster name string to its integer cluster ID.
+
+    Parameters
+    ----------
+    cluster_name : str
+        Cluster name (e.g. ``'4a'``). The string ``'Unknown'`` returns ``-1``.
+
+    Returns
+    -------
+    int
+        Integer cluster ID, or ``-1`` if `cluster_name` is ``'Unknown'``.
+    """
     cluster_name = str(cluster_name)
     if cluster_name == 'Unknown':
         return -1
@@ -184,7 +231,19 @@ def baden_cluster_name_to_cluster_id(cluster_name):
     return cluster_ids[i]
 
 
-def baden_cluster_id_to_group_id(cluster_id):
+def baden_cluster_id_to_group_id(cluster_id: int) -> int:
+    """Map a Baden cluster ID to its group ID.
+
+    Parameters
+    ----------
+    cluster_id : int
+        Cluster identifier (1–75). Values outside this range return ``-1``.
+
+    Returns
+    -------
+    int
+        Group ID corresponding to the cluster, or ``-1`` if out of range.
+    """
     cluster_id = int(cluster_id)
     if cluster_id < 1 or cluster_id > 75:
         return -1
@@ -194,7 +253,19 @@ def baden_cluster_id_to_group_id(cluster_id):
     return group_ids[i]
 
 
-def baden_cluster_id_to_supergroup(cluster_id):
+def baden_cluster_id_to_supergroup(cluster_id: int) -> str:
+    """Map a Baden cluster ID to its supergroup label.
+
+    Parameters
+    ----------
+    cluster_id : int
+        Cluster identifier (1–75). Values outside this range return ``'Unknown'``.
+
+    Returns
+    -------
+    str
+        Supergroup name (e.g. ``'OFF'``, ``'Fast ON'``) or ``'Unknown'``.
+    """
     cluster_id = int(cluster_id)
     if cluster_id < 1 or cluster_id > 75:
         return 'Unknown'
@@ -204,7 +275,19 @@ def baden_cluster_id_to_supergroup(cluster_id):
     return supergroups[i]
 
 
-def baden_group_id_to_supergroup(group_id):
+def baden_group_id_to_supergroup(group_id: int) -> str:
+    """Map a Baden group ID to its supergroup label.
+
+    Parameters
+    ----------
+    group_id : int
+        Group identifier (1–46). Values outside this range return ``'Unknown'``.
+
+    Returns
+    -------
+    str
+        Supergroup name (e.g. ``'OFF'``, ``'Slow ON'``) or ``'Unknown'``.
+    """
     group_id = int(group_id)
     if group_id < 1 or group_id > 46:
         return 'Unknown'
@@ -214,7 +297,21 @@ def baden_group_id_to_supergroup(group_id):
     return supergroups[i]
 
 
-def baden_group_id_to_group_name(group_id, shorten=False):
+def baden_group_id_to_group_name(group_id: int, shorten: bool = False) -> str:
+    """Map a Baden group ID to its descriptive group name.
+
+    Parameters
+    ----------
+    group_id : int
+        Group identifier (1–46). Values outside this range return ``'Unknown'``.
+    shorten : bool, optional
+        If True, common words in the name are abbreviated. Default is False.
+
+    Returns
+    -------
+    str
+        Full (or shortened) group name, or ``'Unknown'`` if out of range.
+    """
     group_id = int(group_id)
     if group_id < 1 or group_id > 46:
         return 'Unknown'
@@ -224,7 +321,19 @@ def baden_group_id_to_group_name(group_id, shorten=False):
     return group_name
 
 
-def shorten_baden_name(name):
+def shorten_baden_name(name: str) -> str:
+    """Replace common long words in a Baden group name with abbreviations.
+
+    Parameters
+    ----------
+    name : str
+        Full Baden group name.
+
+    Returns
+    -------
+    str
+        Abbreviated version of the name.
+    """
     name = name.replace('frequency', 'freq.')
     name = name.replace('sustained', 'sus.')
     name = name.replace('transient', 'trans.')

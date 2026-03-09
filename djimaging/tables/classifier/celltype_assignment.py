@@ -12,7 +12,28 @@ from djimaging.utils.baden16_utils import load_baden_data
 from djimaging.utils.dj_utils import merge_keys
 
 
-def extract_feature(preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2, chirp_features, bar_features):
+def extract_feature(
+        preproc_chirp: np.ndarray,
+        preproc_bar: np.ndarray,
+        bar_ds_pvalue: float,
+        roi_size_um2: float,
+        chirp_features: np.ndarray,
+        bar_features: np.ndarray,
+) -> np.ndarray:
+    """Extract a feature vector for a single cell by projecting traces onto feature bases.
+
+    Args:
+        preproc_chirp: Preprocessed chirp trace for one cell.
+        preproc_bar: Preprocessed bar trace for one cell.
+        bar_ds_pvalue: Direction-selectivity p-value from the bar stimulus.
+        roi_size_um2: ROI area in square micrometres.
+        chirp_features: Feature basis matrix for the chirp stimulus.
+        bar_features: Feature basis matrix for the bar stimulus.
+
+    Returns:
+        Concatenated feature vector combining chirp projections, bar projections,
+        the DS p-value and ROI size.
+    """
     feature_activation_chirp = np.dot(preproc_chirp, chirp_features)
     feature_activation_bar = np.dot(preproc_bar, bar_features)
 
@@ -22,7 +43,27 @@ def extract_feature(preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2, chi
     return feature
 
 
-def extract_features(preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, chirp_features, bar_features):
+def extract_features(
+        preproc_chirps: np.ndarray,
+        preproc_bars: np.ndarray,
+        bar_ds_pvalues: np.ndarray,
+        roi_size_um2s: np.ndarray,
+        chirp_features: np.ndarray,
+        bar_features: np.ndarray,
+) -> np.ndarray:
+    """Extract feature vectors for multiple cells by projecting traces onto feature bases.
+
+    Args:
+        preproc_chirps: Preprocessed chirp traces, shape ``(n_cells, n_chirp_timepoints)``.
+        preproc_bars: Preprocessed bar traces, shape ``(n_cells, n_bar_timepoints)``.
+        bar_ds_pvalues: Direction-selectivity p-values for each cell, shape ``(n_cells,)``.
+        roi_size_um2s: ROI areas in square micrometres for each cell, shape ``(n_cells,)``.
+        chirp_features: Feature basis matrix for the chirp stimulus.
+        bar_features: Feature basis matrix for the bar stimulus.
+
+    Returns:
+        Feature matrix of shape ``(n_cells, n_features)``.
+    """
     features = np.concatenate([
         np.dot(preproc_chirps, chirp_features),
         np.dot(preproc_bars, bar_features),
@@ -33,8 +74,30 @@ def extract_features(preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s
     return features
 
 
-def classify_cell(preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2,
-                  chirp_features, bar_features, classifier):
+def classify_cell(
+        preproc_chirp: np.ndarray,
+        preproc_bar: np.ndarray,
+        bar_ds_pvalue: float,
+        roi_size_um2: float,
+        chirp_features: np.ndarray,
+        bar_features: np.ndarray,
+        classifier,
+) -> tuple:
+    """Classify a single cell and return its predicted label and confidence scores.
+
+    Args:
+        preproc_chirp: Preprocessed chirp trace for one cell.
+        preproc_bar: Preprocessed bar trace for one cell.
+        bar_ds_pvalue: Direction-selectivity p-value from the bar stimulus.
+        roi_size_um2: ROI area in square micrometres.
+        chirp_features: Feature basis matrix for the chirp stimulus.
+        bar_features: Feature basis matrix for the bar stimulus.
+        classifier: Trained scikit-learn classifier with ``predict_proba`` and ``classes_``.
+
+    Returns:
+        A tuple ``(cell_label, confidence_scores)`` where ``cell_label`` is the predicted
+        class and ``confidence_scores`` is the array of per-class probabilities.
+    """
     feature = extract_feature(
         preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2, chirp_features, bar_features)
     confidence_scores = classifier.predict_proba(feature[np.newaxis, :]).flatten()
@@ -43,8 +106,31 @@ def classify_cell(preproc_chirp, preproc_bar, bar_ds_pvalue, roi_size_um2,
     return cell_label, confidence_scores
 
 
-def classify_cells(preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s,
-                   chirp_features, bar_features, classifier):
+def classify_cells(
+        preproc_chirps: np.ndarray,
+        preproc_bars: np.ndarray,
+        bar_ds_pvalues: np.ndarray,
+        roi_size_um2s: np.ndarray,
+        chirp_features: np.ndarray,
+        bar_features: np.ndarray,
+        classifier,
+) -> tuple:
+    """Classify multiple cells and return their predicted labels and confidence scores.
+
+    Args:
+        preproc_chirps: Preprocessed chirp traces, shape ``(n_cells, n_chirp_timepoints)``.
+        preproc_bars: Preprocessed bar traces, shape ``(n_cells, n_bar_timepoints)``.
+        bar_ds_pvalues: Direction-selectivity p-values for each cell, shape ``(n_cells,)``.
+        roi_size_um2s: ROI areas in square micrometres for each cell, shape ``(n_cells,)``.
+        chirp_features: Feature basis matrix for the chirp stimulus.
+        bar_features: Feature basis matrix for the bar stimulus.
+        classifier: Trained scikit-learn classifier with ``predict_proba`` and ``classes_``.
+
+    Returns:
+        A tuple ``(cell_labels, confidence_scores)`` where ``cell_labels`` is an array of
+        predicted classes and ``confidence_scores`` is an array of per-class probabilities,
+        shape ``(n_cells, n_classes)``.
+    """
     features = extract_features(
         preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s, chirp_features, bar_features)
     confidence_scores = classifier.predict_proba(features)
@@ -57,7 +143,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
     database = ""
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = """
         # Feature-based cluster assignment of cells
         -> self.baden_trace_table
@@ -71,6 +157,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
     @property
     def key_source(self):
+        """Return the key source combining classifier and field table projections."""
         try:
             return self.classifier_table.proj() * self.field_table.proj()
         except (AttributeError, TypeError):
@@ -78,32 +165,32 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def classifier_training_data_table(self):
+    def classifier_training_data_table(self) -> dj.Manual:
         pass
 
     @property
     @abstractmethod
-    def classifier_table(self):
+    def classifier_table(self) -> dj.Computed:
         pass
 
     @property
     @abstractmethod
-    def os_ds_table(self):
+    def os_ds_table(self) -> dj.Computed:
         pass
 
     @property
     @abstractmethod
-    def roi_table(self):
+    def roi_table(self) -> dj.Manual:
         pass
 
     @property
     @abstractmethod
-    def baden_trace_table(self):
+    def baden_trace_table(self) -> dj.Computed:
         pass
 
     @property
     @abstractmethod
-    def field_table(self):
+    def field_table(self) -> dj.Manual:
         pass
 
     @property
@@ -130,30 +217,49 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
     @cached_property
     def classifier(self):
+        """Load and cache the trained classifier from its stored file path."""
         model_path = (self.classifier_table() & self.current_model_key).fetch1('classifier_file')
         with open(model_path, "rb") as f:
             model = pkl.load(f)
         return model
 
     @cached_property
-    def bar_features(self):
+    def bar_features(self) -> np.ndarray:
+        """Load and cache the bar feature basis matrix from its stored file path."""
         features_bar_file = (self.classifier_training_data_table() & self.current_model_key).fetch1(
             "bar_feats_file")
         features_bar = np.load(features_bar_file)
         return features_bar
 
     @cached_property
-    def chirp_features(self):
+    def chirp_features(self) -> np.ndarray:
+        """Load and cache the chirp feature basis matrix from its stored file path."""
         features_chirp_file = (self.classifier_training_data_table() & self.current_model_key).fetch1(
             "chirp_feats_file")
         features_chirp = np.load(features_chirp_file)
         return features_chirp
 
     def populate(
-            self, *restrictions, suppress_errors=False,
-            return_exception_objects=False, reserve_jobs=False, order="original", limit=None, max_calls=None,
-            display_progress=False, processes=1, make_kwargs=None,
-    ):
+            self, *restrictions, suppress_errors: bool = False,
+            return_exception_objects: bool = False, reserve_jobs: bool = False,
+            order: str = "original", limit=None, max_calls=None,
+            display_progress: bool = False, processes: int = 1, make_kwargs=None,
+    ) -> None:
+        """Populate the table, enforcing single-process execution.
+
+        Args:
+            *restrictions: DataJoint restrictions passed to the parent ``populate`` call.
+            suppress_errors: If True, suppress errors during population.
+            return_exception_objects: If True, return exception objects instead of raising.
+            reserve_jobs: If True, use the job reservation mechanism.
+            order: Population order, e.g. ``"original"`` or ``"random"``.
+            limit: Maximum number of keys to populate.
+            max_calls: Maximum number of ``make`` calls.
+            display_progress: If True, display a progress bar.
+            processes: Number of parallel processes. Values greater than 1 are not
+                supported and will emit a warning.
+            make_kwargs: Additional keyword arguments forwarded to ``make``.
+        """
         if processes > 1:
             warnings.warn('Parallel processing not implemented!')
         super().populate(
@@ -162,7 +268,12 @@ class CelltypeAssignmentTemplate(dj.Computed):
             reserve_jobs=reserve_jobs, order=order, limit=limit, max_calls=max_calls,
             display_progress=display_progress, processes=1, make_kwargs=make_kwargs)
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Classify all ROIs for the given key and insert results into the table.
+
+        Args:
+            key: DataJoint key dictionary identifying the classifier and field to process.
+        """
         roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = self._fetch_data(key)
 
         if roi_keys is None:
@@ -175,7 +286,17 @@ class CelltypeAssignmentTemplate(dj.Computed):
             self.insert1(dict(**merge_keys(key, roi_key), cell_label=cell_label,
                               confidence=confidence_scores_i, max_confidence=np.max(confidence_scores_i)))
 
-    def _fetch_data(self, key, restriction=None):
+    def _fetch_data(self, key: dict, restriction=None) -> tuple:
+        """Fetch preprocessed traces and metadata for the ROIs matching ``key``.
+
+        Args:
+            key: DataJoint key dictionary used to restrict the query.
+            restriction: Additional DataJoint restriction applied on top of ``key``.
+
+        Returns:
+            A tuple ``(roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s)``.
+            Returns ``(None, None, None, None, None)`` when no matching ROIs are found.
+        """
         if restriction is None:
             restriction = dict()
 
@@ -200,13 +321,38 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         return roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s
 
-    def _classify_cells(self, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s):
+    def _classify_cells(
+            self,
+            preproc_chirps: np.ndarray,
+            preproc_bars: np.ndarray,
+            bar_ds_pvalues: np.ndarray,
+            roi_size_um2s: np.ndarray,
+    ) -> tuple:
+        """Run the cached classifier on pre-fetched feature arrays.
+
+        Args:
+            preproc_chirps: Preprocessed chirp traces, shape ``(n_cells, n_timepoints)``.
+            preproc_bars: Preprocessed bar traces, shape ``(n_cells, n_timepoints)``.
+            bar_ds_pvalues: Direction-selectivity p-values, shape ``(n_cells,)``.
+            roi_size_um2s: ROI areas in square micrometres, shape ``(n_cells,)``.
+
+        Returns:
+            A tuple ``(cell_labels, confidence_scores)``.
+        """
         cell_labels, confidence_scores = classify_cells(
             preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s,
             self.chirp_features, self.bar_features, self.classifier)
         return cell_labels, confidence_scores
 
-    def plot(self, threshold_confidence: float, classifier_level: str):
+    def plot(self, threshold_confidence: float, classifier_level: str) -> None:
+        """Plot per-group histograms of predicted cell labels.
+
+        Args:
+            threshold_confidence: Minimum confidence required for a cell to be assigned a label.
+                Cells below this threshold are shown as label ``-1``.
+            classifier_level: Label level to display; one of ``'cluster'``, ``'group'``,
+                or ``'super'``.
+        """
         df = self.fetch(format='frame')
         groups = df.groupby(['training_data_hash', 'classifier_params_hash', 'preprocess_id'])
 
@@ -222,8 +368,19 @@ class CelltypeAssignmentTemplate(dj.Computed):
         plt.tight_layout()
         plt.show()
 
-    def _plot_key(self, ax, df, classifier_params_hash, training_data_hash, preprocess_id,
-                  threshold_confidence, classifier_level):
+    def _plot_key(self, ax, df, classifier_params_hash: str, training_data_hash: str,
+                  preprocess_id, threshold_confidence: float, classifier_level: str) -> None:
+        """Render the cell-label histogram for a single (hash, preprocess_id) group.
+
+        Args:
+            ax: Matplotlib axes on which to draw.
+            df: DataFrame subset for this group, as returned by ``fetch(format='frame')``.
+            classifier_params_hash: Hash identifying the classifier parameter set.
+            training_data_hash: Hash identifying the training data set.
+            preprocess_id: Preprocessing identifier for this group.
+            threshold_confidence: Cells with confidence below this value are labelled ``-1``.
+            classifier_level: Label level; one of ``'cluster'``, ``'group'``, or ``'super'``.
+        """
         celltypes = df.apply(
             lambda row: row['cell_label'] if row["max_confidence"] > threshold_confidence else -1, axis=1)
 
@@ -250,8 +407,21 @@ class CelltypeAssignmentTemplate(dj.Computed):
             f"{np.sum(celltypes == -1)}={np.mean(celltypes == -1):.0%} were not classified", loc='left')
 
     def plot_group_traces(self, threshold_confidence: float, classifier_level: str,
-                          celltypes=None, n_celltypes_max=32,
-                          xlim_chirp=None, xlim_bar=None, plot_baden_data=True):
+                          celltypes=None, n_celltypes_max: int = 32,
+                          xlim_chirp=None, xlim_bar=None, plot_baden_data: bool = True) -> None:
+        """Plot mean traces per cell type grouped by classifier and preprocessing settings.
+
+        Args:
+            threshold_confidence: Minimum confidence required to include a cell.
+            classifier_level: Label level; one of ``'cluster'``, ``'group'``, or ``'super'``.
+            celltypes: Explicit list of cell-type labels to plot. If ``None``, all
+                cell types present in the data are used.
+            n_celltypes_max: Maximum number of cell types to display. Excess types are
+                chosen randomly.
+            xlim_chirp: Optional x-axis limits for the chirp trace panel.
+            xlim_bar: Optional x-axis limits for the bar trace panel.
+            plot_baden_data: If ``True``, overlay traces from the Baden training data.
+        """
         df = self.fetch(format='frame')
         groups = df.groupby(['training_data_hash', 'classifier_params_hash', 'preprocess_id'])
 
@@ -263,9 +433,24 @@ class CelltypeAssignmentTemplate(dj.Computed):
                                         xlim_chirp=xlim_chirp, xlim_bar=xlim_bar, plot_baden_data=plot_baden_data)
 
     def _plot_group_traces_key(self, threshold_confidence: float, classifier_level: str,
-                               classifier_params_hash, training_data_hash, preprocess_id,
-                               celltypes=None, n_celltypes_max=32, xlim_chirp=None, xlim_bar=None,
-                               plot_baden_data=True):
+                               classifier_params_hash: str, training_data_hash: str, preprocess_id,
+                               celltypes=None, n_celltypes_max: int = 32, xlim_chirp=None, xlim_bar=None,
+                               plot_baden_data: bool = True) -> None:
+        """Plot mean traces per cell type for a single (hash, preprocess_id) group.
+
+        Args:
+            threshold_confidence: Minimum confidence required to include a cell.
+            classifier_level: Label level; one of ``'cluster'``, ``'group'``, or ``'super'``.
+            classifier_params_hash: Hash identifying the classifier parameter set.
+            training_data_hash: Hash identifying the training data set.
+            preprocess_id: Preprocessing identifier for this group.
+            celltypes: Explicit list of cell-type labels to plot. If ``None``, all present
+                cell types are used.
+            n_celltypes_max: Maximum number of cell types to display.
+            xlim_chirp: Optional x-axis limits for the chirp trace panel.
+            xlim_bar: Optional x-axis limits for the bar trace panel.
+            plot_baden_data: If ``True``, overlay traces from the Baden training data.
+        """
         key = dict(classifier_params_hash=classifier_params_hash,
                    training_data_hash=training_data_hash,
                    preprocess_id=preprocess_id)

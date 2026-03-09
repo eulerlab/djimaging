@@ -72,14 +72,33 @@ class CenterSurroundTemplate(dj.Computed):
     def cs_params_table(self):
         pass
 
-    def fetch1_rf_time(self, key):
+    def fetch1_rf_time(self, key: dict) -> np.ndarray:
+        """Fetch the RF time axis for the entry identified by *key*.
+
+        Tries the ``'rf_time'`` column directly and falls back to extracting it from
+        the ``'model_dict'`` blob.
+
+        Args:
+            key: DataJoint primary key dict.
+
+        Returns:
+            1-D array of RF time values.
+        """
         try:
             rf_time = (self.color_rf_table & key).fetch1('rf_time')
         except dj.DataJointError:
             rf_time = (self.color_rf_table & key).fetch1('model_dict')['rf_time']
         return rf_time
 
-    def make(self, key, plot=False):
+    def make(self, key: dict, plot: bool = False) -> None:
+        """Compute center/surround RF metrics and insert them into the table.
+
+        Args:
+            key: DataJoint primary key dict identifying a unique combination of
+                color RF and center-surround parameter entries.
+            plot: If True, pass ``plot=True`` to the peak-finding helpers for
+                interactive debugging.
+        """
         rf_time = self.fetch1_rf_time(key=key)
         rf = (self.color_rf_table & key).fetch1('rf')
         peak_nstd, npeaks_max = (self.cs_params_table & key).fetch1('peak_nstd', 'npeaks_max')
@@ -112,7 +131,12 @@ class CenterSurroundTemplate(dj.Computed):
 
         self.insert1(key)
 
-    def plot(self):
+    def plot(self) -> tuple:
+        """Plot histograms of transience index, half-amplitude width, and main peak lag.
+
+        Returns:
+            A tuple ``(fig, axs)`` with the matplotlib Figure and Axes array.
+        """
         fig, axs = plt.subplots(1, 3, figsize=(12, 3))
         for ax, name in zip(axs, ['transience_idx', 'half_amp_width', 'main_peak_lag']):
             ax.hist(self.fetch(name))
@@ -120,7 +144,15 @@ class CenterSurroundTemplate(dj.Computed):
         plt.tight_layout()
         return fig, axs
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict = None) -> tuple:
+        """Plot the center and surround RF kernels with annotated metrics for a single entry.
+
+        Args:
+            key: DataJoint primary key dict. If None, prompts for selection.
+
+        Returns:
+            A tuple ``(fig, axs)`` with the matplotlib Figure and Axes array.
+        """
         key = get_primary_key(table=self, key=key)
 
         rf_time = self.fetch1_rf_time(key=key)

@@ -60,7 +60,17 @@ class ClusteringParametersTemplate(dj.Lookup):
         """
         return definition
 
-    def add(self, kind, params_dict, clustering_id=1, min_count=0, skip_duplicates=False):
+    def add(self, kind: str, params_dict: dict, clustering_id: int = 1, min_count: int = 0,
+            skip_duplicates: bool = False) -> None:
+        """Insert a clustering parameter set into the table.
+
+        Args:
+            kind: Clustering algorithm identifier (e.g. 'gmm', 'hierarchical_ward').
+            params_dict: Algorithm-specific keyword arguments passed to the clustering function.
+            clustering_id: Unique integer identifier for this parameter set.
+            min_count: Minimum number of ROIs a cluster must contain to be kept.
+            skip_duplicates: If True, silently skip insertion when the key already exists.
+        """
         assert isinstance(params_dict, dict)
         key = dict(clustering_id=clustering_id, kind=kind, params_dict=params_dict, min_count=min_count)
         self.insert1(key, skip_duplicates=skip_duplicates)
@@ -96,8 +106,13 @@ class ClusteringTemplate(dj.Computed):
     def params_table(self):
         pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute clusters for all ROIs sharing the given key and populate the table.
 
+        Args:
+            key: DataJoint primary key dict identifying a unique combination of features
+                and clustering parameters.
+        """
         kind, params_dict, min_count = (self.params_table & key).fetch1('kind', 'params_dict', 'min_count')
         features = (self.features_table & key).fetch1('features')
         decomp_kind = (self.features_table.params_table & key).fetch1('kind')
@@ -132,7 +147,12 @@ class ClusteringTemplate(dj.Computed):
             """
             return definition
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict = None) -> None:
+        """Plot a histogram of cluster assignments for a single entry.
+
+        Args:
+            key: DataJoint primary key dict. If None, prompts for selection.
+        """
         key = get_primary_key(table=self, key=key)
 
         clusters = (self & key).fetch1('clusters')
@@ -144,13 +164,29 @@ class ClusteringTemplate(dj.Computed):
         plt.tight_layout()
         plt.show()
 
-    def plot1_averages(self, key=None):
+    def plot1_averages(self, key: dict = None) -> None:
+        """Plot cluster-averaged traces for a single entry.
+
+        Args:
+            key: DataJoint primary key dict. If None, prompts for selection.
+        """
         self.plot1_traces(key=key, kind='averages')
 
-    def plot1_heatmaps(self, key=None):
+    def plot1_heatmaps(self, key: dict = None) -> None:
+        """Plot heatmaps of traces grouped by cluster for a single entry.
+
+        Args:
+            key: DataJoint primary key dict. If None, prompts for selection.
+        """
         self.plot1_traces(key=key, kind='traces')
 
-    def plot1_traces(self, key=None, kind='traces'):
+    def plot1_traces(self, key: dict = None, kind: str = 'traces') -> None:
+        """Plot traces or averages grouped by cluster for a single entry.
+
+        Args:
+            key: DataJoint primary key dict. If None, prompts for selection.
+            kind: One of ``'traces'`` (heatmap per ROI) or ``'averages'`` (cluster mean).
+        """
         key = get_primary_key(table=self, key=key)
 
         stim_names = (self.features_table.params_table & key).fetch1('stim_names').split('_')
@@ -159,7 +195,22 @@ class ClusteringTemplate(dj.Computed):
         plot_utils.plot_clusters(traces_list, stim_names, clusters, kind=kind, title=key)
 
 
-def cluster_features(X, kind: str, params_dict: dict):
+def cluster_features(X: np.ndarray, kind: str, params_dict: dict) -> tuple:
+    """Dispatch to the appropriate clustering algorithm.
+
+    Args:
+        X: 2-D feature matrix of shape ``(n_samples, n_features)``.
+        kind: Algorithm name; one of ``'hierarchical_ward'``, ``'hierarchical_correlation'``,
+            or ``'gmm'``.
+        params_dict: Keyword arguments forwarded to the selected clustering function.
+
+    Returns:
+        A tuple ``(model, cluster_idxs)`` where *model* is the fitted sklearn object and
+        *cluster_idxs* is a float array of shape ``(n_samples,)`` with cluster labels.
+
+    Raises:
+        NotImplementedError: If *kind* is not recognised.
+    """
     assert X.ndim == 2, f"{X.shape}"
 
     if kind == 'hierarchical_ward':
@@ -174,7 +225,20 @@ def cluster_features(X, kind: str, params_dict: dict):
     return model, cluster_idxs
 
 
-def cluster_hierarchical_ward(X, n_clusters=None, distance_threshold=75):
+def cluster_hierarchical_ward(X: np.ndarray, n_clusters: int = None,
+                              distance_threshold: float = 75) -> tuple:
+    """Cluster samples using agglomerative (Ward) hierarchical clustering.
+
+    Args:
+        X: 2-D feature matrix of shape ``(n_samples, n_features)``.
+        n_clusters: Target number of clusters. Mutually exclusive with *distance_threshold*.
+        distance_threshold: Linkage distance above which clusters are not merged.
+
+    Returns:
+        A tuple ``(model, cluster_idxs)`` where *model* is the fitted
+        ``AgglomerativeClustering`` object and *cluster_idxs* is a float array of shape
+        ``(n_samples,)`` with cluster labels.
+    """
     from sklearn.cluster import AgglomerativeClustering
     model = AgglomerativeClustering(n_clusters=n_clusters, metric="euclidean", linkage='ward',
                                     distance_threshold=distance_threshold)
@@ -183,7 +247,21 @@ def cluster_hierarchical_ward(X, n_clusters=None, distance_threshold=75):
     return model, cluster_idxs
 
 
-def cluster_hierarchical_cc(X, n_clusters=None, distance_threshold=0.9, linkage='complete'):
+def cluster_hierarchical_cc(X: np.ndarray, n_clusters: int = None,
+                            distance_threshold: float = 0.9, linkage: str = 'complete') -> tuple:
+    """Cluster samples using correlation-based agglomerative hierarchical clustering.
+
+    Args:
+        X: 2-D feature matrix of shape ``(n_samples, n_features)``.
+        n_clusters: Target number of clusters. Mutually exclusive with *distance_threshold*.
+        distance_threshold: Linkage distance above which clusters are not merged.
+        linkage: Linkage criterion passed to ``AgglomerativeClustering``.
+
+    Returns:
+        A tuple ``(model, cluster_idxs)`` where *model* is the fitted
+        ``AgglomerativeClustering`` object and *cluster_idxs* is a float array of shape
+        ``(n_samples,)`` with cluster labels.
+    """
     from sklearn.cluster import AgglomerativeClustering
     from sklearn.metrics import pairwise_distances
 
@@ -195,7 +273,13 @@ def cluster_hierarchical_cc(X, n_clusters=None, distance_threshold=0.9, linkage=
     return model, cluster_idxs
 
 
-def plot_grid_search_results(grid_search):
+def plot_grid_search_results(grid_search) -> None:
+    """Plot cross-validation scores from a GMM grid search as a line or scatter plot.
+
+    Args:
+        grid_search: Fitted ``GridSearchCV`` object whose ``cv_results_`` contain
+            ``'params'`` and ``'mean_test_score'`` entries.
+    """
     import pandas as pd
     import seaborn as sns
 
@@ -211,8 +295,30 @@ def plot_grid_search_results(grid_search):
     plt.show()
 
 
-def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic',
-                covariance_types=("spherical", "tied", "diag", "full"), seed=45312, plot_results=True):
+def cluster_gmm(X: np.ndarray, ncomp_max: int = 6, ncomp_min: int = 1, cv: int = 10,
+                cv_metric: str = 'bic', covariance_types: tuple = ("spherical", "tied", "diag", "full"),
+                seed: int = 45312, plot_results: bool = True) -> tuple:
+    """Cluster samples using a Gaussian Mixture Model selected via cross-validated grid search.
+
+    Args:
+        X: 2-D feature matrix of shape ``(n_samples, n_features)``.
+        ncomp_max: Maximum number of mixture components to evaluate.
+        ncomp_min: Minimum number of mixture components to evaluate.
+        cv: Number of cross-validation folds. If 1, the training set is used as the test set.
+        cv_metric: Model-selection criterion; one of ``'bic'``, ``'aic'``, or
+            ``'loglikelihood'``.
+        covariance_types: GMM covariance structures to include in the grid search.
+        seed: Random seed for reproducibility.
+        plot_results: If True, call :func:`plot_grid_search_results` after fitting.
+
+    Returns:
+        A tuple ``(model, cluster_idxs)`` where *model* is the fitted ``GridSearchCV``
+        object and *cluster_idxs* is an integer array of shape ``(n_samples,)`` with
+        cluster labels from the best estimator.
+
+    Raises:
+        NotImplementedError: If *cv_metric* is not recognised.
+    """
     from sklearn.mixture import GaussianMixture
     from sklearn.model_selection import GridSearchCV
 
@@ -255,7 +361,21 @@ def cluster_gmm(X, ncomp_max=6, ncomp_min=1, cv=10, cv_metric='bic',
     return model, cluster_idxs
 
 
-def remove_clusters(cluster_idxs, min_count, invalid_value=-1):
+def remove_clusters(cluster_idxs: np.ndarray, min_count: int,
+                    invalid_value: int = -1) -> np.ndarray:
+    """Remove clusters that contain fewer than *min_count* samples.
+
+    Clusters that survive the threshold are re-labelled consecutively starting at 1.
+    Samples belonging to removed clusters receive *invalid_value*.
+
+    Args:
+        cluster_idxs: 1-D integer array of cluster labels with shape ``(n_samples,)``.
+        min_count: Minimum number of samples a cluster must have to be retained.
+        invalid_value: Label assigned to samples whose cluster was removed.
+
+    Returns:
+        A new integer array of the same shape as *cluster_idxs* with re-labelled clusters.
+    """
     new_cluster_idxs = np.full(cluster_idxs.size, invalid_value)
 
     new_cluster = 1
@@ -267,8 +387,21 @@ def remove_clusters(cluster_idxs, min_count, invalid_value=-1):
     return new_cluster_idxs
 
 
-def sort_clusters(traces, cluster_idxs, invalid_value=-1):
-    """Sort clusters by correlation to the largest cluster"""
+def sort_clusters(traces: np.ndarray, cluster_idxs: np.ndarray,
+                  invalid_value: int = -1) -> np.ndarray:
+    """Sort clusters by correlation to the largest cluster.
+
+    Args:
+        traces: 2-D array of shape ``(n_samples, n_timepoints)`` used to compute
+            per-cluster mean traces for correlation ranking.
+        cluster_idxs: 1-D array of cluster labels of shape ``(n_samples,)``.
+            Entries equal to *invalid_value* are ignored.
+        invalid_value: Label used for unassigned or removed samples.
+
+    Returns:
+        A new integer array of the same shape as *cluster_idxs* with clusters
+        re-ordered by descending correlation to the mean trace of the largest cluster.
+    """
     u_cidxs, counts = np.unique(cluster_idxs[cluster_idxs != invalid_value], return_counts=True)
 
     if u_cidxs.size <= 1:

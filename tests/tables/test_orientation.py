@@ -1,12 +1,18 @@
+from importlib.resources import path
 import os
 import pickle as pkl
 
 import numpy as np
+import pytest
 
 from djimaging.tables.response.movingbar.orientation_utils_v2 import compute_os_ds_idxs
 
+_TEST_DATA_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'test_data'))
 
-def load_test_data(cell_type, path='test_mb.pkl'):
+
+def load_test_data(cell_type, path=os.path.join(_TEST_DATA_PATH, 'test_mb.pkl')):
+    if not os.path.isfile(path):
+        pytest.skip(f"File not found {path}")
     with open(path, 'rb') as f:
         temp_dict = pkl.load(f)
         snippets = temp_dict[f'{cell_type}_bar_byrepeat']
@@ -20,11 +26,12 @@ def load_test_data(cell_type, path='test_mb.pkl'):
     return snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op
 
 
-def test_ds(rel_path='test_mb.pkl'):
+def test_ds(path=os.path.join(_TEST_DATA_PATH, 'test_mb.pkl')):
+    if not os.path.isfile(path):
+        pytest.skip(f"File not found {path}")
     np.random.seed(42)
 
-    snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op = load_test_data(
-        'ds', path=os.path.join(os.path.dirname(__file__), rel_path))
+    snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op = load_test_data('ds', path=path)
     dsi, p_dsi, _, _, osi, p_osi, _, _, _, _, _, _, _, _, _ = \
         compute_os_ds_idxs(snippets=snippets.T.reshape((-1, 32)).T, dir_order=dir_order, dt=0.128)
 
@@ -34,11 +41,12 @@ def test_ds(rel_path='test_mb.pkl'):
     assert np.isclose(p_osi, gt_op, atol=0.01, rtol=0.01)
 
 
-def test_nonds(rel_path='test_mb.pkl'):
+def test_nonds(path=os.path.join(_TEST_DATA_PATH, 'test_mb.pkl')):
+    if not os.path.isfile(path):
+        pytest.skip(f"File not found {path}")
     np.random.seed(42)
 
-    snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op = load_test_data(
-        'nds', path=os.path.join(os.path.dirname(os.path.abspath(__file__)), rel_path))
+    snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op = load_test_data('nds', path=path)
     dsi, p_dsi, _, _, osi, p_osi, _, _, _, _, _, _, _, _, _ = \
         compute_os_ds_idxs(snippets=snippets.T.reshape((-1, 32)).T, dir_order=dir_order, dt=0.128)
 

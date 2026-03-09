@@ -66,6 +66,7 @@
 
 import os
 import warnings
+from typing import Optional, List, Tuple
 
 import h5py
 import numpy as np
@@ -74,12 +75,60 @@ from djimaging.utils.scanm import read_h5_utils, read_smp_utils, wparams_utils, 
 
 
 class ScanMRecording:
-    def __init__(self, filepath, setup_id=None,
-                 date=None, stimulator_delay=None,
-                 roi_mask_ignore_not_found=True,
-                 trigger_ch_name='wDataCh2', time_precision='line',
-                 triggers_ignore_not_found=True, trigger_threshold='auto',
-                 repeated_stim=None, ntrigger_rep=None):
+    """In-memory representation of a single ScanM recording.
+
+    Loads a recording from an .h5 or .smp file, parses all scan parameters
+    (wParams), extracts channel stacks, an optional ROI mask, and optionally
+    trigger information.  Provides helpers to recompute frame times and
+    triggers, and to serialise the recording to an .h5 file.
+    """
+    def __init__(self, filepath: str, setup_id: Optional[int] = None,
+                 date: Optional[str] = None, stimulator_delay: Optional[float] = None,
+                 roi_mask_ignore_not_found: bool = True,
+                 trigger_ch_name: str = 'wDataCh2', time_precision: str = 'line',
+                 triggers_ignore_not_found: bool = True,
+                 trigger_threshold: object = 'auto',
+                 repeated_stim: Optional[bool] = None,
+                 ntrigger_rep: Optional[int] = None) -> None:
+        """Initialise a ScanMRecording by loading all data from disk.
+
+        Parameters
+        ----------
+        filepath : str
+            Absolute or relative path to the recording file (.h5 or .smp).
+        setup_id : int, optional
+            Identifier of the experimental setup used for this recording.
+            Required for pixel-size and light-artifact calculations.
+        date : str, optional
+            Recording date (parseable by ``pandas.Timestamp``).  Required
+            when ``stimulator_delay`` is None and triggers need to be
+            computed from the trigger channel.
+        stimulator_delay : float, optional
+            Stimulator delay in seconds.  When None, will be looked up from
+            the stimulator-delay table using ``date`` and ``setup_id``.
+        roi_mask_ignore_not_found : bool, optional
+            If True, a missing ROI mask does not raise an exception.
+            Default is True.
+        trigger_ch_name : str, optional
+            Dataset name of the trigger channel in the h5/smp file.
+            Default is ``'wDataCh2'``.
+        time_precision : str, optional
+            Timing precision for frame-time computation: ``'line'``
+            (default) or ``'pixel'``.
+        triggers_ignore_not_found : bool, optional
+            If True, missing trigger data does not raise an exception.
+            Default is True.
+        trigger_threshold : int or str, optional
+            Threshold for trigger detection.  Pass an integer value or
+            ``'auto'`` to let the threshold be determined automatically from
+            the trigger channel signal range.  Default is ``'auto'``.
+        repeated_stim : bool, optional
+            Whether the stimulus is presented repeatedly.  Used to validate
+            the number of detected triggers.
+        ntrigger_rep : int, optional
+            Expected number of triggers per repetition (or total, when
+            ``repeated_stim`` is False).  Used to set ``trigger_valid``.
+        """
         # File
         self.filepath = filepath
         self.filename = os.path.split(self.filepath)[1]
@@ -196,13 +245,15 @@ class ScanMRecording:
             return True
         return False
 
-    def __load_from_file(self):
+    def __load_from_file(self) -> None:
+        """Dispatch loading to the appropriate reader based on file extension."""
         if self.filetype == '.h5':
             self.__load_from_h5_file()
         else:
             self.__load_from_smp_file()
 
-    def __load_from_h5_file(self):
+    def __load_from_h5_file(self) -> None:
+        """Load channel stacks, wparams, ROI mask, and triggers from an .h5 file."""
         with h5py.File(self.filepath, 'r', driver="stdio") as h5_file:
             ch_stacks = read_h5_utils.extract_all_stack_from_h5(h5_file)
             wparams = read_h5_utils.extract_wparams(h5_file, lower_keys=False)
@@ -225,7 +276,8 @@ class ScanMRecording:
             else:
                 self.trigger_valid = self.trigger_times.size == self.ntrigger_rep
 
-    def __load_from_smp_file(self):
+    def __load_from_smp_file(self) -> None:
+        """Load channel stacks and wparams from a raw .smp file."""
         ch_stacks, wparams = read_smp_utils.load_all_stacks_and_wparams(self.filepath, lower_keys=False)
 
         # Channel info
@@ -233,11 +285,30 @@ class ScanMRecording:
         self.extract_ch_stacks_info(ch_stacks)
         self.extract_wparams_info(wparams)
 
-    def extract_ch_stacks_info(self, ch_stacks):
+    def extract_ch_stacks_info(self, ch_stacks: dict) -> None:
+        """Populate channel-related instance attributes from a dict of stacks.
+
+        Parameters
+        ----------
+        ch_stacks : dict
+            Mapping from channel name to 3-D numpy array ``(x, y, frames)``.
+        """
         self.ch_names = sorted(ch_stacks.keys())
         self.ch_n_frames = ch_stacks[self.ch_names[0]].shape[-1]
 
-    def extract_wparams_info(self, wparams):
+    def extract_wparams_info(self, wparams: dict) -> None:
+        """Parse all scan parameters and populate the corresponding instance attributes.
+
+        Pops known keys from ``wparams`` and stores remaining parameters in
+        ``self.wparams_other``.
+
+        Parameters
+        ----------
+        wparams : dict
+            Dictionary of scan parameters as returned by
+            :func:`read_h5_utils.extract_wparams` with original (non-lower-cased)
+            keys.
+        """
         # Scan type
         self.scan_type = wparams_utils.get_scan_type(wparams)
         self.scan_type_id = wparams.pop("User_ScanType")
@@ -301,7 +372,19 @@ class ScanMRecording:
 
         self.wparams_other = wparams
 
-    def compute_frame_times(self, time_precision=None):
+    def compute_frame_times(self, time_precision: Optional[str] = None) -> None:
+        """Compute and store frame times and per-pixel time offsets.
+
+        Results are written to ``self.frame_times``, ``self.frame_dt_offset``,
+        and ``self.frame_dt``.
+
+        Parameters
+        ----------
+        time_precision : str, optional
+            Override the instance-level ``time_precision``.  Accepted values
+            are ``'line'`` and ``'pixel'``.  If None, the current value of
+            ``self.time_precision`` is used.
+        """
         if time_precision is not None:
             self.time_precision = time_precision
 
@@ -314,7 +397,14 @@ class ScanMRecording:
             npix_x_offset_right=self.pix_n_retrace,
             precision=self.time_precision)
 
-    def set_auto_trigger_threshold(self):
+    def set_auto_trigger_threshold(self) -> None:
+        """Automatically determine and set the trigger detection threshold.
+
+        Uses the signal range of the trigger channel: if the minimum is below
+        25 000 and the maximum is above 35 000, the threshold is fixed at
+        30 000; otherwise it is set to the midpoint between min and max.
+        The result is stored in ``self.trigger_threshold``.
+        """
         vmin = self.ch_stacks[self.trigger_ch_name].min()
         vmax = self.ch_stacks[self.trigger_ch_name].max()
 
@@ -323,7 +413,37 @@ class ScanMRecording:
         else:
             self.trigger_threshold = 0.5 * (vmin + vmax)
 
-    def compute_triggers(self, trigger_threshold=None, time_precision=None, repeated_stim=None, ntrigger_rep=None):
+    def compute_triggers(self, trigger_threshold: Optional[object] = None,
+                         time_precision: Optional[str] = None,
+                         repeated_stim: Optional[bool] = None,
+                         ntrigger_rep: Optional[int] = None) -> None:
+        """Detect triggers from the trigger channel and store the results.
+
+        Populates ``self.trigger_times``, ``self.trigger_values``, and
+        (when ``ntrigger_rep`` is set) ``self.trigger_valid``.
+
+        Parameters
+        ----------
+        trigger_threshold : int or str, optional
+            Override the current ``self.trigger_threshold``.  Pass an integer
+            or ``'auto'`` to auto-detect.  If None, the existing value is
+            used.
+        time_precision : str, optional
+            Override the current ``self.time_precision`` for frame-time
+            computation.  If None, the existing value is used.
+        repeated_stim : bool, optional
+            Override ``self.repeated_stim``.  If None, the existing value is
+            used.
+        ntrigger_rep : int, optional
+            Override ``self.ntrigger_rep``.  If None, the existing value is
+            used.
+
+        Raises
+        ------
+        ValueError
+            If neither ``self.stimulator_delay`` nor both ``self.date`` and
+            ``self.setup_id`` are set.
+        """
         if trigger_threshold is not None:
             self.trigger_threshold = trigger_threshold
 
@@ -360,8 +480,37 @@ class ScanMRecording:
             else:
                 self.trigger_valid = self.trigger_times.size == self.ntrigger_rep
 
-    def to_h5(self, filepath, include_wparams_num=True, include_wparams_str=True, include_triggers=True,
-              overwrite=False):
+    def to_h5(self, filepath: str, include_wparams_num: bool = True,
+              include_wparams_str: bool = True, include_triggers: bool = True,
+              overwrite: bool = False) -> None:
+        """Serialise the recording to an HDF5 file.
+
+        Channel stacks are written as top-level datasets.  Scan parameters
+        and trigger data are written as optional groups/datasets.
+
+        Parameters
+        ----------
+        filepath : str
+            Destination path for the output .h5 file.
+        include_wparams_num : bool, optional
+            If True, write numeric scan parameters to a ``'wParamsNum'``
+            group.  Default is True.
+        include_wparams_str : bool, optional
+            If True, write string scan parameters to a ``'wParamsStr'``
+            group.  Default is True.
+        include_triggers : bool, optional
+            If True, write ``'Triggertimes'`` and ``'Triggervalues'``
+            datasets.  Triggers are computed on demand if not yet available.
+            Default is True.
+        overwrite : bool, optional
+            If False, raise :exc:`FileExistsError` when ``filepath`` already
+            exists.  Default is False.
+
+        Raises
+        ------
+        FileExistsError
+            If ``overwrite`` is False and the file already exists.
+        """
         if not overwrite and os.path.isfile(filepath):
             raise FileExistsError(f"File already exists: {filepath}. Set `overwrite=True` to overwrite.")
 
@@ -399,7 +548,20 @@ class ScanMRecording:
                 f.create_dataset('Triggertimes', data=self.trigger_times, dtype='f4')
                 f.create_dataset('Triggervalues', data=self.trigger_values, dtype='f4')
 
-    def get_wparams_num_dict(self, lower_keys=False):
+    def get_wparams_num_dict(self, lower_keys: bool = False) -> dict:
+        """Return a dictionary of numeric scan parameters.
+
+        Parameters
+        ----------
+        lower_keys : bool, optional
+            If True, convert all keys to lower-case.  Default is False.
+
+        Returns
+        -------
+        dict
+            Mapping of parameter name to numeric value for the subset of
+            wParamsNum fields stored on this instance.
+        """
         wparams_num = dict()
         wparams_num['User_dxPix'] = self.pix_nx_full
         wparams_num['User_dyPix'] = self.pix_ny
@@ -420,7 +582,20 @@ class ScanMRecording:
 
         return wparams_num
 
-    def get_wparams_str_dict(self, lower_keys=False):
+    def get_wparams_str_dict(self, lower_keys: bool = False) -> dict:
+        """Return a dictionary of string scan parameters.
+
+        Parameters
+        ----------
+        lower_keys : bool, optional
+            If True, convert all keys to lower-case.  Default is False.
+
+        Returns
+        -------
+        dict
+            Mapping of parameter name to string value for the subset of
+            wParamsStr fields stored on this instance.
+        """
         wparams_str = dict()
 
         wparams_str['GUID'] = self.guid

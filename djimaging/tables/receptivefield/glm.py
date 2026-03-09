@@ -100,15 +100,25 @@ class RfGlmParamsTemplate(dj.Lookup):
         df_ts : blob
         df_ws : blob
         betas : blob
-        kfold : tinyint unsigned        
+        kfold : tinyint unsigned
         metric = "mse": enum("mse", "corrcoef")
         output_nonlinearity = 'none' : varchar(63)
         other_params_dict : longblob
         """
         return definition
 
-    def add_default(self, other_params_dict=None, skip_duplicates=False, **params):
-        """Add default preprocess parameter to table"""
+    def add_default(self, other_params_dict: dict | None = None, skip_duplicates: bool = False, **params) -> None:
+        """Add default GLM parameter set to the table.
+
+        Parameters
+        ----------
+        other_params_dict : dict or None, optional
+            Additional parameters for the GLM. If None, defaults are used. Default is None.
+        skip_duplicates : bool, optional
+            If True, skip duplicate entries. Default is False.
+        **params
+            Additional parameter overrides for the key.
+        """
 
         assert "other_params_dict" not in params.keys()
         other_params_dict = dict() if other_params_dict is None else other_params_dict
@@ -180,7 +190,22 @@ class RfGlmTemplate(dj.Computed):
     def noise_traces_table(self):
         pass
 
-    def make(self, key, suppress_outputs=False, clear_outputs=True):
+    def make(self, key: dict, suppress_outputs: bool = False, clear_outputs: bool = True) -> None:
+        """Fit a GLM receptive field and insert the result.
+
+        Fetches noise trace and stimulus for the given key, fits a
+        ReceptiveFieldGLM model, and stores the resulting RF, quality metrics,
+        and model dictionary.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        suppress_outputs : bool, optional
+            If True, suppress verbose output during fitting. Default is False.
+        clear_outputs : bool, optional
+            If True, clear IPython cell output after fitting. Default is True.
+        """
         params = (self.params_table() & key).fetch1()
         noise_dt, noise_t0, trace, stim_idxs = (self.noise_traces_table() & key).fetch1(
             'noise_dt', 'noise_t0', 'trace', 'stim_idxs')
@@ -224,19 +249,49 @@ class RfGlmTemplate(dj.Computed):
 
         self.insert1(rf_key)
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict | None = None) -> None:
+        """Plot summary of the GLM receptive field for a single entry.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        """
         key = get_primary_key(table=self, key=key)
         rf, quality_dict, model_dict = (self & key).fetch1('rf', 'quality_dict', 'model_dict')
         plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
                         title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
         plt.show()
 
-    def plot1_frames(self, key=None, downsample=1):
+    def plot1_frames(self, key: dict | None = None, downsample: int = 1) -> None:
+        """Plot the receptive field as individual frames.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        downsample : int, optional
+            Downsampling factor for the frames. Default is 1.
+        """
         key = get_primary_key(table=self, key=key)
         rf, model_dict = (self & key).fetch1('rf', 'model_dict')
         plot_rf_frames(rf, model_dict['rf_time'], downsample=downsample)
 
-    def plot1_video(self, key=None, fps=10):
+    def plot1_video(self, key: dict | None = None, fps: int = 10):
+        """Plot the receptive field as a video animation.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        fps : int, optional
+            Frames per second for the animation. Default is 10.
+
+        Returns
+        -------
+        matplotlib.animation.Animation
+            Animation object of the RF video.
+        """
         key = get_primary_key(table=self, key=key)
         rf, model_dict = (self & key).fetch1('rf', 'model_dict')
         return plot_rf_video(rf, model_dict['rf_time'], fps=fps)
@@ -271,7 +326,14 @@ class RfGlmQualityDictTemplate(dj.Computed):
     def glm_table(self):
         pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Extract quality metrics from the GLM quality_dict and insert as individual columns.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        """
         quality_dict = (self.glm_table & key).fetch1('quality_dict')
         self.insert1(dict(
             **key,
@@ -283,7 +345,14 @@ class RfGlmQualityDictTemplate(dj.Computed):
             mse_test=quality_dict.get('mse_test', np.nan),
         ))
 
-    def plot(self, *restrictions):
+    def plot(self, *restrictions) -> None:
+        """Fetch quality metrics as a DataFrame (no plot produced).
+
+        Parameters
+        ----------
+        *restrictions : dict
+            Optional DataJoint restrictions to apply before fetching.
+        """
         df_q = (self & restrictions).fetch(format='frame')
 
 
@@ -301,8 +370,16 @@ class RfGlmQualityParamsTemplate(dj.Lookup):
         """
         return definition
 
-    def add_default(self, skip_duplicates=False, **update_kw):
-        """Add default preprocess parameter to table"""
+    def add_default(self, skip_duplicates: bool = False, **update_kw) -> None:
+        """Add default quality parameter set to the table.
+
+        Parameters
+        ----------
+        skip_duplicates : bool, optional
+            If True, skip duplicate entries. Default is False.
+        **update_kw
+            Additional keyword arguments to override default values.
+        """
         key = dict(
             glm_quality_params_id=1,
             min_corrcoef=0.1,
@@ -339,7 +416,18 @@ class RfGlmSingleModelTemplate(dj.Computed):
     def glm_table(self):
         pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Select the best GLM parameterization by test score and insert.
+
+        Fetches all parameter sets for the given ROI, selects the one with the
+        best test score (lowest for MSE/GCV, highest for correlation), and
+        inserts the winner. If an entry already exists, it is deleted first.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the ROI entry to process.
+        """
         roi_key = key.copy()
         quality_dicts, model_dicts, param_ids = (self.glm_table & roi_key).fetch(
             'quality_dict', 'model_dict', 'rf_glm_params_id')
@@ -377,7 +465,8 @@ class RfGlmSingleModelTemplate(dj.Computed):
         key['score_test'] = score_test
         self.insert1(key)
 
-    def plot(self):
+    def plot(self) -> None:
+        """Plot histogram of selected GLM parameter IDs across all entries."""
         rf_glm_params_ids = self.fetch('rf_glm_params_id')
         plt.figure()
         plt.hist(rf_glm_params_ids,
@@ -385,7 +474,14 @@ class RfGlmSingleModelTemplate(dj.Computed):
         plt.title('rf_glm_params_id')
         plt.show()
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict | None = None) -> None:
+        """Plot summary of the best GLM receptive field for a single entry.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        """
         key = get_primary_key(table=self, key=key)
         rf, quality_dict, model_dict = (self.glm_table & key).fetch1('rf', 'quality_dict', 'model_dict')
         plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
@@ -429,7 +525,17 @@ class RfGlmQualityTemplate(dj.Computed):
     def params_table(self):
         pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute a composite GLM quality index and insert it.
+
+        Combines permutation test, correlation coefficient, and MSE thresholds
+        into a single quality index between 0 and 1.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        """
         quality_dict, model_dict = (self.glm_table() & key).fetch1('quality_dict', 'model_dict')
         min_corrcoef, max_mse, perm_alpha = (self.params_table() & key).fetch1(
             'min_corrcoef', 'max_mse', 'perm_alpha')
@@ -470,7 +576,14 @@ class RfGlmQualityTemplate(dj.Computed):
 
         self.insert1(q_key)
 
-    def plot(self, glm_quality_params_id=1):
+    def plot(self, glm_quality_params_id: int = 1) -> None:
+        """Plot histogram of GLM quality indices for a given parameter set.
+
+        Parameters
+        ----------
+        glm_quality_params_id : int, optional
+            ID of the quality parameter set to plot. Default is 1.
+        """
         rf_glm_qidx = (self & f"glm_quality_params_id={glm_quality_params_id}").fetch("rf_glm_qidx")
 
         fig, ax = plt.subplots(1, 1, figsize=(4, 3))

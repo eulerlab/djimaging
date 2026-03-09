@@ -28,10 +28,12 @@ from djimaging.utils.scanm import read_utils
 
 
 class MotionDetectionParamsTemplate(dj.Lookup):
+    """DataJoint lookup table template for motion-correction algorithm parameters."""
+
     database = ""
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = f"""
         mcorr_id : tinyint unsigned
         ---
@@ -40,7 +42,23 @@ class MotionDetectionParamsTemplate(dj.Lookup):
         """
         return definition
 
-    def add(self, mcorr_method='jnormcorre', mcorr_params=None, mcorr_id=1, skip_duplicates=False):
+    def add(
+            self,
+            mcorr_method: str = 'jnormcorre',
+            mcorr_params: dict = None,
+            mcorr_id: int = 1,
+            skip_duplicates: bool = False,
+    ) -> None:
+        """Insert a motion-correction parameter set into the lookup table.
+
+        Args:
+            mcorr_method: Name of the motion-correction algorithm (e.g. ``'jnormcorre'``
+                or ``'none'``).
+            mcorr_params: Dictionary of keyword arguments passed to the algorithm.
+                Defaults to an empty dict when ``None``.
+            mcorr_id: Integer identifier for this parameter set.
+            skip_duplicates: If ``True``, silently ignore duplicate entries.
+        """
         if mcorr_params is None:
             mcorr_params = dict()
 
@@ -49,10 +67,12 @@ class MotionDetectionParamsTemplate(dj.Lookup):
 
 
 class MotionDetectionTemplate(dj.Computed):
+    """DataJoint computed table template for per-frame motion shifts."""
+
     database = ""
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = f"""
         -> self.presentation_table
         -> self.mcorr_params_table
@@ -90,16 +110,34 @@ class MotionDetectionTemplate(dj.Computed):
     def populate(
             self,
             *restrictions,
-            suppress_errors=False,
-            return_exception_objects=False,
-            reserve_jobs=False,
-            order="original",
-            limit=None,
-            max_calls=None,
-            display_progress=False,
-            processes=1,
-            make_kwargs=None,
+            suppress_errors: bool = False,
+            return_exception_objects: bool = False,
+            reserve_jobs: bool = False,
+            order: str = "original",
+            limit: int = None,
+            max_calls: int = None,
+            display_progress: bool = False,
+            processes: int = 1,
+            make_kwargs: dict = None,
     ):
+        """Populate the table, enforcing single-process execution.
+
+        Parallel processing is not supported for this table; if ``processes > 1``
+        is requested it is silently overridden to 1.
+
+        Args:
+            *restrictions: DataJoint restriction expressions forwarded to ``super().populate``.
+            suppress_errors: Passed through to ``super().populate``.
+            return_exception_objects: Passed through to ``super().populate``.
+            reserve_jobs: Passed through to ``super().populate``.
+            order: Passed through to ``super().populate``.
+            limit: Passed through to ``super().populate``.
+            max_calls: Passed through to ``super().populate``.
+            display_progress: Passed through to ``super().populate``.
+            processes: Number of parallel processes. Values greater than 1 are
+                reset to 1 with a warning.
+            make_kwargs: Passed through to ``super().populate``.
+        """
         if processes > 1:
             warnings.warn(
                 "Parallel processing is not supported for this table. "
@@ -120,8 +158,13 @@ class MotionDetectionTemplate(dj.Computed):
             make_kwargs=make_kwargs,
         )
 
-    def make(self, key, verbose=False):
+    def make(self, key: dict, verbose: bool = False) -> None:
+        """Compute and insert per-frame motion shifts for a given presentation.
 
+        Args:
+            key: DataJoint primary key dict identifying the presentation and parameter set.
+            verbose: If ``True``, print progress information to stdout.
+        """
         if verbose:
             print(f"Computing motion detection for\n{key}")
 
@@ -161,7 +204,7 @@ class MotionDetectionTemplate(dj.Computed):
         self.insert1(dict(key, shifts_x=shifts_x, shifts_y=shifts_y,
                           max_shift_x=max_shift_x, max_shift_y=max_shift_y, idx_stim_onset=idx_stim_onset))
 
-    def plot1_stacks(self, key=None, n_average=10, fupsample=1, f_cutoff=3):
+    def plot1_stacks(self, key: dict = None, n_average: int = 10, fupsample: int = 1, f_cutoff: float = 3) -> None:
         key = get_primary_key(table=self, key=key)
 
         pres_data_file, npixartifact = (self.presentation_table & key).fetch1('pres_data_file', 'npixartifact')
@@ -182,7 +225,7 @@ class MotionDetectionTemplate(dj.Computed):
             stack[npixartifact:, :], stack_corrected[npixartifact:, :],
             shifts_x=shifts_x, shifts_y=shifts_y, n_average=n_average)
 
-    def plot1_shifts(self, key=None):
+    def plot1_shifts(self, key: dict = None) -> np.ndarray:
         key = get_primary_key(table=self, key=key)
 
         fs = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')

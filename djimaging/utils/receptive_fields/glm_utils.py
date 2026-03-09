@@ -22,12 +22,84 @@ except ImportError:
 
 
 class ReceptiveFieldGLM:
-    def __init__(self, dt, stim, trace, filter_dur_s_past, filter_dur_s_future, df_ts, df_ws, betas, metric,
-                 output_nonlinearity='none', alphas=(1.,), kfold=1,
-                 tolerance=5, atol=1e-5, step_size=0.01, step_size_finetune=0.001,
-                 max_iters=2000, min_iters=200,
-                 init_method=None, n_perm=20, min_cc=0.2, seed=42, verbose=0, fit_R=False, fit_intercept=True,
-                 num_subunits=1, distr='gaussian', frac_test=0.2, t_burn_min=0., shift=None):
+    def __init__(self, dt: float, stim: np.ndarray, trace: np.ndarray,
+                 filter_dur_s_past: float, filter_dur_s_future: float,
+                 df_ts, df_ws, betas, metric: str,
+                 output_nonlinearity: str = 'none', alphas: tuple = (1.,),
+                 kfold: int = 1, tolerance: int = 5, atol: float = 1e-5,
+                 step_size: float = 0.01, step_size_finetune: float = 0.001,
+                 max_iters: int = 2000, min_iters: int = 200,
+                 init_method: str = None, n_perm: int = 20,
+                 min_cc: float = 0.2, seed: int = 42, verbose: int = 0,
+                 fit_R: bool = False, fit_intercept: bool = True,
+                 num_subunits: int = 1, distr: str = 'gaussian',
+                 frac_test: float = 0.2, t_burn_min: float = 0.,
+                 shift: int = None):
+        """Initialize a GLM-based receptive field estimator.
+
+        Parameters
+        ----------
+        dt : float
+            Time step in seconds.
+        stim : np.ndarray
+            Stimulus array, shape (n_frames,) or (n_frames, n_y, n_x).
+        trace : np.ndarray
+            Neural response trace, shape (n_frames,).
+        filter_dur_s_past : float
+            Duration of the filter extending into the past (seconds).
+        filter_dur_s_future : float
+            Duration of the filter extending into the future (seconds).
+        df_ts : array-like
+            Candidate degrees of freedom for temporal spline basis.
+        df_ws : array-like
+            Candidate degrees of freedom for spatial (width) spline basis.
+        betas : array-like
+            Candidate regularization strengths (beta values).
+        metric : str
+            Optimization metric, e.g. 'corrcoef' or 'mse'.
+        output_nonlinearity : str, optional
+            Output nonlinearity. Default is 'none'.
+        alphas : tuple, optional
+            Candidate alpha values for elastic-net mixing. Default is (1.,).
+        kfold : int, optional
+            Number of cross-validation folds. Default is 1.
+        tolerance : int, optional
+            Early-stopping tolerance (patience in iterations). Default is 5.
+        atol : float, optional
+            Absolute tolerance for convergence. Default is 1e-5.
+        step_size : float, optional
+            Gradient descent step size. Default is 0.01.
+        step_size_finetune : float, optional
+            Step size used for fine-tuning. Default is 0.001.
+        max_iters : int, optional
+            Maximum number of optimization iterations. Default is 2000.
+        min_iters : int, optional
+            Minimum number of optimization iterations. Default is 200.
+        init_method : str, optional
+            Initialization method for model parameters. Default is None (uses 'mle').
+        n_perm : int, optional
+            Number of permutations for the permutation test. Default is 20.
+        min_cc : float, optional
+            Minimum correlation coefficient threshold for quality. Default is 0.2.
+        seed : int, optional
+            Random seed. Default is 42.
+        verbose : int, optional
+            Verbosity level. Default is 0.
+        fit_R : bool, optional
+            Whether to fit the gain parameter R. Default is False.
+        fit_intercept : bool, optional
+            Whether to fit an intercept term. Default is True.
+        num_subunits : int, optional
+            Number of subunits (currently only 1 is supported). Default is 1.
+        distr : str, optional
+            GLM response distribution. Default is 'gaussian'.
+        frac_test : float, optional
+            Fraction of data reserved for testing. Default is 0.2.
+        t_burn_min : float, optional
+            Minimum burn-in time in seconds. Default is 0.
+        shift : int, optional
+            Expected temporal shift; if provided, validated against computed value.
+        """
         # Data
         self.dt = dt
         self.stim = stim
@@ -89,8 +161,19 @@ class ReceptiveFieldGLM:
         else:
             assert not df_ws
 
-    def compute_glm_receptive_field(self):
-        """Estimate RF for given data. Return RF and quality."""
+    def compute_glm_receptive_field(self) -> tuple[np.ndarray, dict, dict]:
+        """Estimate RF for given data. Return RF and quality.
+
+        Returns
+        -------
+        tuple[np.ndarray, dict, dict]
+            w : np.ndarray
+                Estimated receptive field.
+            quality_dict : dict
+                Quality metrics including correlation coefficients and permutation test results.
+            model_dict : dict
+                Model metadata including training curves and hyperparameters.
+        """
         np.random.seed(self.seed)
         starttime = time.time()
 
@@ -178,11 +261,39 @@ class ReceptiveFieldGLM:
 
         return w, quality_dict, model_dict
 
-    def dfh_from_dfw(self, df_w):
+    def dfh_from_dfw(self, df_w: int) -> int:
+        """Compute height degrees of freedom from width degrees of freedom.
+
+        Parameters
+        ----------
+        df_w : int
+            Degrees of freedom for the width dimension.
+
+        Returns
+        -------
+        int
+            Degrees of freedom for the height dimension, clipped to hdims.
+        """
         return np.minimum(int(np.round(df_w * self.hdims / self.wdims)), self.hdims)
 
-    def compute_best_rf_model(self, trace, stim):
-        """Compute the best RF model using K-Fold cross-validation."""
+    def compute_best_rf_model(self, trace: np.ndarray, stim: np.ndarray) -> tuple:
+        """Compute the best RF model using K-Fold cross-validation.
+
+        Parameters
+        ----------
+        trace : np.ndarray
+            Neural response trace.
+        stim : np.ndarray
+            Stimulus array.
+
+        Returns
+        -------
+        tuple
+            best_model : object
+                The fitted GLM model with optimal hyperparameters.
+            metrics_dev_opt : np.ndarray
+                Array of development set metrics for all HP combinations and folds.
+        """
 
         if self.verbose > 0 and (self.betas.size > 1):
             print(f"################## Optimizing dfs ##################\n" + \
@@ -263,7 +374,21 @@ class ReceptiveFieldGLM:
         return best_model, metrics_dev_opt
 
     @staticmethod
-    def clip_dfs(dfs, dims):
+    def clip_dfs(dfs: np.ndarray, dims: int) -> np.ndarray:
+        """Clip degrees of freedom so they do not exceed the data dimensionality.
+
+        Parameters
+        ----------
+        dfs : np.ndarray
+            Array of candidate degrees of freedom.
+        dims : int
+            Maximum allowed degrees of freedom.
+
+        Returns
+        -------
+        np.ndarray
+            Clipped degrees of freedom array.
+        """
         if np.all(dfs <= dims):
             return dfs
         elif np.any(dfs <= dims):
@@ -274,12 +399,57 @@ class ReceptiveFieldGLM:
             return np.array([dims])
 
     @staticmethod
-    def _df_w2df_h(df_w, X_train, hdims):
+    def _df_w2df_h(df_w: int, X_train: np.ndarray, hdims: int) -> int:
+        """Convert width degrees of freedom to height degrees of freedom.
+
+        Parameters
+        ----------
+        df_w : int
+            Degrees of freedom for the width dimension.
+        X_train : np.ndarray
+            Training design matrix (used for shape reference).
+        hdims : int
+            Maximum allowed height degrees of freedom.
+
+        Returns
+        -------
+        int
+            Height degrees of freedom.
+        """
         df_h = np.minimum(int(np.round(df_w * X_train.shape[1] / X_train.shape[2])), hdims)
         return df_h
 
-    def create_and_fit_glm(self, df, X_train, y_train, alphas, betas, X_dev=None, y_dev=None):
-        """Fit GLM model"""
+    def create_and_fit_glm(self, df: tuple, X_train: np.ndarray, y_train: np.ndarray,
+                           alphas, betas,
+                           X_dev: np.ndarray = None,
+                           y_dev: np.ndarray = None) -> tuple:
+        """Create and fit a GLM model for given hyperparameters.
+
+        Parameters
+        ----------
+        df : tuple
+            Degrees of freedom per dimension (df_t, df_h, df_w) or (df_t,).
+        X_train : np.ndarray
+            Training design matrix.
+        y_train : np.ndarray
+            Training response.
+        alphas : array-like
+            Candidate alpha values.
+        betas : array-like
+            Candidate beta values.
+        X_dev : np.ndarray, optional
+            Development design matrix. Default is None.
+        y_dev : np.ndarray, optional
+            Development response. Default is None.
+
+        Returns
+        -------
+        tuple
+            model : object
+                Fitted GLM model.
+            metric_dev_opt_hp_sets : list or np.ndarray
+                Development set metrics for each HP combination.
+        """
         assert X_train.shape[0] == y_train.shape[0]
         if X_dev is not None:
             assert y_dev is not None
@@ -294,7 +464,31 @@ class ReceptiveFieldGLM:
 
         return model, metric_dev_opt_hp_sets
 
-    def create_glm(self, df, X_train, y_train, X_dev):
+    def create_glm(self, df: tuple, X_train: np.ndarray,
+                   y_train: np.ndarray, X_dev: np.ndarray) -> object:
+        """Create and initialize a GLM model.
+
+        Parameters
+        ----------
+        df : tuple
+            Degrees of freedom per dimension.
+        X_train : np.ndarray
+            Training design matrix.
+        y_train : np.ndarray
+            Training response.
+        X_dev : np.ndarray
+            Development design matrix (or None).
+
+        Returns
+        -------
+        object
+            Initialized GLM model.
+
+        Raises
+        ------
+        ValueError
+            If the size of df does not match self.dims.
+        """
 
         if len(self.dims) != len(df):
             raise ValueError(f"size mismatch {len(self.dims)} != {len(df)}")
@@ -310,8 +504,31 @@ class ReceptiveFieldGLM:
         model = self.initialize_model(df=df, X_train=X_train, y_train=y_train, X_dev=X_dev)
         return model
 
-    def fit_glm(self, model, alphas, betas, y_train, y_dev=None):
-        """Fit GLM model"""
+    def fit_glm(self, model: object, alphas, betas,
+                y_train: np.ndarray, y_dev: np.ndarray = None) -> tuple:
+        """Fit a GLM model by optimizing over alpha and beta hyperparameters.
+
+        Parameters
+        ----------
+        model : object
+            Initialized GLM model.
+        alphas : array-like
+            Candidate alpha values.
+        betas : array-like
+            Candidate beta values.
+        y_train : np.ndarray
+            Training response.
+        y_dev : np.ndarray, optional
+            Development response. Default is None.
+
+        Returns
+        -------
+        tuple
+            model : object
+                Fitted GLM model.
+            metric_dev_opt_hp_sets : list or np.ndarray
+                Development set metrics for each HP combination.
+        """
         min_iters_other = self.min_iters // 5
 
         if len(alphas) == 1 and len(betas) == 1:
@@ -345,8 +562,26 @@ class ReceptiveFieldGLM:
 
         return model, metric_dev_opt_hp_sets
 
-    def initialize_model(self, df, X_train, y_train, X_dev=None):
-        """Initialize model parameters for faster optimization"""
+    def initialize_model(self, df: tuple, X_train: np.ndarray,
+                         y_train: np.ndarray, X_dev: np.ndarray = None) -> object:
+        """Initialize model parameters for faster optimization.
+
+        Parameters
+        ----------
+        df : tuple
+            Degrees of freedom per dimension.
+        X_train : np.ndarray
+            Training design matrix.
+        y_train : np.ndarray
+            Training response.
+        X_dev : np.ndarray, optional
+            Development design matrix. Default is None.
+
+        Returns
+        -------
+        object
+            Initialized rfest.GLM model.
+        """
 
         model = rfest.GLM(distr=self.distr, output_nonlinearity=self.output_nonlinearity)
         model.burn_in = self.burn_in
@@ -365,18 +600,61 @@ class ReceptiveFieldGLM:
         return model
 
     @staticmethod
-    def get_b_from_w(S, w):
+    def get_b_from_w(S: np.ndarray, w: np.ndarray) -> np.ndarray:
+        """Compute spline coefficients b from weights w and spline basis S.
+
+        Parameters
+        ----------
+        S : np.ndarray
+            Spline basis matrix, shape (n_features, n_basis).
+        w : np.ndarray
+            Weight vector, shape (n_features,).
+
+        Returns
+        -------
+        np.ndarray
+            Spline coefficients b, shape (n_basis,).
+        """
         b, *_ = np.linalg.lstsq(S, w, rcond=None)
         return b
 
     @staticmethod
-    def _get_model_info(model):
+    def _get_model_info(model: object) -> str:
+        """Format a summary string of key model hyperparameters and metrics.
+
+        Parameters
+        ----------
+        model : object
+            Fitted GLM model with attributes metric, metric_dev_opt, alpha, beta, df, dims.
+
+        Returns
+        -------
+        str
+            Human-readable info string.
+        """
         info = f"{model.metric}={model.metric_dev_opt:.4f} "
         info += f"for HP-set: alpha={model.alpha:.5g}, beta={model.beta:.5g}, df={model.df}, dims={model.dims}"
         return info
 
 
-def quality_test(score_trueX, score_permX, metric):
+def quality_test(score_trueX: float, score_permX: np.ndarray, metric: str) -> float:
+    """Perform a one-sample t-test to assess whether the true score exceeds permuted scores.
+
+    Parameters
+    ----------
+    score_trueX : float
+        Model score on the true (non-permuted) test data.
+    score_permX : np.ndarray
+        Model scores on permuted test data, shape (n_perm,).
+    metric : str
+        Metric name used to determine the alternative hypothesis direction
+        ('corrcoef' -> 'less', 'mse' -> 'greater', else 'two-sided').
+
+    Returns
+    -------
+    float
+        p-value of the one-sample t-test.
+    """
     if metric == 'corrcoef':
         alternative = 'less'
     elif metric == 'mse':
@@ -388,8 +666,29 @@ def quality_test(score_trueX, score_permX, metric):
     return p_value
 
 
-def plot_rf_summary(rf, quality_dict, model_dict, title=""):
-    """Plot tRF and sRFs and quality test"""
+def plot_rf_summary(rf: np.ndarray, quality_dict: dict, model_dict: dict,
+                    title: str = "") -> tuple:
+    """Plot tRF and sRFs and quality test.
+
+    Parameters
+    ----------
+    rf : np.ndarray
+        Receptive field array, shape (n_t,) for 1D or (n_t, n_y, n_x) for 3D.
+    quality_dict : dict
+        Quality metrics dict, may contain 'score_permX', 'quality', 'corrcoef_*', etc.
+    model_dict : dict
+        Model metadata dict, may contain 'metric_train', 'y_train', 'y_test', etc.
+    title : str, optional
+        Figure title. Default is "".
+
+    Returns
+    -------
+    tuple
+        fig : matplotlib.figure.Figure
+            The figure object.
+        axs : np.ndarray
+            Array of axes objects.
+    """
 
     plot_training = model_dict is not None and 'metric_train' in model_dict
     plot_y_train = model_dict is not None and 'y_train' in model_dict
@@ -525,8 +824,31 @@ def plot_rf_summary(rf, quality_dict, model_dict, title=""):
     return fig, axs
 
 
-def plot_test_rf_quality(score_permX, score_test, cc_test=None, cc_dev=None, ax=None, metric=''):
-    """Plot test results"""
+def plot_test_rf_quality(score_permX: np.ndarray, score_test: float,
+                         cc_test: float = None, cc_dev: float = None,
+                         ax=None, metric: str = ''):
+    """Plot test results comparing true score to permuted scores.
+
+    Parameters
+    ----------
+    score_permX : np.ndarray
+        Model scores on permuted test data, shape (n_perm,).
+    score_test : float
+        Model score on true test data.
+    cc_test : float, optional
+        Correlation coefficient on test set. Default is None.
+    cc_dev : float, optional
+        Correlation coefficient on dev set. Default is None.
+    ax : matplotlib.axes.Axes, optional
+        Axes to plot on. If None, creates a new figure. Default is None.
+    metric : str, optional
+        Metric name shown in legend. Default is ''.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The axes with the plot.
+    """
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(4, 2))
     sns.boxplot(y=score_permX, ax=ax, width=0.8)
