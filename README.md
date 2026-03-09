@@ -28,9 +28,11 @@ cd djimaging
 uv pip install -e .
 ```
 
-If you want to use autorois, install with the optional extras:
+If you want to use autorois or receptive fields, install with the optional extras:
 ```bash
 uv pip install -e ".[autorois]"
+uv pip install -e ".[rf]"
+uv pip install -e ".[autorois,rf]"
 ```
 
 > ❗ To test if the package was successfully installed, e.g.
