@@ -27,6 +27,8 @@ from djimaging.utils.scanm import read_utils
 
 
 class CorrMapTemplate(dj.Computed):
+    """DataJoint computed table template that stores per-presentation correlation maps."""
+
     database = ""
     _cut_x = (1, 1)
     _cut_z = (1, 1)
@@ -38,7 +40,7 @@ class CorrMapTemplate(dj.Computed):
             self._include_prestim = True
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = """
         -> self.presentation_table
         ---
@@ -76,13 +78,28 @@ class CorrMapTemplate(dj.Computed):
     def raw_params_table(self):
         pass
 
-    def get_cut_x(self):
+    def get_cut_x(self) -> tuple:
+        """Return the pixel cut margins in the x direction.
+
+        Returns:
+            A 2-tuple ``(cut_left, cut_right)`` of pixel counts to exclude.
+        """
         return self._cut_x
 
-    def get_cut_z(self):
+    def get_cut_z(self) -> tuple:
+        """Return the pixel cut margins in the z direction.
+
+        Returns:
+            A 2-tuple ``(cut_bottom, cut_top)`` of pixel counts to exclude.
+        """
         return self._cut_z
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute and insert the correlation map for a given presentation.
+
+        Args:
+            key: DataJoint primary key dict identifying the presentation entry.
+        """
         filepath = (self.presentation_table & key).fetch1('pres_data_file')
         from_raw_data = (self.raw_params_table & key).fetch1('from_raw_data')
         data_name = (self.userinfo_table & key).fetch1('data_stack_name')
@@ -112,7 +129,7 @@ class CorrMapTemplate(dj.Computed):
         else:
             self.insert1(entry)
 
-    def plot1(self, key=None, gamma=0.7):
+    def plot1(self, key: dict = None, gamma: float = 0.7) -> None:
         key = get_primary_key(self, key=key)
 
         data_name = (self.userinfo_table & key).fetch1('data_stack_name')
@@ -157,13 +174,15 @@ class CorrMapTemplate(dj.Computed):
 
 
 class CrossCondCorrMapTemplate(dj.Computed):
+    """DataJoint computed table template for cross-condition correlation maps."""
+
     database = ""
     _split_cond = 'cond1'
     _ref_cond = 'C1'
     _max_shift = 5
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = f"""
         -> self.corr_map_table.proj(cond1_A='{self._split_cond}')
         -> self.corr_map_table.proj(cond1_B='{self._split_cond}')
@@ -192,11 +211,26 @@ class CrossCondCorrMapTemplate(dj.Computed):
     def corr_map_table(self):
         pass
 
-    def make(self, key, plot=False):
+    def make(self, key: dict, plot: bool = False) -> None:
+        """Compute and insert the cross-condition correlation map.
+
+        Args:
+            key: DataJoint primary key dict identifying the pair of conditions.
+            plot: If ``True``, generate a diagnostic plot during computation.
+        """
         correlation, x_shift, z_shift, max_corr = self._make_compute(key)
         self.insert1(dict(key, cross_corr_map=correlation, shift_x=x_shift, shift_z=z_shift, max_corr=max_corr))
 
-    def _make_compute(self, key, plot=False):
+    def _make_compute(self, key: dict, plot: bool = False) -> tuple:
+        """Fetch correlation maps for both conditions and compute cross-correlation.
+
+        Args:
+            key: DataJoint primary key dict identifying the pair of conditions.
+            plot: If ``True``, generate a diagnostic plot.
+
+        Returns:
+            A 4-tuple ``(correlation, x_shift, z_shift, max_corr)``.
+        """
         key_a = {**key, 'cond1': key[f'{self._split_cond}_A']}
         key_b = {**key, 'cond1': key[f'{self._split_cond}_B']}
 
@@ -214,18 +248,25 @@ class CrossCondCorrMapTemplate(dj.Computed):
 
         return correlation, x_shift, z_shift, max_corr
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict = None) -> None:
+        """Plot the cross-condition correlation map for a given key.
+
+        Args:
+            key: DataJoint primary key dict. If ``None``, the first available key is used.
+        """
         key = get_primary_key(self, key=key)
         self._make_compute(key, plot=True)
 
 
 class CrossStimCorrMapTemplate(dj.Computed):
+    """DataJoint computed table template for cross-stimulus correlation maps."""
+
     database = ""
     _ref_stim = 'noise'
     _max_shift = 5
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = f"""
         -> self.corr_map_table.proj(stim_A='stim_name')
         -> self.corr_map_table.proj(stim_B='stim_name')
@@ -252,11 +293,26 @@ class CrossStimCorrMapTemplate(dj.Computed):
     def corr_map_table(self):
         pass
 
-    def make(self, key, plot=False):
+    def make(self, key: dict, plot: bool = False) -> None:
+        """Compute and insert the cross-stimulus correlation map.
+
+        Args:
+            key: DataJoint primary key dict identifying the pair of stimuli.
+            plot: If ``True``, generate a diagnostic plot during computation.
+        """
         correlation, x_shift, z_shift, max_corr = self._make_compute(key)
         self.insert1(dict(key, cross_corr_map=correlation, shift_x=x_shift, shift_z=z_shift, max_corr=max_corr))
 
-    def _make_compute(self, key, plot=False):
+    def _make_compute(self, key: dict, plot: bool = False) -> tuple:
+        """Fetch correlation maps for both stimuli and compute cross-correlation.
+
+        Args:
+            key: DataJoint primary key dict identifying the pair of stimuli.
+            plot: If ``True``, generate a diagnostic plot.
+
+        Returns:
+            A 4-tuple ``(correlation, x_shift, z_shift, max_corr)``.
+        """
         key_a = {**key, 'stim_name': key['stim_A']}
         key_b = {**key, 'stim_name': key['stim_B']}
 
@@ -274,12 +330,30 @@ class CrossStimCorrMapTemplate(dj.Computed):
 
         return correlation, x_shift, z_shift, max_corr
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict = None) -> None:
+        """Plot the cross-stimulus correlation map for a given key.
+
+        Args:
+            key: DataJoint primary key dict. If ``None``, the first available key is used.
+        """
         key = get_primary_key(self, key=key)
         self._make_compute(key, plot=True)
 
 
-def normalized_cross_correlation(image1, image2):
+def normalized_cross_correlation(image1: np.ndarray, image2: np.ndarray) -> np.ndarray:
+    """Compute the normalized 2-D cross-correlation between two images.
+
+    Both images are z-score normalised before computing the cross-correlation
+    with ``scipy.signal.correlate2d`` in ``'same'`` mode. The result is then
+    divided by the geometric mean of the signal energies.
+
+    Args:
+        image1: First 2-D input array.
+        image2: Second 2-D input array, must have the same shape as ``image1``.
+
+    Returns:
+        Normalized cross-correlation array with the same shape as the inputs.
+    """
     image1_norm = normalize_zscore(image1)
     image2_norm = normalize_zscore(image2)
 
@@ -288,7 +362,27 @@ def normalized_cross_correlation(image1, image2):
     return correlation
 
 
-def cross_correlate_images(image1, image2, plot=False, max_shift=None):
+def cross_correlate_images(
+        image1: np.ndarray,
+        image2: np.ndarray,
+        plot: bool = False,
+        max_shift: int = None,
+) -> tuple:
+    """Compute the normalized cross-correlation between two images and find the peak shift.
+
+    Args:
+        image1: Reference 2-D image array.
+        image2: Query 2-D image array, must have the same shape as ``image1``.
+        plot: If ``True``, generate a 4-panel diagnostic figure.
+        max_shift: If provided and positive, zero out correlation values outside a
+            central square of this half-width (in pixels) before finding the peak.
+
+    Returns:
+        A 4-tuple ``(correlation, x_shift, z_shift, max_corr)`` where
+        ``correlation`` is the full normalized cross-correlation array,
+        ``x_shift`` and ``z_shift`` are integer pixel shifts (image2 relative to
+        image1), and ``max_corr`` is the peak correlation value.
+    """
     # Compute the normalized cross-correlation
     correlation = normalized_cross_correlation(image1, image2)
 

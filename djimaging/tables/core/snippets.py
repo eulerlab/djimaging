@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import warnings
 from abc import abstractmethod
 
@@ -11,7 +13,29 @@ from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.snippet_utils import split_trace_by_reps, split_trace_by_group_reps, compute_repeat_correlation
 
 
-def get_aligned_snippets_times(snippets_times, raise_error=True, tol=1e-4):
+def get_aligned_snippets_times(
+        snippets_times: np.ndarray,
+        raise_error: bool = True,
+        tol: float = 1e-4,
+) -> np.ndarray:
+    """Align snippet time arrays across repetitions and return a single time vector.
+
+    Args:
+        snippets_times: 2-D array of shape (n_timepoints, n_reps) containing
+            the absolute time stamps for each snippet.
+        raise_error: If True, raise a ValueError when the across-repetition
+            standard deviation exceeds ``tol``. If False, issue a warning
+            instead.
+        tol: Maximum allowed standard deviation (in seconds) for the
+            snippet times to be considered consistent. Default is 1e-4.
+
+    Returns:
+        A 1-D array of shape (n_timepoints,) with the mean relative time for
+        each sample, aligned to the start of each repetition.
+
+    Raises:
+        ValueError: If ``raise_error`` is True and the times are inconsistent.
+    """
     snippets_times = snippets_times - snippets_times[0, :]
 
     is_inconsistent = np.any(np.std(snippets_times, axis=1) > tol)
@@ -57,32 +81,46 @@ class SnippetsTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def preprocesstraces_table(self):
+    def preprocesstraces_table(self) -> dj.Table:
+        """Return the preprocessed traces table."""
         pass
 
     @property
     @abstractmethod
-    def stimulus_table(self):
+    def stimulus_table(self) -> dj.Table:
+        """Return the stimulus table."""
         pass
 
     @property
     @abstractmethod
-    def presentation_table(self):
+    def presentation_table(self) -> dj.Table:
+        """Return the presentation table."""
         pass
 
     @property
     @abstractmethod
-    def traces_table(self):
+    def traces_table(self) -> dj.Table:
+        """Return the raw traces table."""
         pass
 
     @property
     def key_source(self):
+        """Return the key source restricted to repeated stimuli."""
         try:
             return (self.preprocesstraces_table() & (self.stimulus_table() & "isrepeated=1")).proj()
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute and insert snippets for the given key.
+
+        Fetches the preprocessed trace and stimulus parameters, splits the
+        trace into per-repetition snippets, optionally applies baseline
+        correction, and inserts the result.
+
+        Args:
+            key: Primary key dict identifying the entry to populate.
+        """
         stim_name, stim_dict, ntrigger_rep = (self.stimulus_table() & key).fetch1(
             'stim_name', 'stim_dict', 'ntrigger_rep')
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
@@ -111,7 +149,22 @@ class SnippetsTemplate(dj.Computed):
             droppedlastrep_flag=int(droppedlastrep_flag),
         ))
 
-    def get_snippet_base_dt(self, stim_name):
+    def get_snippet_base_dt(self, stim_name: str) -> float | None:
+        """Return the baseline duration for snippet baseline correction.
+
+        Checks first in the stimulus table's ``snippet_base_dt`` column, then
+        falls back to the class-level ``_dt_base_line_dict`` lookup.
+
+        Args:
+            stim_name: Stimulus name used to look up the baseline duration.
+
+        Returns:
+            Baseline window duration in seconds, or None if no baseline
+            correction should be applied.
+
+        Raises:
+            ValueError: If both sources provide different non-None values.
+        """
         try:
             dt_baseline = (self.stimulus_table & dict(stim_name=stim_name)).fetch1('snippet_base_dt')
             if not np.isfinite(dt_baseline):
@@ -132,7 +185,15 @@ class SnippetsTemplate(dj.Computed):
 
         return dt_baseline
 
-    def plot1(self, key=None, xlim=None, xlim_aligned=None):
+    def plot1(self, key: dict = None, xlim: tuple = None, xlim_aligned: tuple = None) -> None:
+        """Plot the raw, repetition-aligned, and averaged snippets for one entry.
+
+        Args:
+            key: Primary key identifying the entry to plot. If None, the first
+                available key is used.
+            xlim: x-axis limits for the raw snippet panel.
+            xlim_aligned: x-axis limits for the aligned snippet panels.
+        """
         key = get_primary_key(table=self, key=key)
         snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self & key).fetch1(
             "snippets_t0", "snippets_dt", "snippets", "triggertimes_snippets")
@@ -215,32 +276,46 @@ class GroupSnippetsTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def preprocesstraces_table(self):
+    def preprocesstraces_table(self) -> dj.Table:
+        """Return the preprocessed traces table."""
         pass
 
     @property
     @abstractmethod
-    def stimulus_table(self):
+    def stimulus_table(self) -> dj.Table:
+        """Return the stimulus table."""
         pass
 
     @property
     @abstractmethod
-    def presentation_table(self):
+    def presentation_table(self) -> dj.Table:
+        """Return the presentation table."""
         pass
 
     @property
     @abstractmethod
-    def traces_table(self):
+    def traces_table(self) -> dj.Table:
+        """Return the raw traces table."""
         pass
 
     @property
     def key_source(self):
+        """Return the key source restricted to stimuli with trial_info defined."""
         try:
             return (self.preprocesstraces_table() & (self.stimulus_table() & "trial_info!='None'")).proj()
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key, allow_incomplete=True):
+    def make(self, key: dict, allow_incomplete: bool = True) -> None:
+        """Compute and insert group-level snippets for the given key.
+
+        Fetches the preprocessed trace and trial-info structure, splits the
+        trace by group and repetition, and inserts the result.
+
+        Args:
+            key: Primary key dict identifying the entry to populate.
+            allow_incomplete: If True, allow incomplete last repetitions.
+        """
         trial_info, stim_dict = (self.stimulus_table() & key).fetch1('trial_info', 'stim_dict')
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
         pp_trace_t0, pp_trace_dt, pp_trace = (self.preprocesstraces_table() & key).fetch1(
@@ -268,7 +343,20 @@ class GroupSnippetsTemplate(dj.Computed):
             droppedlastrep_flag=droppedlastrep_flag,
         ))
 
-    def plot1(self, key=None, xlim=None, fig_kws=None):
+    def plot1(self, key: dict = None, xlim: tuple = None, fig_kws: dict = None) -> tuple:
+        """Plot per-group snippet traces for one entry.
+
+        Args:
+            key: Primary key identifying the entry to plot. If None, the first
+                available key is used.
+            xlim: x-axis limits for the combined overview panel.
+            fig_kws: Additional keyword arguments forwarded to
+                ``plt.subplot_mosaic``.
+
+        Returns:
+            A 2-tuple of (fig, axs) where axs is the mosaic axes dict with
+            keys 'all' and one key per group name.
+        """
         fig_kws = {} if fig_kws is None else fig_kws
 
         key = get_primary_key(table=self, key=key)

@@ -28,6 +28,8 @@ from djimaging.utils.scanm.recording import ScanMRecording
 
 
 class HighResTemplate(dj.Computed):
+    """DataJoint computed table template for high-resolution stack metadata and averages."""
+
     database = ""
     _fallback_to_raw = True  # If h5 not available, try to load from raw data
 
@@ -37,7 +39,7 @@ class HighResTemplate(dj.Computed):
     incl_cond3 = False  # Include condition 3 as primary key?
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = """
         # High resolution stack information.
         -> self.field_table
@@ -124,8 +126,17 @@ class HighResTemplate(dj.Computed):
             """
             return definition
 
-    def load_field_stim_file_info_df(self, field_key):
-        """Load file info for a given field + stimulus combination."""
+    def load_field_stim_file_info_df(self, field_key: dict):
+        """Load file info for a given field + stimulus combination.
+
+        Args:
+            field_key: DataJoint primary key dict identifying the field entry.
+
+        Returns:
+            A pandas DataFrame with file information filtered to the given field key,
+            with default values applied for any condition/region columns not present
+            in the underlying field table.
+        """
         from_raw_data = (self.raw_params_table & field_key).fetch1('from_raw_data')
         file_info_df = self.field_table().load_exp_file_info_df(field_key, filter_kind='hr')
 
@@ -159,7 +170,14 @@ class HighResTemplate(dj.Computed):
 
         return file_info_df
 
-    def make(self, key, verboselvl=0):
+    def make(self, key: dict, verboselvl: int = 0) -> None:
+        """Populate the high-resolution stack entries for a given field key.
+
+        Args:
+            key: DataJoint primary key dict identifying the field entry.
+            verboselvl: Verbosity level. 0 = silent, 1 = progress messages,
+                >1 = additional detail.
+        """
         setupid = (self.experiment_table().ExpInfo & key).fetch1("setupid")
 
         file_info_df = self.load_field_stim_file_info_df(field_key=key)
@@ -188,8 +206,14 @@ class HighResTemplate(dj.Computed):
             filepath = pres_df.iloc[0].filepath
             self._add_entry(pres_key, filepath=filepath, setupid=setupid)
 
-    def _add_entry(self, key, filepath, setupid):
-        """Load data, create key and insert entry"""
+    def _add_entry(self, key: dict, filepath: str, setupid: str) -> None:
+        """Load data, create key and insert entry.
+
+        Args:
+            key: DataJoint primary key dict for the high-resolution entry.
+            filepath: Path to the recording file (e.g. an h5 file).
+            setupid: Setup identifier string used to initialise the recording object.
+        """
         rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=key['date'])
         hr_entry, avg_entries = self._complete_keys(key, rec)
 
@@ -198,8 +222,18 @@ class HighResTemplate(dj.Computed):
             (self.StackAverages & key).insert1(avg_key, allow_direct_insert=True)
 
     @staticmethod
-    def _complete_keys(base_key, rec) -> (dict, list):
+    def _complete_keys(base_key: dict, rec) -> tuple:
+        """Build the high-resolution entry dict and per-channel average entry dicts.
 
+        Args:
+            base_key: DataJoint primary key dict to extend with recording metadata.
+            rec: A ``ScanMRecording`` instance containing the loaded recording data.
+
+        Returns:
+            A 2-tuple ``(hr_entry, avg_entries)`` where ``hr_entry`` is the dict
+            to insert into the master table and ``avg_entries`` is a list of dicts
+            to insert into ``StackAverages``.
+        """
         hr_entry = deepcopy(base_key)
         hr_entry["highres_file"] = rec.filepath
 
@@ -227,7 +261,7 @@ class HighResTemplate(dj.Computed):
 
         return hr_entry, avg_entries
 
-    def plot1(self, key=None, figsize=(8, 4), gamma=0.7):
+    def plot1(self, key: dict = None, figsize: tuple = (8, 4), gamma: float = 0.7) -> None:
         key = get_primary_key(table=self, key=key)
 
         scan_type = (self & key).fetch1('scan_type')

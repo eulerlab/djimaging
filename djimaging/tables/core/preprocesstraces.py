@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import warnings
 from abc import abstractmethod
 
@@ -33,7 +35,8 @@ class PreprocessParamsTemplate(dj.Lookup):
 
     @property
     @abstractmethod
-    def stimulus_table(self):
+    def stimulus_table(self) -> dj.Table:
+        """Return the stimulus table."""
         pass
 
     def add_default(
@@ -119,21 +122,25 @@ class PreprocessTracesTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def traces_table(self):
+    def traces_table(self) -> dj.Table:
+        """Return the raw traces table."""
         pass
 
     @property
     @abstractmethod
-    def preprocessparams_table(self):
+    def preprocessparams_table(self) -> dj.Table:
+        """Return the preprocessing parameters lookup table."""
         pass
 
     @property
     @abstractmethod
-    def presentation_table(self):
+    def presentation_table(self) -> dj.Table:
+        """Return the presentation table."""
         pass
 
     @property
     def key_source(self):
+        """Return the key source restricted to valid traces and valid triggers."""
         try:
             return ((self.traces_table() & 'trace_valid=1' & 'trigger_valid=1') * self.preprocessparams_table()).proj()
         except (AttributeError, TypeError):

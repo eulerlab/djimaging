@@ -1,14 +1,17 @@
 from abc import abstractmethod
-from datetime import datetime
+from datetime import date, datetime
+from typing import Optional
 
 import datajoint as dj
 
 
 class AnimalAgeTemplate(dj.Computed):
+    """DataJoint computed table template that stores the age of an animal in days."""
+
     database = ""
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = """
         -> self.experiment_table
         ---
@@ -28,7 +31,12 @@ class AnimalAgeTemplate(dj.Computed):
     def experiment_table(self):
         pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute and insert the animal age in days for a given experiment key.
+
+        Args:
+            key: DataJoint primary key dict identifying the experiment entry.
+        """
         dod, dob = (self.experiment_table.Animal & key).fetch1('date', 'animdob')
 
         # convert string to date
@@ -40,7 +48,18 @@ class AnimalAgeTemplate(dj.Computed):
             age = (dod - dob).days
             self.insert1(dict(key, age=age))
 
-def date_str_to_date(date_str: str):
+def date_str_to_date(date_str: str) -> Optional[date]:
+    """Parse a date string into a ``datetime.date`` object.
+
+    Tries several common date formats and returns ``None`` if the string is
+    empty, unparseable, or the parsed year is outside 2000–2050.
+
+    Args:
+        date_str: A date string to parse (e.g. ``"20210101"`` or ``"01.01.2021"``).
+
+    Returns:
+        A ``datetime.date`` instance, or ``None`` if parsing fails.
+    """
     if not date_str:  # Handle empty entries
         return None
     date_formats = [

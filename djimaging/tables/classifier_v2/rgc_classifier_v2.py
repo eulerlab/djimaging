@@ -8,7 +8,7 @@ class ClassifierV2Template(dj.Manual):
     database = ""
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = """
         classifier_id : int unsigned  # Unique identifier for the classifier
         ---
@@ -16,7 +16,18 @@ class ClassifierV2Template(dj.Manual):
         """
         return definition
 
-    def add(self, classifier_file='/gpfs01/euler/data/Resources/Classifier_v2/rgc_classifier_v2.pkl', classifier_id=1):
+    def add(self, classifier_file: str = '/gpfs01/euler/data/Resources/Classifier_v2/rgc_classifier_v2.pkl',
+            classifier_id: int = 1) -> None:
+        """Validate a classifier file and insert a new entry into the table.
+
+        Args:
+            classifier_file: Path to the pickled classifier dictionary file.
+            classifier_id: Unique integer identifier for the classifier entry.
+
+        Raises:
+            AssertionError: If the classifier file fails validation by
+                :func:`check_classifier_dict`.
+        """
         # Test if classifier is valid
         clf_dict = load_classifier_from_file(classifier_file)
         check_classifier_dict(clf_dict)
@@ -26,13 +37,38 @@ class ClassifierV2Template(dj.Manual):
             classifier_file=classifier_file))
 
 
-def load_classifier_from_file(classifier_file):
+def load_classifier_from_file(classifier_file: str) -> dict:
+    """Load and return the classifier dictionary from a pickle file.
+
+    Args:
+        classifier_file: Path to the pickled classifier dictionary file.
+
+    Returns:
+        Dictionary containing the classifier and its associated metadata.
+    """
     with open(classifier_file, 'rb') as f:
         clf_dict = pickle.load(f)
     return clf_dict
 
 
-def check_classifier_dict(clf_dict):
+def check_classifier_dict(clf_dict: dict) -> dict:
+    """Validate the structure and contents of a classifier dictionary.
+
+    Checks that all required keys are present, that the training arrays have consistent
+    shapes, that every unique training label appears in ``y_names``, and that the
+    ``'classifier'`` value is a valid scikit-learn classifier.
+
+    Args:
+        clf_dict: Dictionary expected to contain at least the keys ``'classifier'``,
+            ``'chirp_feats'``, ``'bar_feats'``, ``'feature_names'``, ``'train_x'``,
+            ``'train_y'``, and ``'y_names'``.
+
+    Returns:
+        The validated ``clf_dict`` unchanged.
+
+    Raises:
+        AssertionError: If any validation check fails.
+    """
     assert type(clf_dict) == dict, "Classifier file must contain a dictionary with classifier data."
 
     # Check keys
@@ -60,10 +96,37 @@ def check_classifier_dict(clf_dict):
     return clf_dict
 
 
-def save_classifier_to_file(classifier, chirp_feats, bar_feats, feature_names, train_x, train_y, y_names,
-                            classifier_file, **kwargs):
-    """
-    Saves the classifier and its metadata to a file.
+def save_classifier_to_file(
+        classifier,
+        chirp_feats: np.ndarray,
+        bar_feats: np.ndarray,
+        feature_names: list,
+        train_x: np.ndarray,
+        train_y: np.ndarray,
+        y_names: dict,
+        classifier_file: str,
+        **kwargs,
+) -> None:
+    """Save the classifier and its metadata to a pickle file.
+
+    Assembles a classifier dictionary from the provided arguments, validates it with
+    :func:`check_classifier_dict`, and writes it to ``classifier_file``.
+
+    Args:
+        classifier: Trained scikit-learn classifier.
+        chirp_feats: Chirp feature basis matrix used during training.
+        bar_feats: Bar feature basis matrix used during training.
+        feature_names: Ordered list of feature names corresponding to the columns of
+            the training feature matrix.
+        train_x: Training feature matrix of shape ``(n_samples, n_features)``.
+        train_y: Training label array of shape ``(n_samples,)``.
+        y_names: Mapping from integer label values to human-readable label names.
+        classifier_file: Destination path for the pickled classifier dictionary.
+        **kwargs: Additional items to include in the saved dictionary.
+
+    Raises:
+        AssertionError: If the assembled dictionary fails validation by
+            :func:`check_classifier_dict`.
     """
     clf_dict = {
         'classifier': classifier,

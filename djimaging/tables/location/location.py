@@ -80,7 +80,13 @@ class RelativeFieldLocationTemplate(dj.Computed):
     def presentation_table(self):  # Optional table
         return None
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute the field position relative to the optic disk and insert it.
+
+        Args:
+            key: DataJoint primary key dict identifying a unique combination of optic
+                disk and field entries.
+        """
         od_key = key.copy()
         od_key.pop('field', None)
 
@@ -114,7 +120,12 @@ class RelativeFieldLocationTemplate(dj.Computed):
 
         self.insert1(loc_key)
 
-    def plot(self, view='igor_local'):
+    def plot(self, view: str = 'igor_local') -> None:
+        """Scatter-plot all field positions in setup coordinates.
+
+        Args:
+            view: Axis orientation; one of ``'igor_local'`` or ``'igor_setup'``.
+        """
         relx, rely = self.fetch("relx", "rely")
         plot_relxy_pos(relx, rely, view=view)
 
@@ -153,7 +164,12 @@ class RetinalFieldLocationTemplate(dj.Computed):
     def expinfo_table(self):
         pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Convert relative field coordinates to retinal (ventral-dorsal / temporal-nasal) axes.
+
+        Args:
+            key: DataJoint primary key dict identifying a unique relative field location entry.
+        """
         relx, rely = (self.relativefieldlocation_table() & key).fetch1('relx', 'rely')
         eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
 
@@ -169,7 +185,13 @@ class RetinalFieldLocationTemplate(dj.Computed):
         rfl_key['temporal_nasal_pos_um'] = temporal_nasal_pos_um
         self.insert1(rfl_key)
 
-    def plot(self, key=None):
+    def plot(self, key: dict = None) -> None:
+        """Scatter-plot all fields in retinal coordinates, optionally highlighting one key.
+
+        Args:
+            key: Optional DataJoint primary key dict. If provided, the matching entry is
+                highlighted with a separate scatter marker.
+        """
         temporal_nasal_pos_um, ventral_dorsal_pos_um = self.fetch("temporal_nasal_pos_um", "ventral_dorsal_pos_um")
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
         ax.scatter(temporal_nasal_pos_um, ventral_dorsal_pos_um, label='all')
@@ -215,7 +237,12 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
     def retinalfieldlocation_table(self):
         pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Categorise a field's retinal location into nasal/temporal and ventral/dorsal sides.
+
+        Args:
+            key: DataJoint primary key dict identifying a unique retinal field location entry.
+        """
         ventral_dorsal, temporal_nasal = (self.retinalfieldlocation_table() & key).fetch1(
             self._ventral_dorsal_key, self._temporal_nasal_key)
 
@@ -241,8 +268,13 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
         rfl_key['nvd_t_side'] = nt_side + vd_side if nt_side == 'n' else nt_side
         self.insert1(rfl_key)
 
-    def plot(self, restriction=None):
+    def plot(self, restriction: dict = None) -> None:
+        """Scatter-plot all fields colour-coded by their combined retinal quadrant label.
 
+        Args:
+            restriction: Optional DataJoint restriction dict applied before plotting.
+                Defaults to no restriction.
+        """
         if restriction is None:
             restriction = dict()
 
@@ -258,8 +290,18 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
         plt.show()
 
 
-def plot_relxy_pos(relx, rely, view='igor_local'):
-    """Plot Data in setup coordinates"""
+def plot_relxy_pos(relx: np.ndarray, rely: np.ndarray, view: str = 'igor_local') -> None:
+    """Plot field positions in setup XY coordinates.
+
+    Args:
+        relx: Array of X coordinates relative to the optic disk (in µm).
+        rely: Array of Y coordinates relative to the optic disk (in µm).
+        view: Axis orientation; one of ``'igor_local'`` (invert both axes) or
+            ``'igor_setup'`` (invert y-axis only).
+
+    Raises:
+        NotImplementedError: If *view* is not recognised.
+    """
     fig, ax = plt.subplots(1, 1, figsize=(5, 5))
     ax.scatter(rely, relx, label='all', s=1, alpha=0.5)
     ax.set(xlabel="rely", ylabel="relx")
@@ -277,8 +319,18 @@ def plot_relxy_pos(relx, rely, view='igor_local'):
     plt.show()
 
 
-def plot_relyz_pos(rely, relz, view='igor_local'):
-    """Plot Data in setup coordinates"""
+def plot_relyz_pos(rely: np.ndarray, relz: np.ndarray, view: str = 'igor_local') -> None:
+    """Plot field positions in setup YZ coordinates.
+
+    Args:
+        rely: Array of Y coordinates relative to the optic disk (in µm).
+        relz: Array of Z coordinates relative to the optic disk (in µm).
+        view: Axis orientation; ``'igor_local'`` inverts the x-axis, ``'igor_setup'``
+            leaves axes as-is.
+
+    Raises:
+        NotImplementedError: If *view* is not recognised.
+    """
     fig, ax = plt.subplots(1, 1, figsize=(5, 5))
     ax.scatter(rely, relz, label='all', s=1, alpha=0.5)
     ax.set(xlabel="rely", ylabel="relz")
