@@ -34,8 +34,6 @@ autorois = [
 ]
 rf = [
     "rfest>=2.1.2",
-    "jax",
-    "jaxlib",
 ]
 dev = [
     "pytest",
