@@ -1,12 +1,29 @@
 import warnings
+from typing import Optional, Tuple
 
 import numpy as np
 
 from djimaging.utils.mask_format_utils import assert_igor_format
 
 
-def extract_roi_ids(roi_mask, npixartifact=0):
-    """Return roi idxs as in ROI mask (i.e. negative values)"""
+def extract_roi_ids(roi_mask: np.ndarray, npixartifact: int = 0) -> np.ndarray:
+    """Return ROI IDs as stored in the ROI mask (negative integer values).
+
+    Parameters
+    ----------
+    roi_mask : np.ndarray
+        2-D integer array where background pixels are >= 0 and each ROI is
+        encoded as a unique negative integer.
+    npixartifact : int, optional
+        Number of rows at the top of the mask to skip (light-artifact lines).
+        Default is 0.
+
+    Returns
+    -------
+    np.ndarray
+        1-D integer array of unique ROI IDs (negative values), sorted by
+        absolute value.
+    """
     assert roi_mask.ndim == 2
     roi_ids = np.unique(roi_mask[npixartifact:, :])
     roi_ids = roi_ids[roi_ids < 0]  # remove background indexes (0 or 1)
@@ -14,8 +31,23 @@ def extract_roi_ids(roi_mask, npixartifact=0):
     return roi_ids.astype(int)
 
 
-def fix_first_or_last_n_nan(trace, n):
-    """Replace NaNs if they are at the beginning or end of the trace"""
+def fix_first_or_last_n_nan(trace: np.ndarray, n: int) -> np.ndarray:
+    """Replace NaNs if they are at the beginning or end of the trace.
+
+    Parameters
+    ----------
+    trace : np.ndarray
+        1-D or N-D array of trace values.
+    n : int
+        Number of samples at each end to inspect and fix. If ``n <= 0`` the
+        array is returned unchanged.
+
+    Returns
+    -------
+    np.ndarray
+        Trace with leading/trailing NaN values replaced by the nearest
+        non-NaN neighbour.
+    """
     if n <= 0:
         return trace
     if np.any(np.isnan(trace[:n])):
@@ -25,8 +57,35 @@ def fix_first_or_last_n_nan(trace, n):
     return trace
 
 
-def get_roi2trace(traces, traces_times, roi_ids_traces, roi_ids_subset=None):
-    """Get dict that holds traces and times accessible by roi_id"""
+def get_roi2trace(
+        traces: np.ndarray,
+        traces_times: np.ndarray,
+        roi_ids_traces: np.ndarray,
+        roi_ids_subset: Optional[np.ndarray] = None,
+) -> dict:
+    """Get a dict that holds traces and times accessible by ROI ID.
+
+    Parameters
+    ----------
+    traces : np.ndarray
+        Array of shape ``(frames, rois)`` or ``(frames, repeats, rois)``
+        containing fluorescence trace values.
+    traces_times : np.ndarray
+        Array with the same shape as ``traces`` containing the time stamp
+        of each sample in seconds.
+    roi_ids_traces : np.ndarray
+        1-D array of positive integer ROI IDs corresponding to the last axis
+        of ``traces``.
+    roi_ids_subset : np.ndarray, optional
+        Subset of ``roi_ids_traces`` to include in the output dict. If None,
+        all ROIs are included.
+
+    Returns
+    -------
+    dict
+        Mapping from ROI ID (int) to a dict with keys ``'trace'``,
+        ``'trace_times'``, and ``'trace_valid'`` (1 if valid, 0 otherwise).
+    """
     roi_ids_subset = roi_ids_traces if roi_ids_subset is None else roi_ids_subset
 
     assert np.all(roi_ids_traces >= 1), f"roi_ids_traces {roi_ids_traces} should be >= 1."
@@ -69,8 +128,26 @@ def get_roi2trace(traces, traces_times, roi_ids_traces, roi_ids_subset=None):
     return roi2trace
 
 
-def compare_roi_masks(roi_mask1: np.ndarray, roi_mask2: np.ndarray, max_shift=4) -> str:
-    """Test if two roi masks are the same"""
+def compare_roi_masks(roi_mask1: np.ndarray, roi_mask2: np.ndarray, max_shift: int = 4) -> str:
+    """Test if two ROI masks are the same, possibly up to a spatial shift.
+
+    Parameters
+    ----------
+    roi_mask1 : np.ndarray
+        First 2-D integer ROI mask in Igor format.
+    roi_mask2 : np.ndarray
+        Second 2-D integer ROI mask in Igor format.
+    max_shift : int, optional
+        Maximum number of pixels to try shifting in each direction when
+        testing for a shifted match. Default is 4.
+
+    Returns
+    -------
+    str
+        ``'same'`` if the masks are identical, ``'shifted'`` if they match
+        after a spatial shift within ``max_shift``, or ``'different'``
+        otherwise.
+    """
     assert_igor_format(roi_mask1)
     assert_igor_format(roi_mask2)
 
@@ -93,7 +170,29 @@ def compare_roi_masks(roi_mask1: np.ndarray, roi_mask2: np.ndarray, max_shift=4)
     return 'different'
 
 
-def get_roi_center(roi_mask: np.ndarray, roi_id: int) -> (float, float):
+def get_roi_center(roi_mask: np.ndarray, roi_id: int) -> Tuple[float, float]:
+    """Return the centre of mass of a single ROI in pixel coordinates.
+
+    Parameters
+    ----------
+    roi_mask : np.ndarray
+        2-D integer ROI mask where each ROI is encoded as a unique negative
+        integer (i.e. ``-roi_id`` marks pixels belonging to ``roi_id``).
+    roi_id : int
+        Positive integer identifying the ROI of interest.
+
+    Returns
+    -------
+    x : float
+        Row (first-axis) coordinate of the ROI centre of mass.
+    y : float
+        Column (second-axis) coordinate of the ROI centre of mass.
+
+    Raises
+    ------
+    ValueError
+        If ``roi_id`` is not found in ``roi_mask``.
+    """
     binary_arr = -roi_mask == roi_id
     if not np.any(binary_arr):
         raise ValueError(f'roi_id={roi_id} not found in roi_mask with values {np.unique(roi_mask)}')
@@ -102,6 +201,20 @@ def get_roi_center(roi_mask: np.ndarray, roi_id: int) -> (float, float):
 
 
 def get_roi_centers(roi_mask: np.ndarray, roi_ids: np.ndarray) -> np.ndarray:
+    """Return the centre of mass for each ROI in pixel coordinates.
+
+    Parameters
+    ----------
+    roi_mask : np.ndarray
+        2-D integer ROI mask.
+    roi_ids : np.ndarray
+        1-D array of positive integer ROI IDs to compute centres for.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape ``(len(roi_ids), 2)`` with columns ``[x, y]``.
+    """
     # TODO test if x, y should be swapped
     roi_centers = np.zeros((len(roi_ids), 2))
     for i, roi_id in enumerate(roi_ids):
@@ -110,8 +223,39 @@ def get_roi_centers(roi_mask: np.ndarray, roi_ids: np.ndarray) -> np.ndarray:
     return roi_centers
 
 
-def get_rel_roi_pos(roi_id, roi_mask, pixel_size_um, pixel_size_d2_um=None, ang_deg=0.):
-    """Get position relative to plotting axis"""
+def get_rel_roi_pos(
+        roi_id: int,
+        roi_mask: np.ndarray,
+        pixel_size_um: float,
+        pixel_size_d2_um: Optional[float] = None,
+        ang_deg: float = 0.,
+) -> Tuple[float, float]:
+    """Get ROI position relative to the image centre in micrometres.
+
+    Parameters
+    ----------
+    roi_id : int
+        Positive integer identifying the ROI.
+    roi_mask : np.ndarray
+        2-D integer ROI mask.
+    pixel_size_um : float
+        Physical size of a pixel along the first spatial axis in micrometres.
+    pixel_size_d2_um : float, optional
+        Physical size of a pixel along the second spatial axis in micrometres.
+        Defaults to ``pixel_size_um`` if None.
+    ang_deg : float, optional
+        Rotation angle in degrees to apply around the image centre.
+        Default is 0 (no rotation).
+
+    Returns
+    -------
+    d1_um : float
+        Offset along the first axis from the image centre in micrometres,
+        after optional rotation.
+    d2_um : float
+        Offset along the second axis from the image centre in micrometres,
+        after optional rotation.
+    """
     # Get relative position in pixel space
     pix_d1, pix_d2 = get_roi_center(roi_mask, roi_id)
 

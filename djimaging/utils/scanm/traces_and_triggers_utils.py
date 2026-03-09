@@ -1,3 +1,5 @@
+from typing import Optional, Tuple
+
 import numpy as np
 
 from djimaging.tables.motion_correction import motion_utils
@@ -7,8 +9,39 @@ from djimaging.utils.scanm import roi_utils, wparams_utils, read_utils
 
 def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset: np.ndarray,
                      threshold: int = 30_000, stimulator_delay: float = 0.) \
-        -> (np.ndarray, np.ndarray):
-    """Extract triggertimes from stack"""
+        -> Tuple[np.ndarray, np.ndarray]:
+    """Extract trigger onset times and values from a trigger channel stack.
+
+    Parameters
+    ----------
+    stack : np.ndarray
+        3-D array of shape ``(x, y, frames)`` representing the trigger channel.
+    frame_times : np.ndarray
+        1-D array of frame start times in seconds, shape ``(frames,)``.
+    frame_dt_offset : np.ndarray
+        2-D array of per-pixel time offsets within a frame in seconds,
+        shape ``(x, y)``.
+    threshold : int, optional
+        Signal level above which a trigger onset is detected. Default is
+        30 000.
+    stimulator_delay : float, optional
+        Delay in seconds added to each detected trigger time to account for
+        the stimulator latency. Default is 0.
+
+    Returns
+    -------
+    triggertimes : np.ndarray
+        1-D array of trigger onset times in seconds.
+    triggervalues : np.ndarray
+        1-D array of signal amplitudes at each trigger onset.
+
+    Raises
+    ------
+    ValueError
+        If ``stack`` is not 3-D, if its shape does not match ``frame_times``
+        or ``frame_dt_offset``, or if the computed stack times are
+        non-monotonic.
+    """
     if stack.ndim != 3:
         raise ValueError(f"stack must be 3d but ndim={stack.ndim}")
     if stack.shape[2] != frame_times.size:
@@ -45,11 +78,51 @@ def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset
     return triggertimes, triggervalues
 
 
-def compute_frame_times(n_frames: int, pix_dt: int, npix_x: int, npix_2nd: int,
+def compute_frame_times(n_frames: int, pix_dt: float, npix_x: int, npix_2nd: int,
                         npix_x_offset_left: int, npix_x_offset_right: int,
-                        precision: str = 'line') -> (np.ndarray, np.ndarray):
+                        precision: str = 'line') -> Tuple[np.ndarray, np.ndarray, float]:
     """Compute timepoints of frames and relative delay of individual pixels.
-    npix_2nd can be npix_y (xy-scan) or npix_z (xz-scan)
+
+    ``npix_2nd`` is ``npix_y`` for xy-scans and ``npix_z`` for xz-scans.
+
+    Parameters
+    ----------
+    n_frames : int
+        Total number of recorded frames.
+    pix_dt : float
+        Duration of one pixel acquisition in seconds.
+    npix_x : int
+        Total number of pixels along the fast (x) scan axis, including
+        retrace and line-offset pixels.
+    npix_2nd : int
+        Number of pixels along the slow scan axis (y for xy-scans,
+        z for xz-scans).
+    npix_x_offset_left : int
+        Number of line-offset pixels to skip at the beginning of each line
+        (must be >= 0).
+    npix_x_offset_right : int
+        Number of retrace pixels to skip at the end of each line
+        (must be >= 0).
+    precision : str, optional
+        Timing precision: ``'line'`` assigns the same timestamp to all pixels
+        in a line; ``'pixel'`` assigns individual timestamps. Default is
+        ``'line'``.
+
+    Returns
+    -------
+    frame_times : np.ndarray
+        1-D array of frame start times in seconds, shape ``(n_frames,)``.
+    frame_dt_offset : np.ndarray
+        2-D array of per-pixel time offsets within a frame in seconds,
+        shape ``(npix_x_active, npix_2nd)`` where
+        ``npix_x_active = npix_x - npix_x_offset_left - npix_x_offset_right``.
+    frame_dt : float
+        Duration of one complete frame in seconds.
+
+    Raises
+    ------
+    ValueError
+        If ``npix_x_offset_left`` or ``npix_x_offset_right`` is negative.
     """
     if npix_x_offset_left < 0:
         raise ValueError(f"npix_x_offset_left has to be positive or 0, but was {npix_x_offset_left}")
@@ -72,8 +145,41 @@ def compute_frame_times(n_frames: int, pix_dt: int, npix_x: int, npix_2nd: int,
 
 
 def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, precision: str = 'line') \
-        -> (np.ndarray, np.ndarray):
-    """Extract traces and tracetimes of stack"""
+        -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """Extract per-ROI fluorescence traces and their timestamps from a stack.
+
+    Parameters
+    ----------
+    stack : np.ndarray
+        3-D array of shape ``(x, y, frames)`` containing pixel intensities.
+    roi_mask : np.ndarray
+        2-D integer ROI mask in Igor format, shape ``(x, y)``.
+    wparams : dict
+        Scan parameters used to compute frame timing via
+        :func:`wparams_utils.compute_frame_times`.
+    precision : str, optional
+        Timing precision passed to frame-time computation:
+        ``'line'`` (default) or ``'pixel'``.
+
+    Returns
+    -------
+    roi_ids : np.ndarray
+        1-D integer array of ROI IDs found in ``roi_mask``.
+    traces : np.ndarray
+        Array of shape ``(frames, n_rois)`` with mean pixel intensity per ROI
+        per frame.
+    traces_times : np.ndarray
+        Array of shape ``(frames, n_rois)`` with the timestamp of each
+        sample in seconds.
+    frame_dt : float
+        Duration of one frame in seconds.
+
+    Raises
+    ------
+    ValueError
+        If ``stack`` is not 3-D or its spatial dimensions do not match
+        ``roi_mask``.
+    """
     # TODO: Decide if tracetimes should be numerically equal:
     # Igor uses different method of defining the central pixel, leading to slightly different results.
     # Igor uses GeoC, i.e. it defines a pixel for each ROI.
@@ -107,8 +213,54 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, preci
 def roi2trace_from_stack(
         filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray,
         data_stack_name: str, precision: str, from_raw_data: bool = False,
-        shifts_x: np.ndarray = None, shifts_y: np.ndarray = None,
-        shift_kws: dict = None, accept_missing_rois: bool = False) -> (dict, float):
+        shifts_x: Optional[np.ndarray] = None, shifts_y: Optional[np.ndarray] = None,
+        shift_kws: Optional[dict] = None, accept_missing_rois: bool = False) -> Tuple[dict, float]:
+    """Load a stack from disk and extract per-ROI traces, optionally after motion correction.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to the recording file (.h5 or .smp).
+    roi_ids : np.ndarray
+        1-D array of positive integer ROI IDs to extract traces for.
+    roi_mask : np.ndarray
+        2-D integer ROI mask in Igor format used to average pixels per ROI.
+    data_stack_name : str
+        Name of the channel dataset to load (e.g. ``'wDataCh0'``).
+    precision : str
+        Timing precision passed to :func:`compute_traces`:
+        ``'line'`` or ``'pixel'``.
+    from_raw_data : bool, optional
+        If True, load from a raw .smp file; otherwise load from an .h5 file.
+        Default is False.
+    shifts_x : np.ndarray, optional
+        Per-frame shift values along x for motion correction. If None, no
+        motion correction is applied.
+    shifts_y : np.ndarray, optional
+        Per-frame shift values along y for motion correction. If None, no
+        motion correction is applied.
+    shift_kws : dict, optional
+        Additional keyword arguments passed to
+        :func:`motion_utils.correct_shifts_in_stack`. Ignored if both
+        ``shifts_x`` and ``shifts_y`` are None.
+    accept_missing_rois : bool, optional
+        If True, silently skip ROI IDs that are present in ``roi_ids`` but
+        absent from the mask. Default is False.
+
+    Returns
+    -------
+    roi2trace : dict
+        Mapping from ROI ID (int) to a dict with keys ``'trace'``,
+        ``'trace_times'``, and ``'trace_valid'``.
+    frame_dt : float
+        Duration of one frame in seconds.
+
+    Raises
+    ------
+    ValueError
+        If ``roi_ids`` contains IDs absent from the mask and
+        ``accept_missing_rois`` is False.
+    """
     ch_stacks, wparams = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_stack_name,))
     stack = ch_stacks[data_stack_name]
 
@@ -133,7 +285,28 @@ def roi2trace_from_stack(
     return roi2trace, frame_dt
 
 
-def check_valid_triggers_rel_to_tracetime(trace_valid, trace_times, triggertimes):
+def check_valid_triggers_rel_to_tracetime(
+        trace_valid: int,
+        trace_times: np.ndarray,
+        triggertimes: np.ndarray,
+) -> int:
+    """Check whether all trigger times fall within the trace time window.
+
+    Parameters
+    ----------
+    trace_valid : int
+        1 if the trace is considered valid, 0 otherwise.
+    trace_times : np.ndarray
+        1-D array of trace sample timestamps in seconds.
+    triggertimes : np.ndarray
+        1-D array of trigger onset times in seconds.
+
+    Returns
+    -------
+    int
+        1 if the triggers are valid relative to the trace window,
+        0 otherwise.
+    """
     if len(triggertimes) == 0:
         return 1
 
