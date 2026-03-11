@@ -28,8 +28,24 @@ def fit_sigmoid_with_retry(x_data, y_data, max_tries=3):
     return p00
 
 
-def fit_sigmoid(y_data, x_data=None, sign=1, n: int = 3, ax=None):
-    """Fit sigmoid function to data, and estimate half amp"""
+def fit_sigmoid(y_data, x_data=None, sign=1, n: int = 3, full_output: bool = False):
+    """
+    Fit sigmoid function to data, and estimate half amp.
+
+    Args:
+        y_data (array-like): Response data.
+        x_data (array-like, optional): Stimulus data. Defaults to None (uses index).
+        sign (int): Sign of the data. Defaults to 1.
+        n (int): Number of retries. Defaults to 3.
+        full_output (bool): If True, return all intermediate values needed for plotting in addition to the
+            standard outputs. Defaults to False.
+
+    Returns:
+        If full_output is False:
+            tuple: half_amplitude, half_amplitude_x, slope_at_half_amplitude
+        If full_output is True:
+            tuple: half_amplitude, half_amplitude_x, slope_at_half_amplitude, popt, sign, x_data
+    """
     np.random.seed(42)
 
     if x_data is None:
@@ -52,18 +68,26 @@ def fit_sigmoid(y_data, x_data=None, sign=1, n: int = 3, ax=None):
     half_amplitude *= sign
     slope_at_half_amplitude *= sign
 
-    if ax is not None:
-        x_data_us = np.linspace(x_data[0], x_data[-1], x_data.size * 20)
-        ax.scatter(x_data, y_data * sign, label='Data')
-        ax.plot(x_data_us, sigmoid(x_data_us, *popt) * sign, 'r-',
-                label='Fit: x0=%5.3f, k=%5.3f, A=%5.3f' % tuple(popt))
-        ax.plot(half_amplitude_x, half_amplitude, 'gD', linestyle='--',
-                label=f'x(Half Amplitude)={half_amplitude_x:.2f}')
-        dt = np.min(np.diff(x_data))
-        ax.plot([half_amplitude_x - 0.5 * dt, half_amplitude_x + 0.5 * dt],
-                [half_amplitude - 0.5 * dt * slope_at_half_amplitude,
-                 half_amplitude + 0.5 * dt * slope_at_half_amplitude],
-                color='k', label=f'slope={slope_at_half_amplitude:.2f}')
-        ax.legend(fontsize=6)
+    if full_output:
+        return x_data, y_data, half_amplitude, half_amplitude_x, slope_at_half_amplitude, popt, sign
 
     return half_amplitude, half_amplitude_x, slope_at_half_amplitude
+
+
+def plot_sigmoid_fit(ax, x_data, y_data, half_amplitude, half_amplitude_x, slope_at_half_amplitude, popt, sign):
+    """
+    Plot sigmoid fit and half amplitude point.
+    """
+
+    x_data_us = np.linspace(x_data[0], x_data[-1], x_data.size * 20)
+    ax.scatter(x_data, y_data * sign, label='Data')
+    ax.plot(x_data_us, sigmoid(x_data_us, *popt) * sign, 'r-',
+            label='Fit: x0=%5.3f, k=%5.3f, A=%5.3f' % tuple(popt))
+    ax.plot(half_amplitude_x, half_amplitude, 'gD', linestyle='--',
+            label=f'x(Half Amplitude)={half_amplitude_x:.2f}')
+    dt = np.min(np.diff(x_data))
+    ax.plot([half_amplitude_x - 0.5 * dt, half_amplitude_x + 0.5 * dt],
+            [half_amplitude - 0.5 * dt * slope_at_half_amplitude,
+             half_amplitude + 0.5 * dt * slope_at_half_amplitude],
+            color='k', label=f'slope={slope_at_half_amplitude:.2f}')
+    ax.legend(fontsize=6)

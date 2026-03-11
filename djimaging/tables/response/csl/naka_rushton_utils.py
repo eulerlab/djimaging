@@ -106,7 +106,7 @@ def fit_naka_rushton_repeated(x_data: np.ndarray, y_data: np.ndarray, n: int = 3
     return popt_best
 
 
-def fit_naka_rushton(x_data: np.ndarray, y_data: np.ndarray, n: int = 3, ax=None):
+def fit_naka_rushton(x_data: np.ndarray, y_data: np.ndarray, n: int = 3, full_output: bool = False):
     """
     Fit Naka-Rushton function to data and estimate half-maximum metrics.
     This function will use a linear fit if the Naka-Rushton fit is not good.
@@ -118,10 +118,15 @@ def fit_naka_rushton(x_data: np.ndarray, y_data: np.ndarray, n: int = 3, ax=None
         x_data (array-like): Stimulus data.
         y_data (array-like): Response data.
         n (int): Number of retries.
-        ax (matplotlib.axes.Axes, optional): Axis for plotting. Defaults to None.
+        full_output (bool): If True, return all intermediate values needed for plotting in addition to the
+            standard outputs. Defaults to False.
 
     Returns:
-        tuple: Half-maximum response, corresponding stimulus, and slope at that point.
+        If full_output is False:
+            tuple: half_max, half_max_stimulus, slope_at_half_max
+        If full_output is True:
+            tuple: half_max, half_max_stimulus, slope_at_half_max, popt, linear_fit, mse_naka_rushton,
+                   mse_linear, y_fit_min, y_fit_max, use_linear
     """
     np.random.seed(42)
 
@@ -163,27 +168,39 @@ def fit_naka_rushton(x_data: np.ndarray, y_data: np.ndarray, n: int = 3, ax=None
         half_max_stimulus = np.nan
         slope_at_half_max = linear_fit[0]
 
-    # Optional plotting
-    if ax is not None:
-        x_data_us = np.linspace(x_data[0], x_data[-1], x_data.size * 20)
-        ax.scatter(x_data, y_data, label='Data', color='k')
-        ax.plot(x_data_us, naka_rushton(x_data_us, *popt), 'r-',
-                label=f'NR Fit: MSE={mse_naka_rushton:.3f}, R_max={Rm_fit:.3f}, S50={S50_fit:.3f}, n={n_fit:.3f}, R_base={R0_fit:.3f}.')
-        ax.plot(x_data, linear_fit_fn(x_data), 'b-',
-                label=f'Linear Fit: MSE={mse_linear:.3f}, slope={linear_fit[0]:.3f}, intercept={linear_fit[1]:.3f}')
-        ax.plot(half_max_stimulus, half_max, 'gD', label=f'S(Half-Max)={half_max_stimulus:.2f}')
-        dt = np.min(np.diff(x_data))
-        ax.plot([half_max_stimulus - 0.5 * dt, half_max_stimulus + 0.5 * dt],
-                [half_max - 0.5 * dt * slope_at_half_max,
-                 half_max + 0.5 * dt * slope_at_half_max],
-                color='lime', label=f'slope={slope_at_half_max:.2f}')
-        ax.axhline(y_fit_min, color='black', linestyle='--', alpha=0.4)
-        ax.axhline(y_fit_max, color='black', linestyle='--', alpha=0.4)
-        ax.axhline(0.5 * (y_fit_min + y_fit_max), color='black', linestyle='--', alpha=0.8)
-
-        ax.annotate('Linear fit used' if use_linear else 'Naka-Rushton fit used', xy=(0.5, 0.2),
-                    xycoords='axes fraction', ha='center')
-
-        ax.legend(fontsize=6)
+    if full_output:
+        return x_data, y_data, half_max, half_max_stimulus, slope_at_half_max, popt, linear_fit, mse_naka_rushton, mse_linear, y_fit_min, y_fit_max, use_linear
 
     return half_max, half_max_stimulus, slope_at_half_max
+
+
+def plot_naka_rushton_fit(
+        ax, x_data, y_data, half_max, half_max_stimulus, slope_at_half_max, popt, linear_fit, mse_naka_rushton,
+        mse_linear, y_fit_min, y_fit_max, use_linear):
+    """
+    Plot fit on the given axis.
+    """
+    _, Rm_fit, S50_fit, n_fit = popt
+    R0_fit = popt[0]
+    linear_fit_fn = np.poly1d(linear_fit)
+
+    x_data_us = np.linspace(x_data[0], x_data[-1], x_data.size * 20)
+    ax.scatter(x_data, y_data, label='Data', color='k')
+    ax.plot(x_data_us, naka_rushton(x_data_us, *popt), 'r-',
+            label=f'NR Fit: MSE={mse_naka_rushton:.3f}, R_max={Rm_fit:.3f}, S50={S50_fit:.3f}, n={n_fit:.3f}, R_base={R0_fit:.3f}.')
+    ax.plot(x_data, linear_fit_fn(x_data), 'b-',
+            label=f'Linear Fit: MSE={mse_linear:.3f}, slope={linear_fit[0]:.3f}, intercept={linear_fit[1]:.3f}')
+    ax.plot(half_max_stimulus, half_max, 'gD', label=f'S(Half-Max)={half_max_stimulus:.2f}')
+    dt = np.min(np.diff(x_data))
+    ax.plot([half_max_stimulus - 0.5 * dt, half_max_stimulus + 0.5 * dt],
+            [half_max - 0.5 * dt * slope_at_half_max,
+             half_max + 0.5 * dt * slope_at_half_max],
+            color='lime', label=f'slope={slope_at_half_max:.2f}')
+    ax.axhline(y_fit_min, color='black', linestyle='--', alpha=0.4)
+    ax.axhline(y_fit_max, color='black', linestyle='--', alpha=0.4)
+    ax.axhline(0.5 * (y_fit_min + y_fit_max), color='black', linestyle='--', alpha=0.8)
+
+    ax.annotate('Linear fit used' if use_linear else 'Naka-Rushton fit used', xy=(0.5, 0.2),
+                xycoords='axes fraction', ha='center')
+
+    ax.legend(fontsize=6)
