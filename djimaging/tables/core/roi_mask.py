@@ -21,6 +21,7 @@ from djimaging.utils.plot_utils import plot_field
 class RoiMaskTemplate(dj.Manual):
     database = ""
     _max_shift = 5
+    _include_roi_dir = True  # Whether to include roi_mask_dir as primary key
 
     @property
     def definition(self):
@@ -28,6 +29,12 @@ class RoiMaskTemplate(dj.Manual):
         # ROI mask
         -> self.field_table
         -> self.raw_params_table
+        """
+        if self._include_roi_dir:
+            definition += """
+            roi_mask_dir : varchar(31)  # Sub-directory name where ROI mask pickle files are stored, e.g. 'ROIs', 'AutoROIs'
+            """
+        definition += """
         ---
         -> self.presentation_table
         roi_mask     : blob                   # ROI mask for recording field
@@ -101,10 +108,49 @@ class RoiMaskTemplate(dj.Manual):
             file_info_df = file_info_df[file_info_df[new_key] == field_key[new_key]]
         return file_info_df
 
-    def draw_roi_mask(self, field_key=None, pres_key=None, canvas_width=20, autorois_models='default_rgc',
-                      show_diagnostics=True, load_high_res=True, max_shift=None,
-                      roi_mask_dir='ROIs', old_prefix=None, new_prefix=None, use_stim_onset=True,
-                      verbose=True, **kwargs):
+    def draw_roi_mask(
+            self,
+            field_key: dict = None,
+            pres_key: dict = None,
+            canvas_width: int = 20,
+            autorois_models: dict | None = None,
+            show_diagnostics: bool = True,
+            load_high_res: bool = True,
+            max_shift: int = None,
+            roi_mask_dir: str = 'ROIs',
+            old_prefix: str = None,
+            new_prefix: str = None,
+            use_stim_onset: bool = True,
+            verbose: bool = True,
+            **kwargs,
+    ):
+        """Launch the interactive ROI-drawing GUI for a field.
+
+        Args:
+            field_key: Primary key dict identifying the field. If None and
+                pres_key is also None, a random missing field is selected.
+            pres_key: Primary key dict of a presentation whose field will be
+                used. Takes precedence over field_key when both are given.
+            canvas_width: Width of the canvas as a percentage of the screen
+                width (must be between 0 and 100 exclusive).
+            autorois_models: None or a dict of auto-ROI models.
+            show_diagnostics: Whether to show diagnostic panels in the GUI.
+            load_high_res: Whether to load high-resolution background stacks.
+            max_shift: Maximum allowed pixel shift between presentations.
+                Defaults to the table-level ``_max_shift`` value.
+            roi_mask_dir: Sub-directory name where ROI mask pickle files are
+                stored (e.g. 'ROIs', 'AutoROIs').
+            old_prefix: Path prefix to replace when resolving file paths.
+            new_prefix: Replacement path prefix.
+            use_stim_onset: If True, trim stacks to start at stimulus onset.
+            verbose: If True, print status messages.
+            **kwargs: Additional keyword arguments forwarded to
+                ``InteractiveRoiCanvas``.
+
+        Returns:
+            An ``InteractiveRoiCanvas`` instance. Call ``.start_gui()`` on it
+            to open the interactive widget.
+        """
         if canvas_width <= 0 or canvas_width >= 100:
             raise ValueError(f'canvas_width={canvas_width} must be in (0, 100)%')
 
@@ -188,9 +234,13 @@ class RoiMaskTemplate(dj.Manual):
         if initial_roi_mask is not None:
             initial_roi_mask = to_python_format(initial_roi_mask)
 
-        # Load default AutoROIs models
-        if isinstance(autorois_models, str):
-            autorois_models = load_default_autorois_models(autorois_models)
+        if (autorois_models is not None) and isinstance(autorois_models , str):
+            raise NotImplementedError("""
+            Passing a str for autorois models is no longer supported.
+            Please load the desired models yourself and pass in a dict of model_name:model_object pairs.
+            e.g.:
+            autorois_models = djimaging.tables.core.roi_mask.load_default_autorois_models(kind: str = 'default_rgc')
+            """)
 
         # Load shifts if available
         shifts = self.init_shifts(field_key, pres_keys)
@@ -428,6 +478,9 @@ class RoiMaskTemplate(dj.Manual):
 
         if add_primary_keys is not None:
             main_key = {**main_key, **add_primary_keys}
+        if 'roi_mask_dir' in self.primary_key and self._include_roi_dir:
+            main_key['roi_mask_dir'] = roi_mask_dir
+
         self.insert1(main_key, skip_duplicates=True)
 
         for roi_mask_pres_key in roi_mask_pres_keys:
