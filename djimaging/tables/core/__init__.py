@@ -10,3 +10,4 @@ from .field import FieldTemplate
 from .roi_mask import RoiMaskTemplate
 from .roi import RoiTemplate
 from .traces import TracesTemplate
+from .stim_logs import QdsPyLogFileTemplate, QdsPyLogTemplate
