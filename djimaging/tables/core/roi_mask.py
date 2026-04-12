@@ -465,6 +465,85 @@ class RoiMaskTemplate(dj.Manual):
 
         return err_list
 
+    def check_filesystem_consistency(
+            self,
+            restrictions: dict = None,
+            roi_mask_dir: str = 'ROIs',
+            old_prefix: str = None,
+            new_prefix: str = None,
+    ) -> list:
+        """Check whether database ROI masks are consistent with the filesystem.
+
+        Iterates over every presentation already stored in RoiMaskPresentation
+        and compares it against the corresponding file on disk. Returns a list
+        of problem records so the caller can inspect or correct them.
+
+        Args:
+            restrictions: Optional DataJoint restriction applied to
+                RoiMaskPresentation before iterating (e.g. a field key dict).
+            roi_mask_dir: Sub-directory name containing ROI mask pickle files.
+            old_prefix: Path prefix to replace when resolving file paths.
+            new_prefix: Replacement path prefix.
+
+        Returns:
+            A list of dicts, one per problematic presentation, each with:
+
+            - ``'key'``: the presentation primary key dict
+            - ``'issue'``: one of
+
+              * ``'mismatch'`` — file exists but its content differs from DB
+              * ``'missing_on_filesystem'`` — DB has a mask but the pickle
+                file is gone
+              * ``'igor_missing'`` — DB has a mask but the H5 file contains
+                no ROI mask
+
+            - ``'filesystem_file'``: expected file path (pickle or H5)
+
+        Example::
+
+            problems = roi_mask_table.check_filesystem_consistency(
+                roi_mask_dir='ROIs')
+            for p in problems:
+                print(p['issue'], p['filesystem_file'])
+                print(p['key'])
+        """
+        if restrictions is None:
+            restrictions = dict()
+
+        problems = []
+        pres_keys = (self.RoiMaskPresentation & restrictions).fetch('KEY')
+
+        for key in pres_keys:
+            igor_roi_masks = (self.raw_params_table & key).fetch1('igor_roi_masks')
+            input_file = (self.presentation_table & key).fetch1('pres_data_file')
+            roimask_file = to_roi_mask_file(
+                input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+
+            if igor_roi_masks == 'yes':
+                filesystem_file = input_file
+                filesystem_roi_mask = read_h5_utils.load_roi_mask(
+                    filepath=input_file, ignore_not_found=True)
+                if filesystem_roi_mask is None:
+                    problems.append(
+                        {'key': key, 'issue': 'igor_missing', 'filesystem_file': filesystem_file})
+                    continue
+            else:
+                filesystem_file = roimask_file
+                if not os.path.isfile(roimask_file):
+                    problems.append(
+                        {'key': key, 'issue': 'missing_on_filesystem', 'filesystem_file': filesystem_file})
+                    continue
+                with open(roimask_file, 'rb') as f:
+                    filesystem_roi_mask = pickle.load(f).copy().astype(np.int32)
+                filesystem_roi_mask = to_igor_format(filesystem_roi_mask)
+
+            database_roi_mask = (self.RoiMaskPresentation & key).fetch1('roi_mask')
+            if not np.all(filesystem_roi_mask == database_roi_mask):
+                problems.append(
+                    {'key': key, 'issue': 'mismatch', 'filesystem_file': filesystem_file})
+
+        return problems
+
     def _add_field_roi_masks(
             self,
             field_key: dict,
@@ -500,32 +579,33 @@ class RoiMaskTemplate(dj.Manual):
         if verboselvl > 2:
             print('\nfield_key:', field_key, '\npres_keys:', pres_keys)
 
-        roi_masks = [self._load_presentation_roi_mask(key, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
-                     for key in pres_keys]
+        # Filter to new presentation keys BEFORE loading masks, so that existing
+        # entries are not needlessly read from disk and their filesystem-vs-database
+        # consistency is not checked here (which would cause rescan to fail if any
+        # pre-existing mask file was edited outside the database).
+        new_pres_keys = [pk for pk in pres_keys
+                         if len(self.RoiMaskPresentation & pk) == 0]
 
-        data_pairs = zip(pres_keys, roi_masks)
-
-        if not auto_fill_pres_keys:
-            # Filter out keys without ROI mask
-            data_pairs = [(pres_key, roi_mask) for pres_key, roi_mask in data_pairs
-                          if roi_mask is not None]
-        else:
-            data_pairs = list(data_pairs)
-
-        if len(data_pairs) == 0:
+        if len(new_pres_keys) == 0:
             if verboselvl > 1:
-                print('No ROI masks found for field:', field_key)
+                print('Nothing new to add for field:', field_key)
             if verboselvl > 2:
                 print('pres_keys:', [k for k in pres_keys])
             return
 
-        # Filter out keys that are already present
-        data_pairs = [(pres_key, roi_mask) for pres_key, roi_mask in data_pairs
-                      if len(self.RoiMaskPresentation & pres_key) == 0]
+        roi_masks = [self._load_presentation_roi_mask(key, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+                     for key in new_pres_keys]
+
+        if not auto_fill_pres_keys:
+            # Filter out keys without ROI mask
+            data_pairs = [(pres_key, roi_mask) for pres_key, roi_mask in zip(new_pres_keys, roi_masks)
+                          if roi_mask is not None]
+        else:
+            data_pairs = list(zip(new_pres_keys, roi_masks))
 
         if len(data_pairs) == 0:
             if verboselvl > 1:
-                print('Nothing new to add for field:', field_key)
+                print('No ROI masks found for field:', field_key)
             return
 
         if len(self & field_key) == 0:
@@ -577,7 +657,6 @@ class RoiMaskTemplate(dj.Manual):
 
         for roi_mask_pres_key in roi_mask_pres_keys:
             if add_primary_keys is not None:
-                main_key = {**main_key, **add_primary_keys}
                 roi_mask_pres_key = {**roi_mask_pres_key, **add_primary_keys}
 
             self.RoiMaskPresentation().insert1(roi_mask_pres_key, skip_duplicates=True)
@@ -624,12 +703,21 @@ class RoiMaskTemplate(dj.Manual):
             database_roi_mask = (self.RoiMaskPresentation & key).fetch1('roi_mask')
 
             if filesystem_roi_mask is None:
-                warnings.warn(
-                    f'ROI mask for key=\n{key}\nhas been deleted on the filesystem but not in the database.\n'
-                    f'Saving ROI masks to file now: {roimask_file}'
-                )
-                with open(roimask_file, 'wb') as f:
-                    pickle.dump(to_python_format(database_roi_mask), f)
+                if igor_roi_masks == 'yes':
+                    # H5 files have no write-back API; writing a pickle would be silently
+                    # ignored on the next scan (which still reads from H5), causing an
+                    # infinite repeated warning.
+                    warnings.warn(
+                        f'ROI mask for key=\n{key}\nwas not found in the H5 file but exists in the database. '
+                        f'Cannot write back to H5 format; database entry retained.'
+                    )
+                else:
+                    warnings.warn(
+                        f'ROI mask for key=\n{key}\nhas been deleted on the filesystem but not in the database.\n'
+                        f'Saving ROI masks to file now: {roimask_file}'
+                    )
+                    with open(roimask_file, 'wb') as f:
+                        pickle.dump(to_python_format(database_roi_mask), f)
 
             elif not np.all(filesystem_roi_mask == database_roi_mask):
                 raise ValueError(f'ROI mask for key=\n{key}\nhas been changed on filesystem but not in database.')
