@@ -1,5 +1,5 @@
+import heapq
 import warnings
-from collections import deque
 from typing import Callable
 
 import numpy as np
@@ -124,17 +124,19 @@ class CorrRoiMask:
 
         stack = ch0_stack if self.use_ch0_stack else ch1_stack
 
-        n_pix_min = self.n_pix_min or 2
-        n_pix_min = int(np.maximum(np.round(self.min_area_um2 / (pixel_size_um[0] * pixel_size_um[1])), n_pix_min))
+        if self.n_pix_min is not None:
+            n_pix_min = self.n_pix_min
+        else:
+            n_pix_min = max(2, int(np.round(self.min_area_um2 / (pixel_size_um[0] * pixel_size_um[1]))))
 
-        n_pix_max = self.n_pix_max or 2
-        n_pix_max = int(np.maximum(np.round(self.max_area_um2 / (pixel_size_um[0] * pixel_size_um[1])), n_pix_max))
+        if self.n_pix_max is not None:
+            n_pix_max = self.n_pix_max
+        else:
+            n_pix_max = max(2, int(np.round(self.max_area_um2 / (pixel_size_um[0] * pixel_size_um[1]))))
 
-        # At most twice as long as wide
-        n_pix_max_x = int(
-            np.maximum(np.sqrt(2 * self.max_area_um2), 1)) if self.n_pix_max_x is None else self.n_pix_max_x
-        n_pix_max_z = int(
-            np.maximum(np.sqrt(2 * self.max_area_um2), 1)) if self.n_pix_max_z is None else self.n_pix_max_z
+        # At most twice as long as wide, converted to pixels
+        n_pix_max_x = max(1, int(np.sqrt(2 * self.max_area_um2) / pixel_size_um[0])) if self.n_pix_max_x is None else self.n_pix_max_x
+        n_pix_max_z = max(1, int(np.sqrt(2 * self.max_area_um2) / pixel_size_um[1])) if self.n_pix_max_z is None else self.n_pix_max_z
 
         print(f'Creating ROI mask for stack of shape={stack.shape}, '
               f'with n_pix_min={n_pix_min}, n_pix_max={n_pix_max}, '
@@ -439,14 +441,25 @@ def corr_map_grow_roi(
     """
     nx, nz, nt = stack.shape
     visited = np.zeros((nx, nz), dtype=bool)
+    in_heap = np.zeros((nx, nz), dtype=bool)
     if ignore_map is not None:
         visited[ignore_map] = True
+        in_heap[ignore_map] = True
 
     p_threshold = np.asarray(p_threshold)
     if p_threshold.size == 1:
         p_threshold = np.full(nz, p_threshold)
 
-    queue = deque([(seed_ix, seed_iz, 1.)])
+    # Precompute normalised seed trace to avoid recomputing it for each neighbour
+    if corr_map is None:
+        seed_trace = stack[seed_ix, seed_iz, :].astype(float)
+        seed_centered = seed_trace - seed_trace.mean()
+        seed_norm = float(np.sqrt((seed_centered ** 2).sum()))
+
+    # Max-heap via negated correlation (heapq is a min-heap)
+    in_heap[seed_ix, seed_iz] = True
+    heap = [(-1.0, seed_ix, seed_iz)]
+
     roi_pixels = []
     min_x, max_x = seed_ix, seed_ix
     min_z, max_z = seed_iz, seed_iz
@@ -454,9 +467,12 @@ def corr_map_grow_roi(
     reached_x_max = False
     reached_z_max = False
 
-    while queue and len(roi_pixels) < n_pix_max:
-        ix, iz, corr_i = queue.pop()
+    while heap and len(roi_pixels) < n_pix_max:
+        neg_corr_i, ix, iz = heapq.heappop(heap)
+        corr_i = -neg_corr_i
+
         if visited[ix, iz]:
+            # Pixel was invalidated by a spatial-bound update after being pushed
             continue
 
         visited[ix, iz] = True
@@ -466,32 +482,41 @@ def corr_map_grow_roi(
 
             # update range
             if not reached_x_max:
-                min_x = np.minimum(ix, min_x)
-                max_x = np.maximum(ix, max_x)
+                min_x = min(ix, min_x)
+                max_x = max(ix, max_x)
 
                 if (max_x - min_x) >= n_pix_max_x - 1:
                     visited[:min_x, :] = True
                     visited[max_x + 1:, :] = True
+                    in_heap[:min_x, :] = True
+                    in_heap[max_x + 1:, :] = True
                     reached_x_max = True
 
             if not reached_z_max:
-                min_z = np.minimum(iz, min_z)
-                max_z = np.maximum(iz, max_z)
+                min_z = min(iz, min_z)
+                max_z = max(iz, max_z)
 
                 if (max_z - min_z) >= n_pix_max_z - 1:
                     visited[:, :min_z] = True
                     visited[:, max_z + 1:] = True
+                    in_heap[:, :min_z] = True
+                    in_heap[:, max_z + 1:] = True
                     reached_z_max = True
 
             for dx, dz in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                new_ix, new_iy = ix + dx, iz + dz
-                if 0 <= new_ix < nx and 0 <= new_iy < nz and not visited[new_ix, new_iy]:
+                new_ix, new_iz = ix + dx, iz + dz
+                if 0 <= new_ix < nx and 0 <= new_iz < nz and not in_heap[new_ix, new_iz]:
+                    in_heap[new_ix, new_iz] = True
                     if corr_map is not None:
-                        new_corr_i = corr_map[new_ix, new_iy]
+                        new_corr_i = corr_map[new_ix, new_iz]
                     else:
-                        new_corr_i = np.corrcoef(stack[seed_ix, seed_iz, :], stack[new_ix, new_iy, :])[0, 1]
-                    queue.append((new_ix, new_iy, new_corr_i))
-
-        queue = deque(sorted(queue, key=lambda v: v[2]))
+                        neigh_trace = stack[new_ix, new_iz, :].astype(float)
+                        neigh_centered = neigh_trace - neigh_trace.mean()
+                        neigh_norm = float(np.sqrt((neigh_centered ** 2).sum()))
+                        if seed_norm > 0 and neigh_norm > 0:
+                            new_corr_i = float(np.dot(seed_centered, neigh_centered) / (seed_norm * neigh_norm))
+                        else:
+                            new_corr_i = 0.0
+                    heapq.heappush(heap, (-new_corr_i, new_ix, new_iz))
 
     return roi_pixels
