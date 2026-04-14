@@ -153,7 +153,7 @@ def compute_linear_rf_single_or_batch(x_train: np.ndarray, y_train: np.ndarray,
         y_pred_train : np.ndarray
             Predicted training responses.
     """
-    if np.product(stim_shape) <= batch_size_n:
+    if np.prod(stim_shape) <= batch_size_n:
         rf, y_pred_train = _compute_linear_rf_single_batch(
             x_train=x_train, y_train=y_train, kind=kind, dim_t=dim_t, shift=shift, burn_in=burn_in,
             is_design_matrix=is_design_matrix, threshold_pred=threshold_pred, dtype=dtype)
@@ -267,7 +267,7 @@ def _compute_sta_batchwise(x_train: np.ndarray, y_train: np.ndarray,
     """
     x_shape = x_train.shape
     n_frames = x_shape[0]
-    n_features = np.product(x_shape[1:])
+    n_features = np.prod(x_shape[1:])
 
     rf = np.zeros((dim_t, n_features), dtype=dtype)
 
@@ -392,8 +392,8 @@ def compute_rf_mle(X: np.ndarray, y: np.ndarray) -> np.ndarray:
 
 
 def predict_linear_rf_response(rf: np.ndarray, stim_design_matrix: np.ndarray,
-                                threshold: bool = False,
-                                dtype: type = np.float32) -> np.ndarray:
+                               threshold: bool = False,
+                               dtype: type = np.float32) -> np.ndarray:
     """Predict neural response using a linear receptive field and design matrix.
 
     Parameters
@@ -480,35 +480,35 @@ def split_data(x: np.ndarray, y: np.ndarray,
 
 
 def build_design_matrix(X: np.ndarray, n_lag: int, shift: int = 0,
-                        n_c: int = 1, dtype: type = None) -> np.ndarray:
+                        dtype: type = None) -> np.ndarray:
     """Build design matrix for linear RF estimation.
 
-    Modified from RFEst.
+    Modified from RFEst. Works for multi-color stimuli by flattening all
+    non-temporal dimensions (spatial and color) into a single feature axis.
 
     Parameters
     ----------
     X : np.ndarray
-        Stimulus array, shape (n_frames, ...).
+        Stimulus array, shape (n_frames, ...). For multi-color stimuli this
+        can be e.g. (n_frames, n_x, n_y, n_colors).
     n_lag : int
         Number of temporal lags to include.
     shift : int, optional
         Temporal shift applied to the design matrix (negative shifts into future). Default is 0.
-    n_c : int, optional
-        Number of color channels (adds an extra dimension if > 1). Default is 1.
     dtype : type, optional
         Output data type. If None, uses X.dtype.
 
     Returns
     -------
     np.ndarray
-        Design matrix, shape (n_frames, n_lag * n_feature) or
-        (n_frames, n_lag * n_feature / n_c, n_c) if n_c > 1.
+        Design matrix, shape (n_frames, n_lag * n_feature) where
+        n_feature = product of all non-temporal dimensions.
     """
     if dtype is None:
         dtype = X.dtype
 
     n_frames = X.shape[0]
-    n_feature = np.product(X.shape[1:])
+    n_feature = np.prod(X.shape[1:])
 
     X_design = np.reshape(X.copy(), (n_frames, n_feature))
 
@@ -519,8 +519,5 @@ def build_design_matrix(X: np.ndarray, n_lag: int, shift: int = 0,
         X_design = np.vstack([X_design, np.zeros([-shift, n_feature])])
 
     X_design = np.hstack([X_design[i:n_frames + i] for i in range(n_lag)])
-
-    if n_c > 1:
-        X_design = np.reshape(X_design, (X_design.shape[0], -1, n_c))
 
     return X_design.astype(dtype)
