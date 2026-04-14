@@ -1219,9 +1219,6 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def _compute_traces(self):
         mask = self.get_current_selected_roi_mask()
-        dx, dy = self.get_shift('x'), self.get_shift('y')
-        if dx == 0 and dy == 0 and self.n_artifact == 0:
-            return self.ch0_stacks[self._selected_stim_idx][mask].astype(np.float32)
         return self.get_current_stack()[mask]
 
     def _compute_cc(self, traces):
