@@ -446,11 +446,19 @@ class RoiMaskTemplate(dj.Manual):
             restrictions = dict()
 
         if only_new_fields:
-            restrictions = (self.key_source - self) & restrictions
+            keys_to_scan = ((self.key_source - self) & restrictions).fetch('KEY')
+        else:
+            keys_to_scan = (self.key_source & restrictions).fetch('KEY')
+
+        if verboselvl > 0:
+            print(f'Scanning {len(keys_to_scan)} keys for new ROI masks...')
 
         err_list = []
 
-        for key in (self.key_source & restrictions):
+        for key in keys_to_scan:
+            if verboselvl > 2:
+                print('#' * 60)
+                print('Scanning key:', key)
             try:
                 self._add_field_roi_masks(
                     key, auto_fill_pres_keys=auto_fill_pres_keys,
