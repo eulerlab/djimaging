@@ -471,6 +471,7 @@ class RoiMaskTemplate(dj.Manual):
             roi_mask_dir: str = 'ROIs',
             old_prefix: str = None,
             new_prefix: str = None,
+            verbose: bool = True,
     ) -> list:
         """Check whether database ROI masks are consistent with the filesystem.
 
@@ -484,6 +485,7 @@ class RoiMaskTemplate(dj.Manual):
             roi_mask_dir: Sub-directory name containing ROI mask pickle files.
             old_prefix: Path prefix to replace when resolving file paths.
             new_prefix: Replacement path prefix.
+            verbose: If True, print progress and a summary at the end.
 
         Returns:
             A list of dicts, one per problematic presentation, each with:
@@ -513,23 +515,33 @@ class RoiMaskTemplate(dj.Manual):
         problems = []
         pres_keys = (self.RoiMaskPresentation & restrictions).fetch('KEY')
 
-        for key in pres_keys:
+        if verbose:
+            print(f'Checking filesystem consistency for {len(pres_keys)} presentation(s)...')
+
+        for i, key in enumerate(pres_keys):
             igor_roi_masks = (self.raw_params_table & key).fetch1('igor_roi_masks')
             input_file = (self.presentation_table & key).fetch1('pres_data_file')
             roimask_file = to_roi_mask_file(
                 input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+
+            if verbose:
+                print(f'  [{i + 1}/{len(pres_keys)}] Checking key={key}')
 
             if igor_roi_masks == 'yes':
                 filesystem_file = input_file
                 filesystem_roi_mask = read_h5_utils.load_roi_mask(
                     filepath=input_file, ignore_not_found=True)
                 if filesystem_roi_mask is None:
+                    if verbose:
+                        print(f'    -> PROBLEM: igor_missing  ({filesystem_file})')
                     problems.append(
                         {'key': key, 'issue': 'igor_missing', 'filesystem_file': filesystem_file})
                     continue
             else:
                 filesystem_file = roimask_file
                 if not os.path.isfile(roimask_file):
+                    if verbose:
+                        print(f'    -> PROBLEM: missing_on_filesystem  ({filesystem_file})')
                     problems.append(
                         {'key': key, 'issue': 'missing_on_filesystem', 'filesystem_file': filesystem_file})
                     continue
@@ -539,8 +551,19 @@ class RoiMaskTemplate(dj.Manual):
 
             database_roi_mask = (self.RoiMaskPresentation & key).fetch1('roi_mask')
             if not np.all(filesystem_roi_mask == database_roi_mask):
+                if verbose:
+                    print(f'    -> PROBLEM: mismatch  ({filesystem_file})')
                 problems.append(
                     {'key': key, 'issue': 'mismatch', 'filesystem_file': filesystem_file})
+            else:
+                if verbose:
+                    print(f'    -> OK')
+
+        if verbose:
+            if problems:
+                print(f'Done. Found {len(problems)} problem(s) out of {len(pres_keys)} presentation(s).')
+            else:
+                print(f'Done. All {len(pres_keys)} presentation(s) are consistent.')
 
         return problems
 
