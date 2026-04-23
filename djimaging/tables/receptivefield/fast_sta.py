@@ -16,6 +16,7 @@ class FastSta(receptivefield.FastStaTemplate):
 from abc import abstractmethod
 
 import datajoint as dj
+from matplotlib import pyplot as plt
 import numpy as np
 from tqdm.notebook import tqdm
 
@@ -119,7 +120,7 @@ class FastStaParamsTemplate(dj.Lookup):
             stim, stim_dict, ntrigger_rep, isrepeated, framerate = (self.stimulus_table() & stim_key).fetch1(
                 "stim_trace", "stim_dict", "ntrigger_rep", "isrepeated", "framerate")
 
-            if framerate > 0:
+            if framerate > 0:  # This is actually the triggerrate!
                 dt_trigger = 1 / framerate
             else:
                 triggertimes = (self.presentation_table() & stim_key).fetch('triggertimes')
@@ -137,11 +138,19 @@ class FastStaParamsTemplate(dj.Lookup):
 
             if verbose:
                 print(f"Preparing design matrix for stimulus: {stim_name}: "
-                      f"n_trigger: {n_trigger}, dt_trigger: {dt_trigger}")
+                      f"{n_trigger=}, {dt_trigger=}, {len(stimtime)=}")
 
             x_stimulus, rf_time, dims, burn_in, shift, dt, t0 = self.prepare_stimulus(
-                stim, stimtime, stim_dict.get('ntrigger_per_frame', 1), fupsample_stim,
-                filter_dur_s_past, filter_dur_s_future)
+                stim=stim, triggertimes=stimtime,
+                nframes_per_trigger=stim_dict.get('nframes_per_trigger', stim_dict.get('ntrigger_per_frame', 1)),
+                # Old name was ntrigger_per_frame
+                fupsample_stim=fupsample_stim,
+                filter_dur_s_past=filter_dur_s_past,
+                filter_dur_s_future=filter_dur_s_future,
+            )
+
+            if verbose:
+                print(f"Stimulus design matrix has shape: {x_stimulus.shape=} with {dt=}")
 
             new_key = stim_key.copy()
             new_key['x_stimulus'] = x_stimulus
@@ -155,8 +164,11 @@ class FastStaParamsTemplate(dj.Lookup):
 
     @staticmethod
     def prepare_stimulus(
-            stim: np.ndarray, triggertimes: np.ndarray, ntrigger_per_frame: int,
-            fupsample_stim: int, filter_dur_s_past: float,
+            stim: np.ndarray,
+            triggertimes: np.ndarray,
+            nframes_per_trigger: int,
+            fupsample_stim: int,
+            filter_dur_s_past: float,
             filter_dur_s_future: float) -> tuple:
         """Preprocess stimulus and build the design matrix.
 
@@ -166,8 +178,8 @@ class FastStaParamsTemplate(dj.Lookup):
             Raw stimulus array.
         triggertimes : np.ndarray
             Array of trigger timestamps.
-        ntrigger_per_frame : int
-            Number of triggers per stimulus frame.
+        nframes_per_trigger : int
+            Number of frames per trigger
         fupsample_stim : int
             Upsampling factor for the stimulus.
         filter_dur_s_past : float
@@ -180,7 +192,10 @@ class FastStaParamsTemplate(dj.Lookup):
         tuple
             Tuple of (x_stimulus, rf_time, dims, burn_in, shift, dt, t0).
         """
-        stimtime, stim = preprocess_stimulus(stim, triggertimes, ntrigger_per_frame, fupsample_stim)
+        stimtime, stim = preprocess_stimulus(
+            stim, triggertimes,
+            nframes_per_trigger=nframes_per_trigger,
+            fupsample_stim=fupsample_stim)
         dt, dt_rel_error = get_mean_dt(stimtime, rtol_error=np.inf, rtol_warning=0.5)
         t0 = stimtime[0]
 
@@ -260,9 +275,18 @@ class FastStaTemplate(dj.Computed):
 
         x_stimulus = np.ascontiguousarray(x_stimulus.astype(np.float32))
 
+        # Fetch nframes_per_trigger from the stimulus table so that stimtime
+        # reconstructed in make_compute matches the design matrix built in
+        # prepare_stimulus. Falls back to the old name 'ntrigger_per_frame'
+        # and to 1 if neither is present.
+        stim_dict = (self.params_table.stimulus_table & [*restrictions]).fetch1('stim_dict')
+        nframes_per_trigger = int(stim_dict.get(
+            'nframes_per_trigger', stim_dict.get('ntrigger_per_frame', 1)))
+
         sta_params = dict(
             x_stimulus=x_stimulus, rf_time=rf_time, burn_in=burn_in, shift=shift, kind=kind, dims=dims,
             dt=dt, fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
+            nframes_per_trigger=nframes_per_trigger,
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
             pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s,
         )
@@ -358,6 +382,7 @@ class FastStaTemplate(dj.Computed):
             dims = sta_params['dims']
             fupsample_trace = sta_params['fupsample_trace']
             fupsample_stim = sta_params['fupsample_stim']
+            nframes_per_trigger = sta_params['nframes_per_trigger']
             fit_kind = sta_params['fit_kind']
             lowpass_cutoff = sta_params['lowpass_cutoff']
             pre_blur_sigma_s = sta_params['pre_blur_sigma_s']
@@ -367,13 +392,18 @@ class FastStaTemplate(dj.Computed):
 
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
 
+        # Build stimtime at the same resolution as x_stimulus: each trigger
+        # spans nframes_per_trigger stimulus frames, each further upsampled
+        # by fupsample_stim. Total upsampling factor per trigger:
+        total_upsample = nframes_per_trigger * fupsample_stim
+
         dt_triggertimes = np.median(np.diff(triggertimes))
         xidxs = np.arange(triggertimes.size + 1)
-        xidxs_stim = np.repeat(xidxs, fupsample_stim) + np.tile(
-            np.arange(fupsample_stim) * 1 / fupsample_stim, xidxs.size)
+        xidxs_stim = np.repeat(xidxs, total_upsample) + np.tile(
+            np.arange(total_upsample) * 1 / total_upsample, xidxs.size)
 
         stimtime = np.interp(
-            xidxs_stim, xidxs, np.append(triggertimes, triggertimes[-1] + dt_triggertimes))[:-fupsample_stim]
+            xidxs_stim, xidxs, np.append(triggertimes, triggertimes[-1] + dt_triggertimes))[:-total_upsample]
 
         trace_t0s, trace_dts, traces, rf_keys = (self.traces_table() & key).fetch(
             self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace', 'KEY')
@@ -387,10 +417,22 @@ class FastStaTemplate(dj.Computed):
         rf_entries = []
         for trace, trace_t0, rf_key in tqdm(
                 zip(traces, trace_t0s, rf_keys), total=len(rf_keys), desc=str(key), leave=False):
+            tracetime = tracetime_base + trace_t0
             rf = self._compute_rf(
-                tracetime_base + trace_t0, trace, stimtime, x_stimulus,
+                tracetime, trace, stimtime, x_stimulus,
                 dims, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s)
-            rf_entries.append({**key, **rf_key, "rf": rf})
+
+            if np.any(np.isnan(rf)):
+                print(f"Skipping {key}, RF contains NaNs. "
+                      f"x_stimulus contained {np.sum(np.isnan(x_stimulus))} NaNs. "
+                      f"trace contained {np.sum(np.isnan(trace))} NaNs. "
+                      f"tracetime contained {np.sum(np.isnan(tracetime))} NaNs. "
+                      f"[{tracetime[0]=} ... {tracetime[-1]}] and [{stimtime[0]=} ... {stimtime[-1]}]")
+            else:
+                rf_entries.append({**key, **rf_key, "rf": rf})
+
+        if len(rf_entries) == 0 and len(traces) > 0:
+            print(f"All RFs contain NaNs for {key}, skipping.")
 
         return rf_entries
 
@@ -450,6 +492,10 @@ class FastStaTemplate(dj.Computed):
             stimtime=stimtime, trace=trace, tracetime=tracetime)
         trace = finalize_trace(trace, dt, post_blur_sigma_s).astype(np.float32)
 
+        if trace.size < x_stimulus.shape[0] * 1 / 3:
+            print(f"WARNING: Trace doesn't cover much of the stimulus duration."
+                  f"trace-size: {trace.size}, stim-size: {x_stimulus.shape[0]}")
+
         assert trace.size <= x_stimulus.shape[0], f"stim-shape: {x_stimulus.shape}, trace-shape: {trace.shape}"
         assert trace.dtype == x_stimulus.dtype, (trace.dtype, x_stimulus.dtype)
         rf = compute_rf_sta(np.ascontiguousarray(x_stimulus[:trace.size]),
@@ -457,17 +503,26 @@ class FastStaTemplate(dj.Computed):
 
         return rf
 
-    def plot1(self, key: dict | None = None, downsample: int = 1) -> None:
+    def plot1(self, key: dict | None = None, kind: str = 'frames', **kwargs) -> None:
         """Plot the receptive field as frames.
 
         Parameters
         ----------
         key : dict or None, optional
             DataJoint key to restrict the table. Default is None.
-        downsample : int, optional
-            Downsampling factor for the frames. Default is 1.
+        kind : str, optional
+            Kind of plot to show. Currently only 'frames' is supported. Default is 'frames'.
+        **kwargs
+            Additional keyword arguments passed to the specific plot function.
         """
-        self.plot1_frames(key=key, downsample=downsample)
+        if kind == 'frames':
+            self.plot1_frames(key=key, **kwargs)
+        elif kind == 'video':
+            self.plot1_video(key=key, **kwargs)
+        elif kind == 'traces':
+            self.plot1_traces(key=key, **kwargs)
+        else:
+            raise NotImplementedError(f"kind {kind} is not supported.")
 
     def plot1_frames(self, key: dict | None = None, downsample: int = 1) -> None:
         """Plot the receptive field as individual frames.
@@ -503,3 +558,173 @@ class FastStaTemplate(dj.Computed):
         rf_time = (self.params_table & key).fetch1('rf_time')
         rf = (self & key).fetch1('rf')
         return plot_rf_video(rf, rf_time, fps=fps)
+
+    def plot1_traces(self, key: dict | None = None, ax=None, cmap: str = 'viridis'):
+        """Plot the spatial components of the RF as lines vs. lag.
+
+        Useful for few-pixel stimuli where the spatial structure is low-dimensional
+        (e.g. 1D bar noise or small 2D grids). Each spatial pixel is plotted as a
+        line over rf_time, color-coded by its position along the flattened spatial
+        axis.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        ax : matplotlib.axes.Axes or None, optional
+            Axes to plot into. If None, a new figure and axes are created.
+        cmap : str, optional
+            Matplotlib colormap name used to color pixels by spatial position.
+            Default is 'viridis'.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes containing the plot.
+        """
+        key = get_primary_key(table=self, key=key)
+        rf_time = (self.params_table & key).fetch1('rf_time')
+        rf = (self & key).fetch1('rf')
+
+        # Reshape to (n_lags, n_pixels), handling both 2D and 3D+ RFs.
+        n_lags = rf.shape[0]
+        rf_flat = rf.reshape(n_lags, -1)
+        n_pixels = rf_flat.shape[1]
+
+        if ax is None:
+            _, ax = plt.subplots(1, 1, figsize=(6, 4))
+
+        colors = plt.get_cmap(cmap)(np.linspace(0, 1, n_pixels))
+        for i in range(n_pixels):
+            ax.plot(rf_time, rf_flat[:, i], color=colors[i], lw=1)
+
+        ax.axhline(0, color='k', lw=0.5, alpha=0.5)
+        ax.axvline(0, color='k', lw=0.5, alpha=0.5)
+        ax.set_xlabel('Lag (s)')
+        ax.set_ylabel('RF amplitude')
+        ax.set_title(f"RF traces ({n_pixels} pixels)")
+
+        return ax
+
+
+class FastStaQualityTemplate(dj.Computed):
+    database = ""
+    # Duration (in seconds) at the acausal end of rf_time used as the noise/baseline region.
+    # For shift <= 0 (filter into the past), this is the most-future portion of rf_time,
+    # which should contain no stimulus-driven signal.
+    _baseline_dur_s = 0.1
+
+    @property
+    def definition(self):
+        definition = """
+        # Signal-to-noise ratio for STA receptive fields (peak-to-baseline at best pixel).
+        -> self.sta_table
+        ---
+        snr: float              # peak_amplitude / noise_std at the best spatial location
+        peak_amplitude: float   # max(|rf|) at the best spatial location, over all time
+        noise_std: float        # std of rf at the best spatial location, within the baseline window
+        n_baseline_frames: int unsigned  # number of time bins used as baseline
+        """
+        return definition
+
+    @property
+    @abstractmethod
+    def sta_table(self):
+        pass
+
+    def make(self, key: dict) -> None:
+        rf = (self.sta_table & key).fetch1('rf')
+        rf_time = (self.sta_table.params_table & key).fetch1('rf_time')
+
+        # Flatten spatial/feature dims so rf becomes (T, S) regardless of input shape.
+        T = rf.shape[0]
+        rf_flat = rf.reshape(T, -1)  # (T, S); S == 1 if rf was 1D
+
+        # Determine baseline region: acausal end of rf_time.
+        # rf_time is ordered from past to future, so the most-future bins are at the end.
+        dt = np.median(np.diff(rf_time))
+        n_baseline = max(1, int(round(self._baseline_dur_s / dt)))
+        n_baseline = min(n_baseline, T - 1)  # leave at least one signal frame
+
+        # Find the best spatial location: the pixel whose time course has the largest
+        # absolute deviation at any lag. This makes peak statistics independent of S.
+        abs_rf = np.abs(rf_flat)
+        best_pixel = int(np.argmax(abs_rf.max(axis=0)))  # index into S
+
+        pixel_trace = rf_flat[:, best_pixel]  # (T,)
+        pixel_baseline = pixel_trace[-n_baseline:]  # (n_baseline,)
+
+        peak = float(np.max(np.abs(pixel_trace)))
+        noise_std = float(np.std(pixel_baseline))
+        snr = peak / noise_std if noise_std > 0 else np.nan
+
+        self.insert1({
+            **key,
+            'snr': snr,
+            'peak_amplitude': peak,
+            'noise_std': noise_std,
+            'n_baseline_frames': n_baseline,
+        })
+
+    def plot1(self, key: dict | None = None, ax=None):
+        """Plot the RF traces with the baseline window highlighted.
+
+        Shows all spatial components as lines over rf_time, shades the baseline
+        region used for noise estimation, and marks the peak amplitude. The
+        computed SNR is shown in the title.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        ax : matplotlib.axes.Axes or None, optional
+            Axes to plot into. If None, a new figure and axes are created.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes containing the plot.
+        """
+        from matplotlib import pyplot as plt
+
+        key = get_primary_key(table=self, key=key)
+
+        snr, peak_amplitude, noise_std, n_baseline = (self & key).fetch1(
+            'snr', 'peak_amplitude', 'noise_std', 'n_baseline_frames')
+        rf = (self.sta_table & key).fetch1('rf')
+        rf_time = (self.sta_table.params_table & key).fetch1('rf_time')
+
+        # Flatten spatial dims to (n_lags, n_pixels)
+        n_lags = rf.shape[0]
+        rf_flat = rf.reshape(n_lags, -1)
+        n_pixels = rf_flat.shape[1]
+
+        if ax is None:
+            _, ax = plt.subplots(1, 1, figsize=(6, 4))
+
+        colors = plt.get_cmap('viridis')(np.linspace(0, 1, n_pixels))
+        for i in range(n_pixels):
+            ax.plot(rf_time, rf_flat[:, i], color=colors[i], lw=1)
+
+        # Shade baseline region (last n_baseline frames, matching the make() logic)
+        ax.axvspan(rf_time[-n_baseline], rf_time[-1], color='gray', alpha=0.2,
+                   label=f'baseline ({n_baseline} frames)')
+
+        # Mark peak amplitude as horizontal reference lines
+        ax.axhline(peak_amplitude, color='red', lw=0.5, ls='--', alpha=0.7)
+        ax.axhline(-peak_amplitude, color='red', lw=0.5, ls='--', alpha=0.7,
+                   label=f'±peak = {peak_amplitude:.3g}')
+
+        # Noise band
+        ax.axhline(noise_std, color='k', lw=0.5, ls=':', alpha=0.5)
+        ax.axhline(-noise_std, color='k', lw=0.5, ls=':', alpha=0.5,
+                   label=f'±noise std = {noise_std:.3g}')
+
+        ax.axhline(0, color='k', lw=0.5, alpha=0.5)
+        ax.axvline(0, color='k', lw=0.5, alpha=0.5)
+        ax.set_xlabel('Lag (s)')
+        ax.set_ylabel('RF amplitude')
+        ax.set_title(f"SNR = {snr:.2f}")
+        ax.legend(loc='best', fontsize=8)
+
+        return ax

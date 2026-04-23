@@ -224,6 +224,7 @@ class StimulusTemplate(dj.Manual):
             snippet_base_dt: float = None,
             alias: str = None,
             ntrigger_per_frame: int = 1,
+            nframes_per_trigger: int = 1,
             stim_trace: np.ndarray = None,
             pix_n_x: int = None,
             pix_n_y: int = None,
@@ -248,6 +249,8 @@ class StimulusTemplate(dj.Manual):
             alias: Custom alias string; auto-generated from pixel scale if None.
             ntrigger_per_frame: Number of triggers sent per stimulus frame.
                 Default is 1.
+            nframes_per_trigger: Number of frames sent per stimulus frame.
+                Default is 1.
             stim_trace: Optional numerical stimulus trace array.
             pix_n_x: Number of stimulus pixels in x.
             pix_n_y: Number of stimulus pixels in y.
@@ -268,6 +271,7 @@ class StimulusTemplate(dj.Manual):
 
         stim_dict = {
             "ntrigger_per_frame": ntrigger_per_frame,
+            "nframes_per_trigger": nframes_per_trigger,
         }
 
         if n_colors is not None:
