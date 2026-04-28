@@ -11,7 +11,7 @@ from djimaging.utils.trace_utils import get_mean_dt, align_stim_to_trace, align_
 
 def prepare_noise_data(stim: np.ndarray, triggertimes: np.ndarray,
                        trace: np.ndarray, tracetime: np.ndarray,
-                       ntrigger_per_frame: int = 1,
+                       nframes_per_trigger: int = 1,
                        fupsample_trace: int = None,
                        fupsample_stim: int = None,
                        fit_kind: str = 'trace',
@@ -35,7 +35,7 @@ def prepare_noise_data(stim: np.ndarray, triggertimes: np.ndarray,
         Neural response trace, shape (n_timepoints,).
     tracetime : np.ndarray
         Timestamps for the trace, shape (n_timepoints,).
-    ntrigger_per_frame : int, optional
+    nframes_per_trigger : int, optional
         Number of triggers per stimulus frame. Default is 1.
     fupsample_trace : int, optional
         Upsampling factor for the trace. Default is None.
@@ -80,7 +80,7 @@ def prepare_noise_data(stim: np.ndarray, triggertimes: np.ndarray,
 
     # Resampling and filtering
     stimtime, stim = preprocess_stimulus(
-        stim, triggertimes, ntrigger_per_frame, fupsample_stim)
+        stim, triggertimes, nframes_per_trigger, fupsample_stim)
     tracetime, trace = preprocess_trace(
         tracetime, trace, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s, dt_rtol)
 
@@ -132,7 +132,6 @@ def preprocess_stimulus(stim: np.ndarray, triggertimes: np.ndarray,
     ValueError
         If there are more triggertimes than stimulus frames.
     """
-
     if nframes_per_trigger > 1:
         stimtime = np.repeat(triggertimes, nframes_per_trigger)
         trigger_dt, _ = get_mean_dt(triggertimes, rtol_error=np.inf, rtol_warning=0.5)
