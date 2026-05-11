@@ -186,7 +186,6 @@ class PresentationLogTemplate(dj.Computed):
     def definition(self):
         definition = """
         -> self.presentation_table
-        -> self.log_table
         ---
         log_idx      : tinyint
         stim_idx     : int
