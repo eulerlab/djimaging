@@ -136,3 +136,131 @@ class QdsPyLogTemplate(dj.Computed):
 
         self.insert1(row)
         self.StimLog().insert(stim_rows)
+
+
+class PresentationLogTemplate(dj.Computed):
+    database = ""
+
+    @property
+    def definition(self):
+        definition = """
+        -> self.presentation_table
+        ---
+        log_idx      : tinyint
+        stim_idx     : int
+        match_method : varchar(32)
+        t_start      : time
+        t_end        : time
+        """
+        return definition
+
+    @property
+    def exp_table(self):
+        """Override to specify the experiment table (used in make() to scope log queries)."""
+        raise NotImplementedError("Subclasses must implement the exp_table property.")
+
+    @property
+    def presentation_table(self):
+        """Override to specify the presentation table."""
+        raise NotImplementedError("Subclasses must implement the presentation_table property.")
+
+    @property
+    def log_table(self):
+        """Override to specify the log table (a QdsPyLogTemplate.StimLog instance)."""
+        raise NotImplementedError("Subclasses must implement the log_table property.")
+
+    @property
+    def stimulus_table(self):
+        """Override to specify the stimulus table (must expose stim_hash and stim_dict)."""
+        raise NotImplementedError("Subclasses must implement the stimulus_table property.")
+
+    def make(self, key, verbose: int = 0):
+        if verbose >= 1:
+            print(f"[PresentationLog] Processing key: {key}")
+
+        exp_key = (self.exp_table & key).fetch1('KEY')
+
+        stim_hash, stim_dict = (self.stimulus_table & key).fetch1('stim_hash', 'stim_dict')
+        hashes = {stim_hash} | set(stim_dict.get('stim_hash_list', []))
+        hashes.discard('')
+        names = set(stim_dict.get('stim_name_list', []))
+        if 'stim_name' in key:
+            names.add(key['stim_name'])
+
+        if verbose >= 2:
+            print(f"  stim_hash={stim_hash!r}")
+            print(f"  candidate hashes : {hashes}")
+            print(f"  candidate names  : {names}")
+
+        log_rows = (self.log_table & exp_key & 'aborted = 0').fetch(
+            as_dict=True, order_by='log_idx, stim_idx'
+        )
+
+        if verbose >= 2:
+            print(f"  non-aborted log rows for experiment: {len(log_rows)}")
+        if verbose >= 3:
+            for r in log_rows:
+                print(f"    log_idx={r['log_idx']} stim_idx={r['stim_idx']} "
+                      f"name={r['stim_file_name']!r} md5={r['stim_md5']!r}")
+
+        matches = [r for r in log_rows if r['stim_md5'] in hashes]
+        method = 'md5'
+
+        if not matches:
+            if verbose >= 2:
+                print("  no MD5 match — falling back to filename matching")
+            matches = [r for r in log_rows if r['stim_file_name'] in names]
+            method = 'filename'
+
+        if verbose >= 2:
+            print(f"  match_method={method!r}, {len(matches)} candidate(s) after filtering")
+
+        if not matches:
+            raise ValueError(
+                f"No log entry found for key={key}. "
+                f"Checked hashes={hashes}, names={names}."
+            )
+
+        stim_pk = self.stimulus_table.primary_key
+        stim_filter = {k: key[k] for k in stim_pk if k in key}
+        all_pres_keys = sorted(
+            (self.presentation_table & exp_key & stim_filter).fetch('KEY'),
+            key=lambda k: tuple(v for _, v in sorted(k.items()))
+        )
+        pres_idx = next(
+            (i for i, pk in enumerate(all_pres_keys)
+             if all(key.get(k) == pk.get(k) for k in pk)),
+            None
+        )
+
+        if verbose >= 2:
+            print(f"  sibling presentations for this stimulus: {len(all_pres_keys)}, "
+                  f"this presentation ordinal: {pres_idx}")
+        if verbose >= 3:
+            for i, pk in enumerate(all_pres_keys):
+                marker = "  <-- this" if i == pres_idx else ""
+                print(f"    [{i}] {pk}{marker}")
+
+        if pres_idx is None:
+            raise ValueError(f"Could not locate key={key} among sibling presentations.")
+
+        if len(matches) <= pres_idx:
+            raise ValueError(
+                f"Only {len(matches)} log entr(ies) found for "
+                f"hashes={hashes} / names={names}, but presentation ordinal is {pres_idx}."
+            )
+
+        matched = matches[pres_idx]
+
+        if verbose >= 1:
+            print(f"  -> matched log_idx={matched['log_idx']} stim_idx={matched['stim_idx']} "
+                  f"method={method!r} t_start={matched['t_start']} t_end={matched['t_end']}")
+
+        self.insert1({
+            **key,
+            'log_idx'     : matched['log_idx'],
+            'stim_idx'    : matched['stim_idx'],
+            'match_method': method,
+            't_start'     : matched['t_start'],
+            't_end'       : matched['t_end'],
+        })
