@@ -64,28 +64,23 @@ class QdsPyLogTemplate(dj.Computed):
         @property
         def definition(self):
             definition = """
-            # ROI Mask
             -> master
-            stim_idx            : int           # stimulus index
+            stim_idx            : int
             ---
             stim_file_name   : varchar(255)
             stim_path        : varchar(1024)
             stim_md5         : char(32)
-        
-            t_abs_s          : float           # absolute time (s)
-            t_since_last_s   : float           # time since previous stim (s)
-        
+            t_abs_s          : float
+            t_since_last_s   : float
             t_start          : time
             t_end            : time
-        
             aborted          : bool
             t_dur_s          : float
             t_dur_s_calc     : float
-        
             n_dropped_frames : int
-            
             params           : blob
-            other_info      : blob          # additional info with new keys
+            sequence_used    = null : int
+            other_info       : blob
             """
             return definition
 
@@ -110,6 +105,13 @@ class QdsPyLogTemplate(dj.Computed):
             'n_err': stats.get('nErr', -1),
         })
 
+        _KNOWN_STIM_KEYS = {
+            'index', 'stimFileName', 'stimPath', 'stimMD5',
+            't_abs_s', 't_since_last_s', 't_start', 't_end',
+            'aborted', 't_dur_s', 't_dur_s_calc', 'nDroppedFrames',
+            'params', 'sequenceUsed',
+        }
+
         stim_rows = []
         for stim in stims:
             stim_row = key.copy()
@@ -127,11 +129,8 @@ class QdsPyLogTemplate(dj.Computed):
                 't_dur_s_calc': stim.get('t_dur_s_calc', -1),
                 'n_dropped_frames': stim.get('nDroppedFrames', -1),
                 'params': stim.get('params', dict()),
-                'other_info': {k: v for k, v in stim.items() if k not in [
-                    'stimFileName', 'stimPath', 'stimMD5', 't_abs_s', 't_since_last_s',
-                    't_start', 't_end', 'aborted', 't_dur_s', 't_dur_s_calc',
-                    'nDroppedFrames', 'params'
-                ]}
+                'sequence_used': stim.get('sequenceUsed', None),
+                'other_info': {k: v for k, v in stim.items() if k not in _KNOWN_STIM_KEYS},
             })
             stim_rows.append(stim_row)
 
