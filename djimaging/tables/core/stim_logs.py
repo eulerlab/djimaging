@@ -312,13 +312,15 @@ class PresentationLogTemplate(dj.Computed):
                 scan_params_dict = (self.presentation_table.ScanInfo & key).fetch1('scan_params_dict')
                 rec_time = _parse_scan_start_time(scan_params_dict)
                 if rec_time is not None:
+                    rec_s = (rec_time.hour * 3600 + rec_time.minute * 60
+                             + rec_time.second + rec_time.microsecond / 1e6)
+
                     def _delta_s(row):
+                        # DataJoint returns MySQL TIME columns as timedelta
                         t = row['t_start']
-                        return abs(
-                            (rec_time.hour - t.hour) * 3600
-                            + (rec_time.minute - t.minute) * 60
-                            + (rec_time.second - t.second)
-                        )
+                        log_s = t.total_seconds() if hasattr(t, 'total_seconds') else (
+                            t.hour * 3600 + t.minute * 60 + t.second)
+                        return abs(rec_s - log_s)
                     matched = min(matches, key=_delta_s)
                     method = method + '+time'
                     if verbose >= 2:
