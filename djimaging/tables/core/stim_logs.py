@@ -3,6 +3,47 @@ import datajoint as dj
 from djimaging.utils.qdspy.read_logs import parse_stimulus_log
 
 
+def _parse_scan_start_time(scan_params_dict: dict):
+    """Extract recording start time from a ScanM scan_params_dict.
+
+    Returns a datetime.time on success, or None if the dict lacks the required
+    keys or none of the known formats match.
+    """
+    from datetime import datetime as _dt
+
+    def _decode(v):
+        return v.decode('utf-8') if hasattr(v, 'decode') else str(v)
+
+    date_str = None
+    for k in ('datestamp_d_m_y', 'datestamp_y_m_d', 'date', 'datestamp'):
+        if scan_params_dict.get(k) is not None:
+            date_str = _decode(scan_params_dict[k])
+            break
+
+    time_str = None
+    for k in ('timestamp_h_m_s_ms', 'timestamp', 'time'):
+        if scan_params_dict.get(k) is not None:
+            time_str = _decode(scan_params_dict[k])
+            break
+
+    if date_str is None or time_str is None:
+        return None
+
+    for fmt in (
+        '%Y-%m-%d %H-%M-%S-%f',
+        '%Y-%m-%d %H:%M:%S.%f',
+        '%Y-%m-%d %H:%M:%S',
+        '%d-%m-%Y %H-%M-%S-%f',
+        '%d-%m-%Y %H:%M:%S.%f',
+        '%d-%m-%Y %H:%M:%S',
+    ):
+        try:
+            return _dt.strptime(f'{date_str} {time_str}', fmt).time()
+        except ValueError:
+            pass
+    return None
+
+
 class QdsPyLogFileTemplate(dj.Manual):
     database = ""
 
@@ -176,6 +217,16 @@ class PresentationLogTemplate(dj.Computed):
         """Override to specify the stimulus table (must expose stim_hash and stim_dict)."""
         raise NotImplementedError("Subclasses must implement the stimulus_table property.")
 
+    @property
+    def scan_params_table(self):
+        """Override to enable time-based matching.
+
+        Should return a table (e.g. Presentation.ScanInfo) that has a
+        scan_params_dict longblob field fetchable by the presentation key.
+        Return None (default) to skip time matching and use ordinal matching only.
+        """
+        return None
+
     def make(self, key, verbose: int = 0, skip_if_no_log: bool = False):
         if verbose >= 1:
             print(f"[PresentationLog] Processing key: {key}")
@@ -249,36 +300,72 @@ class PresentationLogTemplate(dj.Computed):
                 f"Checked hashes={hashes}, names={names}."
             )
 
-        stim_pk = self.stimulus_table.primary_key
-        stim_filter = {k: key[k] for k in stim_pk if k in key}
-        all_pres_keys = sorted(
-            (self.presentation_table & exp_key & stim_filter).fetch('KEY'),
-            key=lambda k: tuple(v for _, v in sorted(k.items()))
-        )
-        pres_idx = next(
-            (i for i, pk in enumerate(all_pres_keys)
-             if all(key.get(k) == pk.get(k) for k in pk)),
-            None
-        )
+        # --- selection: time-based (preferred) or ordinal (fallback) ---
 
-        if verbose >= 2:
-            print(f"  sibling presentations for this stimulus: {len(all_pres_keys)}, "
-                  f"this presentation ordinal: {pres_idx}")
-        if verbose >= 3:
-            for i, pk in enumerate(all_pres_keys):
-                marker = "  <-- this" if i == pres_idx else ""
-                print(f"    [{i}] {pk}{marker}")
+        matched = None
 
-        if pres_idx is None:
-            raise ValueError(f"Could not locate key={key} among sibling presentations.")
+        if len(matches) == 1:
+            matched = matches[0]
 
-        if len(matches) <= pres_idx:
-            raise ValueError(
-                f"Only {len(matches)} log entr(ies) found for "
-                f"hashes={hashes} / names={names}, but presentation ordinal is {pres_idx}."
+        if matched is None and self.presentation_table.ScanInfo is not None:
+            try:
+                scan_params_dict = (self.presentation_table.ScanInfo & key).fetch1('scan_params_dict')
+                rec_time = _parse_scan_start_time(scan_params_dict)
+                if rec_time is not None:
+                    def _delta_s(row):
+                        t = row['t_start']
+                        return abs(
+                            (rec_time.hour - t.hour) * 3600
+                            + (rec_time.minute - t.minute) * 60
+                            + (rec_time.second - t.second)
+                        )
+                    matched = min(matches, key=_delta_s)
+                    method = method + '+time'
+                    if verbose >= 2:
+                        print(f"  time-matching: recording start={rec_time}, "
+                              f"best match t_start={matched['t_start']} "
+                              f"(delta={_delta_s(matched):.0f}s)")
+                    if verbose >= 3:
+                        for r in matches:
+                            marker = "  <-- selected" if r is matched else ""
+                            print(f"    stim_idx={r['stim_idx']} t_start={r['t_start']} "
+                                  f"delta={_delta_s(r):.0f}s{marker}")
+                else:
+                    if verbose >= 2:
+                        print("  time-matching: could not parse time from scan_params_dict")
+            except Exception as e:
+                if verbose >= 2:
+                    print(f"  time-matching failed ({e}) — falling back to ordinal matching")
+
+        if matched is None:
+            stim_pk = self.stimulus_table.primary_key
+            stim_filter = {k: key[k] for k in stim_pk if k in key}
+            all_pres_keys = sorted(
+                (self.presentation_table & exp_key & stim_filter).fetch('KEY'),
+                key=lambda k: tuple(v for _, v in sorted(k.items()))
+            )
+            pres_idx = next(
+                (i for i, pk in enumerate(all_pres_keys)
+                 if all(key.get(k) == pk.get(k) for k in pk)),
+                None
             )
 
-        matched = matches[pres_idx]
+            if verbose >= 2:
+                print(f"  ordinal matching: {len(all_pres_keys)} sibling presentation(s), "
+                      f"this ordinal={pres_idx}")
+            if verbose >= 3:
+                for i, pk in enumerate(all_pres_keys):
+                    marker = "  <-- this" if i == pres_idx else ""
+                    print(f"    [{i}] {pk}{marker}")
+
+            if pres_idx is None:
+                raise ValueError(f"Could not locate key={key} among sibling presentations.")
+            if len(matches) <= pres_idx:
+                raise ValueError(
+                    f"Only {len(matches)} log entr(ies) found for "
+                    f"hashes={hashes} / names={names}, but presentation ordinal is {pres_idx}."
+                )
+            matched = matches[pres_idx]
 
         if verbose >= 1:
             aborted_flag = " [ABORTED]" if matched['aborted'] else ""
