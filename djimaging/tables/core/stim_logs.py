@@ -145,12 +145,14 @@ class PresentationLogTemplate(dj.Computed):
     def definition(self):
         definition = """
         -> self.presentation_table
+        -> self.log_table
         ---
         log_idx      : tinyint
         stim_idx     : int
         match_method : varchar(32)
         t_start      : time
         t_end        : time
+        aborted      : bool
         """
         return definition
 
@@ -174,7 +176,7 @@ class PresentationLogTemplate(dj.Computed):
         """Override to specify the stimulus table (must expose stim_hash and stim_dict)."""
         raise NotImplementedError("Subclasses must implement the stimulus_table property.")
 
-    def make(self, key, verbose: int = 0):
+    def make(self, key, verbose: int = 0, skip_if_no_log: bool = False):
         if verbose >= 1:
             print(f"[PresentationLog] Processing key: {key}")
 
@@ -192,9 +194,24 @@ class PresentationLogTemplate(dj.Computed):
             print(f"  candidate hashes : {hashes}")
             print(f"  candidate names  : {names}")
 
-        log_rows = (self.log_table & exp_key & 'aborted = 0').fetch(
-            as_dict=True, order_by='log_idx, stim_idx'
-        )
+        def _fetch_log_rows(include_aborted: bool):
+            q = self.log_table & exp_key
+            if not include_aborted:
+                q = q & 'aborted = 0'
+            return q.fetch(as_dict=True, order_by='log_idx, stim_idx')
+
+        def _filter_rows(rows):
+            names_lower = {n.lower() for n in names}
+            by_md5 = [r for r in rows if r['stim_md5'] in hashes]
+            if by_md5:
+                return by_md5, 'md5'
+            by_name = [
+                r for r in rows
+                if any(r['stim_file_name'].lower().startswith(n) for n in names_lower)
+            ]
+            return by_name, 'filename'
+
+        log_rows = _fetch_log_rows(include_aborted=False)
 
         if verbose >= 2:
             print(f"  non-aborted log rows for experiment: {len(log_rows)}")
@@ -203,17 +220,28 @@ class PresentationLogTemplate(dj.Computed):
                 print(f"    log_idx={r['log_idx']} stim_idx={r['stim_idx']} "
                       f"name={r['stim_file_name']!r} md5={r['stim_md5']!r}")
 
-        matches = [r for r in log_rows if r['stim_md5'] in hashes]
-        method = 'md5'
+        matches, method = _filter_rows(log_rows)
 
         if not matches:
             if verbose >= 2:
-                print("  no MD5 match — falling back to filename matching")
-            matches = [r for r in log_rows if r['stim_file_name'] in names]
-            method = 'filename'
+                print("  no match in non-aborted rows — retrying with aborted entries included")
+            log_rows = _fetch_log_rows(include_aborted=True)
+            if not log_rows:
+                if skip_if_no_log:
+                    if verbose >= 1:
+                        print("  no log entries for this experiment — skipping")
+                    return
+                raise ValueError(f"No log entries at all for experiment key={exp_key}.")
+            if verbose >= 3:
+                aborted_rows = [r for r in log_rows if r['aborted']]
+                for r in aborted_rows:
+                    print(f"    [aborted] log_idx={r['log_idx']} stim_idx={r['stim_idx']} "
+                          f"name={r['stim_file_name']!r} md5={r['stim_md5']!r}")
+            matches, method = _filter_rows(log_rows)
 
         if verbose >= 2:
-            print(f"  match_method={method!r}, {len(matches)} candidate(s) after filtering")
+            print(f"  match_method={method!r}, {len(matches)} candidate(s) after filtering "
+                  f"({sum(r['aborted'] for r in matches)} aborted)")
 
         if not matches:
             raise ValueError(
@@ -253,8 +281,10 @@ class PresentationLogTemplate(dj.Computed):
         matched = matches[pres_idx]
 
         if verbose >= 1:
+            aborted_flag = " [ABORTED]" if matched['aborted'] else ""
             print(f"  -> matched log_idx={matched['log_idx']} stim_idx={matched['stim_idx']} "
-                  f"method={method!r} t_start={matched['t_start']} t_end={matched['t_end']}")
+                  f"method={method!r} t_start={matched['t_start']} t_end={matched['t_end']}"
+                  f"{aborted_flag}")
 
         self.insert1({
             **key,
@@ -263,4 +293,5 @@ class PresentationLogTemplate(dj.Computed):
             'match_method': method,
             't_start'     : matched['t_start'],
             't_end'       : matched['t_end'],
+            'aborted'     : matched['aborted'],
         })
