@@ -621,8 +621,9 @@ class FastStaQualityTemplate(dj.Computed):
         -> self.sta_table
         ---
         snr: float              # peak_amplitude / noise_std at the best spatial location
-        peak_amplitude: float   # max(|rf|) at the best spatial location, over all time
-        noise_std: float        # std of rf at the best spatial location, within the baseline window
+        peak_amplitude = NULL: float   # max(|rf|) at the best spatial location, over all time
+        peak_z = NULL : float
+        noise_std : float        # std of rf at the best spatial location, within the baseline window
         n_baseline_frames: int unsigned  # number of time bins used as baseline
         """
         return definition
@@ -635,36 +636,54 @@ class FastStaQualityTemplate(dj.Computed):
     def make(self, key: dict) -> None:
         rf = (self.sta_table & key).fetch1('rf')
         rf_time = (self.sta_table.params_table & key).fetch1('rf_time')
-
+     
         # Flatten spatial/feature dims so rf becomes (T, S) regardless of input shape.
         T = rf.shape[0]
         rf_flat = rf.reshape(T, -1)  # (T, S); S == 1 if rf was 1D
-
+        S = rf_flat.shape[1]
+     
         # Determine baseline region: acausal end of rf_time.
         # rf_time is ordered from past to future, so the most-future bins are at the end.
         dt = np.median(np.diff(rf_time))
         n_baseline = max(1, int(round(self._baseline_dur_s / dt)))
         n_baseline = min(n_baseline, T - 1)  # leave at least one signal frame
-
-        # Find the best spatial location: the pixel whose time course has the largest
-        # absolute deviation at any lag. This makes peak statistics independent of S.
+     
+        # Pooled noise estimate across ALL spatial locations in the acausal tail.
+        # This decouples noise estimation from pixel selection and makes the
+        # estimate stable and (asymptotically) invariant to adding noise-only
+        # pixels via spatial padding outside the RF.
+        baseline = rf_flat[-n_baseline:, :]  # (n_baseline, S)
+        noise_std = float(np.std(baseline))
+     
+        # Raw peak across all space and time.
+        peak = float(np.max(np.abs(rf_flat)))
+     
+        # Extreme-value correction. With S pixels and T lags of approximately
+        # independent Gaussian noise, E[max |z|] ~ sqrt(2 * log(T * S)). Dividing
+        # the raw peak-z by this expected null peak yields a statistic whose null
+        # distribution is roughly centered at 1 regardless of S (and T), so
+        # padding the stimulus with noise-only pixels no longer inflates SNR.
+        if noise_std > 0:
+            peak_z = peak / noise_std
+            null_peak = np.sqrt(2.0 * np.log(max(T * S, 2)))
+            snr = peak_z / null_peak
+        else:
+            peak_z = np.nan
+            snr = np.nan
+     
+        # Argmax pixel kept only for reporting / downstream use.
         abs_rf = np.abs(rf_flat)
-        best_pixel = int(np.argmax(abs_rf.max(axis=0)))  # index into S
-
-        pixel_trace = rf_flat[:, best_pixel]  # (T,)
-        pixel_baseline = pixel_trace[-n_baseline:]  # (n_baseline,)
-
-        peak = float(np.max(np.abs(pixel_trace)))
-        noise_std = float(np.std(pixel_baseline))
-        snr = peak / noise_std if noise_std > 0 else np.nan
-
+        best_pixel = int(np.argmax(abs_rf.max(axis=0)))
+     
         self.insert1({
             **key,
-            'snr': snr,
-            'peak_amplitude': peak,
-            'noise_std': noise_std,
+            'snr': snr,                       # size-invariant: peak_z / E[max|z|] under null
+            'peak_amplitude': peak,           # raw peak (same units as rf)
+            'peak_z': peak_z,                 # peak in units of pooled noise std
+            'noise_std': noise_std,           # pooled across all S pixels
             'n_baseline_frames': n_baseline,
         })
+
 
     def plot1(self, key: dict | None = None, ax=None):
         """Plot the RF traces with the baseline window highlighted.
