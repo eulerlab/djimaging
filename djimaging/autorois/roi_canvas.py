@@ -1,5 +1,4 @@
 import os.path
-import pickle
 import warnings
 from collections import deque
 from datetime import datetime
@@ -1147,8 +1146,8 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         roi_mask, output_file = self._prep_save_to_file()
 
-        with open(self.output_file, 'wb') as f:
-            pickle.dump(roi_mask, f)
+        mask_utils.save_roi_mask_file(self.output_file, roi_mask,
+                                      mask_utils._infer_roi_file_format(self.output_file))
 
         success = os.path.isfile(self.output_file)
         if success:
@@ -1182,8 +1181,8 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.update_progress(100 * i / len(self.pres_names))
 
         for roi_mask, output_file in zip(roi_masks, output_files):
-            with open(output_file, 'wb') as f:
-                pickle.dump(roi_mask, f)
+            mask_utils.save_roi_mask_file(output_file, roi_mask,
+                                          mask_utils._infer_roi_file_format(output_file))
 
         success = all(os.path.isfile(f) for f in output_files)
         if success:

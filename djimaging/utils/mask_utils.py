@@ -12,6 +12,100 @@ from djimaging.utils.mask_format_utils import assert_igor_format, to_igor_format
 from djimaging.utils.scanm import read_h5_utils
 from djimaging.utils.cellpose_utils import intersection_over_union
 
+_ROI_FILE_FORMAT_HELP = (
+    "Set file_format to 'numpy' (recommended) or 'pickle' (old standard). "
+    "New files should always use 'numpy'. Use 'pickle' only for backward compatibility with existing files."
+)
+
+
+def _infer_roi_file_format(path: str) -> str:
+    """Infer the ROI mask file format from the file extension.
+
+    Parameters
+    ----------
+    path : str
+        Path ending in ``.npy`` or ``.pkl``.
+
+    Returns
+    -------
+    str
+        ``'numpy'`` or ``'pickle'``.
+
+    Raises
+    ------
+    ValueError
+        If the extension is not recognised.
+    """
+    if path.endswith('.npy'):
+        return 'numpy'
+    elif path.endswith('.pkl'):
+        return 'pickle'
+    else:
+        raise ValueError(
+            f"Cannot infer ROI mask format from path={path!r}. "
+            f"Expected a .npy or .pkl file. {_ROI_FILE_FORMAT_HELP}"
+        )
+
+
+def _get_roi_mask_suffix(file_format: str) -> str:
+    if file_format == 'numpy':
+        return '_ROIs.npy'
+    elif file_format == 'pickle':
+        return '_ROIs.pkl'
+    else:
+        raise ValueError(f"Unknown file_format={file_format!r}. {_ROI_FILE_FORMAT_HELP}")
+
+
+def save_roi_mask_file(path: str, roi_mask: np.ndarray, file_format: str) -> None:
+    """Save an ROI mask to disk in either numpy or pickle format.
+
+    Parameters
+    ----------
+    path : str
+        Destination file path. Should end in ``.npy`` for numpy or ``.pkl`` for pickle.
+    roi_mask : np.ndarray
+        The mask array to save.
+    file_format : str
+        ``'numpy'`` to use ``np.save`` or ``'pickle'`` to use ``pickle.dump``.
+    """
+    if file_format == 'numpy':
+        np.save(path, roi_mask)
+    elif file_format == 'pickle':
+        with open(path, 'wb') as f:
+            pickle.dump(roi_mask, f)
+    else:
+        raise ValueError(f"Unknown file_format={file_format!r}. {_ROI_FILE_FORMAT_HELP}")
+
+
+def load_roi_mask_file(path: str) -> np.ndarray:
+    """Load an ROI mask from disk, inferring the format from the file extension.
+
+    Parameters
+    ----------
+    path : str
+        Path to a ``.npy`` (numpy) or ``.pkl`` (pickle) ROI mask file.
+
+    Returns
+    -------
+    np.ndarray
+        The loaded mask array.
+
+    Raises
+    ------
+    ValueError
+        If the file extension is not ``.npy`` or ``.pkl``.
+    """
+    if path.endswith('.npy'):
+        return np.load(path).copy()
+    elif path.endswith('.pkl'):
+        with open(path, 'rb') as f:
+            return pickle.load(f).copy()
+    else:
+        raise ValueError(
+            f"Cannot infer ROI mask format from path={path!r}. "
+            f"Expected a .npy or .pkl file. {_ROI_FILE_FORMAT_HELP}"
+        )
+
 
 def create_circular_mask(h: int, w: int, center: tuple, radius: float) -> np.ndarray:
     """Create a binary circular mask for a 2-D grid.
@@ -655,7 +749,7 @@ def generate_roi_suggestions(mask_pred: np.ndarray, mask_true: np.ndarray, n_art
 
 def to_roi_mask_file(data_file: str, old_suffix: str | None = None, new_suffix: str = '_ROIs.pkl',
                      roi_mask_dir: str | None = None, old_prefix: str | None = None,
-                     new_prefix: str | None = None) -> str:
+                     new_prefix: str | None = None, file_format: str | None = None) -> str:
     """Derive the ROI mask file path from a data file path.
 
     Parameters
@@ -680,6 +774,9 @@ def to_roi_mask_file(data_file: str, old_suffix: str | None = None, new_suffix: 
     str
         Full path to the corresponding ROI mask file.
     """
+    if file_format is not None:
+        new_suffix = _get_roi_mask_suffix(file_format)
+
     f_path, f_name = os.path.split(data_file)
     f_root, f_dir = os.path.split(f_path)
 
@@ -795,8 +892,9 @@ def load_preferred_roi_mask_igor(files: list, mask_alias: str = '',
 
 def load_preferred_roi_mask_pickle(files: list, mask_alias: str = '', highres_alias: str = '',
                                    roi_mask_dir: str | None = None, old_prefix: str | None = None,
-                                   new_prefix: str | None = None) -> tuple[np.ndarray | None, str | None]:
-    """Load the most preferred ROI mask from a list of files via pickle (Igor format).
+                                   new_prefix: str | None = None,
+                                   file_format: str | None = None) -> tuple[np.ndarray | None, str | None]:
+    """Load the most preferred ROI mask from a list of files (Igor format).
 
     Parameters
     ----------
@@ -807,24 +905,38 @@ def load_preferred_roi_mask_pickle(files: list, mask_alias: str = '', highres_al
     highres_alias : str, optional
         Alias string for high-resolution files (lower preference).
     roi_mask_dir : str | None, optional
-        Subdirectory override for locating pickle mask files.
+        Subdirectory override for locating mask files.
     old_prefix : str | None, optional
         Prefix to strip when deriving the mask file name.
     new_prefix : str | None, optional
         Prefix to prepend when deriving the mask file name.
+    file_format : str | None, optional
+        ``'numpy'`` to look for ``.npy`` files, ``'pickle'`` to look for
+        ``.pkl`` files. If None, a ``ValueError`` is raised with guidance.
 
     Returns
     -------
     tuple[np.ndarray | None, str | None]
         ``(roi_mask, filepath)`` in Igor format for the first found mask, or
         ``(None, None)`` if no mask is found.
+
+    Raises
+    ------
+    ValueError
+        If ``file_format`` is None.
     """
+    if file_format is None:
+        raise ValueError(
+            f"file_format is not set. {_ROI_FILE_FORMAT_HELP} "
+            f"If you were using pickle files before, set file_format='pickle'."
+        )
     sorted_files = sort_roi_mask_files(files, mask_alias=mask_alias, highres_alias=highres_alias)
     for file in sorted_files:
-        roimask_file = to_roi_mask_file(file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+        roimask_file = to_roi_mask_file(
+            file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+            file_format=file_format)
         if os.path.isfile(roimask_file):
-            with open(roimask_file, 'rb') as f:
-                roi_mask = pickle.load(f).copy()
+            roi_mask = load_roi_mask_file(roimask_file).astype(np.int32)
             roi_mask = to_igor_format(roi_mask)
             return roi_mask, roimask_file
     else:

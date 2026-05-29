@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import pickle
 import warnings
 from abc import abstractmethod
 
@@ -14,8 +13,11 @@ from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 
 from djimaging.utils.filesystem_utils import as_pre_filepath
 from djimaging.utils.dj_utils import get_primary_key, check_unique_one
-from djimaging.utils.mask_utils import to_roi_mask_file, sort_roi_mask_files, \
-    load_preferred_roi_mask_igor, load_preferred_roi_mask_pickle, compare_roi_masks
+from djimaging.utils.mask_utils import (
+    to_roi_mask_file, sort_roi_mask_files,
+    load_preferred_roi_mask_igor, load_preferred_roi_mask_pickle, compare_roi_masks,
+    save_roi_mask_file, load_roi_mask_file, _ROI_FILE_FORMAT_HELP,
+)
 from djimaging.utils.mask_format_utils import to_igor_format, to_python_format
 from djimaging.utils.plot_utils import plot_field
 
@@ -23,6 +25,7 @@ from djimaging.utils.plot_utils import plot_field
 class RoiMaskTemplate(dj.Manual):
     database = ""
     _max_shift = 5
+    _roi_file_format: str | None = None  # set to 'numpy' (recommended) or 'pickle' (old standard)
 
     @property
     def definition(self):
@@ -92,6 +95,17 @@ class RoiMaskTemplate(dj.Manual):
     def highres_table(self) -> dj.Table:
         """Return the high-resolution stack table."""
         pass
+
+    def _get_roi_file_format(self) -> str:
+        """Return the configured ROI file format, or raise a descriptive error if unset."""
+        if self._roi_file_format is None:
+            raise ValueError(
+                f"_roi_file_format is not set on {type(self).__name__}. "
+                f"{_ROI_FILE_FORMAT_HELP} "
+                f"Add `_roi_file_format = 'numpy'` (recommended) or "
+                f"`_roi_file_format = 'pickle'` (old standard) as a class attribute."
+            )
+        return self._roi_file_format
 
     @property
     def key_source(self):
@@ -205,7 +219,8 @@ class RoiMaskTemplate(dj.Manual):
         data_name, alt_name = (self.userinfo_table & field_key).fetch1('data_stack_name', 'alt_stack_name')
         ch0_stacks, ch1_stacks, output_files = load_stack_data(
             files=filepaths, data_name=data_name, alt_name=alt_name, from_raw_data=from_raw_data,
-            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+            file_format=self._get_roi_file_format())
 
         # Some sanity checks
         assert len(pres_names) == len(pres_keys)
@@ -319,7 +334,7 @@ class RoiMaskTemplate(dj.Manual):
         """
         Load initial ROI mask for field.
         First try to load from database.
-        Second try pickle file, unless ROI masks should be exclusively loaded from Igor.
+        Second try filesystem file (numpy or pickle), unless ROI masks should be exclusively loaded from Igor.
         Last try to load from Igor file, unless ROI masks should never be loaded from Igor.
         """
 
@@ -393,7 +408,8 @@ class RoiMaskTemplate(dj.Manual):
 
         roi_mask, src_file = load_preferred_roi_mask_pickle(
             files, mask_alias=mask_alias, highres_alias=highres_alias,
-            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+            file_format=self._get_roi_file_format())
         if roi_mask is not None and verbose:
             print(f'Loaded ROI mask from file={src_file} for files=\n{files}\nfor mask_alias={mask_alias}')
 
@@ -530,7 +546,8 @@ class RoiMaskTemplate(dj.Manual):
             igor_roi_masks = (self.raw_params_table & key).fetch1('igor_roi_masks')
             input_file = (self.presentation_table & key).fetch1('pres_data_file')
             roimask_file = to_roi_mask_file(
-                input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+                input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+                file_format=self._get_roi_file_format())
 
             if verbose:
                 print(f'  [{i + 1}/{len(pres_keys)}] Checking key={key}')
@@ -553,8 +570,7 @@ class RoiMaskTemplate(dj.Manual):
                     problems.append(
                         {'key': key, 'issue': 'missing_on_filesystem', 'filesystem_file': filesystem_file})
                     continue
-                with open(roimask_file, 'rb') as f:
-                    filesystem_roi_mask = pickle.load(f).copy().astype(np.int32)
+                filesystem_roi_mask = load_roi_mask_file(roimask_file).astype(np.int32)
                 filesystem_roi_mask = to_igor_format(filesystem_roi_mask)
 
             database_roi_mask = (self.RoiMaskPresentation & key).fetch1('roi_mask')
@@ -716,16 +732,17 @@ class RoiMaskTemplate(dj.Manual):
         igor_roi_masks, from_raw_data = (self.raw_params_table & key).fetch1('igor_roi_masks', 'from_raw_data')
         input_file = (self.presentation_table & key).fetch1("pres_data_file")
 
+        file_format = self._get_roi_file_format()
         roimask_file = to_roi_mask_file(
-            input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+            file_format=file_format)
 
         if igor_roi_masks == 'yes':
             assert not from_raw_data, 'Inconsistent parameters'
             filesystem_roi_mask = read_h5_utils.load_roi_mask(filepath=input_file, ignore_not_found=True)
         else:
             if os.path.isfile(roimask_file):
-                with open(roimask_file, 'rb') as f:
-                    filesystem_roi_mask = pickle.load(f).copy().astype(np.int32)
+                filesystem_roi_mask = load_roi_mask_file(roimask_file).astype(np.int32)
                 filesystem_roi_mask = to_igor_format(filesystem_roi_mask)
             else:
                 filesystem_roi_mask = None
@@ -747,8 +764,7 @@ class RoiMaskTemplate(dj.Manual):
                         f'ROI mask for key=\n{key}\nhas been deleted on the filesystem but not in the database.\n'
                         f'Saving ROI masks to file now: {roimask_file}'
                     )
-                    with open(roimask_file, 'wb') as f:
-                        pickle.dump(to_python_format(database_roi_mask), f)
+                    save_roi_mask_file(roimask_file, to_python_format(database_roi_mask), file_format)
 
             elif not np.all(filesystem_roi_mask == database_roi_mask):
                 raise ValueError(f'ROI mask for key=\n{key}\nhas been changed on filesystem but not in database.')
@@ -820,6 +836,7 @@ def load_stack_data(
         roi_mask_dir: str = 'ROIs',
         old_prefix: str = None,
         new_prefix: str = None,
+        file_format: str = None,
 ) -> tuple[list, list, list]:
     """Load image stacks for a list of presentation files.
 
@@ -831,6 +848,8 @@ def load_stack_data(
         roi_mask_dir: Sub-directory name for ROI mask output files.
         old_prefix: Path prefix to replace in output file paths.
         new_prefix: Replacement path prefix.
+        file_format: ``'numpy'`` or ``'pickle'``; controls the suffix of the
+            output file paths passed to the GUI for saving.
 
     Returns:
         A 3-tuple of (ch0_stacks, ch1_stacks, output_files) where each is a
@@ -845,7 +864,8 @@ def load_stack_data(
         ch0_stacks.append(ch_stacks[data_name])
         ch1_stacks.append(ch_stacks[alt_name])
         output_files.append(to_roi_mask_file(
-            data_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix))
+            data_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+            file_format=file_format))
 
     return ch0_stacks, ch1_stacks, output_files
 
