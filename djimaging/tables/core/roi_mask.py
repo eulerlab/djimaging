@@ -142,16 +142,16 @@ class RoiMaskTemplate(dj.Manual):
 
     def draw_roi_mask(
             self,
-            field_key: dict = None,
-            pres_key: dict = None,
+            field_key: dict | None = None,
+            pres_key: dict | None = None,
             canvas_width: int = 20,
             autorois_models: str = 'default_rgc',
             show_diagnostics: bool = True,
             load_high_res: bool = True,
-            max_shift: int = None,
+            max_shift: int | None = None,
             roi_mask_dir: str = 'ROIs',
-            old_prefix: str = None,
-            new_prefix: str = None,
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
             use_stim_onset: bool = True,
             verbose: bool = True,
             **kwargs,
@@ -491,10 +491,10 @@ class RoiMaskTemplate(dj.Manual):
 
     def check_filesystem_consistency(
             self,
-            restrictions: dict = None,
+            restrictions: dict | None = None,
             roi_mask_dir: str = 'ROIs',
-            old_prefix: str = None,
-            new_prefix: str = None,
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
             verbose: bool = True,
     ) -> list:
         """Check whether database ROI masks are consistent with the filesystem.
@@ -595,11 +595,11 @@ class RoiMaskTemplate(dj.Manual):
             self,
             field_key: dict,
             auto_fill_pres_keys: bool = False,
-            add_primary_keys: dict = None,
+            add_primary_keys: dict | None = None,
             roi_mask_dir: str = 'ROIs',
-            old_prefix: str = None,
-            new_prefix: str = None,
-            max_shift: int = None,
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+            max_shift: int | None = None,
             verboselvl: int = 0,
     ) -> None:
         """Find and insert ROI mask entries for all presentations of a field.
@@ -712,8 +712,8 @@ class RoiMaskTemplate(dj.Manual):
             self,
             key: dict,
             roi_mask_dir: str = 'ROIs',
-            old_prefix: str = None,
-            new_prefix: str = None,
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
     ) -> np.ndarray | None:
         """Load the ROI mask for a single presentation, reconciling filesystem and database state.
 
@@ -773,7 +773,7 @@ class RoiMaskTemplate(dj.Manual):
 
         return filesystem_roi_mask
 
-    def plot1(self, key: dict = None, gamma: float = 0.5) -> None:
+    def plot1(self, key: dict | None = None, gamma: float = 0.5) -> None:
         """Plot the stack average with the ROI mask overlay for one presentation.
 
         Args:
@@ -795,7 +795,7 @@ class RoiMaskTemplate(dj.Manual):
         plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
                    roi_mask=roi_mask, title=key, npixartifact=npixartifact, gamma=gamma)
 
-    def load_high_res_bg_dict(self, key: dict, ch_names: list, verbose: bool = True) -> dict:
+    def load_high_res_bg_dict(self, key: dict | None, ch_names: list, verbose: bool = True) -> dict:
         """Load high-resolution channel averages as a background dict for the GUI.
 
         Args:
@@ -834,9 +834,9 @@ def load_stack_data(
         alt_name: str,
         from_raw_data: bool,
         roi_mask_dir: str = 'ROIs',
-        old_prefix: str = None,
-        new_prefix: str = None,
-        file_format: str = None,
+        old_prefix: str | None = None,
+        new_prefix: str | None = None,
+        file_format: str | None = None,
 ) -> tuple[list, list, list]:
     """Load image stacks for a list of presentation files.
 
