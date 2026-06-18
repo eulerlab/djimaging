@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import pickle
 import warnings
 from abc import abstractmethod
 
@@ -14,8 +13,11 @@ from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 
 from djimaging.utils.filesystem_utils import as_pre_filepath
 from djimaging.utils.dj_utils import get_primary_key, check_unique_one
-from djimaging.utils.mask_utils import to_roi_mask_file, sort_roi_mask_files, \
-    load_preferred_roi_mask_igor, load_preferred_roi_mask_pickle, compare_roi_masks
+from djimaging.utils.mask_utils import (
+    to_roi_mask_file, sort_roi_mask_files,
+    load_preferred_roi_mask_igor, load_preferred_roi_mask_pickle, compare_roi_masks,
+    save_roi_mask_file, load_roi_mask_file, _ROI_FILE_FORMAT_HELP,
+)
 from djimaging.utils.mask_format_utils import to_igor_format, to_python_format
 from djimaging.utils.plot_utils import plot_field
 
@@ -23,6 +25,7 @@ from djimaging.utils.plot_utils import plot_field
 class RoiMaskTemplate(dj.Manual):
     database = ""
     _max_shift = 5
+    _roi_file_format: str | None = None  # set to 'numpy' (recommended) or 'pickle' (old standard)
 
     @property
     def definition(self):
@@ -93,6 +96,17 @@ class RoiMaskTemplate(dj.Manual):
         """Return the high-resolution stack table."""
         pass
 
+    def _get_roi_file_format(self) -> str:
+        """Return the configured ROI file format, or raise a descriptive error if unset."""
+        if self._roi_file_format is None:
+            raise ValueError(
+                f"_roi_file_format is not set on {type(self).__name__}. "
+                f"{_ROI_FILE_FORMAT_HELP} "
+                f"Add `_roi_file_format = 'numpy'` (recommended) or "
+                f"`_roi_file_format = 'pickle'` (old standard) as a class attribute."
+            )
+        return self._roi_file_format
+
     @property
     def key_source(self):
         """Return the key source for this manual table."""
@@ -128,16 +142,16 @@ class RoiMaskTemplate(dj.Manual):
 
     def draw_roi_mask(
             self,
-            field_key: dict = None,
-            pres_key: dict = None,
+            field_key: dict | None = None,
+            pres_key: dict | None = None,
             canvas_width: int = 20,
             autorois_models: str = 'default_rgc',
             show_diagnostics: bool = True,
             load_high_res: bool = True,
-            max_shift: int = None,
+            max_shift: int | None = None,
             roi_mask_dir: str = 'ROIs',
-            old_prefix: str = None,
-            new_prefix: str = None,
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
             use_stim_onset: bool = True,
             verbose: bool = True,
             **kwargs,
@@ -205,7 +219,8 @@ class RoiMaskTemplate(dj.Manual):
         data_name, alt_name = (self.userinfo_table & field_key).fetch1('data_stack_name', 'alt_stack_name')
         ch0_stacks, ch1_stacks, output_files = load_stack_data(
             files=filepaths, data_name=data_name, alt_name=alt_name, from_raw_data=from_raw_data,
-            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+            file_format=self._get_roi_file_format())
 
         # Some sanity checks
         assert len(pres_names) == len(pres_keys)
@@ -319,7 +334,7 @@ class RoiMaskTemplate(dj.Manual):
         """
         Load initial ROI mask for field.
         First try to load from database.
-        Second try pickle file, unless ROI masks should be exclusively loaded from Igor.
+        Second try filesystem file (numpy or pickle), unless ROI masks should be exclusively loaded from Igor.
         Last try to load from Igor file, unless ROI masks should never be loaded from Igor.
         """
 
@@ -393,7 +408,8 @@ class RoiMaskTemplate(dj.Manual):
 
         roi_mask, src_file = load_preferred_roi_mask_pickle(
             files, mask_alias=mask_alias, highres_alias=highres_alias,
-            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+            file_format=self._get_roi_file_format())
         if roi_mask is not None and verbose:
             print(f'Loaded ROI mask from file={src_file} for files=\n{files}\nfor mask_alias={mask_alias}')
 
@@ -427,11 +443,23 @@ class RoiMaskTemplate(dj.Manual):
 
         return roi_mask, src_file
 
-    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
-                          only_new_fields: bool = True, roi_mask_dir='ROIs', old_prefix=None, new_prefix=None,
-                          max_shift=None, auto_fill_pres_keys: bool = False, add_primary_keys=None):
+    def rescan_filesystem(
+            self,
+            restrictions: dict | None = None,
+            source = 'infer',  # 'infer' | 'igor' | 'autorois'
+            verboselvl: int = 0,
+            suppress_errors: bool = False,
+            only_new_fields: bool = True,
+            roi_mask_dir='ROIs',
+            old_prefix=None,
+            new_prefix=None,
+            max_shift=None,
+            auto_fill_pres_keys: bool = False,
+            add_primary_keys=None
+        ):
         """Scan filesystem for new ROI masks and add them to the database.
         :param restrictions: Restrictions for field_table
+        :param source: Source of ROI masks to scan for. Can be 'infer' (to automatically infer from parameters), 'igor' (to only scan for Igor files) or 'autorois' (to only scan for AutoROIs files).
         :param verboselvl: Verbosity level
         :param suppress_errors: Suppress errors
         :param only_new_fields: Only scan for new fields
@@ -446,14 +474,22 @@ class RoiMaskTemplate(dj.Manual):
             restrictions = dict()
 
         if only_new_fields:
-            restrictions = (self.key_source - self) & restrictions
+            keys_to_scan = ((self.key_source - self) & restrictions).fetch('KEY')
+        else:
+            keys_to_scan = (self.key_source & restrictions).fetch('KEY')
+
+        if verboselvl > 0:
+            print(f'Scanning {len(keys_to_scan)} keys for new ROI masks...')
 
         err_list = []
 
-        for key in (self.key_source & restrictions):
+        for key in keys_to_scan:
+            if verboselvl > 2:
+                print('#' * 60)
+                print('Scanning key:', key)
             try:
                 self._add_field_roi_masks(
-                    key, auto_fill_pres_keys=auto_fill_pres_keys,
+                    key, source=source, auto_fill_pres_keys=auto_fill_pres_keys,
                     roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
                     max_shift=max_shift, add_primary_keys=add_primary_keys, verboselvl=verboselvl)
             except Exception as e:
@@ -465,21 +501,133 @@ class RoiMaskTemplate(dj.Manual):
 
         return err_list
 
+    def check_filesystem_consistency(
+            self,
+            restrictions: dict | None = None,
+            source = 'infer',  # 'infer' | 'igor' | 'autorois'
+            roi_mask_dir: str = 'ROIs',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+            verbose: bool = True,
+    ) -> list:
+        """Check whether database ROI masks are consistent with the filesystem.
+
+        Iterates over every presentation already stored in RoiMaskPresentation
+        and compares it against the corresponding file on disk. Returns a list
+        of problem records so the caller can inspect or correct them.
+
+        Args:
+            restrictions: Optional DataJoint restriction applied to
+                RoiMaskPresentation before iterating (e.g. a field key dict).
+            source: Source of ROI masks to check for. Can be 'infer' (to automatically infer from parameters), 'igor' (to only check Igor files) or 'autorois' (to only check AutoROIs files).
+            roi_mask_dir: Sub-directory name containing ROI mask pickle files.
+            old_prefix: Path prefix to replace when resolving file paths.
+            new_prefix: Replacement path prefix.
+            verbose: If True, print progress and a summary at the end.
+
+        Returns:
+            A list of dicts, one per problematic presentation, each with:
+
+            - ``'key'``: the presentation primary key dict
+            - ``'issue'``: one of
+
+              * ``'mismatch'`` — file exists but its content differs from DB
+              * ``'missing_on_filesystem'`` — DB has a mask but the pickle
+                file is gone
+              * ``'igor_missing'`` — DB has a mask but the H5 file contains
+                no ROI mask
+
+            - ``'filesystem_file'``: expected file path (pickle or H5)
+
+        Example::
+
+            problems = roi_mask_table.check_filesystem_consistency(
+                roi_mask_dir='ROIs')
+            for p in problems:
+                print(p['issue'], p['filesystem_file'])
+                print(p['key'])
+        """
+        if restrictions is None:
+            restrictions = dict()
+
+        problems = []
+        pres_keys = (self.RoiMaskPresentation & restrictions).fetch('KEY')
+
+        if verbose:
+            print(f'Checking filesystem consistency for {len(pres_keys)} presentation(s)...')
+
+        for i, key in enumerate(pres_keys):
+            if source == 'infer':
+                igor_roi_masks = (self.raw_params_table & key).fetch1('igor_roi_masks')
+            elif source == 'igor':
+                igor_roi_masks = 'yes'
+            elif source == 'autorois':
+                igor_roi_masks = 'no'
+
+            input_file = (self.presentation_table & key).fetch1('pres_data_file')
+            roimask_file = to_roi_mask_file(
+                input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+                file_format=self._get_roi_file_format())
+
+            if verbose:
+                print(f'  [{i + 1}/{len(pres_keys)}] Checking key={key}')
+
+            if igor_roi_masks == 'yes':
+                filesystem_file = input_file
+                filesystem_roi_mask = read_h5_utils.load_roi_mask(
+                    filepath=input_file, ignore_not_found=True)
+                if filesystem_roi_mask is None:
+                    if verbose:
+                        print(f'    -> PROBLEM: igor_missing  ({filesystem_file})')
+                    problems.append(
+                        {'key': key, 'issue': 'igor_missing', 'filesystem_file': filesystem_file})
+                    continue
+            else:
+                filesystem_file = roimask_file
+                if not os.path.isfile(roimask_file):
+                    if verbose:
+                        print(f'    -> PROBLEM: missing_on_filesystem  ({filesystem_file})')
+                    problems.append(
+                        {'key': key, 'issue': 'missing_on_filesystem', 'filesystem_file': filesystem_file})
+                    continue
+                filesystem_roi_mask = load_roi_mask_file(roimask_file).astype(np.int32)
+                filesystem_roi_mask = to_igor_format(filesystem_roi_mask)
+
+            database_roi_mask = (self.RoiMaskPresentation & key).fetch1('roi_mask')
+            if not np.all(filesystem_roi_mask == database_roi_mask):
+                if verbose:
+                    print(f'    -> PROBLEM: mismatch  ({filesystem_file})')
+                problems.append(
+                    {'key': key, 'issue': 'mismatch', 'filesystem_file': filesystem_file})
+            else:
+                if verbose:
+                    print(f'    -> OK')
+
+        if verbose:
+            if problems:
+                print(f'Done. Found {len(problems)} problem(s) out of {len(pres_keys)} presentation(s).')
+            else:
+                print(f'Done. All {len(pres_keys)} presentation(s) are consistent.')
+
+        return problems
+
     def _add_field_roi_masks(
             self,
             field_key: dict,
+            source: str = 'infer',
             auto_fill_pres_keys: bool = False,
-            add_primary_keys: dict = None,
+            add_primary_keys: dict | None = None,
             roi_mask_dir: str = 'ROIs',
-            old_prefix: str = None,
-            new_prefix: str = None,
-            max_shift: int = None,
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+            max_shift: int | None = None,
             verboselvl: int = 0,
     ) -> None:
         """Find and insert ROI mask entries for all presentations of a field.
 
         Args:
             field_key: Primary key dict for the field.
+            source: Source of the ROI masks ('infer', 'igor', or 'autorois').
             auto_fill_pres_keys: If True, presentations without a mask file
                 are filled with the main field mask (zero shift).
             add_primary_keys: Optional extra primary key columns to inject into
@@ -500,32 +648,34 @@ class RoiMaskTemplate(dj.Manual):
         if verboselvl > 2:
             print('\nfield_key:', field_key, '\npres_keys:', pres_keys)
 
-        roi_masks = [self._load_presentation_roi_mask(key, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
-                     for key in pres_keys]
+        # Filter to new presentation keys BEFORE loading masks, so that existing
+        # entries are not needlessly read from disk and their filesystem-vs-database
+        # consistency is not checked here (which would cause rescan to fail if any
+        # pre-existing mask file was edited outside the database).
+        new_pres_keys = [pk for pk in pres_keys
+                         if len(self.RoiMaskPresentation & pk) == 0]
 
-        data_pairs = zip(pres_keys, roi_masks)
-
-        if not auto_fill_pres_keys:
-            # Filter out keys without ROI mask
-            data_pairs = [(pres_key, roi_mask) for pres_key, roi_mask in data_pairs
-                          if roi_mask is not None]
-        else:
-            data_pairs = list(data_pairs)
-
-        if len(data_pairs) == 0:
+        if len(new_pres_keys) == 0:
             if verboselvl > 1:
-                print('No ROI masks found for field:', field_key)
+                print('Nothing new to add for field:', field_key)
             if verboselvl > 2:
                 print('pres_keys:', [k for k in pres_keys])
             return
 
-        # Filter out keys that are already present
-        data_pairs = [(pres_key, roi_mask) for pres_key, roi_mask in data_pairs
-                      if len(self.RoiMaskPresentation & pres_key) == 0]
+        roi_masks = [self._load_presentation_roi_mask(
+            key, roi_mask_dir, source=source, old_prefix=old_prefix, new_prefix=new_prefix)
+                     for key in new_pres_keys]
+
+        if not auto_fill_pres_keys:
+            # Filter out keys without ROI mask
+            data_pairs = [(pres_key, roi_mask) for pres_key, roi_mask in zip(new_pres_keys, roi_masks)
+                          if roi_mask is not None]
+        else:
+            data_pairs = list(zip(new_pres_keys, roi_masks))
 
         if len(data_pairs) == 0:
             if verboselvl > 1:
-                print('Nothing new to add for field:', field_key)
+                print('No ROI masks found for field:', field_key)
             return
 
         if len(self & field_key) == 0:
@@ -577,7 +727,6 @@ class RoiMaskTemplate(dj.Manual):
 
         for roi_mask_pres_key in roi_mask_pres_keys:
             if add_primary_keys is not None:
-                main_key = {**main_key, **add_primary_keys}
                 roi_mask_pres_key = {**roi_mask_pres_key, **add_primary_keys}
 
             self.RoiMaskPresentation().insert1(roi_mask_pres_key, skip_duplicates=True)
@@ -586,8 +735,9 @@ class RoiMaskTemplate(dj.Manual):
             self,
             key: dict,
             roi_mask_dir: str = 'ROIs',
-            old_prefix: str = None,
-            new_prefix: str = None,
+            source: str = 'infer',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
     ) -> np.ndarray | None:
         """Load the ROI mask for a single presentation, reconciling filesystem and database state.
 
@@ -603,19 +753,26 @@ class RoiMaskTemplate(dj.Manual):
         Raises:
             ValueError: If the filesystem mask differs from the database mask.
         """
-        igor_roi_masks, from_raw_data = (self.raw_params_table & key).fetch1('igor_roi_masks', 'from_raw_data')
         input_file = (self.presentation_table & key).fetch1("pres_data_file")
 
+        if source == 'infer':
+            igor_roi_masks, from_raw_data = (self.raw_params_table & key).fetch1('igor_roi_masks', 'from_raw_data')
+        elif source == 'igor':
+            igor_roi_masks, from_raw_data = 'yes', False
+        elif source == 'autorois':
+            igor_roi_masks, from_raw_data = 'no', True
+
+        file_format = self._get_roi_file_format()
         roimask_file = to_roi_mask_file(
-            input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+            file_format=file_format)
 
         if igor_roi_masks == 'yes':
             assert not from_raw_data, 'Inconsistent parameters'
             filesystem_roi_mask = read_h5_utils.load_roi_mask(filepath=input_file, ignore_not_found=True)
         else:
             if os.path.isfile(roimask_file):
-                with open(roimask_file, 'rb') as f:
-                    filesystem_roi_mask = pickle.load(f).copy().astype(np.int32)
+                filesystem_roi_mask = load_roi_mask_file(roimask_file).astype(np.int32)
                 filesystem_roi_mask = to_igor_format(filesystem_roi_mask)
             else:
                 filesystem_roi_mask = None
@@ -624,12 +781,20 @@ class RoiMaskTemplate(dj.Manual):
             database_roi_mask = (self.RoiMaskPresentation & key).fetch1('roi_mask')
 
             if filesystem_roi_mask is None:
-                warnings.warn(
-                    f'ROI mask for key=\n{key}\nhas been deleted on the filesystem but not in the database.\n'
-                    f'Saving ROI masks to file now: {roimask_file}'
-                )
-                with open(roimask_file, 'wb') as f:
-                    pickle.dump(to_python_format(database_roi_mask), f)
+                if igor_roi_masks == 'yes':
+                    # H5 files have no write-back API; writing a pickle would be silently
+                    # ignored on the next scan (which still reads from H5), causing an
+                    # infinite repeated warning.
+                    warnings.warn(
+                        f'ROI mask for key=\n{key}\nwas not found in the H5 file but exists in the database. '
+                        f'Cannot write back to H5 format; database entry retained.'
+                    )
+                else:
+                    warnings.warn(
+                        f'ROI mask for key=\n{key}\nhas been deleted on the filesystem but not in the database.\n'
+                        f'Saving ROI masks to file now: {roimask_file}'
+                    )
+                    save_roi_mask_file(roimask_file, to_python_format(database_roi_mask), file_format)
 
             elif not np.all(filesystem_roi_mask == database_roi_mask):
                 raise ValueError(f'ROI mask for key=\n{key}\nhas been changed on filesystem but not in database.')
@@ -638,7 +803,7 @@ class RoiMaskTemplate(dj.Manual):
 
         return filesystem_roi_mask
 
-    def plot1(self, key: dict = None, gamma: float = 0.5) -> None:
+    def plot1(self, key: dict | None = None, gamma: float = 0.5) -> None:
         """Plot the stack average with the ROI mask overlay for one presentation.
 
         Args:
@@ -660,7 +825,7 @@ class RoiMaskTemplate(dj.Manual):
         plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
                    roi_mask=roi_mask, title=key, npixartifact=npixartifact, gamma=gamma)
 
-    def load_high_res_bg_dict(self, key: dict, ch_names: list, verbose: bool = True) -> dict:
+    def load_high_res_bg_dict(self, key: dict | None, ch_names: list, verbose: bool = True) -> dict:
         """Load high-resolution channel averages as a background dict for the GUI.
 
         Args:
@@ -699,8 +864,9 @@ def load_stack_data(
         alt_name: str,
         from_raw_data: bool,
         roi_mask_dir: str = 'ROIs',
-        old_prefix: str = None,
-        new_prefix: str = None,
+        old_prefix: str | None = None,
+        new_prefix: str | None = None,
+        file_format: str | None = None,
 ) -> tuple[list, list, list]:
     """Load image stacks for a list of presentation files.
 
@@ -712,6 +878,8 @@ def load_stack_data(
         roi_mask_dir: Sub-directory name for ROI mask output files.
         old_prefix: Path prefix to replace in output file paths.
         new_prefix: Replacement path prefix.
+        file_format: ``'numpy'`` or ``'pickle'``; controls the suffix of the
+            output file paths passed to the GUI for saving.
 
     Returns:
         A 3-tuple of (ch0_stacks, ch1_stacks, output_files) where each is a
@@ -726,7 +894,8 @@ def load_stack_data(
         ch0_stacks.append(ch_stacks[data_name])
         ch1_stacks.append(ch_stacks[alt_name])
         output_files.append(to_roi_mask_file(
-            data_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix))
+            data_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+            file_format=file_format))
 
     return ch0_stacks, ch1_stacks, output_files
 

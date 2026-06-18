@@ -231,119 +231,106 @@ class CascadeSpikesTemplate(dj.Computed):
 
     @property
     def definition(self):
-        definition = """
+        return """
         # performs basic preprocessing on raw traces
-        -> self.cascadetraces_table 
+        -> self.cascadetraces_table
         -> self.cascade_params_table
         ---
         spike_prob:       longblob
         """
-        return definition
 
     @property
     @abstractmethod
-    def presentation_table(self):
-        pass
+    def presentation_table(self): pass
 
     @property
     @abstractmethod
-    def cascadetraces_params_table(self):
-        pass
+    def cascadetraces_params_table(self): pass
 
     @property
     @abstractmethod
-    def cascadetraces_table(self):
-        pass
+    def cascadetraces_table(self): pass
 
     @property
     @abstractmethod
-    def cascade_params_table(self):
-        pass
+    def cascade_params_table(self): pass
 
     @property
     def key_source(self):
         try:
-            return self.presentation_table().proj() * \
-                self.cascade_params_table().proj() * \
-                self.cascadetraces_params_table.proj()
+            return (self.presentation_table().proj()
+                    * self.cascade_params_table().proj()
+                    * self.cascadetraces_params_table.proj())
         except (AttributeError, TypeError):
-            pass
+            return None
 
-    def populate(
-            self,
-            *restrictions,
-            suppress_errors=False,
-            return_exception_objects=False,
-            reserve_jobs=False,
-            order="original",
-            limit=None,
-            max_calls=None,
-            display_progress=False,
-            processes=1,
-            make_kwargs=None,
-    ):
-        if len(restrictions) == 0:
-            cascade_params_ids = self.cascade_params_table.fetch('cascade_params_id')
-        else:
-            cascade_params_ids = (self.cascade_params_table & restrictions).fetch('cascade_params_id')
+    def populate(self, *restrictions, make_kwargs=None, **populate_kwargs):
+        # Validate make_kwargs once
+        make_kwargs = dict(make_kwargs) if make_kwargs else {}
+        for reserved in ('cascade', 'cascade_models_path'):
+            if reserved in make_kwargs:
+                raise ValueError(f"{reserved} cannot be passed as make_kwargs.")
 
-        for cascade_params_id in cascade_params_ids:
-            cascade_folder, cascade_model_subfolder = (
-                    self.cascade_params_table & dict(cascade_params_id=cascade_params_id)).fetch1(
-                'cascade_folder', 'cascade_model_subfolder')
+        # Fetch only the columns we need, once
+        params_table = self.cascade_params_table
+        query = params_table & restrictions if restrictions else params_table
+        rows = query.fetch('cascade_params_id', 'cascade_folder',
+                           'cascade_model_subfolder', as_dict=True)
 
-            if cascade_folder not in sys.path:
-                assert os.path.isdir(cascade_folder)
-                print(f'Adding {cascade_folder} to sys.path')
-                sys.path = [cascade_folder] + sys.path
+        # Cache imports across params_ids that share a folder
+        cascade_cache = {}
 
-            try:
-                from cascade2p import checks
-                from cascade2p import cascade
-            except ImportError:
-                raise ImportError(f'Failed to import cascade from folder {cascade_folder}')
+        for row in rows:
+            cascade_folder = row['cascade_folder']
+            cascade_model_subfolder = row['cascade_model_subfolder']
 
-            checks.check_packages()
+            if cascade_folder not in cascade_cache:
+                if cascade_folder not in sys.path:
+                    assert os.path.isdir(cascade_folder)
+                    print(f'Adding {cascade_folder} to sys.path')
+                    sys.path.insert(0, cascade_folder)
+                try:
+                    from cascade2p import checks, cascade
+                except ImportError:
+                    raise ImportError(f'Failed to import cascade from folder {cascade_folder}')
+                checks.check_packages()
+                cascade_cache[cascade_folder] = cascade
 
-            if make_kwargs is None:
-                make_kwargs = dict()
-            else:
-                if 'cascade' in make_kwargs:
-                    raise ValueError("cascade cannot be passed as make_kwargs.")
-                if 'cascade_models_path' in make_kwargs:
-                    raise ValueError("cascade_models_path cannot be passed as make_kwargs.")
+            cascade = cascade_cache[cascade_folder]
 
-            make_kwargs['cascade'] = cascade
-            make_kwargs['cascade_models_path'] = os.path.join(cascade_folder, cascade_model_subfolder)
+            call_kwargs = {
+                **make_kwargs,
+                'cascade': cascade,
+                'cascade_models_path': os.path.join(cascade_folder, cascade_model_subfolder),
+            }
 
             super().populate(
                 *restrictions,
-                dict(cascade_params_id=cascade_params_id),
-                suppress_errors=suppress_errors,
-                return_exception_objects=return_exception_objects,
-                reserve_jobs=reserve_jobs,
-                order=order,
-                limit=limit,
-                max_calls=max_calls,
-                display_progress=display_progress,
-                processes=processes,
-                make_kwargs=make_kwargs,
+                {'cascade_params_id': row['cascade_params_id']},
+                make_kwargs=call_kwargs,
+                **populate_kwargs,
             )
 
     def make(self, key, cascade_models_path, cascade, verboselvl=0):
-        model_name = (self.cascade_params_table & key).fetch1('model_name')
         pp_traces, roi_ids = (self.cascadetraces_table & key).fetch('pp_trace', 'roi_id')
-
         if len(pp_traces) == 0:
             return
-        elif len(pp_traces) > 1:
-            pp_traces = np.stack(pp_traces)
+
+        model_name = (self.cascade_params_table & key).fetch1('model_name')
+        pp_traces = np.stack(pp_traces) if len(pp_traces) > 1 else np.asarray(pp_traces)
 
         with suppress_output(condition=verboselvl == 0):
-            spike_probs = cascade.predict(model_name, pp_traces, verbosity=verboselvl, model_folder=cascade_models_path)
+            spike_probs = cascade.predict(
+                model_name, pp_traces,
+                verbosity=verboselvl,
+                model_folder=cascade_models_path,
+            )
 
-        for spike_prob, roi_id in zip(spike_probs, roi_ids):
-            self.insert1(dict(key, spike_prob=spike_prob.astype(np.float32), roi_id=roi_id))
+        spike_probs = spike_probs.astype(np.float32, copy=False)
+        self.insert(
+            [{**key, 'spike_prob': sp, 'roi_id': rid}
+             for sp, rid in zip(spike_probs, roi_ids)]
+        )
 
     def plot1(self, key=None, xlim=None):
         key = get_primary_key(self, key)

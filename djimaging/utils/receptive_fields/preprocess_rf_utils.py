@@ -11,7 +11,7 @@ from djimaging.utils.trace_utils import get_mean_dt, align_stim_to_trace, align_
 
 def prepare_noise_data(stim: np.ndarray, triggertimes: np.ndarray,
                        trace: np.ndarray, tracetime: np.ndarray,
-                       ntrigger_per_frame: int = 1,
+                       nframes_per_trigger: int = 1,
                        fupsample_trace: int = None,
                        fupsample_stim: int = None,
                        fit_kind: str = 'trace',
@@ -35,7 +35,7 @@ def prepare_noise_data(stim: np.ndarray, triggertimes: np.ndarray,
         Neural response trace, shape (n_timepoints,).
     tracetime : np.ndarray
         Timestamps for the trace, shape (n_timepoints,).
-    ntrigger_per_frame : int, optional
+    nframes_per_trigger : int, optional
         Number of triggers per stimulus frame. Default is 1.
     fupsample_trace : int, optional
         Upsampling factor for the trace. Default is None.
@@ -80,7 +80,7 @@ def prepare_noise_data(stim: np.ndarray, triggertimes: np.ndarray,
 
     # Resampling and filtering
     stimtime, stim = preprocess_stimulus(
-        stim, triggertimes, ntrigger_per_frame, fupsample_stim)
+        stim, triggertimes, nframes_per_trigger, fupsample_stim)
     tracetime, trace = preprocess_trace(
         tracetime, trace, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s, dt_rtol)
 
@@ -102,7 +102,7 @@ def prepare_noise_data(stim: np.ndarray, triggertimes: np.ndarray,
 
 
 def preprocess_stimulus(stim: np.ndarray, triggertimes: np.ndarray,
-                        ntrigger_per_frame: int,
+                        nframes_per_trigger: int = 1,
                         fupsample_stim: int = None) -> tuple[np.ndarray, np.ndarray]:
     """Preprocess the stimulus by aligning to trigger times and optionally upsampling.
 
@@ -112,8 +112,10 @@ def preprocess_stimulus(stim: np.ndarray, triggertimes: np.ndarray,
         Stimulus array, shape (n_frames, ...).
     triggertimes : np.ndarray
         Trigger timestamps in seconds, shape (n_triggers,).
-    ntrigger_per_frame : int
-        Number of triggers per stimulus frame.
+    nframes_per_trigger : int, optional
+        Number of stimulus frames per trigger. Use when triggers are less
+        frequent than frames (e.g. one trigger every N frames). Default is 1.
+        Mutually exclusive with ``ntrigger_per_frame > 1``.
     fupsample_stim : int, optional
         Upsampling factor for the stimulus. Default is None.
 
@@ -130,17 +132,17 @@ def preprocess_stimulus(stim: np.ndarray, triggertimes: np.ndarray,
     ValueError
         If there are more triggertimes than stimulus frames.
     """
-    if ntrigger_per_frame > 1:
-        stimtime = np.repeat(triggertimes, ntrigger_per_frame)
+    if nframes_per_trigger > 1:
+        stimtime = np.repeat(triggertimes, nframes_per_trigger)
         trigger_dt, _ = get_mean_dt(triggertimes, rtol_error=np.inf, rtol_warning=0.5)
-        stimtime += np.tile(np.arange(ntrigger_per_frame) * trigger_dt / ntrigger_per_frame,
-                            stimtime.size // ntrigger_per_frame)
+        stimtime += np.tile(np.arange(nframes_per_trigger) * trigger_dt / nframes_per_trigger,
+                            stimtime.size // nframes_per_trigger)
     else:
         stimtime = triggertimes
 
     if stim.shape[0] < stimtime.size:
         raise ValueError(
-            f"More triggertimes than expected: stim-len {stim.shape[0]} != stimtime-len {stimtime.size}")
+            f"More triggertimes than expected: stim-len {stim.shape[0]} != stimtime-len {stimtime.size} for {nframes_per_trigger=} and {len(triggertimes)=}")
     elif stim.shape[0] > stimtime.size:
         warnings.warn(f"Less triggertimes than expected: stim-len {stim.shape[0]} != stimtime-len {stimtime.size}")
         stim = stim[:stimtime.size].copy()
