@@ -141,8 +141,8 @@ def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n
     dsi_s, pref_dir_s = get_si(surrogate_v, sorted_directions, 1)
     # osi_s, pref_or_s = get_si(surrogate_v, sorted_directions, 2)  # Not used atm
 
-    p_dsi, null_dist_dsi, _ = compute_null_dist(sorted_directions, projected.T, 1, iters=n_shuffles)
-    p_osi, null_dist_osi, _ = compute_null_dist(sorted_directions, projected.T, 2, iters=n_shuffles)
+    p_dsi, _, null_dist_dsi = compute_null_dist(sorted_directions, projected.T, 1, iters=n_shuffles)
+    p_osi, _, null_dist_osi = compute_null_dist(sorted_directions, projected.T, 2, iters=n_shuffles)
 
     d_qi = quality_index_ds(sorted_responses)
     on_off = get_on_off_index(time_component, dt=dt)
