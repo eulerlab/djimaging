@@ -1,6 +1,7 @@
 import numpy as np
 
 from djimaging.tables.response.movingbar.orientation_utils_v2 import compute_os_ds_idxs
+from tests.fixtures.random_utils import numpy_seed
 
 
 DIRECTIONS_DEG = np.array([0, 180, 45, 225, 90, 270, 135, 315])
@@ -33,14 +34,14 @@ def _synthetic_snippets(tuning: str) -> tuple[np.ndarray, np.ndarray]:
 
 def test_direction_selective_response():
     snippets, direction_order = _synthetic_snippets("direction")
-    np.random.seed(42)
 
-    result = compute_os_ds_idxs(
-        snippets=snippets,
-        dir_order=direction_order,
-        dt=DT,
-        n_shuffles=256,
-    )
+    with numpy_seed(42):
+        result = compute_os_ds_idxs(
+            snippets=snippets,
+            dir_order=direction_order,
+            dt=DT,
+            n_shuffles=256,
+        )
     dsi, p_dsi, _, preferred_direction, osi, p_osi = result[:6]
 
     expected_dsi = 0.5 * (np.pi / 4) / (2 * np.sin(np.pi / 8))
@@ -53,14 +54,14 @@ def test_direction_selective_response():
 
 def test_orientation_selective_non_directional_response():
     snippets, direction_order = _synthetic_snippets("orientation")
-    np.random.seed(42)
 
-    result = compute_os_ds_idxs(
-        snippets=snippets,
-        dir_order=direction_order,
-        dt=DT,
-        n_shuffles=256,
-    )
+    with numpy_seed(42):
+        result = compute_os_ds_idxs(
+            snippets=snippets,
+            dir_order=direction_order,
+            dt=DT,
+            n_shuffles=256,
+        )
     dsi, p_dsi, _, _, osi, p_osi, _, preferred_orientation = result[:8]
 
     expected_osi = 0.5 * (np.pi / 2) / (2 * np.sin(np.pi / 4))

@@ -4,7 +4,6 @@ on:
   push:
     branches: [ master ]
   pull_request:
-    branches: [ master ]
 
 jobs:
   test:
@@ -32,7 +31,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install --system flake8 pytest
-          uv pip install --system -e .
+          uv pip install --system "setuptools<81" "datajoint==0.14.7" -e .
 
       - name: Lint with flake8
         run: |
@@ -41,4 +40,4 @@ jobs:
 
       - name: Test with pytest
         run: |
-          pytest -v
+          pytest -v tests --ignore=tests/integration

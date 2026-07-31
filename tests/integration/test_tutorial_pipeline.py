@@ -4,6 +4,8 @@ import h5py
 import numpy as np
 import pytest
 
+from tests.fixtures.random_utils import numpy_seed
+
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("DJ_TEST_MYSQL") != "1",
@@ -74,8 +76,8 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
     tutorial_schema.Averages().populate(experiment_key, display_progress=False)
     tutorial_schema.ChirpQI().populate(experiment_key, display_progress=False)
 
-    np.random.seed(42)
-    tutorial_schema.OsDsIndexes().populate(experiment_key, display_progress=False)
+    with numpy_seed(42):
+        tutorial_schema.OsDsIndexes().populate(experiment_key, display_progress=False)
 
     tutorial_schema.OpticDisk().populate(experiment_key, display_progress=False)
     tutorial_schema.RelativeFieldLocation().populate(experiment_key, display_progress=False)
@@ -98,8 +100,15 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
         tutorial_schema.RelativeFieldLocation(): 1,
         tutorial_schema.RetinalFieldLocation(): 1,
     }
+    count_mismatches = {}
     for table, expected_count in expected_counts.items():
-        assert len(table & experiment_key) == expected_count, table.full_table_name
+        observed_count = len(table & experiment_key)
+        if observed_count != expected_count:
+            count_mismatches[table.full_table_name] = {
+                "expected": expected_count,
+                "observed": observed_count,
+            }
+    assert not count_mismatches, f"Unexpected table counts: {count_mismatches}"
 
     assert np.all((tutorial_schema.Presentation() & experiment_key).fetch("trigger_valid") == 1)
     assert np.all(np.isfinite((tutorial_schema.ChirpQI() & experiment_key).fetch("qidx")))

@@ -67,3 +67,31 @@ calling <code>schema.drop()</code> and confirm by entering <code>yes</code>.
 
 > ⚠️ Make sure you only drop your own schema! <code>schema.drop()</code> will show you the name of the schema.
 > If you are not sure about the schema's origin, don't drop it!
+
+## Local testing
+
+Install the test environment with DataJoint 0.14.7:
+
+```bash
+uv pip install pytest "setuptools<81" "datajoint==0.14.7" -e .
+```
+
+Run unit tests:
+
+```bash
+pytest -q tests --ignore=tests/integration
+```
+
+Run integration tests against a temporary MySQL 8.0.43 server:
+
+```bash
+docker run --rm --name djimaging-mysql-test \
+  -e MYSQL_ROOT_PASSWORD=datajoint -e MYSQL_ROOT_HOST=% \
+  -p 3307:3306 -d mysql:8.0.43
+until docker exec djimaging-mysql-test mysqladmin ping -h 127.0.0.1 -pdatajoint; do sleep 1; done
+
+DJ_TEST_MYSQL=1 DJ_HOST=127.0.0.1 DJ_PORT=3307 \
+DJ_USER=root DJ_PASS=datajoint pytest -q tests/integration
+
+docker stop djimaging-mysql-test
+```
