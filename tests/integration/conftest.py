@@ -6,7 +6,7 @@ import pytest
 
 
 @pytest.fixture(scope="session")
-def core_schema():
+def tutorial_schema():
     dj.config["database.host"] = os.environ.get("DJ_HOST", "127.0.0.1")
     dj.config["database.port"] = int(os.environ.get("DJ_PORT", "3306"))
     dj.config["database.user"] = os.environ.get("DJ_USER", "root")
@@ -15,7 +15,7 @@ def core_schema():
     connection = dj.conn()
     schema_name = f"djimaging_ci_{uuid.uuid4().hex[:8]}"
 
-    from djimaging.schemas import core_schema as schema_module
+    from djimaging.schemas import tutorial_schema as schema_module
     from djimaging.utils.dj_utils import activate_schema
 
     try:

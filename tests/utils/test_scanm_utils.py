@@ -10,11 +10,6 @@ from djimaging.utils.scanm import read_h5_utils, setup_utils, traces_and_trigger
 
 _TEST_DATA_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'test_data'))
 
-pytestmark = pytest.mark.skipif(
-    not os.path.isdir(_TEST_DATA_PATH),
-    reason="test_data directory not found (skipped on CI)"
-)
-
 
 def test_get_pixel_size_um_64_default_scan1():
     setupid = 1
