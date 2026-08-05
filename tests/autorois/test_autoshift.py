@@ -10,11 +10,6 @@ from djimaging.utils.scanm import read_h5_utils
 
 _TEST_DATA_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'test_data'))
 
-pytestmark = pytest.mark.skipif(
-    not os.path.isdir(_TEST_DATA_PATH),
-    reason="test_data directory not found (skipped on CI)"
-)
-
 params_test_shit_img = [
     (0, 0),
     (1, 0),

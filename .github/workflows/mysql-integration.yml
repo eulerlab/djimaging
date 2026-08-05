@@ -1,0 +1,52 @@
+name: MySQL integration testing
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0.43
+        env:
+          MYSQL_ROOT_PASSWORD: datajoint
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pdatajoint"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv pip install --system pytest "setuptools<81" "datajoint==0.14.7" -e .
+
+      - name: Run MySQL integration tests
+        env:
+          DJ_TEST_MYSQL: "1"
+          DJ_HOST: 127.0.0.1
+          DJ_PORT: "3306"
+          DJ_USER: root
+          DJ_PASS: datajoint
+        run: pytest -q tests/integration
