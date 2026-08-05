@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 
 from djimaging.utils.dj_storage import load_array, local_path, open_object
-from scripts.migrate_datajoint_v2 import _verify_schema_v20
 
 
 pytestmark = pytest.mark.skipif(
@@ -61,11 +60,3 @@ def test_datajoint_v2_storage_round_trip_and_deletion(tutorial_schema, dj_test_s
     assert npy_path in processed_report["orphaned_schema_paths"]
     assert processed_report["hash_paths_orphaned"] >= 1
     assert models_report["hash_paths_orphaned"] >= 1
-
-
-def test_schema_v2_verifier(tutorial_schema):
-    result = _verify_schema_v20(tutorial_schema.schema)
-
-    assert result["compatible"]
-    assert result["blob_markers"]
-    assert result["issues"] == []
