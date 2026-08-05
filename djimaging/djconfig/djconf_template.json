@@ -28,6 +28,5 @@
       "protocol": "file",
       "location": "/path/to/models"
     }
-  },
-  "schema_name": ""
+  }
 }
