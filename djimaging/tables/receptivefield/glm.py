@@ -87,6 +87,21 @@ from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.receptive_fields.glm_utils import ReceptiveFieldGLM, plot_rf_summary, quality_test
 
 
+def _get_shared_model_shift(model_dict: dict) -> int:
+    """Return the common temporal shift used by all stimulus channels."""
+    shifts = model_dict['shift']
+    if not isinstance(shifts, dict):
+        return int(shifts)
+
+    channel_names = model_dict.get('channel_names') or list(shifts)
+    channel_shifts = [int(shifts[name]) for name in channel_names]
+    if not channel_shifts:
+        raise ValueError("GLM model does not contain a stimulus-channel shift")
+    if len(set(channel_shifts)) != 1:
+        raise ValueError(f"GLM channels use different shifts: {dict(zip(channel_names, channel_shifts))}")
+    return channel_shifts[0]
+
+
 class RfGlmParamsTemplate(dj.Lookup):
     database = ""
 
@@ -242,7 +257,7 @@ class RfGlmTemplate(dj.Computed):
 
         if self._def_sta:
             rf_key['rf_time'] = model_dict.pop('rf_time')
-            rf_key['shift'] = model_dict['shift']['stimulus']  # There may be other shifts
+            rf_key['shift'] = _get_shared_model_shift(model_dict)
 
         rf_key['model_dict'] = model_dict
         rf_key['quality_dict'] = quality_dict

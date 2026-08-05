@@ -28,6 +28,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.receptivefield import FitGauss2DRFTemplate, FitDoG2DRFTemplate, RfContoursTemplate
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.receptive_fields.srf_contour_utils import compute_cntr_center
 
 
@@ -359,7 +360,7 @@ class RfRoiOffsetTemplate(dj.Computed):
         from matplotlib.patches import Ellipse
         import seaborn as sns
 
-        roi_mask = (self.roimask_tab & key).fetch1("roi_mask")
+        roi_mask = load_array((self.roimask_tab & key).fetch1("roi_mask"))
         pixel_size_um, npixartifact, scan_type = (self.pres_tab & key).to_arrays(
             'pixel_size_um', 'npixartifact', 'scan_type')
 

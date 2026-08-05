@@ -4,6 +4,7 @@ import numpy as np
 import datajoint as dj
 from matplotlib import pyplot as plt
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trf, prep_long_title
 from djimaging.utils.receptive_fields.temporal_rf_utils import compute_polarity_and_peak_idxs, \
@@ -105,8 +106,7 @@ class CenterSurroundTemplate(dj.Computed):
                 interactive debugging.
         """
         rf_time = self.fetch1_rf_time(key=key)
-        rf = (self.color_rf_table & key).fetch1('rf')
-        rf = rf.squeeze()
+        rf = load_array((self.color_rf_table & key).fetch1('rf')).squeeze()
 
         if rf.ndim != 2:
             raise ValueError(f"rf must be 2d (time x center/surround), but got shape {rf.shape}")
@@ -166,8 +166,7 @@ class CenterSurroundTemplate(dj.Computed):
         key = get_primary_key(table=self, key=key)
 
         rf_time = self.fetch1_rf_time(key=key)
-        rf = (self.color_rf_table & key).fetch1('rf')
-        rf = rf.squeeze()
+        rf = load_array((self.color_rf_table & key).fetch1('rf')).squeeze()
 
         peak_nstd, npeaks_max = (self.cs_params_table & key).fetch1('peak_nstd', 'npeaks_max')
 

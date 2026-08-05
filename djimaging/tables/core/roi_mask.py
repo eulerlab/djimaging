@@ -12,6 +12,7 @@ from djimaging.utils.scanm import read_h5_utils, read_utils
 from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 
 from djimaging.utils.filesystem_utils import as_pre_filepath
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key, check_unique_one
 from djimaging.utils.mask_utils import (
     to_roi_mask_file, sort_roi_mask_files,
@@ -593,7 +594,7 @@ class RoiMaskTemplate(dj.Manual):
                 filesystem_roi_mask = load_roi_mask_file(roimask_file).astype(np.int32)
                 filesystem_roi_mask = to_igor_format(filesystem_roi_mask)
 
-            database_roi_mask = (self.RoiMaskPresentation & key).fetch1('roi_mask')
+            database_roi_mask = load_array((self.RoiMaskPresentation & key).fetch1('roi_mask'))
             if not np.all(filesystem_roi_mask == database_roi_mask):
                 if verbose:
                     print(f'    -> PROBLEM: mismatch  ({filesystem_file})')
@@ -701,7 +702,7 @@ class RoiMaskTemplate(dj.Manual):
             main_pres_key, main_roi_mask = keys_masks_files[sort_idxs[0]][:2]
         else:
             main_pres_key = (self.RoiMaskPresentation().proj() & (self & field_key)).fetch1()
-            main_roi_mask = (self.RoiMaskPresentation & main_pres_key).fetch1('roi_mask')
+            main_roi_mask = load_array((self.RoiMaskPresentation & main_pres_key).fetch1('roi_mask'))
 
         roi_mask_pres_keys = []
 
@@ -778,7 +779,7 @@ class RoiMaskTemplate(dj.Manual):
                 filesystem_roi_mask = None
 
         if len((self.RoiMaskPresentation & key).proj()) > 0:
-            database_roi_mask = (self.RoiMaskPresentation & key).fetch1('roi_mask')
+            database_roi_mask = load_array((self.RoiMaskPresentation & key).fetch1('roi_mask'))
 
             if filesystem_roi_mask is None:
                 if igor_roi_masks == 'yes':
@@ -821,7 +822,7 @@ class RoiMaskTemplate(dj.Manual):
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
 
-        roi_mask = (self.RoiMaskPresentation & key).fetch1('roi_mask')
+        roi_mask = load_array((self.RoiMaskPresentation & key).fetch1('roi_mask'))
         plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
                    roi_mask=roi_mask, title=key, npixartifact=npixartifact, gamma=gamma)
 

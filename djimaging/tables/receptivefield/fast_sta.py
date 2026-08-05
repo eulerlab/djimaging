@@ -20,6 +20,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 from tqdm.notebook import tqdm
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.receptive_fields.fit_rf_utils import build_design_matrix, get_rf_timing_params, compute_rf_sta
 from djimaging.utils.receptive_fields.plot_rf_utils import plot_rf_frames, plot_rf_video
@@ -273,7 +274,7 @@ class FastStaTemplate(dj.Computed):
             'x_stimulus', 'dt', 'rf_time', 'burn_in', 'shift', 'fit_kind', 'dims', 'fupsample_stim',
             "fupsample_trace", "fit_kind", "lowpass_cutoff", "pre_blur_sigma_s", "post_blur_sigma_s")
 
-        x_stimulus = np.ascontiguousarray(x_stimulus.astype(np.float32))
+        x_stimulus = np.ascontiguousarray(load_array(x_stimulus).astype(np.float32))
 
         # Fetch nframes_per_trigger from the stimulus table so that stimtime
         # reconstructed in make_compute matches the design matrix built in

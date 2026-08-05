@@ -310,9 +310,10 @@ class PresentationLogTemplate(dj.Computed):
         if len(matches) == 1:
             matched = matches[0]
 
-        if matched is None and self.presentation_table.ScanInfo is not None:
+        scan_params_table = self.scan_params_table
+        if matched is None and scan_params_table is not None:
             try:
-                scan_params_dict = (self.presentation_table.ScanInfo & key).fetch1('scan_params_dict')
+                scan_params_dict = (scan_params_table & key).fetch1('scan_params_dict')
                 rec_time = _parse_scan_start_time(scan_params_dict)
                 if rec_time is not None:
                     rec_s = (rec_time.hour * 3600 + rec_time.minute * 60

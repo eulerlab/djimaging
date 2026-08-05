@@ -31,6 +31,7 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.math_utils import normalize
 from djimaging.utils.plot_utils import plot_srf, set_long_title
@@ -126,7 +127,7 @@ class RfContoursTemplate(dj.Computed):
         norm_kind, blur_std, blur_npix, upsample_srf_scale, levels = (
                 self.rf_contours_params_table() & key).fetch1(
             "norm_kind", "blur_std", "blur_npix", "upsample_srf_scale", "levels")
-        srf = (self.split_rf_table() & key).fetch1("srf")
+        srf = load_array((self.split_rf_table() & key).fetch1("srf"))
 
         pixel_size_x_um, pixel_size_y_um = self.fetch1_pixel_size(key)
         if not np.isclose(pixel_size_x_um, pixel_size_y_um):
@@ -274,7 +275,7 @@ class RfContourMetricsTemplate(dj.Computed):
         upsample_srf_scale, levels = (self.rf_contour_table.rf_contours_params_table() & key).fetch1(
             "upsample_srf_scale", "levels")
 
-        srf = (self.rf_contour_table.split_rf_table() & key).fetch1("srf")
+        srf = load_array((self.rf_contour_table.split_rf_table() & key).fetch1("srf"))
 
         if upsample_srf_scale > 1:
             srf = resize_srf(srf, scale=upsample_srf_scale)
