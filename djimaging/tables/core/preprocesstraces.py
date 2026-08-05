@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt
 from scipy import signal
 
 from djimaging.utils import filter_utils, math_utils, plot_utils, trace_utils
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.filter_utils import lowpass_filter_trace
 from djimaging.utils.plot_utils import plot_trace_and_trigger, prep_long_title
@@ -165,7 +166,8 @@ class PreprocessTracesTemplate(dj.Computed):
                 'f_cutoff', 'fs_resample')
 
         trace, trace_t0, trace_dt = (self.traces_table() & key).fetch1('trace', 'trace_t0', 'trace_dt')
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        trace = load_array(trace)
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
 
         stim_start = triggertimes[0] if len(triggertimes) > 0 else None
 
@@ -201,6 +203,7 @@ class PreprocessTracesTemplate(dj.Computed):
 
         trace, smoothed_trace, trace_t0, trace_dt = (self & key).fetch1(
             'pp_trace', 'smoothed_trace', 'pp_trace_t0', 'pp_trace_dt')
+        trace, smoothed_trace = load_array(trace), load_array(smoothed_trace)
         trace_t = np.arange(trace.size) * trace_dt + trace_t0
 
         import ipywidgets as widgets
@@ -271,7 +274,9 @@ class PreprocessTracesTemplate(dj.Computed):
         pp_trace_t0, pp_trace_dt, pp_trace, smoothed_trace = (self & key).fetch1(
             "pp_trace_t0", "pp_trace_dt", "pp_trace", "smoothed_trace")
         trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1("trace_t0", "trace_dt", "trace")
-        triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+        pp_trace, smoothed_trace = load_array(pp_trace), load_array(smoothed_trace)
+        trace = load_array(trace)
+        triggertimes = load_array((self.presentation_table() & key).fetch1("triggertimes"))
 
         trace_times = np.arange(trace.size) * trace_dt + pp_trace_t0
         pp_trace_times = np.arange(pp_trace.size) * pp_trace_dt + pp_trace_t0

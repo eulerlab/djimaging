@@ -25,6 +25,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.utils import mask_format_utils
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.scanm import read_utils
 from djimaging.utils.dj_utils import get_primary_key
 
@@ -95,10 +96,10 @@ class SrIndexTemplate(dj.Computed):
             A 2-tuple ``(roi_ids, sr_idxs)`` where ``roi_ids`` is an array of ROI
             identifiers and ``sr_idxs`` is the corresponding array of SR index values.
         """
-        roi_mask = (self.roimask_table & key).fetch1('roi_mask')
+        roi_mask = load_array((self.roimask_table & key).fetch1('roi_mask'))
 
         try:
-            triggertimes = (self.presentation_table & key).fetch1('triggertimes')
+            triggertimes = load_array((self.presentation_table & key).fetch1('triggertimes'))
             fs = (self.presentation_table.ScanInfo & key).to_arrays('scan_frequency')
             ntrigger_rep = (self.stimulus_table & key).fetch1('ntrigger_rep')
 

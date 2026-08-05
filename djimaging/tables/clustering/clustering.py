@@ -41,6 +41,7 @@ from abc import abstractmethod
 import datajoint as dj
 import numpy as np
 from djimaging.utils import plot_utils
+from djimaging.utils.dj_storage import load_array
 from matplotlib import pyplot as plt
 
 from djimaging.utils.dj_utils import get_primary_key
@@ -155,7 +156,7 @@ class ClusteringTemplate(dj.Computed):
         """
         key = get_primary_key(table=self, key=key)
 
-        clusters = (self & key).fetch1('clusters')
+        clusters = load_array((self & key).fetch1('clusters'))
 
         fig, ax = plt.subplots(1, 1, figsize=(6, 2))
         plot_utils.set_long_title(fig=fig, title=key)
@@ -191,7 +192,7 @@ class ClusteringTemplate(dj.Computed):
 
         stim_names = (self.features_table.params_table & key).fetch1('stim_names').split('_')
         traces_list = (self.features_table & key).fetch1('traces')
-        clusters = (self & key).fetch1('clusters')
+        clusters = load_array((self & key).fetch1('clusters'))
         plot_utils.plot_clusters(traces_list, stim_names, clusters, kind=kind, title=key)
 
 

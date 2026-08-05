@@ -94,7 +94,7 @@ class CenterSurroundTemplate(dj.Computed):
             rf_time = (self.color_rf_time_table & key).fetch1('rf_time')
         except dj.DataJointError:
             rf_time = (self.color_rf_time_table & key).fetch1('model_dict')['rf_time']
-        return rf_time
+        return load_array(rf_time)
 
     def make(self, key: dict, plot: bool = False) -> None:
         """Compute center/surround RF metrics and insert them into the table.

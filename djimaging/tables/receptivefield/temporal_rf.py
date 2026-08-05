@@ -6,6 +6,7 @@ from matplotlib import pyplot as plt
 
 from djimaging.utils.receptive_fields.temporal_rf_utils import compute_trf_transience_index, compute_half_amp_width, \
     compute_main_peak_lag, compute_rel_weight_baseline
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trf, set_long_title
 
@@ -52,11 +53,12 @@ class TempRFPropertiesTemplate(dj.Computed):
                 rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
             except dj.DataJointError:
                 rf_time = (self.rf_table.params_table & key).fetch1('rf_time')
-        return rf_time
+        return load_array(rf_time)
 
     def make(self, key, plot=False):
         rf_time = self.fetch1_rf_time(key=key)
         trf, trf_peak_idxs = (self.split_rf_table & key).fetch1('trf', 'trf_peak_idxs')
+        trf, trf_peak_idxs = load_array(trf), load_array(trf_peak_idxs)
 
         if np.any(rf_time[trf_peak_idxs] > self._max_dt_future):
             raise ValueError(f'Peak too the future. max_dt_future={self._max_dt_future}.'
@@ -92,6 +94,7 @@ class TempRFPropertiesTemplate(dj.Computed):
 
         rf_time = self.fetch1_rf_time(key=key)
         trf, peak_idxs = (self.split_rf_table & key).fetch1('trf', 'trf_peak_idxs')
+        trf, peak_idxs = load_array(trf), load_array(peak_idxs)
         rel_weight_baseline, transience_idx, half_amp_width, main_peak_lag = (self & key).fetch1(
             'rel_weight_baseline', 'transience_idx', 'half_amp_width', 'main_peak_lag')
 

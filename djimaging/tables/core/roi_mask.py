@@ -815,10 +815,11 @@ class RoiMaskTemplate(dj.Manual):
         key = get_primary_key(table=self.proj() * self.presentation_table.proj(), key=key)
         npixartifact, scan_type = (self.field_table & key).fetch1('npixartifact', 'scan_type')
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average')
+        main_ch_average = load_array(
+            (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         try:
-            alt_ch_average = (self.presentation_table.StackAverages & key & dict(ch_name=alt_name)).fetch1(
-                'ch_average')
+            alt_ch_average = load_array(
+                (self.presentation_table.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average'))
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
 

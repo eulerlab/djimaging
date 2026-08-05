@@ -21,6 +21,7 @@ from matplotlib import pyplot as plt
 from djimaging.autorois.corr_roi_mask_utils import stack_corr_image
 from djimaging.tables.core.averages import compute_upsampled_average
 from djimaging.tables.core.snippets import get_aligned_snippets_times
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.math_utils import normalize
 from djimaging.utils.scanm import read_utils
@@ -86,7 +87,7 @@ class LightArtifactTemplate(dj.Computed):
         light_artifact = stack[0, :, :].T.flatten()
 
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
         line_duration = (self.presentation_table.ScanInfo & key).to_arrays('line_duration')
 
         times = np.arange(light_artifact.size) * line_duration
@@ -102,9 +103,9 @@ class LightArtifactTemplate(dj.Computed):
 
     def plot1(self, key: dict = None) -> None:
         key = get_primary_key(self, key=key)
-        light_artifact = (self & key).fetch1('light_artifact')
+        light_artifact = load_array((self & key).fetch1('light_artifact'))
         line_duration = (self.presentation_table.ScanInfo & key).to_arrays('line_duration')
-        triggertimes_rel = (self & key).fetch1('triggertimes_rel')
+        triggertimes_rel = load_array((self & key).fetch1('triggertimes_rel'))
 
         time = np.arange(light_artifact.size) * line_duration
 

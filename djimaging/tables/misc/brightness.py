@@ -19,6 +19,7 @@ import datajoint as dj
 import numpy as np
 
 from djimaging.utils import math_utils
+from djimaging.utils.dj_storage import load_array
 
 
 class RoiBrightnessTemplate(dj.Computed):
@@ -72,13 +73,14 @@ class RoiBrightnessTemplate(dj.Computed):
         Args:
             key: DataJoint primary key dict identifying the presentation and ROI entry.
         """
-        roi_mask = (self.roimask_table & key).fetch1('roi_mask')
+        roi_mask = load_array((self.roimask_table & key).fetch1('roi_mask'))
 
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average')
+        main_ch_average = load_array(
+            (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         try:
-            alt_ch_average = (self.presentation_table.StackAverages & key & dict(ch_name=alt_name)).fetch1(
-                'ch_average')
+            alt_ch_average = load_array(
+                (self.presentation_table.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average'))
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
         main_ch_average = math_utils.normalize_zero_one(main_ch_average)

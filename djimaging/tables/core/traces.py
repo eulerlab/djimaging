@@ -11,6 +11,7 @@ from djimaging.tables.core.preprocesstraces import plot_left_right_clipping
 from djimaging.utils.scanm.traces_and_triggers_utils import roi2trace_from_stack, check_valid_triggers_rel_to_tracetime
 from djimaging.utils.scanm.read_h5_utils import load_roi2trace
 from djimaging.utils import plot_utils, math_utils, trace_utils
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger, prep_long_title
 
@@ -110,7 +111,7 @@ class TracesTemplate(dj.Computed):
             raise ValueError("from_raw_data=True only supported for compute_from_stack=True")
 
         filepath = (self.presentation_table & key).fetch1("pres_data_file")
-        triggertimes = (self.presentation_table & key).fetch1("triggertimes")
+        triggertimes = load_array((self.presentation_table & key).fetch1("triggertimes"))
         roi_ids = (self.roi_table & key).to_arrays("roi_id")
 
         if compute_from_stack:
@@ -168,6 +169,7 @@ class TracesTemplate(dj.Computed):
         """
         data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
         roi_mask, as_field_mask = (self.roi_mask_table.RoiMaskPresentation & key).fetch1("roi_mask", "as_field_mask")
+        roi_mask = load_array(roi_mask)
         n_artifact = (self.presentation_table & key).fetch1("npixartifact")
 
         if as_field_mask == 'different':
@@ -176,6 +178,7 @@ class TracesTemplate(dj.Computed):
 
         if self._include_motion_correction and (self.motion_detection_table is not None):
             shifts_x, shifts_y = (self.motion_detection_table & key).fetch1('shifts_x', 'shifts_y')
+            shifts_x, shifts_y = load_array(shifts_x), load_array(shifts_y)
             fs = (self.presentation_table.ScanInfo & key).fetch1('scan_frequency')
             roi2trace, frame_dt = roi2trace_from_stack(
                 filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
@@ -207,6 +210,7 @@ class TracesTemplate(dj.Computed):
         """
         trace, trace_t0, trace_dt, valid_trace, valid_trigger = (self & key).fetch1(
             'trace', 'trace_t0', 'trace_dt', 'trace_valid', 'trigger_valid')
+        trace = load_array(trace)
         trace_t = np.arange(trace.size) * trace_dt + trace_t0
 
         import ipywidgets as widgets
@@ -267,7 +271,8 @@ class TracesTemplate(dj.Computed):
         """
         key = get_primary_key(table=self, key=key)
         trace_t0, trace_dt, trace = (self & key).fetch1("trace_t0", "trace_dt", "trace")
-        triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+        trace = load_array(trace)
+        triggertimes = load_array((self.presentation_table() & key).fetch1("triggertimes"))
         trace_times = np.arange(len(trace)) * trace_dt + trace_t0
 
         ax = plot_trace_and_trigger(

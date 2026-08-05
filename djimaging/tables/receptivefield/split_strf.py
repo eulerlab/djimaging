@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 from djimaging.utils.receptive_fields.temporal_rf_utils import compute_polarity_and_peak_idxs
 from djimaging.utils.receptive_fields.split_rf_utils import compute_explained_rf, resize_srf, merge_strf, split_strf
 from djimaging.utils import math_utils
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_srf, plot_trf, plot_signals_heatmap
 from djimaging.utils.trace_utils import sort_traces
@@ -120,7 +121,7 @@ class SplitRFTemplate(dj.Computed):
 
     def make(self, key):
         # Get data
-        strf = (self.rf_table() & key).fetch1("rf")
+        strf = load_array((self.rf_table() & key).fetch1("rf"))
         rf_time = self.fetch1_rf_time(key=key)
 
         # Get preprocess params
@@ -159,13 +160,14 @@ class SplitRFTemplate(dj.Computed):
                 rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
             except dj.DataJointError:
                 rf_time = (self.rf_table.params_table & key).fetch1('rf_time')
-        return rf_time
+        return load_array(rf_time)
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
         rf_time = self.fetch1_rf_time(key=key)
         srf, trf, peak_idxs = (self & key).fetch1("srf", "trf", "trf_peak_idxs")
+        srf, trf, peak_idxs = load_array(srf), load_array(trf), load_array(peak_idxs)
 
         fig, axs = plt.subplots(1, 2, figsize=(8, 3), sharex='col')
 

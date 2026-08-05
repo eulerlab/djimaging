@@ -38,6 +38,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.utils import math_utils, plot_utils, trace_utils, filter_utils
+from djimaging.utils.dj_storage import load_array
 
 from djimaging.utils.dj_utils import get_primary_key, suppress_output
 
@@ -142,7 +143,9 @@ class CascadeTracesTemplate(dj.Computed):
             warnings.warn("fs_resample is not implemented yet.")
 
         trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1('trace_t0', 'trace_dt', 'trace')
-        stim_start = (self.presentation_table() & key).fetch1('triggertimes')[0]
+        trace = load_array(trace)
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
+        stim_start = triggertimes[0]
 
         if stim_start is not None:
             if stim_start < trace_t0:
@@ -159,7 +162,8 @@ class CascadeTracesTemplate(dj.Computed):
 
         pp_trace_t0, pp_trace_dt, pp_trace = (self & key).fetch1("pp_trace_t0", "pp_trace_dt", "pp_trace")
         trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1("trace_t0", "trace_dt", "trace")
-        triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+        pp_trace, trace = load_array(pp_trace), load_array(trace)
+        triggertimes = load_array((self.presentation_table() & key).fetch1("triggertimes"))
 
         trace_times = np.arange(len(trace)) * trace_dt + trace_t0
         rate_times = np.arange(len(pp_trace)) * pp_trace_dt + pp_trace_t0
@@ -337,6 +341,7 @@ class CascadeSpikesTemplate(dj.Computed):
         spike_prob = (self & key).fetch1("spike_prob")
         pp_trace_t0, pp_trace_dt, pp_trace = (self.cascadetraces_table & key).fetch1(
             "pp_trace_t0", "pp_trace_dt", "pp_trace")
+        spike_prob, pp_trace = load_array(spike_prob), load_array(pp_trace)
 
         trace_times = np.arange(len(pp_trace)) * pp_trace_dt + pp_trace_t0
 

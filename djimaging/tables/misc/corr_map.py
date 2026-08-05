@@ -20,6 +20,7 @@ from scipy import signal
 
 from djimaging.autorois.autoshift_utils import shift_img
 from djimaging.autorois.corr_roi_mask_utils import stack_corr_image
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.math_utils import normalize_zscore
 from djimaging.utils.plot_utils import prep_long_title
@@ -104,7 +105,7 @@ class CorrMapTemplate(dj.Computed):
         from_raw_data = (self.raw_params_table & key).fetch1('from_raw_data')
         data_name = (self.userinfo_table & key).fetch1('data_stack_name')
 
-        triggertimes = (self.presentation_table & key).fetch1('triggertimes')
+        triggertimes = load_array((self.presentation_table & key).fetch1('triggertimes'))
         fs = (self.presentation_table.ScanInfo & key).fetch1('scan_frequency')
         stack = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_name,))[0][data_name]
 
@@ -133,11 +134,12 @@ class CorrMapTemplate(dj.Computed):
         key = get_primary_key(self, key=key)
 
         data_name = (self.userinfo_table & key).fetch1('data_stack_name')
-        main_ch_average = (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average')
+        main_ch_average = load_array(
+            (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
 
-        corr_map = (self & key).fetch1('corr_map')
+        corr_map = load_array((self & key).fetch1('corr_map'))
         if self._include_prestim:
-            corr_map_pre_stim = (self & key).fetch1('corr_map_pre_stim')
+            corr_map_pre_stim = load_array((self & key).fetch1('corr_map_pre_stim'))
 
         vabsmax = np.max(np.abs(corr_map))
 
@@ -234,8 +236,8 @@ class CrossCondCorrMapTemplate(dj.Computed):
         key_a = {**key, 'cond1': key[f'{self._split_cond}_A']}
         key_b = {**key, 'cond1': key[f'{self._split_cond}_B']}
 
-        corr_map_a = (self.corr_map_table & key_a).fetch1('corr_map')
-        corr_map_b = (self.corr_map_table & key_b).fetch1('corr_map')
+        corr_map_a = load_array((self.corr_map_table & key_a).fetch1('corr_map'))
+        corr_map_b = load_array((self.corr_map_table & key_b).fetch1('corr_map'))
 
         cut_x = self.corr_map_table().get_cut_x()
         cut_z = self.corr_map_table().get_cut_z()
@@ -316,8 +318,8 @@ class CrossStimCorrMapTemplate(dj.Computed):
         key_a = {**key, 'stim_name': key['stim_A']}
         key_b = {**key, 'stim_name': key['stim_B']}
 
-        corr_map_a = (self.corr_map_table & key_a).fetch1('corr_map')
-        corr_map_b = (self.corr_map_table & key_b).fetch1('corr_map')
+        corr_map_a = load_array((self.corr_map_table & key_a).fetch1('corr_map'))
+        corr_map_b = load_array((self.corr_map_table & key_b).fetch1('corr_map'))
 
         cut_x = self.corr_map_table().get_cut_x()
         cut_z = self.corr_map_table().get_cut_z()

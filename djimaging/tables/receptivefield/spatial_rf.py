@@ -14,6 +14,7 @@ from matplotlib import pyplot as plt
 from djimaging.utils.receptive_fields.plot_rf_utils import plot_srf_gauss_fit
 from djimaging.utils.receptive_fields.spatial_rf_utils import compute_gauss_srf_area, compute_surround_index, \
     compute_center_index, fit_rf_model
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_srf, prep_long_title
 
@@ -56,7 +57,7 @@ class FitGauss2DRFTemplate(dj.Computed):
         pass
 
     def make(self, key):
-        srf = (self.split_rf_table() & key).fetch1("srf")
+        srf = load_array((self.split_rf_table() & key).fetch1("srf"))
         stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
 
         # Fit RF model
@@ -81,8 +82,9 @@ class FitGauss2DRFTemplate(dj.Computed):
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
-        srf = (self.split_rf_table() & key).fetch1("srf")
+        srf = load_array((self.split_rf_table() & key).fetch1("srf"))
         srf_fit, rf_qidx = (self & key).fetch1("srf_fit", 'rf_qidx')
+        srf_fit = load_array(srf_fit)
         srf_params = (self & key).fetch1("srf_params")
 
         vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
@@ -170,7 +172,7 @@ class FitDoG2DRFTemplate(dj.Computed):
         pass
 
     def make(self, key, plot=False):
-        srf = (self.split_rf_table() & key).fetch1("srf")
+        srf = load_array((self.split_rf_table() & key).fetch1("srf"))
         stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
 
         srf_fit, srf_center_fit, srf_surround_fit, srf_params, eff_polarity, qi = fit_rf_model(
@@ -220,9 +222,11 @@ class FitDoG2DRFTemplate(dj.Computed):
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
-        srf = (self.split_rf_table() & key).fetch1("srf")
+        srf = load_array((self.split_rf_table() & key).fetch1("srf"))
         srf_fit, srf_center_fit, srf_surround_fit, srf_eff_center, rf_qidx, srf_ec_params = (self & key).fetch1(
             "srf_fit", 'srf_center_fit', 'srf_surround_fit', 'srf_eff_center', 'rf_qidx', 'srf_eff_center_params')
+        srf_fit, srf_center_fit, srf_surround_fit, srf_eff_center = (
+            load_array(srf_fit), load_array(srf_center_fit), load_array(srf_surround_fit), load_array(srf_eff_center))
 
         vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
 

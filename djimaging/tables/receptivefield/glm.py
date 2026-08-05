@@ -82,6 +82,7 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.receptive_fields.plot_rf_utils import plot_rf_frames, plot_rf_video
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.receptive_fields.glm_utils import ReceptiveFieldGLM, plot_rf_summary, quality_test
@@ -224,8 +225,9 @@ class RfGlmTemplate(dj.Computed):
         params = (self.params_table() & key).fetch1()
         noise_dt, noise_t0, trace, stim_idxs = (self.noise_traces_table() & key).fetch1(
             'noise_dt', 'noise_t0', 'trace', 'stim_idxs')
+        trace, stim_idxs = load_array(trace), load_array(stim_idxs)
         assert trace.size == stim_idxs.size, "Trace and stim_idxs must have the same size."
-        stim = (self.noise_traces_table.stimulus_table() & key).fetch1("stim_trace")
+        stim = load_array((self.noise_traces_table.stimulus_table() & key).fetch1("stim_trace"))
         stim = stim[stim_idxs].astype(trace.dtype)
 
         other_params_dict = params.pop('other_params_dict')
@@ -274,6 +276,7 @@ class RfGlmTemplate(dj.Computed):
         """
         key = get_primary_key(table=self, key=key)
         rf, quality_dict, model_dict = (self & key).fetch1('rf', 'quality_dict', 'model_dict')
+        rf = load_array(rf)
         plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
                         title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
         plt.show()
@@ -290,6 +293,7 @@ class RfGlmTemplate(dj.Computed):
         """
         key = get_primary_key(table=self, key=key)
         rf, model_dict = (self & key).fetch1('rf', 'model_dict')
+        rf = load_array(rf)
         plot_rf_frames(rf, model_dict['rf_time'], downsample=downsample)
 
     def plot1_video(self, key: dict | None = None, fps: int = 10):
@@ -309,6 +313,7 @@ class RfGlmTemplate(dj.Computed):
         """
         key = get_primary_key(table=self, key=key)
         rf, model_dict = (self & key).fetch1('rf', 'model_dict')
+        rf = load_array(rf)
         return plot_rf_video(rf, model_dict['rf_time'], fps=fps)
 
 
@@ -499,6 +504,7 @@ class RfGlmSingleModelTemplate(dj.Computed):
         """
         key = get_primary_key(table=self, key=key)
         rf, quality_dict, model_dict = (self.glm_table & key).fetch1('rf', 'quality_dict', 'model_dict')
+        rf = load_array(rf)
         plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
                         title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
         plt.show()

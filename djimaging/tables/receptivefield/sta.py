@@ -68,6 +68,7 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.receptive_fields.fit_rf_utils import compute_linear_rf
 from djimaging.utils.receptive_fields.plot_rf_utils import plot_rf_frames, plot_rf_video
@@ -172,7 +173,8 @@ class STATemplate(dj.Computed):
         assert np.isclose(frac_train + frac_dev + frac_test, 1.0)
 
         noise_dt, trace, stim_idxs = (self.noise_traces_table() & key).fetch1('noise_dt', 'trace', 'stim_idxs')
-        stim = (self.noise_traces_table.stimulus_table() & key).fetch1("stim_trace")
+        trace, stim_idxs = load_array(trace), load_array(stim_idxs)
+        stim = load_array((self.noise_traces_table.stimulus_table() & key).fetch1("stim_trace"))
         stim = stim[stim_idxs].astype(trace.dtype)
 
         rf, rf_time, rf_pred, x, y, shift = compute_linear_rf(
@@ -230,9 +232,11 @@ class STATemplate(dj.Computed):
     def plot1_frames(self, key=None, downsample=1):
         key = get_primary_key(table=self, key=key)
         rf, rf_time = (self & key).fetch1('rf', 'rf_time')
+        rf, rf_time = load_array(rf), load_array(rf_time)
         plot_rf_frames(rf, rf_time, downsample=downsample)
 
     def plot1_video(self, key=None, fps=10):
         key = get_primary_key(table=self, key=key)
         rf, rf_time = (self & key).fetch1('rf', 'rf_time')
+        rf, rf_time = load_array(rf), load_array(rf_time)
         return plot_rf_video(rf, rf_time, fps=fps)

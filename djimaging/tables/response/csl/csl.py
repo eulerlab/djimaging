@@ -43,6 +43,7 @@ import numpy as np
 from djimaging.tables.core.preprocesstraces import process_trace
 from djimaging.tables.response.csl.naka_rushton_utils import fit_naka_rushton
 from djimaging.tables.response.csl.sigmoid_utils import fit_sigmoid
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.math_utils import normalize_zero_one
 from djimaging.utils.snippet_utils import split_trace_by_reps
@@ -135,6 +136,7 @@ class CslMetricsTemplate(dj.Computed):
             average, snippets, quality indices, response indices, and fit parameters.
         """
         trace_dt, trace_t0, trace = (self.traces_table & key).fetch1('trace_dt', 'trace_t0', 'trace')
+        trace = load_array(trace)
 
         if len(trace) == 0:
             raise ValueError(f'Cannot compute CSL metrics for empty trace with key={key}')
@@ -143,7 +145,7 @@ class CslMetricsTemplate(dj.Computed):
         scan_type, nypix, nzpix = (self.presentation_table & key).fetch1('scan_type', 'nypix', 'nzpix')
         n_lines = int(nzpix if scan_type == 'xz' else nypix)
 
-        triggertimes = (self.presentation_table & key).fetch1('triggertimes')
+        triggertimes = load_array((self.presentation_table & key).fetch1('triggertimes'))
         ntrigger_rep = (self.stimulus_table & key).fetch1('ntrigger_rep')
 
         fs_resample = 1 / line_duration
@@ -200,7 +202,7 @@ class CslMetricsTemplate(dj.Computed):
         if verbose:
             print(f'Populating {key}')
 
-        trace = (self.traces_table & key).fetch1('trace')
+        trace = load_array((self.traces_table & key).fetch1('trace'))
         if len(trace) == 0:
             if verbose:
                 print(f'Skipping CSL metrics for empty trace with key={key}')

@@ -18,6 +18,7 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.trace_utils import get_mean_dt
 
@@ -71,7 +72,8 @@ class SineSpotFeaturesTemplate(dj.Computed):
 
     def make(self, key):
         trace_t0, trace_dt, trace = (self.preprocesstraces_table() & key).fetch1("trace_t0", "trace_dt", "trace")
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        trace = load_array(trace)
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
 
         tracetimes = np.arange(len(trace)) * trace_dt + trace_t0
@@ -96,7 +98,7 @@ class SineSpotFeaturesTemplate(dj.Computed):
         if plot_trace:
             (self.preprocesstraces_table & key).plot1()
 
-        response_rep_x_dir = (self & key).fetch1("response_rep_x_cond")
+        response_rep_x_dir = load_array((self & key).fetch1("response_rep_x_cond"))
 
         vabsmax = np.max(np.abs(response_rep_x_dir))
 

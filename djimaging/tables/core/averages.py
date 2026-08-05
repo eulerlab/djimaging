@@ -6,6 +6,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.core.snippets import get_aligned_snippets_times
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils import plot_utils, math_utils, trace_utils
 
@@ -128,6 +129,8 @@ class AveragesTemplate(dj.Computed):
 
         average, average_norm, average_t0, average_dt, triggertimes_rel = \
             (self & key).fetch1('average', 'average_norm', 'average_t0', 'average_dt', 'triggertimes_rel')
+        average, average_norm, triggertimes_rel = (
+            load_array(average), load_array(average_norm), load_array(triggertimes_rel))
 
         snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
                           + snippets_t0)
@@ -259,6 +262,8 @@ class ResampledAveragesTemplate(AveragesTemplate):
 
         average, average_norm, average_t0, average_dt, triggertimes_rel = \
             (self & key).fetch1('average', 'average_norm', 'average_t0', 'average_dt', 'triggertimes_rel')
+        average, average_norm, triggertimes_rel = (
+            load_array(average), load_array(average_norm), load_array(triggertimes_rel))
 
         snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
                           + snippets_t0)

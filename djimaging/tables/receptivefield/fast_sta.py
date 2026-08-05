@@ -120,6 +120,7 @@ class FastStaParamsTemplate(dj.Lookup):
 
             stim, stim_dict, ntrigger_rep, isrepeated, framerate = (self.stimulus_table() & stim_key).fetch1(
                 "stim_trace", "stim_dict", "ntrigger_rep", "isrepeated", "framerate")
+            stim = load_array(stim)
 
             if framerate > 0:  # This is actually the triggerrate!
                 dt_trigger = 1 / framerate
@@ -275,6 +276,7 @@ class FastStaTemplate(dj.Computed):
             "fupsample_trace", "fit_kind", "lowpass_cutoff", "pre_blur_sigma_s", "post_blur_sigma_s")
 
         x_stimulus = np.ascontiguousarray(load_array(x_stimulus).astype(np.float32))
+        rf_time = load_array(rf_time)
 
         # Fetch nframes_per_trigger from the stimulus table so that stimtime
         # reconstructed in make_compute matches the design matrix built in
@@ -391,7 +393,7 @@ class FastStaTemplate(dj.Computed):
         else:
             raise NotImplementedError("Only dict supported")
 
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
 
         # Build stimtime at the same resolution as x_stimulus: each trigger
         # spans nframes_per_trigger stimulus frames, each further upsampled
@@ -537,8 +539,8 @@ class FastStaTemplate(dj.Computed):
             Downsampling factor for the frames. Default is 1.
         """
         key = get_primary_key(table=self, key=key)
-        rf_time = (self.params_table & key).fetch1('rf_time')
-        rf = (self & key).fetch1('rf')
+        rf_time = load_array((self.params_table & key).fetch1('rf_time'))
+        rf = load_array((self & key).fetch1('rf'))
         plot_rf_frames(rf, rf_time, downsample=downsample)
 
     def plot1_video(self, key: dict | None = None, fps: int = 10):
@@ -557,8 +559,8 @@ class FastStaTemplate(dj.Computed):
             Animation object of the RF video.
         """
         key = get_primary_key(table=self, key=key)
-        rf_time = (self.params_table & key).fetch1('rf_time')
-        rf = (self & key).fetch1('rf')
+        rf_time = load_array((self.params_table & key).fetch1('rf_time'))
+        rf = load_array((self & key).fetch1('rf'))
         return plot_rf_video(rf, rf_time, fps=fps)
 
     def plot1_traces(self, key: dict | None = None, ax=None, cmap: str = 'viridis'):
@@ -585,8 +587,8 @@ class FastStaTemplate(dj.Computed):
             The axes containing the plot.
         """
         key = get_primary_key(table=self, key=key)
-        rf_time = (self.params_table & key).fetch1('rf_time')
-        rf = (self & key).fetch1('rf')
+        rf_time = load_array((self.params_table & key).fetch1('rf_time'))
+        rf = load_array((self & key).fetch1('rf'))
 
         # Reshape to (n_lags, n_pixels), handling both 2D and 3D+ RFs.
         n_lags = rf.shape[0]
@@ -636,8 +638,8 @@ class FastStaQualityTemplate(dj.Computed):
         pass
 
     def make(self, key: dict) -> None:
-        rf = (self.sta_table & key).fetch1('rf')
-        rf_time = (self.sta_table.params_table & key).fetch1('rf_time')
+        rf = load_array((self.sta_table & key).fetch1('rf'))
+        rf_time = load_array((self.sta_table.params_table & key).fetch1('rf_time'))
 
         # Flatten spatial/feature dims so rf becomes (T, S) regardless of input shape.
         T = rf.shape[0]
@@ -712,8 +714,8 @@ class FastStaQualityTemplate(dj.Computed):
 
         snr, peak_amplitude, noise_std, n_baseline = (self & key).fetch1(
             'snr', 'peak_amplitude', 'noise_std', 'n_baseline_frames')
-        rf = (self.sta_table & key).fetch1('rf')
-        rf_time = (self.sta_table.params_table & key).fetch1('rf_time')
+        rf = load_array((self.sta_table & key).fetch1('rf'))
+        rf_time = load_array((self.sta_table.params_table & key).fetch1('rf_time'))
 
         # Flatten spatial dims to (n_lags, n_pixels)
         n_lags = rf.shape[0]

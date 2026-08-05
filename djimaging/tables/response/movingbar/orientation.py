@@ -23,6 +23,7 @@ from matplotlib import pyplot as plt
 from djimaging.tables.response.movingbar.orientation_utils import preprocess_mb_snippets, T_START, T_CHANGE, T_END
 from djimaging.tables.response.movingbar.orientation_utils_v1 import compute_os_ds_idxs as compute_os_ds_idxs_v1
 from djimaging.tables.response.movingbar.orientation_utils_v2 import compute_os_ds_idxs as compute_os_ds_idxs_v2
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -121,9 +122,10 @@ class OsDsIndexesTemplate(dj.Computed):
         sorted_directions_rad = np.deg2rad(np.sort(dir_order))
 
         (time_component_dt, dir_component, ds_index, ds_pvalue, os_index, os_pvalue, pref_dir, pref_or, on_off) = (
-                self & key).fetch1(
+            self & key).fetch1(
             'time_component_dt', 'dir_component', 'ds_index', 'ds_pvalue', 'os_index', 'os_pvalue',
             'pref_dir', 'pref_or', 'on_off')
+        dir_component = load_array(dir_component)
 
         fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor='w', sharex=True, sharey=True)
 
@@ -148,7 +150,7 @@ class OsDsIndexesTemplate(dj.Computed):
         dir_idxs = [3, 2, 1, 4, 0, 5, 6, 7]
 
         if not self._reduced_storage:
-            avg_sorted_resp = (self & key).fetch1('avg_sorted_resp')
+            avg_sorted_resp = load_array((self & key).fetch1('avg_sorted_resp'))
         else:
             snippets = (self.snippets_table() & key).fetch1('snippets')
             sorted_directions, sorted_responses, avg_sorted_resp = preprocess_mb_snippets(snippets, dir_order)

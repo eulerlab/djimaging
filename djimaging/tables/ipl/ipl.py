@@ -24,6 +24,7 @@ import datajoint as dj
 import numpy as np
 
 from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.dj_storage import load_array
 from matplotlib import pyplot as plt
 
 from djimaging.utils.plot_utils import plot_roi_mask_boundaries, prep_long_title
@@ -88,10 +89,12 @@ class IplBordersTemplate(dj.Manual):
         """
         data_stack_name, alt_stack_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
 
-        ch0_avg = (self.field_or_pres_table.StackAverages & key & dict(ch_name=data_stack_name)).fetch1('ch_average')
+        ch0_avg = load_array(
+            (self.field_or_pres_table.StackAverages & key & dict(ch_name=data_stack_name)).fetch1('ch_average'))
         ch0_avg = normalize_soft_zero_one(ch0_avg, dq=q_clip0)
 
-        ch1_avg = (self.field_or_pres_table.StackAverages & key & dict(ch_name=alt_stack_name)).fetch1('ch_average')
+        ch1_avg = load_array(
+            (self.field_or_pres_table.StackAverages & key & dict(ch_name=alt_stack_name)).fetch1('ch_average'))
         ch1_avg = normalize_soft_zero_one(ch1_avg, dq=q_clip1)
 
         return ch0_avg, ch1_avg
@@ -198,7 +201,7 @@ class RoiIplDepthTemplate(dj.Computed):
         """
         left, right, thick = (self.ipl_border_table & key).fetch1('left', 'right', 'thick')
 
-        roi_mask = (self.roimask_table & key).fetch1('roi_mask')
+        roi_mask = load_array((self.roimask_table & key).fetch1('roi_mask'))
         roi_ids = (self.roi_table & key).to_arrays("roi_id")
 
         roi_centers = get_roi_centers(roi_mask, roi_ids)
@@ -226,7 +229,7 @@ class RoiIplDepthTemplate(dj.Computed):
             key = get_primary_key(self.key_source & self)
 
         left, right, thick = (self.ipl_border_table & key).fetch1('left', 'right', 'thick')
-        roi_mask = (self.roimask_table & key).fetch1('roi_mask')
+        roi_mask = load_array((self.roimask_table & key).fetch1('roi_mask'))
 
         ch0_avg, ch1_avg = self.ipl_border_table().fetch1_and_norm_ch_avgs(key, q_clip0=q_clip0, q_clip1=q_clip1)
 

@@ -33,6 +33,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.location.location import plot_relxy_pos, plot_relyz_pos
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.scanm.setup_utils import get_retinal_position
 from djimaging.utils.scanm.roi_utils import get_rel_roi_pos
 
@@ -85,7 +86,7 @@ class RelativeRoiLocationWrtFieldTemplate(dj.Computed):
 
     def make(self, key):
         roi_id = (self.roi_table & key).fetch1('roi_id')
-        roi_mask = (self.roi_mask_table & key).fetch1('roi_mask')
+        roi_mask = load_array((self.roi_mask_table & key).fetch1('roi_mask'))
         pixel_size_um, z_step_um, scan_type = (self.field_table & key).to_arrays('pixel_size_um', 'z_step_um', 'scan_type')
 
         ang_deg_list = (self.presentation_table.ScanInfo() & (self.field_table & key)).to_arrays('angle_deg')

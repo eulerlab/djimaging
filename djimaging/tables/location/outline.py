@@ -37,6 +37,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.filesystem_utils import get_file_info_df
 from djimaging.utils.scanm.recording import ScanMRecording
@@ -214,7 +215,7 @@ class OutlineAbsTemplate(dj.Computed):
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
-        outline_abs_xy = (self & key).fetch1('outline_abs_xy')
+        outline_abs_xy = load_array((self & key).fetch1('outline_abs_xy'))
 
         fig, ax = plt.subplots(1, 1, figsize=(4, 3))
         ax.plot(*np.array(outline_abs_xy).T, '.-')
@@ -276,7 +277,7 @@ class OutlineRelTemplate(dj.Computed):
         print(key)
 
         odx, ody, odz = (self.opticdisk_table() & key).fetch1("odx", "ody", "odz")
-        outline_abs_xy = (self.outline_abs_table() & key).fetch1('outline_abs_xy')
+        outline_abs_xy = load_array((self.outline_abs_table() & key).fetch1('outline_abs_xy'))
         field_keys, absxs, absys, abszs = (self.outline_abs_table().OutlineAbsField & key).to_arrays(
             'absx', 'absy', 'absz', include_key=True)
 

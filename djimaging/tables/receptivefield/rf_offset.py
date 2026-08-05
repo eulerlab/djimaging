@@ -108,7 +108,7 @@ class RfOffsetTemplate(dj.Computed):
                 rf_dx_um, rf_dy_um = compute_cntr_center(srf_contours[levels[0]][0])
 
         elif isinstance(self.rf_fit_tab(), (FitDoG2DRFTemplate, FitGauss2DRFTemplate)):
-            srf = (self.rf_split_tab & key).fetch1('srf')
+            srf = load_array((self.rf_split_tab & key).fetch1('srf'))
             if isinstance(self.rf_fit_tab(), FitDoG2DRFTemplate):
                 srf_params = (self.rf_fit_tab & key).fetch1('srf_eff_center_params')
             else:
@@ -365,7 +365,8 @@ class RfRoiOffsetTemplate(dj.Computed):
             'pixel_size_um', 'npixartifact', 'scan_type')
 
         data_name, alt_name = (self.userinfo_tab & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.pres_tab.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average')
+        main_ch_average = load_array(
+            (self.pres_tab.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         stim_dict = (self.stimulus_tab & key).fetch1('stim_dict')
         pix_scale_x_um, pix_scale_y_um = stim_dict['pix_scale_x_um'], stim_dict['pix_scale_y_um']
 

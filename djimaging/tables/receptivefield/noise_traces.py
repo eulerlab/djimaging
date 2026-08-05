@@ -8,6 +8,7 @@ import datajoint as dj
 import numpy as np
 
 from djimaging.utils.receptive_fields.preprocess_rf_utils import prepare_noise_data
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -142,9 +143,11 @@ class DNoiseTraceTemplate(dj.Computed):
             DataJoint primary key identifying the entry to compute.
         """
         stim, stim_dict = (self.stimulus_table() & key).fetch1("stim_trace", "stim_dict")
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        stim = load_array(stim)
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
         trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1(
             self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace')
+        trace = load_array(trace)
         fupsample_trace, fupsample_stim, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s, ref_time = (
                 self.params_table() & key).fetch1(
             "fupsample_trace", "fupsample_stim", "fit_kind", "lowpass_cutoff",
@@ -185,13 +188,15 @@ class DNoiseTraceTemplate(dj.Computed):
 
         raw_trace_t0, raw_trace_dt, raw_trace = (self.traces_table() & key).fetch1(
             self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace')
+        raw_trace = load_array(raw_trace)
 
         raw_tracetime = np.arange(raw_trace.size) * raw_trace_dt + raw_trace_t0
 
         noise_t0, noise_dt, trace, stim_idxs = (self & key).fetch1('noise_t0', 'noise_dt', 'trace', 'stim_idxs')
+        trace, stim_idxs = load_array(trace), load_array(stim_idxs)
         assert trace.shape[0] == stim_idxs.shape[0], "Trace and stim have different lengths"
 
-        stim = (self.stimulus_table() & key).fetch1("stim_trace")
+        stim = load_array((self.stimulus_table() & key).fetch1("stim_trace"))
         stim = stim[stim_idxs]
 
         tracetime = np.arange(trace.size) * noise_dt + noise_t0

@@ -5,6 +5,7 @@ from abc import abstractmethod
 import datajoint as dj
 import numpy as np
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm.roi_utils import extract_roi_ids
@@ -61,7 +62,7 @@ class RoiTemplate(dj.Computed):
                 be processed.
         """
         # load roi_mask for insert roi for a specific experiment and field
-        roi_mask = (self.roi_mask_table & key).fetch1("roi_mask")
+        roi_mask = load_array((self.roi_mask_table & key).fetch1("roi_mask"))
 
         scan_type = (self.field_table & key).fetch1("scan_type")
         pixel_size_um = (self.field_table & key).fetch1("pixel_size_um")
@@ -105,11 +106,13 @@ class RoiTemplate(dj.Computed):
         key = get_primary_key(table=self, key=key)
 
         npixartifact, scan_type = (self.field_table & key).fetch1("npixartifact", "scan_type")
-        roi_mask = (self.roi_mask_table & key).fetch1("roi_mask")
+        roi_mask = load_array((self.roi_mask_table & key).fetch1("roi_mask"))
 
         data_name, alt_name = (self.userinfo_table() & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.field_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average')
-        alt_ch_average = (self.field_table.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average')
+        main_ch_average = load_array(
+            (self.field_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
+        alt_ch_average = load_array(
+            (self.field_table.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average'))
 
         plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
                    roi_mask=roi_mask, roi_ch_average=main_ch_average,

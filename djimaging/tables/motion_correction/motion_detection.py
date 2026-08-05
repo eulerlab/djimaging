@@ -22,6 +22,7 @@ from matplotlib import pyplot as plt
 
 from djimaging.tables.motion_correction.motion_utils import compute_shifts_jnormcorre, correct_shifts_in_stack, \
     plot_stack_and_corr_stack
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import set_long_title
 from djimaging.utils.scanm import read_utils
@@ -171,6 +172,7 @@ class MotionDetectionTemplate(dj.Computed):
         scan_frequency = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
         pres_data_file, triggertimes, pixel_size_um, npixartifact = (self.presentation_table & key).fetch1(
             'pres_data_file', 'triggertimes', 'pixel_size_um', 'npixartifact')
+        triggertimes = load_array(triggertimes)
         data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
         from_raw_data = (self.presentation_table.raw_params_table & key).fetch1('from_raw_data')
 
@@ -217,6 +219,7 @@ class MotionDetectionTemplate(dj.Computed):
         stack = stacks[data_stack_name].copy()
 
         shifts_x, shifts_y = (self & key).fetch1('shifts_x', 'shifts_y')
+        shifts_x, shifts_y = load_array(shifts_x), load_array(shifts_y)
 
         stack_corrected = correct_shifts_in_stack(
             stack=stack, shifts_x=shifts_x, shifts_y=shifts_y, fs=fs, fupsample=fupsample, f_cutoff=f_cutoff)
@@ -229,10 +232,11 @@ class MotionDetectionTemplate(dj.Computed):
         key = get_primary_key(table=self, key=key)
 
         fs = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
-        triggertimes = (self.presentation_table & key).fetch1('triggertimes')
+        triggertimes = load_array((self.presentation_table & key).fetch1('triggertimes'))
 
         shifts_x, shifts_y, max_shift_x, max_shift_y, idx_stim_onset = (self & key).fetch1(
             'shifts_x', 'shifts_y', 'max_shift_x', 'max_shift_y', 'idx_stim_onset')
+        shifts_x, shifts_y = load_array(shifts_x), load_array(shifts_y)
 
         time = np.arange(shifts_x.size) / fs
 
