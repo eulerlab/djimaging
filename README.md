@@ -101,10 +101,3 @@ DJ_USER=root DJ_PASS=datajoint pytest -q tests/integration
 
 docker stop djimaging-mysql-test
 ```
-
-## DataJoint 2 migration
-
-The project targets `datajoint>=2.3.1,<2.4` while the temporary upstream
-migration helpers remain available. Rehearse the database and object-store
-migration on a recent production restore before cutover; see
-[`docs/datajoint_v2_runbook.md`](docs/datajoint_v2_runbook.md).
