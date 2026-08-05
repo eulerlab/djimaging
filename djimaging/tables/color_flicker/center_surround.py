@@ -69,6 +69,11 @@ class CenterSurroundTemplate(dj.Computed):
 
     @property
     @abstractmethod
+    def color_rf_time_table(self):
+        pass
+
+    @property
+    @abstractmethod
     def cs_params_table(self):
         pass
 
@@ -85,9 +90,9 @@ class CenterSurroundTemplate(dj.Computed):
             1-D array of RF time values.
         """
         try:
-            rf_time = (self.color_rf_table & key).fetch1('rf_time')
+            rf_time = (self.color_rf_time_table & key).fetch1('rf_time')
         except dj.DataJointError:
-            rf_time = (self.color_rf_table & key).fetch1('model_dict')['rf_time']
+            rf_time = (self.color_rf_time_table & key).fetch1('model_dict')['rf_time']
         return rf_time
 
     def make(self, key: dict, plot: bool = False) -> None:
@@ -101,6 +106,11 @@ class CenterSurroundTemplate(dj.Computed):
         """
         rf_time = self.fetch1_rf_time(key=key)
         rf = (self.color_rf_table & key).fetch1('rf')
+        rf = rf.squeeze()
+
+        if rf.ndim != 2:
+            raise ValueError(f"rf must be 2d (time x center/surround), but got shape {rf.shape}")
+
         peak_nstd, npeaks_max = (self.cs_params_table & key).fetch1('peak_nstd', 'npeaks_max')
 
         polarity_idxs = []
@@ -157,6 +167,7 @@ class CenterSurroundTemplate(dj.Computed):
 
         rf_time = self.fetch1_rf_time(key=key)
         rf = (self.color_rf_table & key).fetch1('rf')
+        rf = rf.squeeze()
 
         peak_nstd, npeaks_max = (self.cs_params_table & key).fetch1('peak_nstd', 'npeaks_max')
 

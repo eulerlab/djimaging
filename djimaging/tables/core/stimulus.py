@@ -224,6 +224,7 @@ class StimulusTemplate(dj.Manual):
             snippet_base_dt: float = None,
             alias: str = None,
             ntrigger_per_frame: int = 1,
+            nframes_per_trigger: int = 1,
             stim_trace: np.ndarray = None,
             pix_n_x: int = None,
             pix_n_y: int = None,
@@ -248,6 +249,8 @@ class StimulusTemplate(dj.Manual):
             alias: Custom alias string; auto-generated from pixel scale if None.
             ntrigger_per_frame: Number of triggers sent per stimulus frame.
                 Default is 1.
+            nframes_per_trigger: Number of frames sent per stimulus frame.
+                Default is 1.
             stim_trace: Optional numerical stimulus trace array.
             pix_n_x: Number of stimulus pixels in x.
             pix_n_y: Number of stimulus pixels in y.
@@ -268,6 +271,7 @@ class StimulusTemplate(dj.Manual):
 
         stim_dict = {
             "ntrigger_per_frame": ntrigger_per_frame,
+            "nframes_per_trigger": nframes_per_trigger,
         }
 
         if n_colors is not None:
@@ -317,7 +321,7 @@ class StimulusTemplate(dj.Manual):
             stim_name: str = "chirp",
             stim_family: str = 'chirp',
             spatialextent: float = None,
-            framerate: float = 1 / 60.,
+            framerate: float = 60.,
             ntrigger_rep: int = 2,
             isrepeated: bool = True,
             snippet_base_dt: float = None,
@@ -331,7 +335,7 @@ class StimulusTemplate(dj.Manual):
             stim_name: Unique string identifier. Default is 'chirp'.
             stim_family: Stimulus family label. Default is 'chirp'.
             spatialextent: Spatial extent of the stimulus in micrometers.
-            framerate: Stimulus frame rate in Hz. Default is 1/60.
+            framerate: Stimulus frame rate in Hz. Default is 60 [Hz].
             ntrigger_rep: Number of triggers per repetition. Default is 2.
             isrepeated: Whether the stimulus is repeated. Default is True.
             snippet_base_dt: Baseline window duration for snippet correction.
@@ -370,7 +374,7 @@ class StimulusTemplate(dj.Manual):
             ntrigger_rep: int = 1,
             isrepeated: bool = True,
             trial_info: list = None,
-            framerate: float = 1 / 60.,
+            framerate: float = 60.,
             snippet_base_dt: float = None,
             bardx: float = None,
             bardy: float = None,
@@ -390,7 +394,7 @@ class StimulusTemplate(dj.Manual):
             trial_info: List of trial dicts (each with 'name' and 'ntrigger').
                 If None, defaults to the standard 8-direction protocol
                 [0, 180, 45, 225, 90, 270, 135, 315].
-            framerate: Stimulus frame rate in Hz. Default is 1/60.
+            framerate: Stimulus frame rate in Hz. Default is 60 Hz.
             snippet_base_dt: Baseline window duration for snippet correction.
             bardx: Bar width in micrometers.
             bardy: Bar height in micrometers.
