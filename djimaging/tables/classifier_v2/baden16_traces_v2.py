@@ -35,15 +35,15 @@ class Baden16TracesV2Template(dj.Computed):
         -> self.traces_table().proj(chirp_stim_name='stim_name')
         -> self.traces_table().proj(bar_stim_name='stim_name')
         ---
-        preproc_chirp: blob  # preprocessed chirp trace (averaged, downsampled and normalized)
-        preproc_bar:   blob  # preprocessed bar (time component in pref. dir., averaged and rolled)
-        dir_component: blob  # projection of bar trace on direction component
-        ds_index:      float # direction selectivity index as resulting vector length (absolute of projection on complex exponential)
-        ds_pvalue:     float # p-value indicating the percentile of the vector length in null distribution
-        pref_dir:      float # preferred direction
-        os_index:      float # orientation selectivity index in analogy to ds_index
-        os_pvalue:     float # analogous to ds_pvalue for orientation tuning
-        pref_or:       float # preferred orientation
+        preproc_chirp: <npy@processed>  # preprocessed chirp trace (averaged, downsampled and normalized)
+        preproc_bar:   <npy@processed>  # preprocessed bar (time component in pref. dir., averaged and rolled)
+        dir_component: <npy@processed>  # projection of bar trace on direction component
+        ds_index:      float32 # direction selectivity index as resulting vector length (absolute of projection on complex exponential)
+        ds_pvalue:     float32 # p-value indicating the percentile of the vector length in null distribution
+        pref_dir:      float32 # preferred direction
+        os_index:      float32 # orientation selectivity index in analogy to ds_index
+        os_pvalue:     float32 # analogous to ds_pvalue for orientation tuning
+        pref_or:       float32 # preferred orientation
         """
         return definition
 

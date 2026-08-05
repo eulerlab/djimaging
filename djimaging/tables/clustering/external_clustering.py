@@ -21,10 +21,10 @@ class RoiClusterTemplate(dj.Manual):
     @property
     def definition(self):
         definition = """
-        clustering_id : tinyint unsigned
+        clustering_id : int32
         -> self.roi_table
         ---
-        cluster_idx : int
+        cluster_idx : int32
         """
         return definition
 

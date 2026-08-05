@@ -33,8 +33,8 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         # Computes an OnOff and a transience index based on the chirp step response
         -> self.snippets_table
         ---
-        on_off_index:       float   # index indicating light preference (-1 Off, 1 On)
-        transience_index:   float   # index indicating transience of response
+        on_off_index:       float32   # index indicating light preference (-1 Off, 1 On)
+        transience_index:   float32   # index indicating transience of response
         '''
         return definition
 
@@ -130,7 +130,7 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        on_off_index, transience_index = (self & restriction).fetch('on_off_index', 'transience_index')
+        on_off_index, transience_index = (self & restriction).to_arrays('on_off_index', 'transience_index')
 
         fig, axs = plt.subplots(1, 2, figsize=(8, 3))
         ax = axs[0]

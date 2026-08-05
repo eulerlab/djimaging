@@ -32,7 +32,7 @@ class RoiMaskTemplate(dj.Manual):
         -> self.raw_params_table
         ---
         -> self.presentation_table
-        roi_mask     : blob                   # ROI mask for recording field
+        roi_mask     : <npy@processed>                   # ROI mask for recording field
         """
         return definition
 
@@ -44,10 +44,10 @@ class RoiMaskTemplate(dj.Manual):
             -> master
             -> self.presentation_table
             ---
-            roi_mask      : blob       # ROI mask for presentation field
-            as_field_mask : enum("same", "different", "shifted")  # relationship to field mask
-            shift_dx=0    : int  # Shift in x
-            shift_dy=0    : int  # Shift in y
+            roi_mask      : <npy@processed>       # ROI mask for presentation field
+            as_field_mask : enum('same', 'different', 'shifted')  # relationship to field mask
+            shift_dx=0    : int32  # Shift in x
+            shift_dy=0    : int32  # Shift in y
             """
             return definition
 
@@ -108,7 +108,7 @@ class RoiMaskTemplate(dj.Manual):
             A list of primary key dicts for fields that are missing from this
             ROI mask table.
         """
-        missing_keys = (self.field_table.proj() & (self.presentation_table.proj() - self.proj())).fetch(as_dict=True)
+        missing_keys = (self.field_table.proj() & (self.presentation_table.proj() - self.proj())).to_dicts()
         return missing_keys
 
     def load_field_file_info_df(self, field_key: dict):
@@ -174,13 +174,13 @@ class RoiMaskTemplate(dj.Manual):
             raise ValueError(f'canvas_width={canvas_width} must be in (0, 100)%')
 
         if pres_key is not None:
-            field_key = (self.field_table & pres_key).fetch1('KEY')
+            field_key = (self.field_table & pres_key).proj().fetch1()
         elif field_key is None:
             field_key = np.random.choice(self.list_missing_field())
 
         if field_key is None:
             raise ValueError('No field_key provided and no missing field found.')
-        field_key = (self.field_table & field_key).fetch1('KEY')
+        field_key = (self.field_table & field_key).proj().fetch1()
 
         from_raw_data = (self.raw_params_table & field_key).fetch1("from_raw_data")
 
@@ -191,7 +191,7 @@ class RoiMaskTemplate(dj.Manual):
         filepaths = []
 
         for f in all_filepaths:
-            pres_key_list = ((self.presentation_table & field_key) & dict(pres_data_file=f)).proj().fetch(as_dict=True)
+            pres_key_list = ((self.presentation_table & field_key) & dict(pres_data_file=f)).proj().to_dicts()
             if len(pres_key_list) == 1:
                 pres_keys.append(pres_key_list[0])
                 filepaths.append(f)
@@ -215,7 +215,7 @@ class RoiMaskTemplate(dj.Manual):
         assert len(output_files) == len(pres_keys)
 
         # Load pixel size and scan type
-        n_artifact, pixel_size_um, scan_type = (self.presentation_table() & pres_keys).fetch(
+        n_artifact, pixel_size_um, scan_type = (self.presentation_table() & pres_keys).to_arrays(
             'npixartifact', 'pixel_size_um', 'scan_type')
         n_artifact = check_unique_one(n_artifact, name='n_artifact')
         pixel_size_um = check_unique_one(pixel_size_um, name='pixel_size_um')
@@ -224,7 +224,7 @@ class RoiMaskTemplate(dj.Manual):
         if scan_type == 'xy':
             pixel_size_d1_d2 = (pixel_size_um, pixel_size_um)
         elif scan_type == 'xz':
-            z_step_um = (self.presentation_table() & pres_keys).fetch('z_step_um')
+            z_step_um = (self.presentation_table() & pres_keys).to_arrays('z_step_um')
             z_step_um = check_unique_one(z_step_um, name='z_step_um')
             pixel_size_d1_d2 = (pixel_size_um, z_step_um)
         else:
@@ -232,8 +232,8 @@ class RoiMaskTemplate(dj.Manual):
 
         # Reduce stacks to after stimulus onset?
         if use_stim_onset:
-            triggertimes = (self.presentation_table & pres_keys).fetch('triggertimes')
-            scan_frequencies = (self.presentation_table.ScanInfo() & pres_keys).fetch('scan_frequency')
+            triggertimes = (self.presentation_table & pres_keys).to_arrays('triggertimes')
+            scan_frequencies = (self.presentation_table.ScanInfo() & pres_keys).to_arrays('scan_frequency')
 
             stim_onset_idxs = [int(np.floor(tt[0] * fs)) if len(tt) > 0 else 0
                                for tt, fs in zip(triggertimes, scan_frequencies)]
@@ -355,14 +355,14 @@ class RoiMaskTemplate(dj.Manual):
         Raises:
             ValueError: If more than one ROI mask is found for the key.
         """
-        database_roi_masks = (self & field_key).fetch("roi_mask")
+        database_roi_masks = (self & field_key).to_arrays("roi_mask")
 
         if len(database_roi_masks) == 1:
             database_roi_mask = database_roi_masks[0].copy()
         elif len(database_roi_masks) == 0:
             database_roi_mask = None
         else:
-            raise ValueError(f'Found multiple ROI masks for key=\n{field_key}\n{(self & field_key).fetch("KEY")}')
+            raise ValueError(f'Found multiple ROI masks for key=\n{field_key}\n{(self & field_key).keys()}')
 
         return database_roi_mask
 
@@ -389,7 +389,7 @@ class RoiMaskTemplate(dj.Manual):
             (or None if not found).
         """
         mask_alias, highres_alias = (self.userinfo_table() & field_key).fetch1("mask_alias", "highres_alias")
-        files = (self.presentation_table() & field_key).fetch("pres_data_file")
+        files = (self.presentation_table() & field_key).to_arrays("pres_data_file")
 
         roi_mask, src_file = load_preferred_roi_mask_pickle(
             files, mask_alias=mask_alias, highres_alias=highres_alias,
@@ -417,7 +417,7 @@ class RoiMaskTemplate(dj.Manual):
         """
         mask_alias, highres_alias, raw_data_dir, pre_data_dir = (self.userinfo_table() & field_key).fetch1(
             "mask_alias", "highres_alias", "raw_data_dir", "pre_data_dir")
-        files = (self.presentation_table() & field_key).fetch("pres_data_file")
+        files = (self.presentation_table() & field_key).to_arrays("pres_data_file")
 
         files = [as_pre_filepath(f, raw_data_dir=raw_data_dir, pre_data_dir=pre_data_dir) for f in files]
 
@@ -491,7 +491,7 @@ class RoiMaskTemplate(dj.Manual):
                 Defaults to the table-level ``_max_shift`` value.
             verboselvl: Verbosity level controlling diagnostic output.
         """
-        pres_keys = (self.presentation_table & field_key).fetch('KEY')
+        pres_keys = (self.presentation_table & field_key).keys()
 
         if add_primary_keys:
             pres_keys = [{**pk, **add_primary_keys} for pk in pres_keys]
@@ -550,7 +550,7 @@ class RoiMaskTemplate(dj.Manual):
 
             main_pres_key, main_roi_mask = keys_masks_files[sort_idxs[0]][:2]
         else:
-            main_pres_key = (self.RoiMaskPresentation().proj() & (self & field_key)).fetch1('KEY')
+            main_pres_key = (self.RoiMaskPresentation().proj() & (self & field_key)).fetch1()
             main_roi_mask = (self.RoiMaskPresentation & main_pres_key).fetch1('roi_mask')
 
         roi_mask_pres_keys = []
@@ -649,9 +649,9 @@ class RoiMaskTemplate(dj.Manual):
         key = get_primary_key(table=self.proj() * self.presentation_table.proj(), key=key)
         npixartifact, scan_type = (self.field_table & key).fetch1('npixartifact', 'scan_type')
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        main_ch_average = (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average')
         try:
-            alt_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{alt_name}"').fetch1(
+            alt_ch_average = (self.presentation_table.StackAverages & key & dict(ch_name=alt_name)).fetch1(
                 'ch_average')
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
@@ -675,7 +675,7 @@ class RoiMaskTemplate(dj.Manual):
         """
         try:
             ch_names, ch_averages, *conds = (
-                    self.highres_table().StackAverages & key & [f"ch_name='{cn}'" for cn in ch_names]).fetch(
+                    self.highres_table().StackAverages & key & [f"ch_name='{cn}'" for cn in ch_names]).to_arrays(
                 'ch_name', 'ch_average', *self.highres_table().new_primary_keys)
             bg_dict = dict()
 

@@ -41,21 +41,21 @@ class PresentationTemplate(dj.Computed):
         definition += """
         ---
         pres_data_file :varchar(191)        # path to file (e.g. h5 file)
-        triggertimes :longblob              # triggertimes in each presentation
-        trigger_valid :tinyint unsigned     # Are triggers as expected (1) or not (0)?
-        absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
-        absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
-        absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
-        scan_type: enum("xy", "xz", "xyz")  # Type of scan
-        npixartifact : int unsigned         # number of pixel with light artifact
-        nxpix: int unsigned                 # number of pixels in x
-        nypix: int unsigned                 # number of pixels in y
-        nzpix: int unsigned                 # number of pixels in z
-        nxpix_offset: int unsigned          # number of offset pixels in x
-        nxpix_retrace: int unsigned         # number of retrace pixels in x
-        pixel_size_um :float                # width of a pixel in um (also height if y is second dimension)
-        z_step_um = NULL :float             # z-step in um
-        nframes: int unsigned               # number of pixels in time
+        triggertimes :<npy@processed>              # triggertimes in each presentation
+        trigger_valid :bool     # Are triggers as expected (1) or not (0)?
+        absx: float32  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
+        absy: float32  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
+        absz: float32  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
+        scan_type: enum('xy', 'xz', 'xyz')  # Type of scan
+        npixartifact : int64         # number of pixel with light artifact
+        nxpix: int64                 # number of pixels in x
+        nypix: int64                 # number of pixels in y
+        nzpix: int64                 # number of pixels in z
+        nxpix_offset: int64          # number of offset pixels in x
+        nxpix_retrace: int64         # number of retrace pixels in x
+        pixel_size_um :float32                # width of a pixel in um (also height if y is second dimension)
+        z_step_um = NULL :float32             # z-step in um
+        nframes: int64               # number of pixels in time
         """
         return definition
 
@@ -119,7 +119,7 @@ class PresentationTemplate(dj.Computed):
             -> master
             ch_name : varchar(32)  # name of the channel
             ---
-            ch_average : longblob  # Stack median over time
+            ch_average : <npy@processed>  # Stack median over time
             """
             return definition
 
@@ -130,13 +130,13 @@ class PresentationTemplate(dj.Computed):
             # Data read from wParamsNum and wParamsStr tables in h5 file
             -> master
             ---
-            scan_frequency=-1 :float             # Scanning frequency in Hz
-            scan_period=-1 :float                # Scanning duration per frame in seconds
-            line_duration=-1 :float              # Line duration from OS_Parameters
-            real_pixel_duration=-1 :float        # Duration of a pixel (un-cropped)
-            zoom :float                          # Zoom of objective, changes pixel size
-            angle_deg :float                     # Angle of objective, changes rotation of image
-            scan_params_dict :longblob           # Other ScanM parameters less frequently used
+            scan_frequency=-1 :float32             # Scanning frequency in Hz
+            scan_period=-1 :float32                # Scanning duration per frame in seconds
+            line_duration=-1 :float32              # Line duration from OS_Parameters
+            real_pixel_duration=-1 :float32        # Duration of a pixel (un-cropped)
+            zoom :float32                          # Zoom of objective, changes pixel size
+            angle_deg :float32                     # Angle of objective, changes rotation of image
+            scan_params_dict :<blob>           # Other ScanM parameters less frequently used
             """
             return definition
 
@@ -419,9 +419,9 @@ class PresentationTemplate(dj.Computed):
         key = get_primary_key(table=self, key=key)
         npixartifact, scan_type = (self.field_table & key).fetch1('npixartifact', 'scan_type')
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        main_ch_average = (self.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average')
         try:
-            alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+            alt_ch_average = (self.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average')
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
         plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,

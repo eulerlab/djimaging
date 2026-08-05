@@ -45,6 +45,11 @@ e.g. based on the template <code>djimaging/djconfig/djconf_template.json</code>.
 Fill out the missing values; if you don't know how, ask someone in your group.
 > ❗ Never upload this personal config file to GitHub.
 
+DataJoint 2 requires MySQL 8 with `utf8mb4`/`utf8mb4_bin` and named stores.
+Use separate roots for externally managed acquisition files, processed arrays
+and blobs, and model attachments. Paths inserted into `<filepath@...>` fields
+must be relative to their configured store root.
+
 ### Create a user folder
 
 Inside the root folder <code>djimaging</code> (not in <code>djimaging/djimaging</code>)
@@ -70,10 +75,10 @@ calling <code>schema.drop()</code> and confirm by entering <code>yes</code>.
 
 ## Local testing
 
-Install the test environment with DataJoint 0.14.7:
+Install the test environment with DataJoint 2.3.x:
 
 ```bash
-uv pip install pytest "setuptools<81" "datajoint==0.14.7" -e .
+uv pip install pytest "setuptools<81" -e .
 ```
 
 Run unit tests:
@@ -87,7 +92,8 @@ Run integration tests against a temporary MySQL 8.0.43 server:
 ```bash
 docker run --rm --name djimaging-mysql-test \
   -e MYSQL_ROOT_PASSWORD=datajoint -e MYSQL_ROOT_HOST=% \
-  -p 3307:3306 -d mysql:8.0.43
+  -p 3307:3306 -d mysql:8.0.43 \
+  --character-set-server=utf8mb4 --collation-server=utf8mb4_bin
 until docker exec djimaging-mysql-test mysqladmin ping -h 127.0.0.1 -pdatajoint; do sleep 1; done
 
 DJ_TEST_MYSQL=1 DJ_HOST=127.0.0.1 DJ_PORT=3307 \
@@ -95,3 +101,10 @@ DJ_USER=root DJ_PASS=datajoint pytest -q tests/integration
 
 docker stop djimaging-mysql-test
 ```
+
+## DataJoint 2 migration
+
+The project targets `datajoint>=2.3.1,<2.4` while the temporary upstream
+migration helpers remain available. Rehearse the database and object-store
+migration on a recent production restore before cutover; see
+[`docs/datajoint_v2_runbook.md`](docs/datajoint_v2_runbook.md).

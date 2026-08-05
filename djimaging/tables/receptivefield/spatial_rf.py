@@ -26,13 +26,13 @@ class FitGauss2DRFTemplate(dj.Computed):
         definition = """
         -> self.split_rf_table
         ---
-        srf_fit: mediumblob
-        srf_params: blob
-        rf_area_um2: float # Area covered by 2 standard deviations
-        rf_cdia_um: float # Circle equivalent diameter
-        center_index: float # Weight and sign of center in sRF
-        surround_index: float # Weight and sign of surround in sRF
-        rf_qidx: float # Quality index as explained variance of the sRF estimation between 0 and 1
+        srf_fit: <npy@processed>
+        srf_params: <blob>
+        rf_area_um2: float32 # Area covered by 2 standard deviations
+        rf_cdia_um: float32 # Circle equivalent diameter
+        center_index: float32 # Weight and sign of center in sRF
+        surround_index: float32 # Weight and sign of surround in sRF
+        rf_qidx: float32 # Quality index as explained variance of the sRF estimation between 0 and 1
         """
         return definition
 
@@ -109,7 +109,7 @@ class FitGauss2DRFTemplate(dj.Computed):
 
     def plot(self, by=("preprocess_id",)):
         columns = ["rf_qidx", "rf_cdia_um", "center_index", "surround_index"]
-        df = self.proj(*columns).fetch(format='frame').reset_index()
+        df = self.proj(*columns).to_pandas().reset_index()
         for params, group in df.groupby(list(by)):
             print(by)
             print(params)
@@ -117,7 +117,7 @@ class FitGauss2DRFTemplate(dj.Computed):
             plt.show()
 
     def plot_multiple(self):
-        srf_params_list = self.fetch("srf_params")
+        srf_params_list = self.to_arrays("srf_params")
 
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
 
@@ -136,17 +136,17 @@ class FitDoG2DRFTemplate(dj.Computed):
         definition = """
         -> self.split_rf_table
         ---
-        srf_fit: mediumblob
-        srf_center_fit: mediumblob
-        srf_surround_fit: mediumblob
-        srf_params: blob
-        srf_eff_center: mediumblob
-        srf_eff_center_params: blob
-        rf_qidx: float
-        rf_area_um2: float # Area covered by 2 standard deviations
-        rf_cdia_um: float # Circle equivalent diameter
-        center_index: float # Weight and sign of center in sRF
-        surround_index: float # Weight and sign of surround in sRF
+        srf_fit: <npy@processed>
+        srf_center_fit: <npy@processed>
+        srf_surround_fit: <npy@processed>
+        srf_params: <blob>
+        srf_eff_center: <npy@processed>
+        srf_eff_center_params: <blob>
+        rf_qidx: float32
+        rf_area_um2: float32 # Area covered by 2 standard deviations
+        rf_cdia_um: float32 # Circle equivalent diameter
+        center_index: float32 # Weight and sign of center in sRF
+        surround_index: float32 # Weight and sign of surround in sRF
         """
         return definition
 
@@ -259,7 +259,7 @@ class FitDoG2DRFTemplate(dj.Computed):
 
     def plot(self, by=("preprocess_id",)):
         columns = ["rf_qidx", "rf_cdia_um", "center_index", "surround_index"]
-        df = self.proj(*columns).fetch(format='frame').reset_index()
+        df = self.proj(*columns).to_pandas().reset_index()
         for params, group in df.groupby(list(by)):
             print(by)
             print(params)

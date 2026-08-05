@@ -45,17 +45,17 @@ class ChirpFeaturesBcTemplate(dj.Computed):
         # See Franke et al. 2017 for details, for HFi see also Baden et al. 2013
         -> self.snippets_table
         ---
-        polarity_index: float # Polarity index (POi) from Franke et al. 2017
-        high_frequency_index: float # High Frequency Index (HFi) from Baden et al. 2013 and Franke et al. 2017
-        transience_index: float # Response transience index (RTi) from Franke et al. 2017
-        plateau_index: float # Response plateau index (RPi) from Franke et al. 2017 (corrected equation!)
-        tonic_release_index: float # Tonic release index (TRi) from Franke et al. 2017
-        l_freq_response : float # Low frequency response
-        h_freq_response : float # High frequency response
-        lh_freq_index : float # Ratio of high to low frequency response
-        l_contrast_response : float # Low contrast response
-        h_contrast_response : float # High contrast response
-        lh_contrast_index : float # Ratio of high to low contrast response
+        polarity_index: float32 # Polarity index (POi) from Franke et al. 2017
+        high_frequency_index: float32 # High Frequency Index (HFi) from Baden et al. 2013 and Franke et al. 2017
+        transience_index: float32 # Response transience index (RTi) from Franke et al. 2017
+        plateau_index: float32 # Response plateau index (RPi) from Franke et al. 2017 (corrected equation!)
+        tonic_release_index: float32 # Tonic release index (TRi) from Franke et al. 2017
+        l_freq_response : float32 # Low frequency response
+        h_freq_response : float32 # High frequency response
+        lh_freq_index : float32 # Ratio of high to low frequency response
+        l_contrast_response : float32 # Low contrast response
+        h_contrast_response : float32 # High contrast response
+        lh_contrast_index : float32 # Ratio of high to low contrast response
         '''
         return definition
 

@@ -52,11 +52,11 @@ class ClusteringParametersTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        clustering_id: tinyint unsigned # unique param set id
+        clustering_id: int32 # unique param set id
         ---
         kind: varchar(191)
-        params_dict: longblob
-        min_count: int
+        params_dict: <blob>
+        min_count: int32
         """
         return definition
 
@@ -85,7 +85,7 @@ class ClusteringTemplate(dj.Computed):
         -> self.features_table
         -> self.params_table
         ---
-        clusters : longblob
+        clusters : <npy@processed>
         """
         return definition
 
@@ -143,7 +143,7 @@ class ClusteringTemplate(dj.Computed):
             -> master
             -> master.features_table.RoiFeatures
             ---
-            cluster_idx : int
+            cluster_idx : int32
             """
             return definition
 

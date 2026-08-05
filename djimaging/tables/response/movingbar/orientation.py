@@ -39,26 +39,26 @@ class OsDsIndexesTemplate(dj.Computed):
         #as well as a quality index of DS responses as described in Baden et al. (2016)
         -> self.snippets_table
         ---
-        ds_index:   float     # direction selectivity index as resulting vector length (absolute of projection on complex exponential)
-        ds_pvalue:  float     # p-value indicating the percentile of the vector length in null distribution
-        pref_dir:   float     # preferred direction
-        os_index:   float     # orientation selectivity index in analogy to ds_index
-        os_pvalue:  float     # analogous to ds_pvalue for orientation tuning
-        pref_or:    float     # preferred orientation
-        on_off:     float     # on off index based on time kernel
-        d_qi:       float     # quality index for moving bar response
-        dir_component:     blob
-        time_component:    blob
-        time_component_dt: float
-        surrogate_v:       blob    # computed by projecting on time
-        surrogate_dsi:     float   # DSI of surrogate v 
+        ds_index:   float32     # direction selectivity index as resulting vector length (absolute of projection on complex exponential)
+        ds_pvalue:  float32     # p-value indicating the percentile of the vector length in null distribution
+        pref_dir:   float32     # preferred direction
+        os_index:   float32     # orientation selectivity index in analogy to ds_index
+        os_pvalue:  float32     # analogous to ds_pvalue for orientation tuning
+        pref_or:    float32     # preferred orientation
+        on_off:     float32     # on off index based on time kernel
+        d_qi:       float32     # quality index for moving bar response
+        dir_component:     <npy@processed>
+        time_component:    <npy@processed>
+        time_component_dt: float32
+        surrogate_v:       <npy@processed>    # computed by projecting on time
+        surrogate_dsi:     float32   # DSI of surrogate v
         """
 
         if not self._reduced_storage:
             definition += """
-        ds_null:    blob      # null distribution of DSIs
-        os_null:    blob      # null distribution of OSIs
-        avg_sorted_resp: longblob
+        ds_null:    <npy@processed>      # null distribution of DSIs
+        os_null:    <npy@processed>      # null distribution of OSIs
+        avg_sorted_resp: <npy@processed>
         """
 
         return definition
@@ -176,7 +176,7 @@ class OsDsIndexesTemplate(dj.Computed):
         fig, axs = plt.subplots(1, len(var_names), figsize=(len(var_names) * 2, 2), squeeze=False)
         axs = axs.flatten()
         for ax, var_name in zip(axs, var_names):
-            dat = (self & restriction).fetch(var_name)
+            dat = (self & restriction).to_arrays(var_name)
             ax.hist(dat)
             ax.set(title=var_name)
         plt.tight_layout()

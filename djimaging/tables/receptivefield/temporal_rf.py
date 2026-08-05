@@ -20,10 +20,10 @@ class TempRFPropertiesTemplate(dj.Computed):
         definition = """
         -> self.split_rf_table
         ---
-        rel_weight_baseline : float
-        transience_idx : float
-        half_amp_width : float
-        main_peak_lag : float
+        rel_weight_baseline : float32
+        transience_idx : float32
+        half_amp_width : float32
+        main_peak_lag : float32
         """
         return definition
 
@@ -82,7 +82,7 @@ class TempRFPropertiesTemplate(dj.Computed):
     def plot(self):
         fig, axs = plt.subplots(1, 4, figsize=(12, 3))
         for ax, name in zip(axs, ['rel_weight_baseline', 'transience_idx', 'half_amp_width', 'main_peak_lag']):
-            ax.hist(self.fetch(name))
+            ax.hist(self.to_arrays(name))
             ax.set_title(name)
         plt.tight_layout()
         return fig, axs

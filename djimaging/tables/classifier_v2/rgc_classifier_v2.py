@@ -10,7 +10,7 @@ class ClassifierV2Template(dj.Manual):
     @property
     def definition(self) -> str:
         definition = """
-        classifier_id : int unsigned  # Unique identifier for the classifier
+        classifier_id : int64  # Unique identifier for the classifier
         ---
         classifier_file : varchar(255)
         """

@@ -26,11 +26,11 @@ class IplBinParamsTemplate(dj.Manual):
     @property
     def definition(self):
         definition = """
-            ipl_bin_id : tinyint unsigned # ipl bin id
+            ipl_bin_id : int32 # ipl bin id
             ---
-            n_bins : tinyint unsigned # number of bins
-            bin_borders   :blob    # pixel index where gcl/ipl border intersects on left of image (with GCL up)
-            bin_names  = NULL :blob    # pixel index where gcl/ipl border intersects on right side of image
+            n_bins : int32 # number of bins
+            bin_borders   :<npy@processed>    # pixel index where gcl/ipl border intersects on left of image (with GCL up)
+            bin_names  = NULL :<blob>    # pixel index where gcl/ipl border intersects on right side of image
             """
         return definition
 
@@ -60,7 +60,7 @@ class RoiIplBinTemplate(dj.Computed):
             -> self.roi_ipl_table
             -> self.ipl_bin_params_table
             ---
-            roi_ipl_bin : tinyint unsigned # ipl bin id -1 if too low, n_bins if too high
+            roi_ipl_bin : int32 # ipl bin id -1 if too low, n_bins if too high
             """
         return definition
 

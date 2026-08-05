@@ -9,7 +9,7 @@ description = "DataJoint for 2P imaging data"
 authors = [{ name = "Jonathan Oesterle", email = "jonathan.oesterle@uni-tuebingen.de" }]
 requires-python = ">=3.10"
 dependencies = [
-    "datajoint>=0.13",
+    "datajoint>=2.3.1,<2.4",
     "numpy",
     "h5py",
     "scipy",
@@ -44,6 +44,10 @@ where = ["."]
 
 [tool.pytest.ini_options]
 markers = ["dependency: mark a test as a dependency"]
+filterwarnings = [
+    "error:fetch\\(\\) is deprecated.*:DeprecationWarning",
+    "error:ERD is deprecated.*:DeprecationWarning",
+]
 
 [tool.uv.sources]
 scanm-support = { git = "https://github.com/eulerlab/ScanM_support.git" }

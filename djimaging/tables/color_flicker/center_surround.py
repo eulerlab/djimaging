@@ -16,10 +16,10 @@ class CenterSurroundParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        cs_params_id: int # unique param set id
+        cs_params_id: int32 # unique param set id
         ---
-        peak_nstd : float  # How many standard deviations does a peak need to be considered peak?
-        npeaks_max : int unsigned # Maximum number of peaks, ignored if zero
+        peak_nstd : float32  # How many standard deviations does a peak need to be considered peak?
+        npeaks_max : int64 # Maximum number of peaks, ignored if zero
         """
         return definition
 
@@ -44,14 +44,14 @@ class CenterSurroundTemplate(dj.Computed):
         -> self.color_rf_table
         -> self.cs_params_table
         ---
-        c_polarity_idx : float  # Polarity index of center RF
-        c_transience_idx : float  # Transience index of center RF
-        c_half_amp_width : float  # Half amplitude width of center RF
-        c_main_peak_lag : float  # Main peak lag of center RF
-        s_polarity_idx : float  # Polarity index of surround RF
-        s_transience_idx : float  # Transience index of surround RF
-        s_half_amp_width : float  # Half amplitude width of surround RF
-        s_main_peak_lag : float  # Main peak lag of surround RF
+        c_polarity_idx : float32  # Polarity index of center RF
+        c_transience_idx : float32  # Transience index of center RF
+        c_half_amp_width : float32  # Half amplitude width of center RF
+        c_main_peak_lag : float32  # Main peak lag of center RF
+        s_polarity_idx : float32  # Polarity index of surround RF
+        s_transience_idx : float32  # Transience index of surround RF
+        s_half_amp_width : float32  # Half amplitude width of surround RF
+        s_main_peak_lag : float32  # Main peak lag of surround RF
         """
         return definition
 
@@ -139,7 +139,7 @@ class CenterSurroundTemplate(dj.Computed):
         """
         fig, axs = plt.subplots(1, 3, figsize=(12, 3))
         for ax, name in zip(axs, ['transience_idx', 'half_amp_width', 'main_peak_lag']):
-            ax.hist(self.fetch(name))
+            ax.hist(self.to_arrays(name))
             ax.set_title(name)
         plt.tight_layout()
         return fig, axs

@@ -44,14 +44,14 @@ class CorrMapTemplate(dj.Computed):
         definition = """
         -> self.presentation_table
         ---
-        corr_map : longblob  # Correlation mask for stack, after stimulus onset
-        corr_map_max : float  # Maximum correlation
-        corr_map_mean : float  # Mean correlation
+        corr_map : <npy@processed>  # Correlation mask for stack, after stimulus onset
+        corr_map_max : float32  # Maximum correlation
+        corr_map_mean : float32  # Mean correlation
         """
 
         if self._include_prestim:
             definition += """
-            corr_map_pre_stim : longblob  # Correlation mask for stack before stimulus
+            corr_map_pre_stim : <npy@processed>  # Correlation mask for stack before stimulus
             """
 
         return definition
@@ -133,7 +133,7 @@ class CorrMapTemplate(dj.Computed):
         key = get_primary_key(self, key=key)
 
         data_name = (self.userinfo_table & key).fetch1('data_stack_name')
-        main_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        main_ch_average = (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average')
 
         corr_map = (self & key).fetch1('corr_map')
         if self._include_prestim:
@@ -187,10 +187,10 @@ class CrossCondCorrMapTemplate(dj.Computed):
         -> self.corr_map_table.proj(cond1_A='{self._split_cond}')
         -> self.corr_map_table.proj(cond1_B='{self._split_cond}')
         ---
-        cross_corr_map : blob  # Cross correlation between stacks of same stimulus but different conditions
-        shift_x : int  # Shift in pixels
-        shift_z : int  # Shift in pixels
-        max_corr : float  # Maximum correlation
+        cross_corr_map : <npy@processed>  # Cross correlation between stacks of same stimulus but different conditions
+        shift_x : int32  # Shift in pixels
+        shift_z : int32  # Shift in pixels
+        max_corr : float32  # Maximum correlation
         """
         return definition
 
@@ -271,10 +271,10 @@ class CrossStimCorrMapTemplate(dj.Computed):
         -> self.corr_map_table.proj(stim_A='stim_name')
         -> self.corr_map_table.proj(stim_B='stim_name')
         ---
-        cross_corr_map : blob  # Cross correlation between stacks of same stimulus but different conditions
-        shift_x : int  # Shift in pixels
-        shift_z : int  # Shift in pixels
-        max_corr : float  # Maximum correlation
+        cross_corr_map : <npy@processed>  # Cross correlation between stacks of same stimulus but different conditions
+        shift_x : int32  # Shift in pixels
+        shift_z : int32  # Shift in pixels
+        max_corr : float32  # Maximum correlation
         """
         return definition
 

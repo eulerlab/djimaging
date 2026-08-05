@@ -169,7 +169,7 @@ def get_primary_key(table: dj.Table, key: dict | None = None) -> dict:
     if key is not None:
         key = {k: v for k, v in key.items() if k in table.primary_key}
     else:
-        key = random.choice(table.proj().fetch(as_dict=True))
+        key = random.choice(table.proj().to_dicts())
     return key
 
 

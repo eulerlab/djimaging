@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -507,7 +507,7 @@ wheels = [
 
 [[package]]
 name = "datajoint"
-version = "2.1.1"
+version = "2.3.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "deepdiff" },
@@ -516,6 +516,7 @@ dependencies = [
     { name = "networkx", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "packaging" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pydantic-settings" },
@@ -524,9 +525,9 @@ dependencies = [
     { name = "pyparsing" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/62/52/b341a41abae666f5c9bbbdfb08fb4836681acb8cddb562e7482140820005/datajoint-2.1.1.tar.gz", hash = "sha256:db2965db3a5d82a7c01084ea5cc773867e421288a37feb227affee37b2a40702", size = 1708931, upload-time = "2026-02-17T19:56:37.894Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/9c/f5f71f241ae31b8861f40c4fcbcc5b0f607c5f3b836dbd834e18643553d1/datajoint-2.3.2.tar.gz", hash = "sha256:47efee045b6eb346353132d4bcd41c58583b661ef880831357fc30227557f3fa", size = 678052, upload-time = "2026-07-21T21:31:40.867Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ec/26/db3b1edf7176ee55329606324cb36b861f0106f456dc94a096fc2fdf1826/datajoint-2.1.1-py3-none-any.whl", hash = "sha256:8c4c8e052958e70aba998a1b1f46fd1266ff0d2946b19966992fb3a4e40e4d94", size = 221980, upload-time = "2026-02-17T19:56:36.442Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/09/4ffdd209ef5bbf7e086c70c633e5fece743a5a6e55e14d0d28422251943c/datajoint-2.3.2-py3-none-any.whl", hash = "sha256:734c74465faef9d1e3053bc22e5aa3a47f82117752c90af00a26009af80ec2c6", size = 252200, upload-time = "2026-07-21T21:31:39.593Z" },
 ]
 
 [[package]]
@@ -596,7 +597,7 @@ rf = [
 requires-dist = [
     { name = "astropy" },
     { name = "cached-property" },
-    { name = "datajoint", specifier = ">=0.13" },
+    { name = "datajoint", specifier = ">=2.3.1,<2.4" },
     { name = "h5py" },
     { name = "ipycanvas", marker = "extra == 'autorois'" },
     { name = "ipython" },
@@ -2108,7 +2109,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess" },
+    { name = "ptyprocess", marker = "(python_full_version < '3.11' and sys_platform == 'emscripten') or (python_full_version < '3.11' and sys_platform == 'win32') or (sys_platform != 'emscripten' and sys_platform != 'win32')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [

@@ -149,9 +149,9 @@ class CelltypeAssignmentTemplate(dj.Computed):
         -> self.baden_trace_table
         -> self.classifier_table
         ---
-        cell_label:      int         # predicted label with highest probability. Meaning of label depends on classifier
-        max_confidence:  float       # confidence score for assigned cell_label, can be celltype, supergroup etc.
-        confidence:      blob        # confidence scores (probabilities) for all celltypes
+        cell_label:      int32         # predicted label with highest probability. Meaning of label depends on classifier
+        max_confidence:  float32       # confidence score for assigned cell_label, can be celltype, supergroup etc.
+        confidence:      <npy@processed>        # confidence scores (probabilities) for all celltypes
         """
         return definition
 
@@ -304,7 +304,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
             classifier_params_hash=key["classifier_params_hash"],
             training_data_hash=key["training_data_hash"])
 
-        roi_keys = (self.baden_trace_table & key & restriction).fetch('KEY')
+        roi_keys = (self.baden_trace_table & key & restriction).keys()
         if len(roi_keys) == 0:
             return None, None, None, None, None
 
@@ -313,7 +313,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
         else:
             data_tab = (self.baden_trace_table & key & restriction) * self.roi_table
 
-        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = data_tab.fetch(
+        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = data_tab.to_arrays(
             'preproc_chirp', 'preproc_bar', 'ds_pvalue', 'roi_size_um2')
 
         preproc_chirps = np.vstack(preproc_chirps)
@@ -353,7 +353,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
             classifier_level: Label level to display; one of ``'cluster'``, ``'group'``,
                 or ``'super'``.
         """
-        df = self.fetch(format='frame')
+        df = self.to_pandas()
         groups = df.groupby(['training_data_hash', 'classifier_params_hash', 'preprocess_id'])
 
         fig, axs = plt.subplots(len(groups), 1, figsize=(12, 3 * len(groups)), squeeze=False)
@@ -374,7 +374,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         Args:
             ax: Matplotlib axes on which to draw.
-            df: DataFrame subset for this group, as returned by ``fetch(format='frame')``.
+            df: DataFrame subset for this group, as returned by ``to_pandas()``.
             classifier_params_hash: Hash identifying the classifier parameter set.
             training_data_hash: Hash identifying the training data set.
             preprocess_id: Preprocessing identifier for this group.
@@ -422,7 +422,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
             xlim_bar: Optional x-axis limits for the bar trace panel.
             plot_baden_data: If ``True``, overlay traces from the Baden training data.
         """
-        df = self.fetch(format='frame')
+        df = self.to_pandas()
         groups = df.groupby(['training_data_hash', 'classifier_params_hash', 'preprocess_id'])
 
         for (tdh, cph, pid), df_group in groups:
@@ -458,7 +458,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
         # Get new data
         roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = self._fetch_data(
             key=key, restriction=(self & f'max_confidence>={threshold_confidence}'))
-        data_celltypes = (self & roi_keys).fetch('cell_label')
+        data_celltypes = (self & roi_keys).to_arrays('cell_label')
 
         # Get training data
         self.current_model_key = dict(classifier_params_hash=classifier_params_hash,

@@ -18,12 +18,12 @@ class RoiTemplate(dj.Computed):
         definition = """
         # ROI information
         -> self.roi_mask_table
-        roi_id           :smallint           # integer id of each ROI
+        roi_id           :int32           # integer id of each ROI
         ---
-        roi_size         :int                # number of pixels in ROI
-        roi_size_um2     :float              # size of ROI in micrometers squared
-        roi_dia_um       :float              # diameter of ROI in micrometers, if it was a circle
-        artifact_flag    :tinyint unsigned   # flag if roi contains light artifact (1) or not (0)
+        roi_size         :int32                # number of pixels in ROI
+        roi_size_um2     :float32              # size of ROI in micrometers squared
+        roi_dia_um       :float32              # diameter of ROI in micrometers, if it was a circle
+        artifact_flag    :bool   # flag if roi contains light artifact (1) or not (0)
         """
         return definition
 
@@ -108,8 +108,8 @@ class RoiTemplate(dj.Computed):
         roi_mask = (self.roi_mask_table & key).fetch1("roi_mask")
 
         data_name, alt_name = (self.userinfo_table() & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.field_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
-        alt_ch_average = (self.field_table.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+        main_ch_average = (self.field_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average')
+        alt_ch_average = (self.field_table.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average')
 
         plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
                    roi_mask=roi_mask, roi_ch_average=main_ch_average,

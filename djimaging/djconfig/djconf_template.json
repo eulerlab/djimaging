@@ -5,15 +5,29 @@
   "database.port": 0,
   "database.reconnect": true,
   "connection.init_function": null,
-  "connection.charset": "",
+  "connection.charset": "utf8mb4",
   "loglevel": "INFO",
   "safemode": true,
-  "fetch_format": "array",
+  "download_path": "./.datajoint-downloads",
   "display.limit": 20,
   "display.width": 14,
   "display.show_tuple_count": true,
   "database.use_tls": null,
-  "enable_python_native_blobs": true,
-  "stores": null,
+  "stores": {
+    "default": "processed",
+    "filepath_default": "acquisition",
+    "acquisition": {
+      "protocol": "file",
+      "location": "/path/to/acquisition"
+    },
+    "processed": {
+      "protocol": "file",
+      "location": "/path/to/processed"
+    },
+    "models": {
+      "protocol": "file",
+      "location": "/path/to/models"
+    }
+  },
   "schema_name": ""
 }

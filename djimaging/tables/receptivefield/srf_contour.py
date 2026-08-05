@@ -46,13 +46,13 @@ class RfContoursParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        rf_contours_params_id: int # unique param set id
+        rf_contours_params_id: int32 # unique param set id
         ---
-        blur_std : float
-        blur_npix : int unsigned
-        upsample_srf_scale : int unsigned
+        blur_std : float32
+        blur_npix : int64
+        upsample_srf_scale : int64
         norm_kind : enum('zscore', 'zero_one', 'amp_one', 'std_one', 'none')
-        levels : blob  # First level is used for area and cdia
+        levels : <blob>  # First level is used for area and cdia
         """
         return definition
 
@@ -79,14 +79,14 @@ class RfContoursTemplate(dj.Computed):
         -> self.split_rf_table
         -> self.rf_contours_params_table
         ---
-        srf_contours : blob
-        srf_contours_um2 : blob
-        srf_contours_cdia_um : blob
-        is_single_contour : tinyint unsigned # True if all levels have a single contour
-        largest_contour_ratio : float # Ratio of largest contour relative to full area (for level where it's lowest)
-        rf_area_um2 = NULL : float # Area of largest contour at first level
-        rf_cdia_um = NULL : float # Circle equivalent diameter of largest contour at first level
-        irregular_index = NULL : float # Irregularity index of largest contour at first level
+        srf_contours : <blob@processed>
+        srf_contours_um2 : <blob@processed>
+        srf_contours_cdia_um : <blob@processed>
+        is_single_contour : bool # True if all levels have a single contour
+        largest_contour_ratio : float32 # Ratio of largest contour relative to full area (for level where it's lowest)
+        rf_area_um2 = NULL : float32 # Area of largest contour at first level
+        rf_cdia_um = NULL : float32 # Circle equivalent diameter of largest contour at first level
+        irregular_index = NULL : float32 # Irregularity index of largest contour at first level
         """
         return definition
 
@@ -240,9 +240,9 @@ class RfContourMetricsTemplate(dj.Computed):
         definition = """
         -> self.rf_contour_table
         ---
-        center_index: float # Weight and sign of center in sRF
-        surround_index: float # Weight and sign of surround in sRF (with space to center)
-        full_surround_index : float # Weight and sign of surround in sRF (with no border to center)
+        center_index: float32 # Weight and sign of center in sRF
+        surround_index: float32 # Weight and sign of surround in sRF (with space to center)
+        full_surround_index : float32 # Weight and sign of surround in sRF (with no border to center)
         """
         return definition
 

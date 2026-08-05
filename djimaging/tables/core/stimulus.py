@@ -80,20 +80,20 @@ class StimulusTemplate(dj.Manual):
         ---
         alias               :varchar(999)       # Strings (_ seperator) to identify this stimulus, not case sensitive!
         stim_family=""      :varchar(191)       # To group stimuli (e.g. gChirp and lChirp) for downstream processing 
-        framerate=0         :float              # framerate in Hz
-        isrepeated=0        :tinyint unsigned   # Is the stimulus repeated? Used for snippets
-        ntrigger_rep=0      :mediumint unsigned # Number of triggers (per repetition)
+        framerate=0         :float32              # framerate in Hz
+        isrepeated=0        :bool   # Is the stimulus repeated? Used for snippets
+        ntrigger_rep=0      :int32 # Number of triggers (per repetition)
         stim_path=""        :varchar(191)       # Path to hdf5 file containing numerical array and info about stim
         commit_id=""        :varchar(191)       # Commit id corresponding to stimulus entry in GitHub repo
         stim_hash=""        :varchar(191)       # QDSpy hash
-        trial_info=NULL     :longblob           # trial information, e.g. directions of moving bar
-        stim_trace=NULL     :longblob           # array of stimulus if available
-        stim_dict=NULL      :longblob           # stimulus information dictionary, contains e.g. spatial extent
+        trial_info=NULL     :<blob>           # trial information, e.g. directions of moving bar
+        stim_trace=NULL     :<npy@processed>           # array of stimulus if available
+        stim_dict=NULL      :<blob>           # stimulus information dictionary, contains e.g. spatial extent
         """
 
         if self._incl_snippet_base_dt:
             definition += """
-            snippet_base_dt=NULL : float           # Time used for snippet baseline estimation
+            snippet_base_dt=NULL : float32           # Time used for snippet baseline estimation
             """
 
         return definition
@@ -110,7 +110,7 @@ class StimulusTemplate(dj.Manual):
             AssertionError: If any individual alias token already exists in the
                 table for a different stimulus.
         """
-        existing_aliases = (self - [dict(stim_name=stim_name)]).fetch('alias')  # Skip duplicate comparison
+        existing_aliases = (self - [dict(stim_name=stim_name)]).to_arrays('alias')  # Skip duplicate comparison
         for existing_alias in existing_aliases:
             for existing_alias_i in existing_alias.split('_'):
                 assert existing_alias_i not in alias.split('_'), \
@@ -191,7 +191,7 @@ class StimulusTemplate(dj.Manual):
         if restriction is None:
             restriction = dict()
 
-        for key in (self & restriction).proj().fetch(as_dict=True):
+        for key in (self & restriction).proj().to_dicts():
             trial_info, ntrigger_rep = (self & key).fetch1('trial_info', 'ntrigger_rep')
             if trial_info is not None:
                 trial_info = check_trial_info(trial_info=trial_info, ntrigger_rep=ntrigger_rep)

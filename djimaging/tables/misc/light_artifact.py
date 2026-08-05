@@ -39,8 +39,8 @@ class LightArtifactTemplate(dj.Computed):
         definition = """
         -> self.presentation_table
         ---
-        light_artifact : longblob  # Normalized mean light artifact trace in line precision
-        triggertimes_rel : blob # Relative triggertimes
+        light_artifact : <npy@processed>  # Normalized mean light artifact trace in line precision
+        triggertimes_rel : <npy@processed> # Relative triggertimes
         """
         return definition
 
@@ -87,7 +87,7 @@ class LightArtifactTemplate(dj.Computed):
 
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
         triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
-        line_duration = (self.presentation_table.ScanInfo & key).fetch('line_duration')
+        line_duration = (self.presentation_table.ScanInfo & key).to_arrays('line_duration')
 
         times = np.arange(light_artifact.size) * line_duration
 
@@ -103,7 +103,7 @@ class LightArtifactTemplate(dj.Computed):
     def plot1(self, key: dict = None) -> None:
         key = get_primary_key(self, key=key)
         light_artifact = (self & key).fetch1('light_artifact')
-        line_duration = (self.presentation_table.ScanInfo & key).fetch('line_duration')
+        line_duration = (self.presentation_table.ScanInfo & key).to_arrays('line_duration')
         triggertimes_rel = (self & key).fetch1('triggertimes_rel')
 
         time = np.arange(light_artifact.size) * line_duration

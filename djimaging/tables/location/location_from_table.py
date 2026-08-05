@@ -39,7 +39,7 @@ class RetinalFieldLocationTableParamsTemplate(dj.Lookup):
         definition = """
         table_hash : varchar(63)         # hash of the classifier params config
         ---
-        table_path :   attach@{store} # Path to table
+        table_path :   <attach@{store}> # Path to table
         col_experimenter = 'experimenter' : varchar(191)
         col_exp_num = 'exp_num' : varchar(191)
         col_date = 'date' : varchar(191)
@@ -70,8 +70,8 @@ class RetinalFieldLocationFromTableTemplate(dj.Computed):
             -> self.field_table
             -> self.params_table
             ---
-            ventral_dorsal_pos   :float      # position on the ventral-dorsal axis, greater 0 means dorsal
-            temporal_nasal_pos   :float      # position on the temporal-nasal axis, greater 0 means nasal
+            ventral_dorsal_pos   :float32      # position on the ventral-dorsal axis, greater 0 means dorsal
+            temporal_nasal_pos   :float32      # position on the temporal-nasal axis, greater 0 means nasal
             """
         return definition
 
@@ -127,7 +127,7 @@ class RetinalFieldLocationFromTableTemplate(dj.Computed):
         self.insert1(rfl_key)
 
     def plot(self, key=None):
-        temporal_nasal_pos, ventral_dorsal_pos = self.fetch("temporal_nasal_pos", "ventral_dorsal_pos")
+        temporal_nasal_pos, ventral_dorsal_pos = self.to_arrays("temporal_nasal_pos", "ventral_dorsal_pos")
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
         ax.scatter(temporal_nasal_pos, ventral_dorsal_pos, label='all')
         if key is not None:
@@ -142,15 +142,12 @@ class RetinalFieldLocationFromTableTemplate(dj.Computed):
 
 def prepare_dj_config_location_from_table(input_folder):
     stores_dict = {
-        "location_table_input": {"protocol": "file", "location": input_folder, "stage": input_folder}}
+        "location_table_input": {"protocol": "file", "location": input_folder}}
 
     # Make sure folders exits
     for store, store_dict in stores_dict.items():
-        for name in store_dict.keys():
-            if name in ["location", "stage"]:
-                assert os.path.isdir(store_dict[name]), f'This must be a folder you have access to: {store_dict[name]}'
-
-    os.environ["DJ_SUPPORT_FILEPATH_MANAGEMENT"] = "TRUE"
+        assert os.path.isdir(store_dict["location"]), \
+            f'This must be a folder you have access to: {store_dict["location"]}'
 
     dj_config_stores = dj.config['stores'] or dict()
     dj_config_stores.update(stores_dict)

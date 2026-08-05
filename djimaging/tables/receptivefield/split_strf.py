@@ -20,20 +20,20 @@ class SplitRFParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        split_rf_params_id: tinyint unsigned # unique param set id
+        split_rf_params_id: int32 # unique param set id
         """
         if self._color_idxs:
             definition += """
-            color_idx: tinyint unsigned
+            color_idx: int32
         """
         definition += """
         ---
         method : varchar(63)  # Method used to split RF, currently available are SVD, STD, and MAX
-        blur_std : float
-        blur_npix : int unsigned
-        upsample_srf_scale : int unsigned
-        peak_nstd : float  # How many standard deviations does a peak need to be considered peak?
-        npeaks_max : int unsigned # Maximum number of peaks, ignored if zero
+        blur_std : float32
+        blur_npix : int64
+        upsample_srf_scale : int64
+        peak_nstd : float32  # How many standard deviations does a peak need to be considered peak?
+        npeaks_max : int64 # Maximum number of peaks, ignored if zero
         """
 
         return definition
@@ -70,11 +70,11 @@ class SplitRFTemplate(dj.Computed):
         -> self.rf_table
         -> self.split_rf_params_table
         ---
-        srf: longblob  # spatio receptive field
-        trf: longblob  # temporal receptive field
-        polarity : tinyint  # Polarity of the RF, 1 for positive, -1 for negative
-        split_qidx : float  # Quality index as explained variance of the sRF tRF split between 0 and 1
-        trf_peak_idxs : blob  # Indexes of peaks in tRF
+        srf: <npy@processed>  # spatio receptive field
+        trf: <npy@processed>  # temporal receptive field
+        polarity : int32  # Polarity of the RF, 1 for positive, -1 for negative
+        split_qidx : float32  # Quality index as explained variance of the sRF tRF split between 0 and 1
+        trf_peak_idxs : <npy@processed>  # Indexes of peaks in tRF
         '''
         return definition
 
@@ -183,7 +183,7 @@ class SplitRFTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        trf = math_utils.padded_vstack((self & restriction).fetch('trf'))
+        trf = math_utils.padded_vstack((self & restriction).to_arrays('trf'))
 
         if sort:
             trf = sort_traces(trf)

@@ -93,17 +93,17 @@ class RfGlmParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        rf_glm_params_id: tinyint unsigned # unique param set id
+        rf_glm_params_id: int32 # unique param set id
         ---
-        filter_dur_s_past : float # filter duration in seconds into the past
-        filter_dur_s_future : float # filter duration in seconds into the future
-        df_ts : blob
-        df_ws : blob
-        betas : blob
-        kfold : tinyint unsigned
-        metric = "mse": enum("mse", "corrcoef")
+        filter_dur_s_past : float32 # filter duration in seconds into the past
+        filter_dur_s_future : float32 # filter duration in seconds into the future
+        df_ts : <blob>
+        df_ws : <blob>
+        betas : <blob>
+        kfold : int32
+        metric = "mse": enum('mse', 'corrcoef')
         output_nonlinearity = 'none' : varchar(63)
-        other_params_dict : longblob
+        other_params_dict : <blob>
         """
         return definition
 
@@ -156,19 +156,19 @@ class RfGlmTemplate(dj.Computed):
         -> self.noise_traces_table
         -> self.params_table
         ---
-        rf: longblob  # spatio-temporal receptive field
-        dt: float
+        rf: <npy@processed>  # spatio-temporal receptive field
+        dt: float32
         '''
 
         if self._def_sta:
             definition += '''
-            rf_time: longblob
-            shift: int
+            rf_time: <npy@processed>
+            shift: int32
             '''
 
         definition += '''
-        model_dict: longblob
-        quality_dict: longblob
+        model_dict: <blob@processed>
+        quality_dict: <blob>
         '''
 
         return definition
@@ -305,12 +305,12 @@ class RfGlmQualityDictTemplate(dj.Computed):
         definition = '''
             -> self.glm_table
             ---
-            corrcoef_train = NULL : float
-            corrcoef_test = NULL : float
-            corrcoef_dev = NULL : float
-            mse_train = NULL : float
-            mse_dev = NULL : float
-            mse_test = NULL : float
+            corrcoef_train = NULL : float32
+            corrcoef_test = NULL : float32
+            corrcoef_dev = NULL : float32
+            mse_train = NULL : float32
+            mse_dev = NULL : float32
+            mse_test = NULL : float32
             '''
         return definition
 
@@ -353,7 +353,7 @@ class RfGlmQualityDictTemplate(dj.Computed):
         *restrictions : dict
             Optional DataJoint restrictions to apply before fetching.
         """
-        df_q = (self & restrictions).fetch(format='frame')
+        df_q = (self & restrictions).to_pandas()
 
 
 class RfGlmQualityParamsTemplate(dj.Lookup):
@@ -362,11 +362,11 @@ class RfGlmQualityParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        glm_quality_params_id: smallint # unique param set id
+        glm_quality_params_id: int32 # unique param set id
         ---
-        min_corrcoef : float
-        max_mse : float
-        perm_alpha : float
+        min_corrcoef : float32
+        max_mse : float32
+        perm_alpha : float32
         """
         return definition
 
@@ -400,7 +400,7 @@ class RfGlmSingleModelTemplate(dj.Computed):
         # Pick best model for all parameterizations
         -> self.glm_table
         ---
-        score_test : float
+        score_test : float32
         '''
         return definition
 
@@ -429,7 +429,7 @@ class RfGlmSingleModelTemplate(dj.Computed):
             DataJoint primary key identifying the ROI entry to process.
         """
         roi_key = key.copy()
-        quality_dicts, model_dicts, param_ids = (self.glm_table & roi_key).fetch(
+        quality_dicts, model_dicts, param_ids = (self.glm_table & roi_key).to_arrays(
             'quality_dict', 'model_dict', 'rf_glm_params_id')
 
         metrics = [model_dict['metric'] for model_dict in model_dicts]
@@ -467,7 +467,7 @@ class RfGlmSingleModelTemplate(dj.Computed):
 
     def plot(self) -> None:
         """Plot histogram of selected GLM parameter IDs across all entries."""
-        rf_glm_params_ids = self.fetch('rf_glm_params_id')
+        rf_glm_params_ids = self.to_arrays('rf_glm_params_id')
         plt.figure()
         plt.hist(rf_glm_params_ids,
                  bins=np.arange(np.min(rf_glm_params_ids) - 0.25, np.max(rf_glm_params_ids) + 0.5, 0.5))
@@ -499,7 +499,7 @@ class RfGlmQualityTemplate(dj.Computed):
         -> self.glm_single_model_table
         -> self.params_table
         ---
-        rf_glm_qidx : float
+        rf_glm_qidx : float32
         '''
         return definition
 
@@ -584,7 +584,7 @@ class RfGlmQualityTemplate(dj.Computed):
         glm_quality_params_id : int, optional
             ID of the quality parameter set to plot. Default is 1.
         """
-        rf_glm_qidx = (self & f"glm_quality_params_id={glm_quality_params_id}").fetch("rf_glm_qidx")
+        rf_glm_qidx = (self & f"glm_quality_params_id={glm_quality_params_id}").to_arrays("rf_glm_qidx")
 
         fig, ax = plt.subplots(1, 1, figsize=(4, 3))
         ax.hist(rf_glm_qidx)

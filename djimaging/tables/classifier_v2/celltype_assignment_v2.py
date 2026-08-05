@@ -22,14 +22,14 @@ class CelltypeAssignmentV2Template(dj.Computed):
         -> self.baden_trace_table
         -> self.classifier_table
         ---
-        cluster_id :       tinyint unsigned      # cluster ID, ranging from 1 to 75
-        group_id :         tinyint unsigned      # group ID, ranging from 1 to 46
+        cluster_id :       int32      # cluster ID, ranging from 1 to 75
+        group_id :         int32      # group ID, ranging from 1 to 46
         supergroup :       enum('OFF', 'ON-OFF', 'Fast ON', 'Slow ON', 'Unc. ON', 'Unc. SbC', 'dAC', 'error')
-        prob_cluster :     float                 # probability of being in the given cluster
-        prob_group :       float                 # aggregated probability of being in the given group
-        prob_supergroup :  float                 # aggregated probability of being in the given supergroup
-        prob_class :       float                 # aggregated probability of being the given cell class (RGC or dAC)
-        probs_per_cluster : blob                 # probabilities for each cluster
+        prob_cluster :     float32                 # probability of being in the given cluster
+        prob_group :       float32                 # aggregated probability of being in the given group
+        prob_supergroup :  float32                 # aggregated probability of being in the given supergroup
+        prob_class :       float32                 # aggregated probability of being the given cell class (RGC or dAC)
+        probs_per_cluster : <npy@processed>                 # probabilities for each cluster
         """
         return definition
 
@@ -191,8 +191,8 @@ class CelltypeAssignmentV2Template(dj.Computed):
             restriction = dict()
 
         roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = (
-                (self.baden_trace_table & key & restriction) * self.roi_table).fetch(
-            'KEY', 'preproc_chirp', 'preproc_bar', 'ds_pvalue', 'roi_size_um2')
+                (self.baden_trace_table & key & restriction) * self.roi_table).to_arrays(
+            'preproc_chirp', 'preproc_bar', 'ds_pvalue', 'roi_size_um2', include_key=True)
 
         if len(roi_keys) > 0:
             preproc_chirps = np.vstack(preproc_chirps)
@@ -224,7 +224,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
         if int(group_id is not None) + int(cluster_id is not None) + int(cluster_name is not None) != 1:
             raise ValueError("Provide exactly one of 'cluster_id', 'cluster_name', or 'group_id'.")
 
-        df = self.fetch(format='frame')
+        df = self.to_pandas()
         groups = df.groupby('classifier_id')
 
         for classifier_id, df_group in groups:
@@ -368,7 +368,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
         if level not in ['cluster', 'group', 'super']:
             raise ValueError("Invalid level. Choose from 'cluster', 'group', or 'super'.")
 
-        df = self.fetch(format='frame').reset_index()
+        df = self.to_pandas().reset_index()
         groups = df.groupby('classifier_id')
 
         for classifier_id, df_classifier in groups:
@@ -382,7 +382,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
         """Render the cell-type count plot for a single classifier entry.
 
         Args:
-            df: DataFrame for one classifier, as returned by ``fetch(format='frame')``.
+            df: DataFrame for one classifier, as returned by ``to_pandas()``.
             min_prob: Minimum probability threshold for including a cell.
             level: Label level; one of ``'cluster'``, ``'group'``, or ``'super'``.
             plot_baden_data: If ``True``, overlay counts from the Baden reference data.

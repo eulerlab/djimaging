@@ -110,7 +110,7 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
             }
     assert not count_mismatches, f"Unexpected table counts: {count_mismatches}"
 
-    assert np.all((tutorial_schema.Presentation() & experiment_key).fetch("trigger_valid") == 1)
-    assert np.all(np.isfinite((tutorial_schema.ChirpQI() & experiment_key).fetch("qidx")))
-    assert np.all(np.isfinite((tutorial_schema.OsDsIndexes() & experiment_key).fetch("ds_index")))
-    assert np.all(np.isfinite((tutorial_schema.OsDsIndexes() & experiment_key).fetch("os_index")))
+    assert np.all((tutorial_schema.Presentation() & experiment_key).to_arrays("trigger_valid") == 1)
+    assert np.all(np.isfinite((tutorial_schema.ChirpQI() & experiment_key).to_arrays("qidx")))
+    assert np.all(np.isfinite((tutorial_schema.OsDsIndexes() & experiment_key).to_arrays("ds_index")))
+    assert np.all(np.isfinite((tutorial_schema.OsDsIndexes() & experiment_key).to_arrays("os_index")))

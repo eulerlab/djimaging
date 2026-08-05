@@ -31,15 +31,15 @@ class SineSpotFeaturesTemplate(dj.Computed):
         #Computes an OnOff and a transience index based on the chirp step response
         -> self.preprocesstraces_table
         ---
-        surround_index : float  # large spot response - small spot response
-        offset_index : float  # strongest small spot response - small spot response
-        response_spot_small : float  # Mean response to small spot
-        response_spot_large : float  # Mean response to large spot
-        response_spot_a : float  # Mean response to small offset spot
-        response_spot_b : float  # Mean response to small offset spot
-        response_spot_c : float  # Mean response to small offset spot
-        response_spot_d : float  # Mean response to small offset spot
-        response_rep_x_cond: longblob  # Response matrix used to compute suppression
+        surround_index : float32  # large spot response - small spot response
+        offset_index : float32  # strongest small spot response - small spot response
+        response_spot_small : float32  # Mean response to small spot
+        response_spot_large : float32  # Mean response to large spot
+        response_spot_a : float32  # Mean response to small offset spot
+        response_spot_b : float32  # Mean response to small offset spot
+        response_spot_c : float32  # Mean response to small offset spot
+        response_spot_d : float32  # Mean response to small offset spot
+        response_rep_x_cond: <npy@processed>  # Response matrix used to compute suppression
         '''
         return definition
 
@@ -111,10 +111,10 @@ class SineSpotFeaturesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        response_spot_small = (self & restriction).fetch("response_spot_small")
-        response_spot_large = (self & restriction).fetch("response_spot_large")
-        surround_index = (self & restriction).fetch("surround_index")
-        offset_index = (self & restriction).fetch("offset_index")
+        response_spot_small = (self & restriction).to_arrays("response_spot_small")
+        response_spot_large = (self & restriction).to_arrays("response_spot_large")
+        surround_index = (self & restriction).to_arrays("surround_index")
+        offset_index = (self & restriction).to_arrays("offset_index")
 
         fig, axs = plt.subplots(1, 4, figsize=(12, 3))
 

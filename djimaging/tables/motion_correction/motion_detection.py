@@ -35,10 +35,10 @@ class MotionDetectionParamsTemplate(dj.Lookup):
     @property
     def definition(self) -> str:
         definition = f"""
-        mcorr_id : tinyint unsigned
+        mcorr_id : int32
         ---
         mcorr_method : varchar(191)
-        mcorr_params : longblob
+        mcorr_params : <blob>
         """
         return definition
 
@@ -77,11 +77,11 @@ class MotionDetectionTemplate(dj.Computed):
         -> self.presentation_table
         -> self.mcorr_params_table
         ---
-        max_shift_x : float  # Maximum shift after stimulus onset in x direction
-        max_shift_y : float  # Maximum shift after stimulus onset in y direction
-        shifts_x : mediumblob  # Shift in x direction
-        shifts_y : mediumblob  # Shift in y direction
-        idx_stim_onset : int  # Index of stimulus onset
+        max_shift_x : float32  # Maximum shift after stimulus onset in x direction
+        max_shift_y : float32  # Maximum shift after stimulus onset in y direction
+        shifts_x : <npy@processed>  # Shift in x direction
+        shifts_y : <npy@processed>  # Shift in y direction
+        idx_stim_onset : int32  # Index of stimulus onset
         """
         return definition
 

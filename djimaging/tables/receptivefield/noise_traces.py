@@ -18,14 +18,14 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
     def definition(self):
         definition = """
         -> self.stimulus_table
-        dnoise_params_id: tinyint unsigned # unique param set id
+        dnoise_params_id: int32 # unique param set id
         ---
         fit_kind : varchar(191)
-        fupsample_trace : tinyint unsigned  # Multiplier of sampling frequency, using linear interpolation.
-        fupsample_stim = 0 : tinyint unsigned  # Multiplier of sampling stimulus, using repeat.
-        lowpass_cutoff = 0: float  # Cutoff frequency low pass filter, applied if larger 0.
-        pre_blur_sigma_s = 0: float  # Gaussian blur applied after low pass filter.
-        post_blur_sigma_s = 0: float  # Gaussian blur applied after all other steps.
+        fupsample_trace : int32  # Multiplier of sampling frequency, using linear interpolation.
+        fupsample_stim = 0 : int32  # Multiplier of sampling stimulus, using repeat.
+        lowpass_cutoff = 0: float32  # Cutoff frequency low pass filter, applied if larger 0.
+        pre_blur_sigma_s = 0: float32  # Gaussian blur applied after low pass filter.
+        post_blur_sigma_s = 0: float32  # Gaussian blur applied after all other steps.
         ref_time ='trace' : enum('trace', 'stim')  # Which time to use as reference.
         """
         return definition
@@ -68,7 +68,7 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
         """
 
         if stim_names is None:
-            stim_names = (self.stimulus_table() & 'stim_family = "noise"').fetch('stim_name')
+            stim_names = (self.stimulus_table() & "stim_family = 'noise'").to_arrays('stim_name')
 
         key = dict(dnoise_params_id=dnoise_params_id, fit_kind=fit_kind,
                    fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
@@ -93,11 +93,11 @@ class DNoiseTraceTemplate(dj.Computed):
         -> self.traces_table
         -> self.params_table
         ---
-        trace : longblob   # Trace to fit
-        stim_idxs : longblob  # Stimulus frame indexes
-        noise_dt : float  # Time-step of time component
-        noise_t0 : float  # Time of first sample
-        dt_rel_error : float  # Maximum relative error of dts, if too large, can have unwanted effects
+        trace : <npy@processed>   # Trace to fit
+        stim_idxs : <npy@processed>  # Stimulus frame indexes
+        noise_dt : float32  # Time-step of time component
+        noise_t0 : float32  # Time of first sample
+        dt_rel_error : float32  # Maximum relative error of dts, if too large, can have unwanted effects
         '''
         return definition
 

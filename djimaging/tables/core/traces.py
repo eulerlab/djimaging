@@ -36,11 +36,11 @@ class TracesTemplate(dj.Computed):
 
         definition += """
         ---
-        trace          :longblob              # array of raw trace
-        trace_t0       :float                 # numerical array of trace times
-        trace_dt       :float                 # time between frames
-        trace_valid    :tinyint unsigned      # Are values in trace correct (1) or not (0)?
-        trigger_valid  :tinyint unsigned      # Are triggertimes inside trace_times (1) or not (0)?
+        trace          :<npy@processed>              # array of raw trace
+        trace_t0       :float32                 # numerical array of trace times
+        trace_dt       :float32                 # time between frames
+        trace_valid    :bool      # Are values in trace correct (1) or not (0)?
+        trigger_valid  :bool      # Are triggertimes inside trace_times (1) or not (0)?
         """
         return definition
 
@@ -111,7 +111,7 @@ class TracesTemplate(dj.Computed):
 
         filepath = (self.presentation_table & key).fetch1("pres_data_file")
         triggertimes = (self.presentation_table & key).fetch1("triggertimes")
-        roi_ids = (self.roi_table & key).fetch("roi_id")
+        roi_ids = (self.roi_table & key).to_arrays("roi_id")
 
         if compute_from_stack:
             roi2trace, frame_dt = self._compute_roi2trace_from_stack(
@@ -285,7 +285,7 @@ class TracesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        traces = (self & restriction).fetch("trace")
+        traces = (self & restriction).to_arrays("trace")
 
         traces = math_utils.padded_vstack(traces, cval=np.nan)
         n = traces.shape[0]

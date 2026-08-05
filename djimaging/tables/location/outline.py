@@ -53,7 +53,7 @@ class OutlineAbsTemplate(dj.Computed):
         definition = """
         -> self.experiment_table
         ---
-        outline_abs_xy : blob  # outline of the retinal field in absolute coordinates
+        outline_abs_xy : <npy@processed>  # outline of the retinal field in absolute coordinates
         """
         return definition
 
@@ -63,19 +63,19 @@ class OutlineAbsTemplate(dj.Computed):
         field   :varchar(32)          # string identifying files corresponding to field
         ---
         field_data_file: varchar(191)  # info extracted from which file?
-        absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
-        absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
-        absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
-        scan_type: enum("xy", "xz", "xyz")  # Type of scan
-        npixartifact : int unsigned         # number of pixel with light artifact
-        nxpix: int unsigned                 # number of pixels in x
-        nypix: int unsigned                 # number of pixels in y
-        nzpix: int unsigned                 # number of pixels in z
-        nxpix_offset: int unsigned          # number of offset pixels in x
-        nxpix_retrace: int unsigned         # number of retrace pixels in x
-        pixel_size_um :float                # width of a pixel in um (also height if y is second dimension)
-        z_step_um = NULL :float             # z-step in um
-        nframes: int unsigned               # number of pixels in time
+        absx: float32  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
+        absy: float32  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
+        absz: float32  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
+        scan_type: enum('xy', 'xz', 'xyz')  # Type of scan
+        npixartifact : int64         # number of pixel with light artifact
+        nxpix: int64                 # number of pixels in x
+        nypix: int64                 # number of pixels in y
+        nzpix: int64                 # number of pixels in z
+        nxpix_offset: int64          # number of offset pixels in x
+        nxpix_retrace: int64         # number of retrace pixels in x
+        pixel_size_um :float32                # width of a pixel in um (also height if y is second dimension)
+        z_step_um = NULL :float32             # z-step in um
+        nframes: int64               # number of pixels in time
         """
 
     @property
@@ -233,8 +233,8 @@ class OutlineRelTemplate(dj.Computed):
         -> self.outline_abs_table
         -> self.opticdisk_table
         ---
-        outline_rel_xy : blob  # outline of the retinal field in coordinates relative to the optic disk
-        outline_retina_xy : blob  # outline of the retinal field in retinal coordinates
+        outline_rel_xy : <npy@processed>  # outline of the retinal field in coordinates relative to the optic disk
+        outline_retina_xy : <npy@processed>  # outline of the retinal field in retinal coordinates
         """
         return definition
 
@@ -243,11 +243,11 @@ class OutlineRelTemplate(dj.Computed):
         -> master
         field   :varchar(32)          # string identifying files corresponding to field
         ---
-        relx: float  # relative position of the center (of the cropped field) in the x axis as recorded by ScanM
-        rely: float  # relative position of the center (of the cropped field) in the y axis as recorded by ScanM
-        relz: float  # relative position of the center (of the cropped field) in the z axis as recorded by ScanM
-        ventral_dorsal_pos_um: float
-        temporal_nasal_pos_um: float
+        relx: float32  # relative position of the center (of the cropped field) in the x axis as recorded by ScanM
+        rely: float32  # relative position of the center (of the cropped field) in the y axis as recorded by ScanM
+        relz: float32  # relative position of the center (of the cropped field) in the z axis as recorded by ScanM
+        ventral_dorsal_pos_um: float32
+        temporal_nasal_pos_um: float32
         """
 
     @property
@@ -277,8 +277,8 @@ class OutlineRelTemplate(dj.Computed):
 
         odx, ody, odz = (self.opticdisk_table() & key).fetch1("odx", "ody", "odz")
         outline_abs_xy = (self.outline_abs_table() & key).fetch1('outline_abs_xy')
-        absxs, absys, abszs, field_keys = (self.outline_abs_table().OutlineAbsField & key).fetch(
-            'absx', 'absy', 'absz', 'KEY')
+        field_keys, absxs, absys, abszs = (self.outline_abs_table().OutlineAbsField & key).to_arrays(
+            'absx', 'absy', 'absz', include_key=True)
 
         eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
 
@@ -322,7 +322,7 @@ class OutlineRelTemplate(dj.Computed):
         outline_rel_xy = np.asarray((self & key).fetch1('outline_rel_xy'))
         outline_retina_xy = np.asarray((self & key).fetch1('outline_retina_xy'))
 
-        fields, relxs, relys = (self.OutlineRelField & key).fetch('field', 'relx', 'rely')
+        fields, relxs, relys = (self.OutlineRelField & key).to_arrays('field', 'relx', 'rely')
 
         fig, axs = plt.subplots(1, 3, figsize=(12, 3))
 

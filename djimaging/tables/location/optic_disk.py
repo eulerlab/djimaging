@@ -34,9 +34,9 @@ class OpticDiskTemplate(dj.Computed):
         definition += """
         ---
         od_fromfile :varchar(191)  # File from which optic disc data was extracted
-        odx      :float            # XCoord_um relative to the optic disk
-        ody      :float            # YCoord_um relative to the optic disk
-        odz      :float            # ZCoord_um relative to the optic disk
+        odx      :float32            # XCoord_um relative to the optic disk
+        ody      :float32            # YCoord_um relative to the optic disk
+        odz      :float32            # ZCoord_um relative to the optic disk
         """
         return definition
 
@@ -113,7 +113,7 @@ class OpticDiskTemplate(dj.Computed):
             if self.incl_region:
                 if self.field_table is None:
                     raise ValueError("Field table is not defined, but region is requested for optic disk.")
-                regions = np.unique((self.field_table & key).fetch("region"))
+                regions = np.unique((self.field_table & key).to_arrays("region"))
                 if len(regions) == 0:
                     warnings.warn(f"No region found for key {key}. Populate field and try again.")
                     return

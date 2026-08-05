@@ -45,7 +45,7 @@ class SrIndexTemplate(dj.Computed):
         -> self.roimask_table
         -> self.roi_table
         ---
-        sr_idx = NULL  : float  # SR index >= 0 of ROI normalized to min of stack average and light_artifact = 1.
+        sr_idx = NULL  : float32  # SR index >= 0 of ROI normalized to min of stack average and light_artifact = 1.
         """
         return definition
 
@@ -99,7 +99,7 @@ class SrIndexTemplate(dj.Computed):
 
         try:
             triggertimes = (self.presentation_table & key).fetch1('triggertimes')
-            fs = (self.presentation_table.ScanInfo & key).fetch('scan_frequency')
+            fs = (self.presentation_table.ScanInfo & key).to_arrays('scan_frequency')
             ntrigger_rep = (self.stimulus_table & key).fetch1('ntrigger_rep')
 
             # Find stim onset and offset for faster computations
@@ -121,7 +121,7 @@ class SrIndexTemplate(dj.Computed):
 
         ch1_stack = ch_stacks['wDataCh1'][:, :, stim_onset_idx:stim_offset_idx]
 
-        roi_ids = (self.roi_table & key).fetch('roi_id')
+        roi_ids = (self.roi_table & key).to_arrays('roi_id')
 
         sr_idxs, roi_avgs, roi_avgs_means, lb, ub = compute_sr_idxs(
             ch1_stack, roi_ids, roi_mask, npixartifact=npixartifact)

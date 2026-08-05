@@ -1,12 +1,31 @@
 import os
 import uuid
+from pathlib import Path
 
 import datajoint as dj
 import pytest
 
 
 @pytest.fixture(scope="session")
-def tutorial_schema():
+def dj_test_stores(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+    root = tmp_path_factory.mktemp("datajoint-v2-stores")
+    stores = {name: root / name for name in ("acquisition", "processed", "models")}
+    for path in stores.values():
+        path.mkdir()
+
+    dj.config["stores"] = {
+        "default": "processed",
+        "filepath_default": "acquisition",
+        **{name: {"protocol": "file", "location": str(path)} for name, path in stores.items()},
+    }
+    download_path = root / "downloads"
+    download_path.mkdir()
+    dj.config["download_path"] = str(download_path)
+    return stores
+
+
+@pytest.fixture(scope="session")
+def tutorial_schema(dj_test_stores):
     dj.config["database.host"] = os.environ.get("DJ_HOST", "127.0.0.1")
     dj.config["database.port"] = int(os.environ.get("DJ_PORT", "3306"))
     dj.config["database.user"] = os.environ.get("DJ_USER", "root")
@@ -17,6 +36,20 @@ def tutorial_schema():
 
     from djimaging.schemas import tutorial_schema as schema_module
     from djimaging.utils.dj_utils import activate_schema
+
+    @schema_module.schema
+    class CodecRoundTrip(dj.Manual):
+        definition = """
+        object_id : int32
+        ---
+        source_file : <filepath@acquisition>
+        attachment : <attach@models>
+        small_object : <blob>
+        large_object : <blob@processed>
+        array : <npy@processed>
+        """
+
+    schema_module.CodecRoundTrip = CodecRoundTrip
 
     try:
         activate_schema(schema_module.schema, schema_name=schema_name)

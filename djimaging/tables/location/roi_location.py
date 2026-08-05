@@ -50,9 +50,9 @@ class RelativeRoiLocationWrtFieldTemplate(dj.Computed):
 
         -> self.roi_table
         ---
-        relx_wrt_field   :float      # XCoord_um relative to the field center
-        rely_wrt_field   :float      # YCoord_um relative to the field center
-        relz_wrt_field   :float      # ZCoord_um relative to the field center
+        relx_wrt_field   :float32      # XCoord_um relative to the field center
+        rely_wrt_field   :float32      # YCoord_um relative to the field center
+        relz_wrt_field   :float32      # ZCoord_um relative to the field center
         """
         return definition
 
@@ -86,9 +86,9 @@ class RelativeRoiLocationWrtFieldTemplate(dj.Computed):
     def make(self, key):
         roi_id = (self.roi_table & key).fetch1('roi_id')
         roi_mask = (self.roi_mask_table & key).fetch1('roi_mask')
-        pixel_size_um, z_step_um, scan_type = (self.field_table & key).fetch('pixel_size_um', 'z_step_um', 'scan_type')
+        pixel_size_um, z_step_um, scan_type = (self.field_table & key).to_arrays('pixel_size_um', 'z_step_um', 'scan_type')
 
-        ang_deg_list = (self.presentation_table.ScanInfo() & (self.field_table & key)).fetch('angle_deg')
+        ang_deg_list = (self.presentation_table.ScanInfo() & (self.field_table & key)).to_arrays('angle_deg')
         assert np.unique(ang_deg_list).size == 1, f'Found different angles for different presentations: {ang_deg_list}'
         ang_deg = ang_deg_list[0]
 
@@ -119,7 +119,7 @@ class RelativeRoiLocationWrtFieldTemplate(dj.Computed):
 
     def plot(self, restriction=None, view='igor_local'):
         restriction = {} if restriction is None else restriction
-        scan_type = (self.field_table & restriction).fetch('scan_type')
+        scan_type = (self.field_table & restriction).to_arrays('scan_type')
 
         if np.unique(scan_type).size != 1:
             raise ValueError(
@@ -127,7 +127,7 @@ class RelativeRoiLocationWrtFieldTemplate(dj.Computed):
         else:
             scan_type = scan_type[0]
 
-        relx, rely, relz = (self & restriction).fetch("relx_wrt_field", "rely_wrt_field", "relz_wrt_field")
+        relx, rely, relz = (self & restriction).to_arrays("relx_wrt_field", "rely_wrt_field", "relz_wrt_field")
 
         if scan_type == 'xy':
             plot_relxy_pos(relx, rely, view=view)
@@ -149,9 +149,9 @@ class RelativeRoiLocationTemplate(dj.Computed):
 
         -> self.relative_field_location_wrt_field_table
         ---
-        relx   :float      # XCoord_um relative to the optic disk
-        rely   :float      # YCoord_um relative to the optic disk
-        relz   :float      # ZCoord_um relative to the optic disk
+        relx   :float32      # XCoord_um relative to the optic disk
+        rely   :float32      # YCoord_um relative to the optic disk
+        relz   :float32      # ZCoord_um relative to the optic disk
         """
         return definition
 
@@ -178,7 +178,7 @@ class RelativeRoiLocationTemplate(dj.Computed):
         pass
 
     def make(self, key):
-        pixel_size_um, scan_type = (self.field_table & key).fetch('pixel_size_um', 'scan_type')
+        pixel_size_um, scan_type = (self.field_table & key).to_arrays('pixel_size_um', 'scan_type')
         relx_wrt_field, rely_wrt_field = (self.relative_field_location_wrt_field_table & key).fetch1(
             'relx_wrt_field', 'rely_wrt_field')
 
@@ -201,7 +201,7 @@ class RelativeRoiLocationTemplate(dj.Computed):
 
     def plot(self, restriction=None, view='igor_local'):
         restriction = {} if restriction is None else restriction
-        scan_type = (self.field_table & restriction).fetch('scan_type')
+        scan_type = (self.field_table & restriction).to_arrays('scan_type')
 
         if np.unique(scan_type).size != 1:
             raise ValueError(
@@ -209,7 +209,7 @@ class RelativeRoiLocationTemplate(dj.Computed):
         else:
             scan_type = scan_type[0]
 
-        relx, rely, relz = (self & restriction).fetch("relx", "rely", "relz")
+        relx, rely, relz = (self & restriction).to_arrays("relx", "rely", "relz")
 
         if scan_type == 'xy':
             plot_relxy_pos(relx, rely, view=view)
@@ -227,8 +227,8 @@ class RetinalRoiLocationTemplate(dj.Computed):
         definition = """
         -> self.relative_roi_location_table
         ---
-        ventral_dorsal_pos_um       :float      # position on the ventral-dorsal axis, greater 0 means dorsal
-        temporal_nasal_pos_um       :float      # position on the temporal-nasal axis, greater 0 means nasal
+        ventral_dorsal_pos_um       :float32      # position on the ventral-dorsal axis, greater 0 means dorsal
+        temporal_nasal_pos_um       :float32      # position on the temporal-nasal axis, greater 0 means nasal
         """
         return definition
 
@@ -266,7 +266,7 @@ class RetinalRoiLocationTemplate(dj.Computed):
 
     def plot(self, restriction=None, key=None):
         restriction = {} if restriction is None else restriction
-        temporal_nasal_pos_um, ventral_dorsal_pos_um = (self & restriction).fetch(
+        temporal_nasal_pos_um, ventral_dorsal_pos_um = (self & restriction).to_arrays(
             "temporal_nasal_pos_um", "ventral_dorsal_pos_um")
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
         ax.scatter(temporal_nasal_pos_um, ventral_dorsal_pos_um, label='all', s=1, alpha=0.5)

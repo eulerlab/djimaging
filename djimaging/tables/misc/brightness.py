@@ -34,8 +34,8 @@ class RoiBrightnessTemplate(dj.Computed):
         -> self.presentation_table
         -> self.roi_table
         ---
-        brightness_ch_data  :float  # For data channel defined by user
-        brightness_ch_alt  :float   # For alternative channel defined by user
+        brightness_ch_data  :float32  # For data channel defined by user
+        brightness_ch_alt  :float32   # For alternative channel defined by user
         """
         return definition
 
@@ -75,9 +75,9 @@ class RoiBrightnessTemplate(dj.Computed):
         roi_mask = (self.roimask_table & key).fetch1('roi_mask')
 
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        main_ch_average = (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average')
         try:
-            alt_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{alt_name}"').fetch1(
+            alt_ch_average = (self.presentation_table.StackAverages & key & dict(ch_name=alt_name)).fetch1(
                 'ch_average')
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)

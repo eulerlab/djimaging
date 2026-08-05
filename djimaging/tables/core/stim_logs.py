@@ -10,7 +10,7 @@ class QdsPyLogFileTemplate(dj.Manual):
     def definition(self):
         definition = """
         -> self.exp_table
-        log_idx : tinyint
+        log_idx : int32
         ---
         log_path        : varchar(1024)
         """
@@ -28,7 +28,7 @@ class QdsPyLogFileTemplate(dj.Manual):
             key: Key identifying the experiment.
             log_path: Path to the log file.
         """
-        log_idxs, log_paths = (self & key).fetch('log_idx', 'log_path')
+        log_idxs, log_paths = (self & key).to_arrays('log_idx', 'log_path')
         if len(log_idxs) == 0:
             log_idx = 0
         else:
@@ -53,10 +53,10 @@ class QdsPyLogTemplate(dj.Computed):
         definition = """
         -> self.log_file_table
         ---
-        n_lines_total : int
-        n_lines_data  : int
-        n_lines_err   : int
-        n_err         : int
+        n_lines_total : int32
+        n_lines_data  : int32
+        n_lines_err   : int32
+        n_err         : int32
         """
         return definition
 
@@ -66,26 +66,26 @@ class QdsPyLogTemplate(dj.Computed):
             definition = """
             # ROI Mask
             -> master
-            stim_idx            : int           # stimulus index
+            stim_idx            : int32           # stimulus index
             ---
             stim_file_name   : varchar(255)
             stim_path        : varchar(1024)
             stim_md5         : char(32)
         
-            t_abs_s          : float           # absolute time (s)
-            t_since_last_s   : float           # time since previous stim (s)
+            t_abs_s          : float32           # absolute time (s)
+            t_since_last_s   : float32           # time since previous stim (s)
         
             t_start          : time
             t_end            : time
         
             aborted          : bool
-            t_dur_s          : float
-            t_dur_s_calc     : float
+            t_dur_s          : float32
+            t_dur_s_calc     : float32
         
-            n_dropped_frames : int
+            n_dropped_frames : int32
             
-            params           : blob
-            other_info      : blob          # additional info with new keys
+            params           : <blob>
+            other_info      : <blob>          # additional info with new keys
             """
             return definition
 

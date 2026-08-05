@@ -20,11 +20,11 @@ class AveragesTemplate(dj.Computed):
         # Averages of snippets
         -> self.snippets_table
         ---
-        average             :longblob  # array of snippet average (time)
-        average_norm        :longblob  # normalized array of snippet average (time)
-        average_t0          :float     # time of the first sample of the average
-        average_dt          :float     # time between samples of the average
-        triggertimes_rel    :longblob  # array of relative triggertimes
+        average             :<npy@processed>  # array of snippet average (time)
+        average_norm        :<npy@processed>  # normalized array of snippet average (time)
+        average_t0          :float32     # time of the first sample of the average
+        average_dt          :float32     # time between samples of the average
+        triggertimes_rel    :<npy@processed>  # array of relative triggertimes
         """
         return definition
 
@@ -161,8 +161,8 @@ class AveragesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        averages = (self & restriction).fetch('average')
-        averages_norm = (self & restriction).fetch('average_norm')
+        averages = (self & restriction).to_arrays('average')
+        averages_norm = (self & restriction).to_arrays('average_norm')
 
         averages = math_utils.padded_vstack(averages, cval=np.nan)
         averages_norm = math_utils.padded_vstack(averages_norm, cval=np.nan)

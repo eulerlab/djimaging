@@ -53,14 +53,14 @@ class CascadeTracesParamsTemplate(dj.Lookup):
     def definition(self):
         definition = """
         -> self.stimulus_table
-        cas_params_id:    int       # unique param set id
+        cas_params_id:    int32       # unique param set id
         ---
-        window_length:       int       # window length for SavGol filter in seconds
-        poly_order:          int       # order of polynomial for savgol filter
-        q_lower:             float     # lower percentile for dF/F computation
-        q_upper:             float     # upper percentile for dF/F computation
-        f_cutoff:            float     # cutoff frequency for lowpass filter, only applied when > 0.
-        fs_resample = 0 :    float     # Resampling frequency, only applied when > 0.
+        window_length:       int32       # window length for SavGol filter in seconds
+        poly_order:          int32       # order of polynomial for savgol filter
+        q_lower:             float32     # lower percentile for dF/F computation
+        q_upper:             float32     # upper percentile for dF/F computation
+        f_cutoff:            float32     # cutoff frequency for lowpass filter, only applied when > 0.
+        fs_resample = 0 :    float32     # Resampling frequency, only applied when > 0.
         """
         return definition
 
@@ -76,7 +76,7 @@ class CascadeTracesParamsTemplate(dj.Lookup):
         assert 0 <= q_upper <= 100, f'q_upper={q_upper} must be between 0 and 100'
 
         if stim_names is None:
-            stim_names = (self.stimulus_table()).fetch('stim_name')
+            stim_names = (self.stimulus_table()).to_arrays('stim_name')
 
         key = dict(
             cas_params_id=cas_params_id,
@@ -104,9 +104,9 @@ class CascadeTracesTemplate(dj.Computed):
         -> self.traces_table
         -> self.cascadetraces_params_table
         ---
-        pp_trace:      longblob    # preprocessed trace
-        pp_trace_t0:   float      # start time of trace
-        pp_trace_dt:   float      # time step of trace
+        pp_trace:      <npy@processed>    # preprocessed trace
+        pp_trace_t0:   float32      # start time of trace
+        pp_trace_dt:   float32      # time step of trace
         """
         return definition
 
@@ -182,7 +182,7 @@ class CascadeTracesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        cascade_traces = (self & restriction).fetch("pp_trace")
+        cascade_traces = (self & restriction).to_arrays("pp_trace")
         cascade_traces = math_utils.padded_vstack(cascade_traces, cval=np.nan)
         n = cascade_traces.shape[0]
 
@@ -203,7 +203,7 @@ class CascadeParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        cascade_params_id: tinyint unsigned # unique param set id
+        cascade_params_id: int32 # unique param set id
         ---
         model_name : varchar(191)
         cascade_model_subfolder : varchar(191)
@@ -236,7 +236,7 @@ class CascadeSpikesTemplate(dj.Computed):
         -> self.cascadetraces_table 
         -> self.cascade_params_table
         ---
-        spike_prob:       longblob
+        spike_prob:       <npy@processed>
         """
         return definition
 
@@ -283,9 +283,9 @@ class CascadeSpikesTemplate(dj.Computed):
             make_kwargs=None,
     ):
         if len(restrictions) == 0:
-            cascade_params_ids = self.cascade_params_table.fetch('cascade_params_id')
+            cascade_params_ids = self.cascade_params_table.to_arrays('cascade_params_id')
         else:
-            cascade_params_ids = (self.cascade_params_table & restrictions).fetch('cascade_params_id')
+            cascade_params_ids = (self.cascade_params_table & restrictions).to_arrays('cascade_params_id')
 
         for cascade_params_id in cascade_params_ids:
             cascade_folder, cascade_model_subfolder = (
@@ -332,7 +332,7 @@ class CascadeSpikesTemplate(dj.Computed):
 
     def make(self, key, cascade_models_path, cascade, verboselvl=0):
         model_name = (self.cascade_params_table & key).fetch1('model_name')
-        pp_traces, roi_ids = (self.cascadetraces_table & key).fetch('pp_trace', 'roi_id')
+        pp_traces, roi_ids = (self.cascadetraces_table & key).to_arrays('pp_trace', 'roi_id')
 
         if len(pp_traces) == 0:
             return
@@ -367,7 +367,7 @@ class CascadeSpikesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        spike_prob = (self & restriction).fetch("spike_prob")
+        spike_prob = (self & restriction).to_arrays("spike_prob")
         spike_prob = math_utils.padded_vstack(spike_prob, cval=np.nan)
         n = spike_prob.shape[0]
 

@@ -41,9 +41,9 @@ class IplBordersTemplate(dj.Manual):
         # Use XZ widget notebook to determine values.
         -> self.field_or_pres_table
         ---
-        left   :tinyint    # pixel index where gcl/ipl border intersects on left of image (with GCL up)
-        right  :tinyint    # pixel index where gcl/ipl border intersects on right side of image
-        thick  :tinyint    # pixel width of the ipl
+        left   :int32    # pixel index where gcl/ipl border intersects on left of image (with GCL up)
+        right  :int32    # pixel index where gcl/ipl border intersects on right side of image
+        thick  :int32    # pixel width of the ipl
         """
         return definition
 
@@ -71,7 +71,7 @@ class IplBordersTemplate(dj.Manual):
             List of dicts, each representing one key in the key source that has not
             yet been entered in this table.
         """
-        missing_keys = (self.key_source - self.proj()).fetch(as_dict=True)
+        missing_keys = (self.key_source - self.proj()).to_dicts()
         return missing_keys
 
     def fetch1_and_norm_ch_avgs(self, key: dict, q_clip0: float = 0.0,
@@ -164,7 +164,7 @@ class RoiIplDepthTemplate(dj.Computed):
         -> self.ipl_border_table
         -> self.roi_table
         ---
-        ipl_depth : float  # Depth in the IPL relative to the GCL (=0) and INL (=1)
+        ipl_depth : float32  # Depth in the IPL relative to the GCL (=0) and INL (=1)
         """
         return definition
 
@@ -199,7 +199,7 @@ class RoiIplDepthTemplate(dj.Computed):
         left, right, thick = (self.ipl_border_table & key).fetch1('left', 'right', 'thick')
 
         roi_mask = (self.roimask_table & key).fetch1('roi_mask')
-        roi_ids = (self.roi_table & key).fetch("roi_id")
+        roi_ids = (self.roi_table & key).to_arrays("roi_id")
 
         roi_centers = get_roi_centers(roi_mask, roi_ids)
 
@@ -235,7 +235,7 @@ class RoiIplDepthTemplate(dj.Computed):
         fig, axs = plot_field_and_fit(
             left=left, right=right, thick=thick, ch0_avg=ch0_avg, ch1_avg=ch1_avg, figsize=figsize, title=str(key))
 
-        roi_idxs, ipl_depths = (self & key).fetch('roi_id', 'ipl_depth')
+        roi_idxs, ipl_depths = (self & key).to_arrays('roi_id', 'ipl_depth')
 
         # get colormap for ipl depths
         cmap = plt.cm.get_cmap('viridis')

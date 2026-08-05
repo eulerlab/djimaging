@@ -34,22 +34,22 @@ class FastStaParamsTemplate(dj.Lookup):
     def definition(self):
         definition = """
         -> self.stimulus_table
-        dnoise_params_id: tinyint unsigned # unique param set id
+        dnoise_params_id: int32 # unique param set id
         ---
-        x_stimulus : longblob  # Stimulus design matrix
+        x_stimulus : <npy@processed>  # Stimulus design matrix
         fit_kind : varchar(191)
-        fupsample_trace : tinyint unsigned  # Multiplier of sampling frequency, using linear interpolation.
-        fupsample_stim = 0 : tinyint unsigned  # Multiplier of sampling stimulus, using repeat.
-        lowpass_cutoff = 0: float  # Cutoff frequency low pass filter, applied if larger 0.
-        pre_blur_sigma_s = 0: float  # Gaussian blur applied after low pass filter.
-        post_blur_sigma_s = 0: float  # Gaussian blur applied after all other steps.
-        filter_dur_s_past : float # filter duration in seconds into the past
-        filter_dur_s_future : float # filter duration in seconds into the future
-        rf_time: longblob #  time of RF, depends on dt and shift
-        dt: float  # Time step between frames
-        shift: int  # Shift of stimulus relative to trace. If negative, prediction looks into future.
-        dims: blob  # Dimensions of stimulus
-        burn_in: int  # Number of frames to burn in
+        fupsample_trace : int32  # Multiplier of sampling frequency, using linear interpolation.
+        fupsample_stim = 0 : int32  # Multiplier of sampling stimulus, using repeat.
+        lowpass_cutoff = 0: float32  # Cutoff frequency low pass filter, applied if larger 0.
+        pre_blur_sigma_s = 0: float32  # Gaussian blur applied after low pass filter.
+        post_blur_sigma_s = 0: float32  # Gaussian blur applied after all other steps.
+        filter_dur_s_past : float32 # filter duration in seconds into the past
+        filter_dur_s_future : float32 # filter duration in seconds into the future
+        rf_time: <npy@processed> #  time of RF, depends on dt and shift
+        dt: float32  # Time step between frames
+        shift: int32  # Shift of stimulus relative to trace. If negative, prediction looks into future.
+        dims: <blob>  # Dimensions of stimulus
+        burn_in: int32  # Number of frames to burn in
         """
         return definition
 
@@ -100,7 +100,7 @@ class FastStaParamsTemplate(dj.Lookup):
         """
 
         if stim_names is None:
-            stim_names = (self.stimulus_table() & "stim_family='noise'").fetch('stim_name')
+            stim_names = (self.stimulus_table() & "stim_family='noise'").to_arrays('stim_name')
 
         key = dict(dnoise_params_id=dnoise_params_id, fit_kind=fit_kind,
                    fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
@@ -122,7 +122,7 @@ class FastStaParamsTemplate(dj.Lookup):
             if framerate > 0:
                 dt_trigger = 1 / framerate
             else:
-                triggertimes = (self.presentation_table() & stim_key).fetch('triggertimes')
+                triggertimes = (self.presentation_table() & stim_key).to_arrays('triggertimes')
                 dt_trigger = np.median([np.median(np.diff(tti)) for tti in triggertimes])
 
             if "ntrigger_tot" in stim_dict:
@@ -130,7 +130,7 @@ class FastStaParamsTemplate(dj.Lookup):
             elif (not isrepeated) and (ntrigger_rep > 1):
                 n_trigger = ntrigger_rep
             else:  # Infer from triggertimes
-                triggertimes = (self.presentation_table() & stim_key).fetch('triggertimes')
+                triggertimes = (self.presentation_table() & stim_key).to_arrays('triggertimes')
                 n_trigger = int(np.percentile([tti.size for tti in triggertimes], q=98))
 
             stimtime = np.arange(n_trigger) * dt_trigger
@@ -204,7 +204,7 @@ class FastStaTemplate(dj.Computed):
         -> self.params_table
         -> self.traces_table
         ---
-        rf: longblob  # spatio-temporal receptive field
+        rf: <npy@processed>  # spatio-temporal receptive field
         '''
         return definition
 
@@ -375,8 +375,9 @@ class FastStaTemplate(dj.Computed):
         stimtime = np.interp(
             xidxs_stim, xidxs, np.append(triggertimes, triggertimes[-1] + dt_triggertimes))[:-fupsample_stim]
 
-        trace_t0s, trace_dts, traces, rf_keys = (self.traces_table() & key).fetch(
-            self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace', 'KEY')
+        rf_keys, trace_t0s, trace_dts, traces = (self.traces_table() & key).to_arrays(
+            self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace',
+            include_key=True)
 
         if len(rf_keys) == 0:
             print(f"No traces found for {key}")

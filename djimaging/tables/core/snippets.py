@@ -71,11 +71,11 @@ class SnippetsTemplate(dj.Computed):
         # Snippets created from slicing traces using the triggertimes. 
         -> self.preprocesstraces_table
         ---
-        snippets               :longblob          # array of snippets (time x repetitions)
-        snippets_t0            :blob              # array of snippet start times (repetitions, ) 
-        snippets_dt            :float
-        triggertimes_snippets  :longblob          # snippeted triggertimes (ntrigger_rep x repetitions)
-        droppedlastrep_flag    :tinyint unsigned  # Was the last repetition incomplete and therefore dropped?
+        snippets               :<blob@processed>          # array of snippets (time x repetitions)
+        snippets_t0            :<blob@processed>              # array of snippet start times (repetitions, )
+        snippets_dt            :float32
+        triggertimes_snippets  :<blob@processed>          # snippeted triggertimes (ntrigger_rep x repetitions)
+        droppedlastrep_flag    :bool  # Was the last repetition incomplete and therefore dropped?
         """
         return definition
 
@@ -167,7 +167,7 @@ class SnippetsTemplate(dj.Computed):
         """
         try:
             dt_baseline = (self.stimulus_table & dict(stim_name=stim_name)).fetch1('snippet_base_dt')
-            if not np.isfinite(dt_baseline):
+            if dt_baseline is None or not np.isfinite(dt_baseline):
                 dt_baseline = None
         except dj.DataJointError:
             dt_baseline = None
@@ -266,11 +266,11 @@ class GroupSnippetsTemplate(dj.Computed):
         # Snippets created from slicing traces using the triggertimes. 
         -> self.preprocesstraces_table
         ---
-        snippets               :longblob          # dict of array of snippets (group: time [x repetitions])
-        snippets_t0           :blob              # dict of array of snippet start times (group: repetitions) 
-        snippets_dt            :float
-        triggertimes_snippets  :longblob          # dict of array of triggertimes (group: time [x repetitions])
-        droppedlastrep_flag    :tinyint unsigned  # Was the last repetition incomplete and therefore dropped?
+        snippets               :<blob@processed>          # dict of array of snippets (group: time [x repetitions])
+        snippets_t0           :<blob@processed>              # dict of array of snippet start times (group: repetitions)
+        snippets_dt            :float32
+        triggertimes_snippets  :<blob@processed>          # dict of array of triggertimes (group: time [x repetitions])
+        droppedlastrep_flag    :bool  # Was the last repetition incomplete and therefore dropped?
         """
         return definition
 

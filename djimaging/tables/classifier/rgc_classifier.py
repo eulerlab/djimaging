@@ -1,6 +1,7 @@
 import os
 import pickle as pkl
 from abc import abstractmethod
+from contextlib import ExitStack
 from typing import Mapping, Dict, Any
 
 import datajoint as dj
@@ -9,6 +10,7 @@ import numpy as np
 from djimaging.tables.classifier.celltype_assignment import extract_features
 from djimaging.utils.baden16_utils import load_baden_data
 from djimaging.utils.dj_utils import make_hash
+from djimaging.utils.dj_storage import local_path, relative_store_path
 from djimaging.utils.import_helpers import extract_class_info, load_class
 
 Key = Dict[str, Any]
@@ -21,7 +23,7 @@ def prepare_dj_config_rgc_classifier(
     """Configure DataJoint file stores for the RGC classifier.
 
     Sets up the ``classifier_input`` and ``classifier_output`` stores in
-    ``dj.config['stores']`` and enables filepath management and native blobs.
+    ``dj.config['stores']``.
 
     Args:
         output_folder: Path to the directory where classifier output files will be stored.
@@ -31,18 +33,14 @@ def prepare_dj_config_rgc_classifier(
         AssertionError: If ``input_folder`` or ``output_folder`` do not exist on the filesystem.
     """
     stores_dict = {
-        "classifier_input": {"protocol": "file", "location": input_folder, "stage": input_folder},
-        "classifier_output": {"protocol": "file", "location": output_folder, "stage": output_folder},
+        "classifier_input": {"protocol": "file", "location": input_folder},
+        "classifier_output": {"protocol": "file", "location": output_folder},
     }
 
     # Make sure folders exits
     for store, store_dict in stores_dict.items():
-        for name in store_dict.keys():
-            if name in ["location", "stage"]:
-                assert os.path.isdir(store_dict[name]), f'This must be a folder you have access to: {store_dict[name]}'
-
-    os.environ["DJ_SUPPORT_FILEPATH_MANAGEMENT"] = "TRUE"
-    dj.config['enable_python_native_blobs'] = True
+        assert os.path.isdir(store_dict["location"]), \
+            f'This must be a folder you have access to: {store_dict["location"]}'
 
     dj_config_stores = dj.config.get('stores', None) or dict()
     dj_config_stores.update(stores_dict)
@@ -60,9 +58,9 @@ class ClassifierTrainingDataTemplate(dj.Manual):
         training_data_hash     :   varchar(63)     # hash of the classifier training data files
         ---
         output_path            :   varchar(191)
-        baden_data_file        :   filepath@{store}
-        chirp_feats_file       :   filepath@{store}
-        bar_feats_file         :   filepath@{store}
+        baden_data_file        :   <filepath@{store}>
+        chirp_feats_file       :   <filepath@{store}>
+        bar_feats_file         :   <filepath@{store}>
         """.format(store=self._store)
         return definition
 
@@ -72,14 +70,13 @@ class ClassifierTrainingDataTemplate(dj.Manual):
         Args:
             skip_duplicates: If ``True``, silently ignore duplicate entries.
         """
-        ipath = dj.config['stores']["classifier_input"]["location"] + '/'
         opath = dj.config['stores']["classifier_output"]["location"] + '/'
 
         self.add_trainingdata(
             output_path=opath,
-            baden_data_file=ipath + 'RGCData_postprocessed.mat',
-            chirp_feats_file=ipath + 'chirp_feats.npz',
-            bar_feats_file=ipath + 'bar_feats.npz',
+            baden_data_file='RGCData_postprocessed.mat',
+            chirp_feats_file='chirp_feats.npz',
+            bar_feats_file='bar_feats.npz',
             skip_duplicates=skip_duplicates,
         )
 
@@ -87,9 +84,9 @@ class ClassifierTrainingDataTemplate(dj.Manual):
                          baden_data_file: str, skip_duplicates: bool = False) -> None:
         key = dict(
             output_path=output_path,
-            chirp_feats_file=chirp_feats_file,
-            bar_feats_file=bar_feats_file,
-            baden_data_file=baden_data_file
+            chirp_feats_file=relative_store_path(chirp_feats_file, self._store),
+            bar_feats_file=relative_store_path(bar_feats_file, self._store),
+            baden_data_file=relative_store_path(baden_data_file, self._store),
         )
         key["training_data_hash"] = make_hash(key)
         self.insert1(key, skip_duplicates=skip_duplicates)
@@ -112,10 +109,15 @@ class ClassifierTrainingDataTemplate(dj.Manual):
         baden_data_file, chirp_feats_file, bar_feats_file = (self & key).fetch1(
             'baden_data_file', 'chirp_feats_file', 'bar_feats_file')
 
-        b_c_labels, b_g_labels, b_s_labels, b_c_traces, b_c_qi, b_mb_traces, b_mb_qi, b_mb_dsi, b_mb_dp, b_soma_um2 = \
-            load_baden_data(baden_data_file)
-        chirp_features = np.load(chirp_feats_file)
-        bar_features = np.load(bar_feats_file)
+        with ExitStack() as stack:
+            baden_data_path = stack.enter_context(local_path(baden_data_file))
+            chirp_feats_path = stack.enter_context(local_path(chirp_feats_file))
+            bar_feats_path = stack.enter_context(local_path(bar_feats_file))
+
+            b_c_labels, b_g_labels, b_s_labels, b_c_traces, b_c_qi, b_mb_traces, b_mb_qi, b_mb_dsi, b_mb_dp, \
+                b_soma_um2 = load_baden_data(baden_data_path)
+            chirp_features = np.load(chirp_feats_path)
+            bar_features = np.load(bar_feats_path)
 
         features = extract_features(
             preproc_chirps=b_c_traces,
@@ -139,8 +141,8 @@ class ClassifierMethodTemplate(dj.Lookup):
         ---
         label_kind              : enum('cluster', 'group', 'super')  # Predict group or cluster labels from Baden et al. 16
         classifier_fn           : varchar(191)    # path to classifier method fn
-        classifier_config       : longblob        # method configuration object
-        classifier_seed         : int
+        classifier_config       : <blob>        # method configuration object
+        classifier_seed         : int32
         comment                 : varchar(191)    # comment
         """
         return definition
@@ -275,10 +277,10 @@ class ClassifierTemplate(dj.Computed):
         -> self.classifier_training_data_table
         -> self.classifier_method_table
         ---
-        classifier_file         :   attach@{store}
-        score_train : float  # Train split data score
-        score_test : float  # Test split score
-        score_final : float  # Score after retraining on all data (the final classifier)
+        classifier_file         :   <attach@{store}>
+        score_train : float32  # Train split data score
+        score_test : float32  # Test split score
+        score_final : float32  # Score after retraining on all data (the final classifier)
         """.format(store=self.store)
         return definition
 

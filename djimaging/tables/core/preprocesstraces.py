@@ -21,15 +21,15 @@ class PreprocessParamsTemplate(dj.Lookup):
     def definition(self):
         definition = """
         -> self.stimulus_table
-        preprocess_id:       tinyint unsigned    # unique param set id
+        preprocess_id:       int32    # unique param set id
         ---
-        window_length:       int       # window length for SavGol filter in seconds
-        poly_order:          int       # order of polynomial for savgol filter
-        non_negative:        tinyint unsigned  # Clip negative values of trace
-        subtract_baseline:   tinyint unsigned  # Subtract baseline
-        standardize:         tinyint unsigned  # standardize (1: with sd of baseline, 2: sd of trace, 0: nothing)
-        f_cutoff = 0 : float  # Cutoff frequency for low pass filter, only applied when > 0.
-        fs_resample = 0 : float  # Resampling frequency, only applied when > 0.
+        window_length:       int32       # window length for SavGol filter in seconds
+        poly_order:          int32       # order of polynomial for savgol filter
+        non_negative:        bool  # Clip negative values of trace
+        subtract_baseline:   bool  # Subtract baseline
+        standardize:         int32  # standardize (1: with sd of baseline, 2: sd of trace, 0: nothing)
+        f_cutoff = 0 : float32  # Cutoff frequency for low pass filter, only applied when > 0.
+        fs_resample = 0 : float32  # Resampling frequency, only applied when > 0.
         """
         return definition
 
@@ -82,7 +82,7 @@ class PreprocessParamsTemplate(dj.Lookup):
             If True, silently skip duplicate entries. Default is False.
         """
         if stim_names is None:
-            stim_names = (self.stimulus_table()).fetch('stim_name')
+            stim_names = (self.stimulus_table()).to_arrays('stim_name')
 
         key = dict(
             preprocess_id=preprocess_id,
@@ -113,10 +113,10 @@ class PreprocessTracesTemplate(dj.Computed):
         -> self.traces_table
         -> self.preprocessparams_table
         ---
-        pp_trace: longblob    # preprocessed trace
-        smoothed_trace:   longblob    # output of savgol filter which is subtracted from the raw trace
-        pp_trace_t0:         float       # numerical array of trace times
-        pp_trace_dt:         float       # time between frames
+        pp_trace: <npy@processed>    # preprocessed trace
+        smoothed_trace:   <npy@processed>    # output of savgol filter which is subtracted from the raw trace
+        pp_trace_t0:         float32       # numerical array of trace times
+        pp_trace_dt:         float32       # time between frames
         """
         return definition
 
@@ -309,7 +309,7 @@ class PreprocessTracesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        preprocess_traces = (self & restriction).fetch("pp_trace")
+        preprocess_traces = (self & restriction).to_arrays("pp_trace")
         preprocess_traces = math_utils.padded_vstack(preprocess_traces, cval=np.nan)
         n = preprocess_traces.shape[0]
 
