@@ -9,6 +9,7 @@ from cached_property import cached_property
 from matplotlib import pyplot as plt
 
 from djimaging.utils.baden16_utils import load_baden_data
+from djimaging.utils.dj_storage import local_path, open_object
 from djimaging.utils.dj_utils import merge_keys
 
 
@@ -219,7 +220,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
     def classifier(self):
         """Load and cache the trained classifier from its stored file path."""
         model_path = (self.classifier_table() & self.current_model_key).fetch1('classifier_file')
-        with open(model_path, "rb") as f:
+        with open_object(model_path, "rb") as f:
             model = pkl.load(f)
         return model
 
@@ -228,7 +229,8 @@ class CelltypeAssignmentTemplate(dj.Computed):
         """Load and cache the bar feature basis matrix from its stored file path."""
         features_bar_file = (self.classifier_training_data_table() & self.current_model_key).fetch1(
             "bar_feats_file")
-        features_bar = np.load(features_bar_file)
+        with local_path(features_bar_file) as path:
+            features_bar = np.load(path)
         return features_bar
 
     @cached_property
@@ -236,7 +238,8 @@ class CelltypeAssignmentTemplate(dj.Computed):
         """Load and cache the chirp feature basis matrix from its stored file path."""
         features_chirp_file = (self.classifier_training_data_table() & self.current_model_key).fetch1(
             "chirp_feats_file")
-        features_chirp = np.load(features_chirp_file)
+        with local_path(features_chirp_file) as path:
+            features_chirp = np.load(path)
         return features_chirp
 
     def populate(

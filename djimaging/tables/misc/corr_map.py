@@ -20,7 +20,7 @@ from scipy import signal
 
 from djimaging.autorois.autoshift_utils import shift_img
 from djimaging.autorois.corr_roi_mask_utils import stack_corr_image
-from djimaging.utils.dj_storage import load_array
+from djimaging.utils.dj_storage import load_array, local_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.math_utils import normalize_zscore
 from djimaging.utils.plot_utils import prep_long_title
@@ -101,13 +101,14 @@ class CorrMapTemplate(dj.Computed):
         Args:
             key: DataJoint primary key dict identifying the presentation entry.
         """
-        filepath = (self.presentation_table & key).fetch1('pres_data_file')
+        filepath_ref = (self.presentation_table & key).fetch1('pres_data_file')
         from_raw_data = (self.raw_params_table & key).fetch1('from_raw_data')
         data_name = (self.userinfo_table & key).fetch1('data_stack_name')
 
         triggertimes = load_array((self.presentation_table & key).fetch1('triggertimes'))
         fs = (self.presentation_table.ScanInfo & key).fetch1('scan_frequency')
-        stack = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_name,))[0][data_name]
+        with local_path(filepath_ref, self.presentation_table._filepath_store) as filepath:
+            stack = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_name,))[0][data_name]
 
         if len(triggertimes) > 0:
             idx_start = int(triggertimes[0] * fs)

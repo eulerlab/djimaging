@@ -7,15 +7,18 @@ import pytest
 
 
 @pytest.fixture(scope="session")
-def dj_test_stores(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
+def dj_test_stores(tmp_path_factory: pytest.TempPathFactory, tutorial_data_dir: Path) -> dict[str, Path]:
     root = tmp_path_factory.mktemp("datajoint-v2-stores")
-    stores = {name: root / name for name in ("acquisition", "processed", "models")}
+    stores = {
+        "reference": tutorial_data_dir,
+        "processed": root / "processed",
+    }
     for path in stores.values():
-        path.mkdir()
+        path.mkdir(exist_ok=True)
 
     dj.config["stores"] = {
         "default": "processed",
-        "filepath_default": "acquisition",
+        "filepath_default": "reference",
         **{name: {"protocol": "file", "location": str(path)} for name, path in stores.items()},
     }
     download_path = root / "downloads"
@@ -42,8 +45,8 @@ def tutorial_schema(dj_test_stores):
         definition = """
         object_id : int32
         ---
-        source_file : <filepath@acquisition>
-        attachment : <attach@models>
+        source_file : <filepath@reference>
+        attachment : <attach@processed>
         small_object : <blob>
         large_object : <blob@processed>
         array : <npy@processed>

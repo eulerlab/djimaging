@@ -22,7 +22,7 @@ class ExperimentTemplate(dj.Computed):
         date                        :date                     # date of recording
         exp_num                     :int32         # experiment number in a day
         ---
-        header_path                 :varchar(191)             # path to header file
+        header_path                 :varchar(191)             # experiment directory containing the header file
         header_name                 :varchar(63)              # name of header file
         """
         return definition

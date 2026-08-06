@@ -8,7 +8,7 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 
-from djimaging.utils.dj_storage import load_array
+from djimaging.utils.dj_storage import load_array, local_path, relative_store_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm.recording import ScanMRecording
@@ -16,6 +16,7 @@ from djimaging.utils.scanm.recording import ScanMRecording
 
 class PresentationTemplate(dj.Computed):
     database = ""
+    _filepath_store = "reference"
     incl_region = True  # Include region as primary key?
     incl_cond1 = True  # Include condition 1 as primary key?
     incl_cond2 = False  # Include condition 2 as primary key?
@@ -39,9 +40,9 @@ class PresentationTemplate(dj.Computed):
         if self.incl_cond3 and not self.field_table.incl_cond3:
             definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
 
-        definition += """
+        definition += f"""
         ---
-        pres_data_file :varchar(191)        # path to file (e.g. h5 file)
+        pres_data_file :<filepath@{self._filepath_store}>  # source acquisition file (e.g. HDF5)
         triggertimes :<npy@processed>              # triggertimes in each presentation
         trigger_valid :bool     # Are triggers as expected (1) or not (0)?
         absx: float32  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
@@ -354,8 +355,7 @@ class PresentationTemplate(dj.Computed):
         for avg_entry in avg_entries:
             self.StackAverages().insert1(avg_entry, allow_direct_insert=True)
 
-    @staticmethod
-    def _complete_keys(base_key: dict, rec: "ScanMRecording") -> tuple[dict, dict, list]:
+    def _complete_keys(self, base_key: dict, rec: "ScanMRecording") -> tuple[dict, dict, list]:
         """Build the three entry dicts needed to insert a presentation record.
 
         Args:
@@ -369,7 +369,7 @@ class PresentationTemplate(dj.Computed):
             part-table rows (one per channel).
         """
         pres_entry = deepcopy(base_key)
-        pres_entry["pres_data_file"] = rec.filepath
+        pres_entry["pres_data_file"] = relative_store_path(rec.filepath, self._filepath_store)
 
         pres_entry["trigger_valid"] = int(rec.trigger_valid)
         pres_entry["triggertimes"] = rec.trigger_times.astype(np.float32)
@@ -447,11 +447,11 @@ class PresentationTemplate(dj.Computed):
         setupid = (self.experiment_table().ExpInfo & key).fetch1("setupid")
         isrepeated, ntrigger_rep = (self.stimulus_table & key).fetch1("isrepeated", "ntrigger_rep")
 
-        rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=key['date'],
-                             repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep)
-        rec.set_auto_trigger_threshold()
-
-        trigger_trace = rec.ch_stacks[rec.trigger_ch_name].T.flatten()
+        with local_path(filepath, self._filepath_store) as filepath_local:
+            rec = ScanMRecording(filepath=filepath_local, setup_id=setupid, date=key['date'],
+                                 repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep)
+            rec.set_auto_trigger_threshold()
+            trigger_trace = rec.ch_stacks[rec.trigger_ch_name].T.flatten()
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 4))
         ax.set_title(f"{len(triggertimes)} triggers detected")

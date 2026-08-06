@@ -11,6 +11,7 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 
+from djimaging.utils.dj_storage import relative_store_path
 from djimaging.utils.scanm.read_h5_utils import load_h5_table
 from djimaging.utils.filesystem_utils import get_file_info_df
 from djimaging.utils.scanm import read_smp_utils
@@ -18,6 +19,7 @@ from djimaging.utils.scanm import read_smp_utils
 
 class OpticDiskTemplate(dj.Computed):
     database = ""
+    _filepath_store = "reference"
     incl_region = False
 
     @property
@@ -31,9 +33,9 @@ class OpticDiskTemplate(dj.Computed):
         """
         if self.incl_region:
             definition += "    region   :varchar(16)    # region (e.g. LR or RR)\n"
-        definition += """
+        definition += f"""
         ---
-        od_fromfile :varchar(191)  # File from which optic disc data was extracted
+        od_fromfile :<filepath@{self._filepath_store}>  # source acquisition file
         odx      :float32            # XCoord_um relative to the optic disk
         ody      :float32            # YCoord_um relative to the optic disk
         odz      :float32            # ZCoord_um relative to the optic disk
@@ -131,7 +133,7 @@ class OpticDiskTemplate(dj.Computed):
         loc_key["odx"] = odx
         loc_key["ody"] = ody
         loc_key["odz"] = odz
-        loc_key["od_fromfile"] = fromfile
+        loc_key["od_fromfile"] = relative_store_path(fromfile, self._filepath_store)
         if self.incl_region:
             if region is None:
                 raise ValueError(f"Region not found for key {key}. This is a new feature, so it could be a bug.")

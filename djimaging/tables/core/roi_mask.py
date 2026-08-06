@@ -12,7 +12,7 @@ from djimaging.utils.scanm import read_h5_utils, read_utils
 from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 
 from djimaging.utils.filesystem_utils import as_pre_filepath
-from djimaging.utils.dj_storage import load_array
+from djimaging.utils.dj_storage import file_store_path, load_array, local_file_path, relative_store_path
 from djimaging.utils.dj_utils import get_primary_key, check_unique_one
 from djimaging.utils.mask_utils import (
     to_roi_mask_file, sort_roi_mask_files,
@@ -206,7 +206,10 @@ class RoiMaskTemplate(dj.Manual):
         filepaths = []
 
         for f in all_filepaths:
-            pres_key_list = ((self.presentation_table & field_key) & dict(pres_data_file=f)).proj().to_dicts()
+            store_path = relative_store_path(f, self.presentation_table._filepath_store)
+            pres_key_list = (
+                (self.presentation_table & field_key) & dict(pres_data_file=store_path)
+            ).proj().to_dicts()
             if len(pres_key_list) == 1:
                 pres_keys.append(pres_key_list[0])
                 filepaths.append(f)
@@ -405,7 +408,10 @@ class RoiMaskTemplate(dj.Manual):
             (or None if not found).
         """
         mask_alias, highres_alias = (self.userinfo_table() & field_key).fetch1("mask_alias", "highres_alias")
-        files = (self.presentation_table() & field_key).to_arrays("pres_data_file")
+        files = [
+            local_file_path(value, self.presentation_table._filepath_store)
+            for value in (self.presentation_table() & field_key).to_arrays("pres_data_file")
+        ]
 
         roi_mask, src_file = load_preferred_roi_mask_pickle(
             files, mask_alias=mask_alias, highres_alias=highres_alias,
@@ -434,7 +440,10 @@ class RoiMaskTemplate(dj.Manual):
         """
         mask_alias, highres_alias, raw_data_dir, pre_data_dir = (self.userinfo_table() & field_key).fetch1(
             "mask_alias", "highres_alias", "raw_data_dir", "pre_data_dir")
-        files = (self.presentation_table() & field_key).to_arrays("pres_data_file")
+        files = [
+            local_file_path(value, self.presentation_table._filepath_store)
+            for value in (self.presentation_table() & field_key).to_arrays("pres_data_file")
+        ]
 
         files = [as_pre_filepath(f, raw_data_dir=raw_data_dir, pre_data_dir=pre_data_dir) for f in files]
 
@@ -565,7 +574,9 @@ class RoiMaskTemplate(dj.Manual):
             elif source == 'autorois':
                 igor_roi_masks = 'no'
 
-            input_file = (self.presentation_table & key).fetch1('pres_data_file')
+            input_file = local_file_path(
+                (self.presentation_table & key).fetch1('pres_data_file'),
+                self.presentation_table._filepath_store)
             roimask_file = to_roi_mask_file(
                 input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
                 file_format=self._get_roi_file_format())
@@ -683,7 +694,9 @@ class RoiMaskTemplate(dj.Manual):
             # Find preferred file that should be used as main key.
             mask_alias, highres_alias = (self.userinfo_table & field_key).fetch1("mask_alias", "highres_alias")
             keys_masks_files = [
-                (pres_key, roi_mask, (self.presentation_table & pres_key).fetch1('pres_data_file'))
+                (pres_key, roi_mask, local_file_path(
+                    (self.presentation_table & pres_key).fetch1('pres_data_file'),
+                    self.presentation_table._filepath_store))
                 for pres_key, roi_mask in data_pairs
                 if roi_mask is not None]
 
@@ -754,7 +767,9 @@ class RoiMaskTemplate(dj.Manual):
         Raises:
             ValueError: If the filesystem mask differs from the database mask.
         """
-        input_file = (self.presentation_table & key).fetch1("pres_data_file")
+        input_file = local_file_path(
+            (self.presentation_table & key).fetch1("pres_data_file"),
+            self.presentation_table._filepath_store)
 
         if source == 'infer':
             igor_roi_masks, from_raw_data = (self.raw_params_table & key).fetch1('igor_roi_masks', 'from_raw_data')
@@ -928,8 +943,10 @@ def _add_autorois_unet(autorois_models: dict) -> None:
     """
     try:
         from djimaging.autorois.unet import UNet
-        config_path = "/gpfs01/euler/data/Resources/AutoROIs/models/UNET_v0.1.0/sd_images.yaml"
-        checkpoint_path = "/gpfs01/euler/data/Resources/AutoROIs/models/UNET_v0.1.0/dropout_and_aug_regul.ckpt"
+        config_path = file_store_path(
+            "Resources/AutoROIs/models/UNET_v0.1.0/sd_images.yaml", "reference")
+        checkpoint_path = file_store_path(
+            "Resources/AutoROIs/models/UNET_v0.1.0/dropout_and_aug_regul.ckpt", "reference")
         unet_model = UNet.from_checkpoint(config_path, checkpoint_path)
 
         autorois_models['UNet'] = unet_model

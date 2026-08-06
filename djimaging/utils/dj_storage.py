@@ -12,21 +12,29 @@ import numpy as np
 
 
 @contextmanager
-def open_object(value: str | Path | dj.ObjectRef, mode: str = "rb") -> Iterator[BinaryIO | TextIO]:
+def open_object(
+        value: str | Path | dj.ObjectRef,
+        mode: str = "rb",
+        store: str | None = None,
+) -> Iterator[BinaryIO | TextIO]:
     """Open a local path or a DataJoint ``ObjectRef`` as a file-like object."""
     if isinstance(value, dj.ObjectRef):
         with value.open(mode=mode) as file:
             yield file
     else:
-        with Path(value).open(mode=mode) as file:
+        path = file_store_path(value, store) if store is not None else Path(value)
+        with path.open(mode=mode) as file:
             yield file
 
 
 @contextmanager
-def local_path(value: str | Path | dj.ObjectRef) -> Iterator[Path]:
+def local_path(
+        value: str | Path | dj.ObjectRef,
+        store: str | None = None,
+) -> Iterator[Path]:
     """Yield a local path, staging a remote ``ObjectRef`` when necessary."""
     if not isinstance(value, dj.ObjectRef):
-        yield Path(value)
+        yield file_store_path(value, store) if store is not None else Path(value)
         return
 
     try:
@@ -41,6 +49,19 @@ def local_path(value: str | Path | dj.ObjectRef) -> Iterator[Path]:
     with tempfile.TemporaryDirectory(prefix="djimaging-object-") as directory:
         destination = Path(directory) / Path(value.path).name
         yield value.download(destination)
+
+
+def local_file_path(value: str | Path | dj.ObjectRef, store: str | None = None) -> Path:
+    """Return the mounted path for a local-file reference without staging it."""
+    if not isinstance(value, dj.ObjectRef):
+        return file_store_path(value, store) if store is not None else Path(value)
+    try:
+        full_path = value.full_path
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ValueError("This operation requires a locally mounted filepath store") from error
+    if "://" in full_path:
+        raise ValueError("This operation requires a locally mounted filepath store")
+    return Path(full_path)
 
 
 def load_array(value: np.ndarray | dj.NpyRef) -> np.ndarray:
@@ -62,3 +83,15 @@ def relative_store_path(value: str | Path, store: str) -> str:
     if ".." in path.parts:
         raise ValueError(f"Path {value!r} escapes DataJoint store {store!r}")
     return path.as_posix()
+
+
+def file_store_path(value: str | Path, store: str) -> Path:
+    """Resolve a relative value against a local DataJoint file store."""
+    path = Path(value)
+    if path.is_absolute():
+        return path
+
+    store_spec = dj.config.get_store_spec(store)
+    if store_spec.get("protocol") != "file":
+        raise ValueError(f"Store {store!r} is not a local file store")
+    return Path(store_spec["location"]) / path

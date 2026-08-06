@@ -8,7 +8,7 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 
-from djimaging.utils.dj_storage import load_array
+from djimaging.utils.dj_storage import load_array, relative_store_path
 from djimaging.utils.filesystem_utils import get_file_info_df
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
@@ -17,6 +17,7 @@ from djimaging.utils.scanm.recording import ScanMRecording
 
 class FieldTemplate(dj.Computed):
     database = ""
+    _filepath_store = "reference"
     incl_region = True  # Include region as primary key?
     incl_cond1 = False  # Include condition 1 as primary key?
     incl_cond2 = False  # Include condition 2 as primary key?
@@ -40,9 +41,9 @@ class FieldTemplate(dj.Computed):
         if self.incl_cond3:
             definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
 
-        definition += """
+        definition += f"""
         ---
-        field_data_file: varchar(191)  # info extracted from which file?
+        field_data_file: <filepath@{self._filepath_store}>  # source acquisition file
         absx: float32  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
         absy: float32  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
         absz: float32  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
@@ -380,8 +381,7 @@ class FieldTemplate(dj.Computed):
 
         return rec
 
-    @staticmethod
-    def complete_keys(base_key: dict, rec: ScanMRecording) -> tuple[dict, list]:
+    def complete_keys(self, base_key: dict, rec: ScanMRecording) -> tuple[dict, list]:
         """Build the field entry dict and stack-average entry dicts from a recording.
 
         Parameters
@@ -401,7 +401,7 @@ class FieldTemplate(dj.Computed):
         """
         field_entry = deepcopy(base_key)
 
-        field_entry["field_data_file"] = rec.filepath
+        field_entry["field_data_file"] = relative_store_path(rec.filepath, self._filepath_store)
         field_entry["absx"] = rec.pos_x_um
         field_entry["absy"] = rec.pos_y_um
         field_entry["absz"] = rec.pos_z_um

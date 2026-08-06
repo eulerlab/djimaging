@@ -37,7 +37,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
-from djimaging.utils.dj_storage import load_array
+from djimaging.utils.dj_storage import load_array, relative_store_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.filesystem_utils import get_file_info_df
 from djimaging.utils.scanm.recording import ScanMRecording
@@ -46,6 +46,7 @@ from djimaging.utils.scanm.setup_utils import get_retinal_position
 
 class OutlineAbsTemplate(dj.Computed):
     database = ""
+    _filepath_store = "reference"
     _from_raw_data = True  # Use SMP or h5 files?
     _num_loc = 3  # In which location of filename is the number found?
 
@@ -59,11 +60,15 @@ class OutlineAbsTemplate(dj.Computed):
         return definition
 
     class OutlineAbsField(dj.Part):
-        definition = """
+        _filepath_store = "reference"
+
+        @property
+        def definition(self):
+            return f"""
         -> master
         field   :varchar(32)          # string identifying files corresponding to field
         ---
-        field_data_file: varchar(191)  # info extracted from which file?
+        field_data_file: <filepath@{self._filepath_store}>  # source acquisition file
         absx: float32  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
         absy: float32  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
         absz: float32  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
@@ -191,11 +196,10 @@ class OutlineAbsTemplate(dj.Computed):
         self.insert1(main_entry)
         self.OutlineAbsField().insert(field_entries)
 
-    @staticmethod
-    def complete_key(base_key, rec) -> dict:
+    def complete_key(self, base_key, rec) -> dict:
 
         field_entry = deepcopy(base_key)
-        field_entry["field_data_file"] = rec.filepath
+        field_entry["field_data_file"] = relative_store_path(rec.filepath, self._filepath_store)
 
         field_entry["absx"] = rec.pos_x_um
         field_entry["absy"] = rec.pos_y_um

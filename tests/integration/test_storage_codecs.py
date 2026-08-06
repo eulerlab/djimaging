@@ -15,7 +15,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_datajoint_v2_storage_round_trip_and_deletion(tutorial_schema, dj_test_stores, tmp_path: Path):
-    source = dj_test_stores["acquisition"] / "raw" / "source.bin"
+    source = dj_test_stores["reference"] / "raw" / "source.bin"
     source.parent.mkdir()
     source.write_bytes(b"source payload")
 
@@ -56,7 +56,5 @@ def test_datajoint_v2_storage_round_trip_and_deletion(tutorial_schema, dj_test_s
     assert source.exists(), "filepath data is user-managed and must not be deleted with a row"
 
     processed_report = dj.gc.GarbageCollector(tutorial_schema.schema, store="processed").collect(dry_run=True)
-    models_report = dj.gc.GarbageCollector(tutorial_schema.schema, store="models").collect(dry_run=True)
     assert npy_path in processed_report["orphaned_schema_paths"]
     assert processed_report["hash_paths_orphaned"] >= 1
-    assert models_report["hash_paths_orphaned"] >= 1

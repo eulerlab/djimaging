@@ -22,7 +22,7 @@ from matplotlib import pyplot as plt
 
 from djimaging.tables.motion_correction.motion_utils import compute_shifts_jnormcorre, correct_shifts_in_stack, \
     plot_stack_and_corr_stack
-from djimaging.utils.dj_storage import load_array
+from djimaging.utils.dj_storage import load_array, local_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import set_long_title
 from djimaging.utils.scanm import read_utils
@@ -176,8 +176,9 @@ class MotionDetectionTemplate(dj.Computed):
         data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
         from_raw_data = (self.presentation_table.raw_params_table & key).fetch1('from_raw_data')
 
-        stacks, wparams = read_utils.load_stacks(
-            pres_data_file, from_raw_data=from_raw_data, ch_names=(data_stack_name,))
+        with local_path(pres_data_file, self.presentation_table._filepath_store) as filepath:
+            stacks, wparams = read_utils.load_stacks(
+                filepath, from_raw_data=from_raw_data, ch_names=(data_stack_name,))
         stack = stacks[data_stack_name].copy()[npixartifact:, :]
 
         idx_stim_onset = int(np.floor(triggertimes[0] * scan_frequency))
@@ -214,8 +215,9 @@ class MotionDetectionTemplate(dj.Computed):
         fs = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
         from_raw_data = (self.presentation_table.raw_params_table & key).fetch1('from_raw_data')
 
-        stacks, wparams = read_utils.load_stacks(
-            pres_data_file, from_raw_data=from_raw_data, ch_names=(data_stack_name,))
+        with local_path(pres_data_file, self.presentation_table._filepath_store) as filepath:
+            stacks, wparams = read_utils.load_stacks(
+                filepath, from_raw_data=from_raw_data, ch_names=(data_stack_name,))
         stack = stacks[data_stack_name].copy()
 
         shifts_x, shifts_y = (self & key).fetch1('shifts_x', 'shifts_y')

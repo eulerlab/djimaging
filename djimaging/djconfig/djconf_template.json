@@ -2,7 +2,7 @@
   "database.host": "",
   "database.password": "",
   "database.user": "",
-  "database.port": 0,
+  "database.port": 3306,
   "database.reconnect": true,
   "connection.init_function": null,
   "connection.charset": "utf8mb4",
@@ -15,18 +15,14 @@
   "database.use_tls": null,
   "stores": {
     "default": "processed",
-    "filepath_default": "acquisition",
-    "acquisition": {
+    "filepath_default": "reference",
+    "reference": {
       "protocol": "file",
-      "location": "/path/to/acquisition"
+      "location": "/gpfs01/euler/data"
     },
     "processed": {
       "protocol": "file",
       "location": "/path/to/processed"
-    },
-    "models": {
-      "protocol": "file",
-      "location": "/path/to/models"
     }
   }
 }

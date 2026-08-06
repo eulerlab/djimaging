@@ -8,12 +8,14 @@ import seaborn as sns
 from djimaging.tables.classifier_v2.rgc_classifier_v2 import load_classifier_from_file, check_classifier_dict
 from djimaging.utils.baden16_utils import baden_cluster_id_to_group_id, baden_group_id_to_supergroup, \
     BADEN_CLUSTER_INFO, load_baden_data, baden_cluster_name_to_cluster_id
+from djimaging.utils.dj_storage import file_store_path
 from djimaging.utils.dj_utils import merge_keys
 
 
 class CelltypeAssignmentV2Template(dj.Computed):
     database = ""
-    _baden_data_file = '/gpfs01/euler/data/Resources/Classifier/rgc_classifier_v2/RGCData_postprocessed.mat'
+    _reference_store = "reference"
+    _baden_data_file = 'Resources/Classifier/rgc_classifier_v2/RGCData_postprocessed.mat'
     __expected_classes = np.arange(1, 75 + 1)  # Expected classes for the classifier
 
     @property
@@ -279,7 +281,9 @@ class CelltypeAssignmentV2Template(dj.Computed):
 
         if plot_baden_data:
             b_cis, b_gis, b_sgs, b_chirps, b_chirp_qi, b_bars, b_mb_qi, b_dsi, b_ds_pvalues, b_soma_um2s = \
-                load_baden_data(self._baden_data_file, quality_filter=True)
+                load_baden_data(
+                    file_store_path(self._baden_data_file, self._reference_store),
+                    quality_filter=True)
 
             if cluster_id is not None:
                 b_idxs = b_cis == cluster_id
@@ -403,7 +407,9 @@ class CelltypeAssignmentV2Template(dj.Computed):
             raise NotImplementedError(f"Level '{level}' is not implemented.")
 
         if plot_baden_data:
-            b_cis, b_gis, b_sgs = load_baden_data(self._baden_data_file, quality_filter=True)[:3]
+            b_cis, b_gis, b_sgs = load_baden_data(
+                file_store_path(self._baden_data_file, self._reference_store),
+                quality_filter=True)[:3]
 
             if level == 'cluster':
                 b_dist = b_cis

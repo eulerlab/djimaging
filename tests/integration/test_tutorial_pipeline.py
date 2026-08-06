@@ -57,6 +57,7 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
         pix_n_y=15,
         pix_scale_x_um=30,
         pix_scale_y_um=30,
+        stim_path=tutorial_data_dir / "resources" / "noise.h5",
         stim_trace=noise_stimulus,
         skip_duplicates=True,
     )

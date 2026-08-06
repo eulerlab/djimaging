@@ -22,7 +22,7 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 
-from djimaging.utils.dj_storage import load_array
+from djimaging.utils.dj_storage import load_array, relative_store_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm.recording import ScanMRecording
@@ -32,6 +32,7 @@ class HighResTemplate(dj.Computed):
     """DataJoint computed table template for high-resolution stack metadata and averages."""
 
     database = ""
+    _filepath_store = "reference"
     _fallback_to_raw = True  # If h5 not available, try to load from raw data
 
     incl_region = True  # Include region as primary key?
@@ -55,9 +56,9 @@ class HighResTemplate(dj.Computed):
         if self.incl_cond3 and not self.field_table.incl_cond3:
             definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
 
-        definition += """
+        definition += f"""
         ---
-        highres_file :varchar(191)          # path to file (e.g. h5 file)
+        highres_file :<filepath@{self._filepath_store}>  # source acquisition file (e.g. HDF5)
         absx: float32  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
         absy: float32  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
         absz: float32  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
@@ -222,8 +223,7 @@ class HighResTemplate(dj.Computed):
         for avg_key in avg_entries:
             (self.StackAverages & key).insert1(avg_key, allow_direct_insert=True)
 
-    @staticmethod
-    def _complete_keys(base_key: dict, rec) -> tuple:
+    def _complete_keys(self, base_key: dict, rec) -> tuple:
         """Build the high-resolution entry dict and per-channel average entry dicts.
 
         Args:
@@ -236,7 +236,7 @@ class HighResTemplate(dj.Computed):
             to insert into ``StackAverages``.
         """
         hr_entry = deepcopy(base_key)
-        hr_entry["highres_file"] = rec.filepath
+        hr_entry["highres_file"] = relative_store_path(rec.filepath, self._filepath_store)
 
         hr_entry["absx"] = rec.pos_x_um
         hr_entry["absy"] = rec.pos_y_um

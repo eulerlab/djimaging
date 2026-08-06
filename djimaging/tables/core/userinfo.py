@@ -18,7 +18,7 @@ class UserInfoTemplate(dj.Manual):
         # Info for decoding file names
         experimenter                    :varchar(16)  # name of the experimenter
         ---     
-        data_dir                        :varchar(191)   # path to header file, used for computed tables
+        data_dir                        :varchar(191)   # acquisition-tree root directory used for file discovery
         field_loc                       :int32       # string location for field
         stimulus_loc                    :int32       # string location for stimulus
         animal_loc=NULL                 :int32       # string location for number of animal (e.g. M1)

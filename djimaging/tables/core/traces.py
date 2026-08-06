@@ -11,7 +11,7 @@ from djimaging.tables.core.preprocesstraces import plot_left_right_clipping
 from djimaging.utils.scanm.traces_and_triggers_utils import roi2trace_from_stack, check_valid_triggers_rel_to_tracetime
 from djimaging.utils.scanm.read_h5_utils import load_roi2trace
 from djimaging.utils import plot_utils, math_utils, trace_utils
-from djimaging.utils.dj_storage import load_array
+from djimaging.utils.dj_storage import load_array, local_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger, prep_long_title
 
@@ -110,15 +110,16 @@ class TracesTemplate(dj.Computed):
         if from_raw_data and not compute_from_stack:
             raise ValueError("from_raw_data=True only supported for compute_from_stack=True")
 
-        filepath = (self.presentation_table & key).fetch1("pres_data_file")
+        filepath_ref = (self.presentation_table & key).fetch1("pres_data_file")
         triggertimes = load_array((self.presentation_table & key).fetch1("triggertimes"))
         roi_ids = (self.roi_table & key).to_arrays("roi_id")
 
-        if compute_from_stack:
-            roi2trace, frame_dt = self._compute_roi2trace_from_stack(
-                key, filepath, roi_ids, trace_precision, from_raw_data, verboselvl=verboselvl)
-        else:
-            roi2trace, frame_dt = load_roi2trace(filepath, roi_ids)
+        with local_path(filepath_ref, self.presentation_table._filepath_store) as filepath:
+            if compute_from_stack:
+                roi2trace, frame_dt = self._compute_roi2trace_from_stack(
+                    key, filepath, roi_ids, trace_precision, from_raw_data, verboselvl=verboselvl)
+            else:
+                roi2trace, frame_dt = load_roi2trace(filepath, roi_ids)
 
         for roi_id, roi_data in roi2trace.items():
             if not include_artifacts and roi_data.get('incl_artifact', False):
