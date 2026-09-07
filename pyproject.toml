@@ -36,7 +36,7 @@ rf = [
     "rfest>=2.1.2",
 ]
 dev = [
-    "pytest",
+    "pytest>=9.0.3",
 ]
 
 [tool.setuptools.packages.find]
@@ -47,6 +47,14 @@ markers = ["dependency: mark a test as a dependency"]
 filterwarnings = [
     "error:fetch\\(\\) is deprecated.*:DeprecationWarning",
     "error:ERD is deprecated.*:DeprecationWarning",
+]
+
+[tool.uv]
+# Minimum patched versions for transitive dependencies with security advisories.
+constraint-dependencies = [
+    "pillow>=12.3.0",
+    "aiohttp>=3.14.3",
+    "idna>=3.15",
 ]
 
 [tool.uv.sources]
