@@ -47,7 +47,7 @@ class FastStaParamsTemplate(dj.Lookup):
         post_blur_sigma_s = 0: float32  # Gaussian blur applied after all other steps.
         filter_dur_s_past : float32 # filter duration in seconds into the past
         filter_dur_s_future : float32 # filter duration in seconds into the future
-        rf_time: <npy@processed> #  time of RF, depends on dt and shift
+        rf_time: <blob> #  time of RF, depends on dt and shift
         dt: float32  # Time step between frames
         shift: int32  # Shift of stimulus relative to trace. If negative, prediction looks into future.
         dims: <blob>  # Dimensions of stimulus

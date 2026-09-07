@@ -86,7 +86,7 @@ class ClusteringTemplate(dj.Computed):
         -> self.features_table
         -> self.params_table
         ---
-        clusters : <npy@processed>
+        clusters : <blob>
         """
         return definition
 

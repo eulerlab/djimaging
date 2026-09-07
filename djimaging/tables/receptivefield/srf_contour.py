@@ -80,9 +80,9 @@ class RfContoursTemplate(dj.Computed):
         -> self.split_rf_table
         -> self.rf_contours_params_table
         ---
-        srf_contours : <blob@processed>
-        srf_contours_um2 : <blob@processed>
-        srf_contours_cdia_um : <blob@processed>
+        srf_contours : <blob>
+        srf_contours_um2 : <blob>
+        srf_contours_cdia_um : <blob>
         is_single_contour : bool # True if all levels have a single contour
         largest_contour_ratio : float32 # Ratio of largest contour relative to full area (for level where it's lowest)
         rf_area_um2 = NULL : float32 # Area of largest contour at first level

@@ -74,7 +74,7 @@ class CslMetricsTemplate(dj.Computed):
         # Normalized contrast step light response
         -> self.traces_table
         ---
-        average: <npy@processed>  # Average of the normalized snippets (time, )
+        average: <blob>  # Average of the normalized snippets (time, )
         snippets: <blob>  # Baseline corrected snippets (times x repetitions)
         fs: float32  # Sampling frequency in which average and snippets are stored
         fs_metrics: float32  # Sampling frequency used to compute metrics
@@ -84,11 +84,11 @@ class CslMetricsTemplate(dj.Computed):
         contrast_sensitivity: float32  # Relating step responses to contrast responses
         tonic_release_index: float32  # Tonic release index as in Franke et al 2017, but for last contrast step
         plateau_index: float32  # Plateau index (a - b) / (a + b), similar to Franke et al 2017
-        contrast_{self._metric_kind}s: <npy@processed>  # Metric per contrast (e.g., auc or fft_f1), incl. baseline at i=0 if _w_zero_fit=1
+        contrast_{self._metric_kind}s: <blob>  # Metric per contrast (e.g., auc or fft_f1), incl. baseline at i=0 if _w_zero_fit=1
         '''
         # Add an optional phases field when using FFT metric
         if getattr(self, '_metric_kind', 'auc') == 'fft_f1':
-            definition += '        contrast_fft_f1_phases: <npy@processed>  # Phase of F1 (degrees) per contrast; baseline at i=0 if present\n'
+            definition += '        contrast_fft_f1_phases: <blob>  # Phase of F1 (degrees) per contrast; baseline at i=0 if present\n'
         definition += f'''        fit_half_amp_y = NULL : float32  # y at half amplitude of fit
         fit_half_amp_x = NULL : float32  # x at half amplitude of fit
         fit_half_amp_slope = NULL : float32  # Slope at half amplitude of fit

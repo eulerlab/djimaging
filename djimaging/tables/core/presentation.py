@@ -43,7 +43,7 @@ class PresentationTemplate(dj.Computed):
         definition += f"""
         ---
         pres_data_file :<filepath@{self._filepath_store}>  # source acquisition file (e.g. HDF5)
-        triggertimes :<npy@processed>              # triggertimes in each presentation
+        triggertimes :<blob>              # triggertimes in each presentation
         trigger_valid :bool     # Are triggers as expected (1) or not (0)?
         absx: float32  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
         absy: float32  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM

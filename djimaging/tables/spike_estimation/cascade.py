@@ -105,7 +105,7 @@ class CascadeTracesTemplate(dj.Computed):
         -> self.traces_table
         -> self.cascadetraces_params_table
         ---
-        pp_trace:      <npy@processed>    # preprocessed trace
+        pp_trace:      <blob>    # preprocessed trace
         pp_trace_t0:   float32      # start time of trace
         pp_trace_dt:   float32      # time step of trace
         """
@@ -240,7 +240,7 @@ class CascadeSpikesTemplate(dj.Computed):
         -> self.cascadetraces_table
         -> self.cascade_params_table
         ---
-        spike_prob:       <npy@processed>
+        spike_prob:       <blob>
         """
 
     @property

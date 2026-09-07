@@ -152,7 +152,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
         ---
         cell_label:      int32         # predicted label with highest probability. Meaning of label depends on classifier
         max_confidence:  float32       # confidence score for assigned cell_label, can be celltype, supergroup etc.
-        confidence:      <npy@processed>        # confidence scores (probabilities) for all celltypes
+        confidence:      <blob>        # confidence scores (probabilities) for all celltypes
         """
         return definition
 

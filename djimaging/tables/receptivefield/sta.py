@@ -124,7 +124,7 @@ class STATemplate(dj.Computed):
         -> self.params_table
         ---
         rf: <npy@processed>  # spatio-temporal receptive field
-        rf_time: <npy@processed> #  time of RF, depends on dt and shift
+        rf_time: <blob> #  time of RF, depends on dt and shift
         dt: float32  # Time step between frames
         shift: int32  # Shift of stimulus relative to trace. If negative, prediction looks into future.
         '''
@@ -155,9 +155,9 @@ class STATemplate(dj.Computed):
             kind : enum('train', 'dev', 'test')  # Data set kind
             ---
             x : <npy@processed>  # Input
-            y : <npy@processed>  # Output
+            y : <blob>  # Output
             burn_in : int64  # Burned output s.t. y_pred.size + burn_in == y.size
-            y_pred : <npy@processed> # predicted output
+            y_pred : <blob> # predicted output
             cc : float32  # Correlation
             mse : float32  # Mean Squared Error
             """

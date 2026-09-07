@@ -43,8 +43,8 @@ class ChirpSurroundTemplate(dj.Computed):
         -> self.snippets_table.proj({self._g_name}='stim_name')
         ---
         chirp_surround_index = NULL : float32
-        l_response_mus : <npy@processed>  # (repetitions,) local response means
-        g_response_mus : <npy@processed>  # (repetitions,) global response means
+        l_response_mus : <blob>  # (repetitions,) local response means
+        g_response_mus : <blob>  # (repetitions,) global response means
         """
         return definition
 

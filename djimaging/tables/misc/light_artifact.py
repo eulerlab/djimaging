@@ -40,8 +40,8 @@ class LightArtifactTemplate(dj.Computed):
         definition = """
         -> self.presentation_table
         ---
-        light_artifact : <npy@processed>  # Normalized mean light artifact trace in line precision
-        triggertimes_rel : <npy@processed> # Relative triggertimes
+        light_artifact : <blob>  # Normalized mean light artifact trace in line precision
+        triggertimes_rel : <blob> # Relative triggertimes
         """
         return definition
 

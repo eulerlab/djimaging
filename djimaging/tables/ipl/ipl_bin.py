@@ -31,7 +31,7 @@ class IplBinParamsTemplate(dj.Manual):
             ipl_bin_id : int32 # ipl bin id
             ---
             n_bins : int32 # number of bins
-            bin_borders   :<npy@processed>    # pixel index where gcl/ipl border intersects on left of image (with GCL up)
+            bin_borders   :<blob>    # pixel index where gcl/ipl border intersects on left of image (with GCL up)
             bin_names  = NULL :<blob>    # pixel index where gcl/ipl border intersects on right side of image
             """
         return definition

@@ -30,8 +30,8 @@ class Baden16TracesTemplate(dj.Computed):
         -> self.averages_table().proj(avg_stim_name='stim_name')
         -> self.os_ds_table().proj(os_ds_stim_name='stim_name')
         ---
-        preproc_chirp:   <npy@processed>  # preprocessed chirp trace (averaged, downsampled and normalized)
-        preproc_bar:     <npy@processed>  # preprocessed bar (time component in pref. dir., averaged and rolled)
+        preproc_chirp:   <blob>  # preprocessed chirp trace (averaged, downsampled and normalized)
+        preproc_bar:     <blob>  # preprocessed bar (time component in pref. dir., averaged and rolled)
         """
         return definition
 

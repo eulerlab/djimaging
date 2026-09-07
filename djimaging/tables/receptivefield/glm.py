@@ -178,7 +178,7 @@ class RfGlmTemplate(dj.Computed):
 
         if self._def_sta:
             definition += '''
-            rf_time: <npy@processed>
+            rf_time: <blob>
             shift: int32
             '''
 

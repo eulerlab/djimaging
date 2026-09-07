@@ -31,7 +31,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
         prob_group :       float32                 # aggregated probability of being in the given group
         prob_supergroup :  float32                 # aggregated probability of being in the given supergroup
         prob_class :       float32                 # aggregated probability of being the given cell class (RGC or dAC)
-        probs_per_cluster : <npy@processed>                 # probabilities for each cluster
+        probs_per_cluster : <blob>                 # probabilities for each cluster
         """
         return definition
 

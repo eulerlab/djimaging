@@ -21,11 +21,11 @@ class AveragesTemplate(dj.Computed):
         # Averages of snippets
         -> self.snippets_table
         ---
-        average             :<npy@processed>  # array of snippet average (time)
-        average_norm        :<npy@processed>  # normalized array of snippet average (time)
+        average             :<blob>  # array of snippet average (time)
+        average_norm        :<blob>  # normalized array of snippet average (time)
         average_t0          :float32     # time of the first sample of the average
         average_dt          :float32     # time between samples of the average
-        triggertimes_rel    :<npy@processed>  # array of relative triggertimes
+        triggertimes_rel    :<blob>  # array of relative triggertimes
         """
         return definition
 

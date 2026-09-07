@@ -94,8 +94,8 @@ class DNoiseTraceTemplate(dj.Computed):
         -> self.traces_table
         -> self.params_table
         ---
-        trace : <npy@processed>   # Trace to fit
-        stim_idxs : <npy@processed>  # Stimulus frame indexes
+        trace : <blob>   # Trace to fit
+        stim_idxs : <blob>  # Stimulus frame indexes
         noise_dt : float32  # Time-step of time component
         noise_t0 : float32  # Time of first sample
         dt_rel_error : float32  # Maximum relative error of dts, if too large, can have unwanted effects

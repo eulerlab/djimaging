@@ -48,18 +48,18 @@ class OsDsIndexesTemplate(dj.Computed):
         pref_or:    float32     # preferred orientation
         on_off:     float32     # on off index based on time kernel
         d_qi:       float32     # quality index for moving bar response
-        dir_component:     <npy@processed>
-        time_component:    <npy@processed>
+        dir_component:     <blob>
+        time_component:    <blob>
         time_component_dt: float32
-        surrogate_v:       <npy@processed>    # computed by projecting on time
+        surrogate_v:       <blob>    # computed by projecting on time
         surrogate_dsi:     float32   # DSI of surrogate v
         """
 
         if not self._reduced_storage:
             definition += """
-        ds_null:    <npy@processed>      # null distribution of DSIs
-        os_null:    <npy@processed>      # null distribution of OSIs
-        avg_sorted_resp: <npy@processed>
+        ds_null:    <blob>      # null distribution of DSIs
+        os_null:    <blob>      # null distribution of OSIs
+        avg_sorted_resp: <blob>
         """
 
         return definition

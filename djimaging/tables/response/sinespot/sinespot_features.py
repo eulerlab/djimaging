@@ -40,7 +40,7 @@ class SineSpotFeaturesTemplate(dj.Computed):
         response_spot_b : float32  # Mean response to small offset spot
         response_spot_c : float32  # Mean response to small offset spot
         response_spot_d : float32  # Mean response to small offset spot
-        response_rep_x_cond: <npy@processed>  # Response matrix used to compute suppression
+        response_rep_x_cond: <blob>  # Response matrix used to compute suppression
         '''
         return definition
 

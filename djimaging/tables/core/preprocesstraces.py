@@ -114,8 +114,8 @@ class PreprocessTracesTemplate(dj.Computed):
         -> self.traces_table
         -> self.preprocessparams_table
         ---
-        pp_trace: <npy@processed>    # preprocessed trace
-        smoothed_trace:   <npy@processed>    # output of savgol filter which is subtracted from the raw trace
+        pp_trace: <blob>    # preprocessed trace
+        smoothed_trace:   <blob>    # output of savgol filter which is subtracted from the raw trace
         pp_trace_t0:         float32       # numerical array of trace times
         pp_trace_dt:         float32       # time between frames
         """

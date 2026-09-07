@@ -80,8 +80,8 @@ class MotionDetectionTemplate(dj.Computed):
         ---
         max_shift_x : float32  # Maximum shift after stimulus onset in x direction
         max_shift_y : float32  # Maximum shift after stimulus onset in y direction
-        shifts_x : <npy@processed>  # Shift in x direction
-        shifts_y : <npy@processed>  # Shift in y direction
+        shifts_x : <blob>  # Shift in x direction
+        shifts_y : <blob>  # Shift in y direction
         idx_stim_onset : int32  # Index of stimulus onset
         """
         return definition

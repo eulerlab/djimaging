@@ -19,7 +19,7 @@ class ExampleTableTemplate(dj.Computed):
         -> self.field_table
         ---
         table_column_a : float32  # Comment on number
-        table_column_b : <npy@processed>  # Comment on array
+        table_column_b : <blob>  # Small analysis array; use <npy@processed> for large arrays
         table_column_c : bool  # use this data type for True (1) or False (0)
         """
         return definition

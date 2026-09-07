@@ -37,7 +37,7 @@ class TracesTemplate(dj.Computed):
 
         definition += """
         ---
-        trace          :<npy@processed>              # array of raw trace
+        trace          :<blob>              # array of raw trace
         trace_t0       :float32                 # numerical array of trace times
         trace_dt       :float32                 # time between frames
         trace_valid    :bool      # Are values in trace correct (1) or not (0)?

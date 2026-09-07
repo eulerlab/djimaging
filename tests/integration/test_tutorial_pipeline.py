@@ -13,7 +13,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
+def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
     experiment_key = {"experimenter": "synthetic"}
 
     tutorial_schema.UserInfo().upload_user(
@@ -70,6 +70,10 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
         roi_mask_dir="AutoROIs",
     )
     tutorial_schema.Roi().populate(experiment_key, display_progress=False)
+
+    processed = dj_test_stores["processed"]
+    external_files_before = {path for path in processed.rglob("*") if path.is_file()}
+
     tutorial_schema.Traces().populate(experiment_key, display_progress=False)
     tutorial_schema.PreprocessParams().add_default(skip_duplicates=True)
     tutorial_schema.PreprocessTraces().populate(experiment_key, display_progress=False)
@@ -79,6 +83,11 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
 
     with numpy_seed(42):
         tutorial_schema.OsDsIndexes().populate(experiment_key, display_progress=False)
+
+    external_files_after = {path for path in processed.rglob("*") if path.is_file()}
+    assert external_files_after == external_files_before, (
+        "Per-ROI traces, snippets, averages, and response metrics must stay in the database"
+    )
 
     tutorial_schema.OpticDisk().populate(experiment_key, display_progress=False)
     tutorial_schema.RelativeFieldLocation().populate(experiment_key, display_progress=False)

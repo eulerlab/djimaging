@@ -55,7 +55,7 @@ class OutlineAbsTemplate(dj.Computed):
         definition = """
         -> self.experiment_table
         ---
-        outline_abs_xy : <npy@processed>  # outline of the retinal field in absolute coordinates
+        outline_abs_xy : <blob>  # outline of the retinal field in absolute coordinates
         """
         return definition
 
@@ -238,8 +238,8 @@ class OutlineRelTemplate(dj.Computed):
         -> self.outline_abs_table
         -> self.opticdisk_table
         ---
-        outline_rel_xy : <npy@processed>  # outline of the retinal field in coordinates relative to the optic disk
-        outline_retina_xy : <npy@processed>  # outline of the retinal field in retinal coordinates
+        outline_rel_xy : <blob>  # outline of the retinal field in coordinates relative to the optic disk
+        outline_retina_xy : <blob>  # outline of the retinal field in retinal coordinates
         """
         return definition
 

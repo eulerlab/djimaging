@@ -72,10 +72,10 @@ class SnippetsTemplate(dj.Computed):
         # Snippets created from slicing traces using the triggertimes. 
         -> self.preprocesstraces_table
         ---
-        snippets               :<blob@processed>          # array of snippets (time x repetitions)
-        snippets_t0            :<blob@processed>              # array of snippet start times (repetitions, )
+        snippets               :<blob>          # array of snippets (time x repetitions)
+        snippets_t0            :<blob>              # array of snippet start times (repetitions, )
         snippets_dt            :float32
-        triggertimes_snippets  :<blob@processed>          # snippeted triggertimes (ntrigger_rep x repetitions)
+        triggertimes_snippets  :<blob>          # snippeted triggertimes (ntrigger_rep x repetitions)
         droppedlastrep_flag    :bool  # Was the last repetition incomplete and therefore dropped?
         """
         return definition
@@ -268,10 +268,10 @@ class GroupSnippetsTemplate(dj.Computed):
         # Snippets created from slicing traces using the triggertimes. 
         -> self.preprocesstraces_table
         ---
-        snippets               :<blob@processed>          # dict of array of snippets (group: time [x repetitions])
-        snippets_t0           :<blob@processed>              # dict of array of snippet start times (group: repetitions)
+        snippets               :<blob>          # dict of array of snippets (group: time [x repetitions])
+        snippets_t0           :<blob>              # dict of array of snippet start times (group: repetitions)
         snippets_dt            :float32
-        triggertimes_snippets  :<blob@processed>          # dict of array of triggertimes (group: time [x repetitions])
+        triggertimes_snippets  :<blob>          # dict of array of triggertimes (group: time [x repetitions])
         droppedlastrep_flag    :bool  # Was the last repetition incomplete and therefore dropped?
         """
         return definition

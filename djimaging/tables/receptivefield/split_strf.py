@@ -71,11 +71,11 @@ class SplitRFTemplate(dj.Computed):
         -> self.rf_table
         -> self.split_rf_params_table
         ---
-        srf: <npy@processed>  # spatio receptive field
-        trf: <npy@processed>  # temporal receptive field
+        srf: <blob>  # spatio receptive field
+        trf: <blob>  # temporal receptive field
         polarity : int32  # Polarity of the RF, 1 for positive, -1 for negative
         split_qidx : float32  # Quality index as explained variance of the sRF tRF split between 0 and 1
-        trf_peak_idxs : <npy@processed>  # Indexes of peaks in tRF
+        trf_peak_idxs : <blob>  # Indexes of peaks in tRF
         '''
         return definition
 

@@ -27,7 +27,7 @@ class FitGauss2DRFTemplate(dj.Computed):
         definition = """
         -> self.split_rf_table
         ---
-        srf_fit: <npy@processed>
+        srf_fit: <blob>
         srf_params: <blob>
         rf_area_um2: float32 # Area covered by 2 standard deviations
         rf_cdia_um: float32 # Circle equivalent diameter
@@ -138,11 +138,11 @@ class FitDoG2DRFTemplate(dj.Computed):
         definition = """
         -> self.split_rf_table
         ---
-        srf_fit: <npy@processed>
-        srf_center_fit: <npy@processed>
-        srf_surround_fit: <npy@processed>
+        srf_fit: <blob>
+        srf_center_fit: <blob>
+        srf_surround_fit: <blob>
         srf_params: <blob>
-        srf_eff_center: <npy@processed>
+        srf_eff_center: <blob>
         srf_eff_center_params: <blob>
         rf_qidx: float32
         rf_area_um2: float32 # Area covered by 2 standard deviations
