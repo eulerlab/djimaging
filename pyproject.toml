@@ -47,3 +47,8 @@ markers = ["dependency: mark a test as a dependency"]
 
 [tool.uv.sources]
 scanm-support = { git = "https://github.com/eulerlab/ScanM_support.git" }
+
+[tool.uv.workspace]
+members = [
+    "djimaging/user/all_gcl",
+]

@@ -26,6 +26,69 @@ from djimaging.tables.response.movingbar.orientation_utils_v2 import compute_os_
 from djimaging.utils.dj_utils import get_primary_key
 
 
+def plot_os_ds_summary(
+        sorted_directions_rad, mean_resp, min_resp, max_resp, avg_sorted_resp, time_component_dt,
+        ds_index, ds_pvalue, os_index, os_pvalue, pref_dir, pref_or, on_off):
+    """
+    Plots a polar direction-tuning summary (mean response per direction, min-max band across reps, preferred
+    direction) and the per-direction average response time courses.
+    """
+    fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor='w', sharex=True, sharey=True)
+
+    fig.suptitle(
+        f"DSI: {ds_index:.2f}, Pref-Dir: {(360 + np.rad2deg(pref_dir)) % 360:.0f}°; p={ds_pvalue:.2f}\n"
+        f"OSI: {ds_index:.2f}, Pref-Or: {(180 + np.rad2deg(pref_or)) % 180:.0f}°; p={os_pvalue:.2f}\n"
+        f"On-Off: {on_off:.2f}")
+
+    # Polar plot in center: mean response per direction, min-max band across reps, true zero if response dips below 0
+    axs[1, 1].remove()
+    ax = fig.add_subplot(3, 3, 5, projection='polar', frameon=False)
+
+    theta = np.append(sorted_directions_rad, sorted_directions_rad[0])
+    mean_closed = np.append(mean_resp, mean_resp[0])
+    min_closed = np.append(min_resp, min_resp[0])
+    max_closed = np.append(max_resp, max_resp[0])
+
+    temp = np.max(np.abs(np.concatenate([mean_resp, min_resp, max_resp])))
+    ax.plot((0, np.pi), (temp * 1.2, temp * 1.2), color='gray')
+    ax.plot((np.pi / 2, np.pi / 2 * 3), (temp * 1.2, temp * 1.2), color='gray')
+
+    r_min = float(np.min(min_resp))
+    if r_min < 0:
+        # r=0 no longer sits at the plot center once rorigin is negative, so draw it explicitly
+        ax.set_rorigin(r_min * 1.1)
+        theta_circle = np.linspace(0, 2 * np.pi, 200)
+        ax.plot(theta_circle, np.zeros_like(theta_circle), color='gray', linestyle='--', linewidth=1)
+    else:
+        ax.set_rmin(0)
+
+    ax.plot([pref_dir, pref_dir], [0, ds_index * temp], color='k')
+    ax.fill_between(theta, min_closed, max_closed, color='red', alpha=0.3)
+    ax.plot(theta, mean_closed, color='red')
+
+    ax.set_thetalim([0, 2 * np.pi])
+    ax.set_yticks([])
+    ax_idxs = [0, 1, 2, 3, 5, 6, 7, 8]
+    dir_idxs = [3, 2, 1, 4, 0, 5, 6, 7]
+
+    for idx, (ax_idx, dir_idx) in enumerate(zip(ax_idxs, dir_idxs)):
+        ax = axs.flat[ax_idx]
+        ax.fill_between(np.arange(avg_sorted_resp.shape[0]) * time_component_dt,
+                        avg_sorted_resp[:, dir_idx], color='red', alpha=0.5)
+        ax.axvline(x=T_START, color='gray', linestyle='--')
+        ax.axvline(x=T_CHANGE, color='gray', linestyle='--')
+        ax.axvline(x=T_END, color='gray', linestyle='--')
+
+        ax.spines['left'].set_visible(True)
+        # Remove all other spines
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+    plt.tight_layout()
+
+    return fig, axs
+
+
 class OsDsIndexesTemplate(dj.Computed):
     database = ""
     _reduced_storage = True  # Don't save all intermediate results
@@ -120,53 +183,27 @@ class OsDsIndexesTemplate(dj.Computed):
         dir_order = (self.stimulus_table() & key).fetch1('trial_info')
         sorted_directions_rad = np.deg2rad(np.sort(dir_order))
 
-        (time_component_dt, dir_component, ds_index, ds_pvalue, os_index, os_pvalue, pref_dir, pref_or, on_off) = (
+        (time_component_dt, time_component, ds_index, ds_pvalue, os_index, os_pvalue, pref_dir, pref_or, on_off) = (
                 self & key).fetch1(
-            'time_component_dt', 'dir_component', 'ds_index', 'ds_pvalue', 'os_index', 'os_pvalue',
+            'time_component_dt', 'time_component', 'ds_index', 'ds_pvalue', 'os_index', 'os_pvalue',
             'pref_dir', 'pref_or', 'on_off')
 
-        fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor='w', sharex=True, sharey=True)
+        # sorted_responses (per repetition) is never stored in the table, so it's always recomputed from snippets
+        snippets = (self.snippets_table() & key).fetch1('snippets')
+        sorted_directions, sorted_responses, avg_sorted_resp = preprocess_mb_snippets(snippets, dir_order)
 
-        fig.suptitle(
-            f"DSI: {ds_index:.2f}, Pref-Dir: {(360 + np.rad2deg(pref_dir)) % 360:.0f}°; p={ds_pvalue:.2f}\n"
-            f"OSI: {ds_index:.2f}, Pref-Or: {(180 + np.rad2deg(pref_or)) % 180:.0f}°; p={os_pvalue:.2f}\n"
-            f"On-Off: {on_off:.2f}")
+        # project each trial onto the time kernel to get a real-amplitude response per direction and repetition
+        t, d, r = sorted_responses.shape
+        projected = np.reshape(np.reshape(sorted_responses, (t, d * r)).T @ time_component, (d, r))
+        mean_resp = np.mean(projected, axis=-1)
+        min_resp = np.min(projected, axis=-1)
+        max_resp = np.max(projected, axis=-1)
 
-        # Polar plot in center
-        axs[1, 1].remove()
-        ax = fig.add_subplot(3, 3, 5, projection='polar', frameon=False)
-        temp = np.max(np.append(dir_component, ds_index))
-        ax.plot((0, np.pi), (temp * 1.2, temp * 1.2), color='gray')
-        ax.plot((np.pi / 2, np.pi / 2 * 3), (temp * 1.2, temp * 1.2), color='gray')
-        ax.plot([0, pref_dir], [0, ds_index * np.sum(dir_component)], color='r')
-        ax.plot(np.append(sorted_directions_rad, sorted_directions_rad[0]),
-                np.append(dir_component, dir_component[0]), color='k')
-        ax.set_rmin(0)
-        ax.set_thetalim([0, 2 * np.pi])
-        ax.set_yticks([])
-        ax_idxs = [0, 1, 2, 3, 5, 6, 7, 8]
-        dir_idxs = [3, 2, 1, 4, 0, 5, 6, 7]
-
-        if not self._reduced_storage:
-            avg_sorted_resp = (self & key).fetch1('avg_sorted_resp')
-        else:
-            snippets = (self.snippets_table() & key).fetch1('snippets')
-            sorted_directions, sorted_responses, avg_sorted_resp = preprocess_mb_snippets(snippets, dir_order)
-
-        for idx, (ax_idx, dir_idx) in enumerate(zip(ax_idxs, dir_idxs)):
-            ax = axs.flat[ax_idx]
-            ax.fill_between(np.arange(avg_sorted_resp.shape[0]) * time_component_dt,
-                            avg_sorted_resp[:, dir_idx], color='red', alpha=0.5)
-            ax.axvline(x=T_START, color='gray', linestyle='--')
-            ax.axvline(x=T_CHANGE, color='gray', linestyle='--')
-            ax.axvline(x=T_END, color='gray', linestyle='--')
-
-            ax.spines['left'].set_visible(True)
-            # Remove all other spines
-            ax.spines['top'].set_visible(False)
-            ax.spines['right'].set_visible(False)
-
-        plt.tight_layout()
+        plot_os_ds_summary(
+            sorted_directions_rad=sorted_directions_rad, mean_resp=mean_resp, min_resp=min_resp, max_resp=max_resp,
+            avg_sorted_resp=avg_sorted_resp, time_component_dt=time_component_dt,
+            ds_index=ds_index, ds_pvalue=ds_pvalue, os_index=os_index, os_pvalue=os_pvalue,
+            pref_dir=pref_dir, pref_or=pref_or, on_off=on_off)
 
     def plot(self, restriction=None):
         if restriction is None:

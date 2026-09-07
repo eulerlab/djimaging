@@ -139,15 +139,18 @@ def compute_corr_map_match_indexes(
     # Iterate over all possible shifts in both x and y directions within the range [-ShiftMax, ShiftMax]
     for i, (dx, dy) in enumerate(dx_dy_pairs, start=1):
         # Crop the shifted_video and stack_corr images to the same size
-        cropped = corr_map[max(0, -dx):min(ref_corr_map.shape[0], ref_corr_map.shape[0] - dx),
-                  max(0, -dy):min(ref_corr_map.shape[1], ref_corr_map.shape[1] - dy)]
+        cropped = corr_map[max(0, -dx):min(corr_map.shape[0], corr_map.shape[0] - dx),
+                  max(0, -dy):min(corr_map.shape[1], corr_map.shape[1] - dy)]
 
         ref_cropped = ref_corr_map[max(0, dx):min(ref_corr_map.shape[0], ref_corr_map.shape[0] + dx),
                       max(0, dy):min(ref_corr_map.shape[1], ref_corr_map.shape[1] + dy)]
 
         # Calculate the correlation coefficient between the cropped images
         if metric == 'corr':
-            score = np.corrcoef(cropped.flatten(), ref_cropped.flatten())[0, 1]
+            a = cropped.ravel() - cropped.mean()
+            b = ref_cropped.ravel() - ref_cropped.mean()
+            denom = np.linalg.norm(a) * np.linalg.norm(b)
+            score = np.dot(a, b) / denom if denom > 0 else 0.0
         elif metric == 'mse':
             score = -np.mean((cropped - ref_cropped) ** 2)
         else:
@@ -165,6 +168,7 @@ def compute_corr_map_match_indexes(
             ax2.imshow(cropped)
 
             plt.show()
+            plt.close(fig)
 
         # Store the correlation coefficient in the cross-correlation matrix
         match_indexes[dx + shift_max, dy + shift_max] = score
@@ -176,9 +180,9 @@ def compute_corr_map_match_indexes(
     v_max = np.max(match_indexes)
     v_max_row_loc, v_max_col_loc = np.unravel_index(np.argmax(match_indexes), match_indexes.shape)
 
-    # Shift the ROI mask
-    x_shift = v_max_row_loc - shift_max
-    y_shift = v_max_col_loc - shift_max
+    # Recover the shift: dx stored at index dx+shift_max, so dx = index-shift_max
+    x_shift = shift_max - v_max_row_loc
+    y_shift = shift_max - v_max_col_loc
 
     if verbose:
         print("ROI mask shifted by", x_shift, "pixels in x and", y_shift, "pixels in y")
