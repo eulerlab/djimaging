@@ -265,13 +265,13 @@ class FastStaTemplate(dj.Computed):
         NotImplementedError
             If the restrictions do not select exactly one parameter set.
         """
-        restrictions = [{}] if len(restrictions) == 0 else restrictions
-        if len(self.params_table() & [*restrictions]) != 1:
+        restriction = dj.AndList(restrictions)
+        params_table = self.params_table() & restriction
+        if len(params_table) != 1:
             raise NotImplementedError("Only one parameter set supported. Provide `restrictions` that selects one.")
 
         (x_stimulus, dt, rf_time, burn_in, shift, kind, dims, fupsample_stim, fupsample_trace,
-         fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s) = (
-                self.params_table & [*restrictions]).fetch1(
+         fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s) = params_table.fetch1(
             'x_stimulus', 'dt', 'rf_time', 'burn_in', 'shift', 'fit_kind', 'dims', 'fupsample_stim',
             "fupsample_trace", "fit_kind", "lowpass_cutoff", "pre_blur_sigma_s", "post_blur_sigma_s")
 
@@ -282,7 +282,7 @@ class FastStaTemplate(dj.Computed):
         # reconstructed in make_compute matches the design matrix built in
         # prepare_stimulus. Falls back to the old name 'ntrigger_per_frame'
         # and to 1 if neither is present.
-        stim_dict = (self.params_table.stimulus_table & [*restrictions]).fetch1('stim_dict')
+        stim_dict = (self.params_table.stimulus_table & restriction).fetch1('stim_dict')
         nframes_per_trigger = int(stim_dict.get(
             'nframes_per_trigger', stim_dict.get('ntrigger_per_frame', 1)))
 
@@ -302,13 +302,13 @@ class FastStaTemplate(dj.Computed):
             suppress_errors: bool = False,
             return_exception_objects: bool = False,
             reserve_jobs: bool = False,
-            order: str = "original",
-            limit: int | None = None,
             max_calls: int | None = None,
             display_progress: bool = False,
             processes: int = 1,
             make_kwargs: dict | None = None,
-    ) -> None:
+            priority: int | None = None,
+            refresh: bool | None = None,
+    ) -> dict:
         """Populate the table, precomputing STA parameters shared across all entries.
 
         Parameters
@@ -321,10 +321,6 @@ class FastStaTemplate(dj.Computed):
             If True, return exception objects instead of raising them. Default is False.
         reserve_jobs : bool, optional
             If True, use DataJoint job reservation. Default is False.
-        order : str, optional
-            Order in which to populate entries. Default is "original".
-        limit : int or None, optional
-            Maximum number of entries to populate. Default is None.
         max_calls : int or None, optional
             Maximum number of make() calls. Default is None.
         display_progress : bool, optional
@@ -333,31 +329,38 @@ class FastStaTemplate(dj.Computed):
             Number of parallel processes. Default is 1.
         make_kwargs : dict or None, optional
             Additional keyword arguments passed to make(). Default is None.
+        priority : int or None, optional
+            Minimum job priority when using distributed population.
+        refresh : bool or None, optional
+            Whether to refresh the distributed job queue.
+
+        Returns
+        -------
+        dict
+            DataJoint population summary with ``success_count`` and ``error_list``.
 
         Raises
         ------
         NotImplementedError
             If the restrictions do not select exactly one parameter set.
         """
-        restrictions = [{}] if len(restrictions) == 0 else restrictions
-        if len(self.params_table() & [*restrictions]) != 1:
+        if len(self.params_table() & dj.AndList(restrictions)) != 1:
             raise NotImplementedError("Only one parameter set supported. Provide `restrictions` that selects one.")
 
-        if make_kwargs is None:
-            make_kwargs = dict()
+        make_kwargs = dict(make_kwargs or {})
         make_kwargs['sta_params'] = self.prepare_sta_params(*restrictions)
 
-        super().populate(
+        return super().populate(
             *restrictions,
             suppress_errors=suppress_errors,
             return_exception_objects=return_exception_objects,
             reserve_jobs=reserve_jobs,
-            order=order,
-            limit=limit,
             max_calls=max_calls,
             display_progress=display_progress,
             processes=processes,
             make_kwargs=make_kwargs,
+            priority=priority,
+            refresh=refresh,
         )
 
     def make_compute(self, key: dict, sta_params: dict | None = None) -> list | None:

@@ -245,9 +245,10 @@ class CelltypeAssignmentTemplate(dj.Computed):
     def populate(
             self, *restrictions, suppress_errors: bool = False,
             return_exception_objects: bool = False, reserve_jobs: bool = False,
-            order: str = "original", limit=None, max_calls=None,
+            max_calls=None,
             display_progress: bool = False, processes: int = 1, make_kwargs=None,
-    ) -> None:
+            priority: int | None = None, refresh: bool | None = None,
+    ) -> dict:
         """Populate the table, enforcing single-process execution.
 
         Args:
@@ -255,21 +256,25 @@ class CelltypeAssignmentTemplate(dj.Computed):
             suppress_errors: If True, suppress errors during population.
             return_exception_objects: If True, return exception objects instead of raising.
             reserve_jobs: If True, use the job reservation mechanism.
-            order: Population order, e.g. ``"original"`` or ``"random"``.
-            limit: Maximum number of keys to populate.
             max_calls: Maximum number of ``make`` calls.
             display_progress: If True, display a progress bar.
             processes: Number of parallel processes. Values greater than 1 are not
                 supported and will emit a warning.
             make_kwargs: Additional keyword arguments forwarded to ``make``.
+            priority: Minimum job priority when using distributed population.
+            refresh: Whether to refresh the distributed job queue.
+
+        Returns:
+            DataJoint population summary with ``success_count`` and ``error_list``.
         """
         if processes > 1:
             warnings.warn('Parallel processing not implemented!')
-        super().populate(
+        return super().populate(
             *restrictions,
             suppress_errors=suppress_errors, return_exception_objects=return_exception_objects,
-            reserve_jobs=reserve_jobs, order=order, limit=limit, max_calls=max_calls,
-            display_progress=display_progress, processes=1, make_kwargs=make_kwargs)
+            reserve_jobs=reserve_jobs, max_calls=max_calls,
+            display_progress=display_progress, processes=1, make_kwargs=make_kwargs,
+            priority=priority, refresh=refresh)
 
     def make(self, key: dict) -> None:
         """Classify all ROIs for the given key and insert results into the table.

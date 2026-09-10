@@ -3,7 +3,9 @@ import os
 import h5py
 import numpy as np
 import pytest
+from sklearn.dummy import DummyClassifier
 
+from djimaging.tables.classifier_v2.rgc_classifier_v2 import save_classifier_to_file
 from tests.fixtures.random_utils import numpy_seed
 
 
@@ -129,3 +131,33 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
     assert np.all(np.isfinite((tutorial_schema.ChirpQI() & experiment_key).to_arrays("qidx")))
     assert np.all(np.isfinite((tutorial_schema.OsDsIndexes() & experiment_key).to_arrays("ds_index")))
     assert np.all(np.isfinite((tutorial_schema.OsDsIndexes() & experiment_key).to_arrays("os_index")))
+
+    with numpy_seed(42):
+        tutorial_schema.Baden16TracesV2().populate(experiment_key, display_progress=False)
+    baden_traces = (tutorial_schema.Baden16TracesV2() & experiment_key).to_dicts()
+    assert len(baden_traces) == 2
+
+    # Exercise classifier loading and population with a model trained in this environment.
+    train_x = np.zeros((75, 4))
+    train_y = np.arange(1, 76)
+    classifier = DummyClassifier(strategy="uniform").fit(train_x, train_y)
+    classifier_file = tutorial_data_dir / "resources" / "test_classifier.pkl"
+    save_classifier_to_file(
+        classifier=classifier,
+        chirp_feats=np.ones((baden_traces[0]["preproc_chirp"].size, 1)),
+        bar_feats=np.ones((baden_traces[0]["preproc_bar"].size, 1)),
+        feature_names=["chirp", "bar", "ds", "size"],
+        train_x=train_x,
+        train_y=train_y,
+        y_names={label: str(label) for label in train_y},
+        classifier_file=classifier_file,
+    )
+    tutorial_schema.ClassifierV2().add(classifier_file=classifier_file)
+    summary = tutorial_schema.CelltypeAssignmentV2().populate(
+        experiment_key, {"classifier_id": 1}, display_progress=False,
+    )
+    assert summary == {"success_count": 1, "error_list": []}
+    assignments = (tutorial_schema.CelltypeAssignmentV2() & experiment_key).to_dicts()
+    assert len(assignments) == 2
+    for row in assignments:
+        np.testing.assert_allclose(row["probs_per_cluster"], np.full(75, 1 / 75))

@@ -66,17 +66,16 @@ class CelltypeAssignmentV2Template(dj.Computed):
     def populate(
             self,
             *restrictions,
-            keys=None,
             suppress_errors: bool = False,
             return_exception_objects: bool = False,
             reserve_jobs: bool = False,
-            order: str = "original",
-            limit=None,
             max_calls=None,
             display_progress: bool = False,
             processes: int = 1,
             make_kwargs=None,
-    ) -> None:
+            priority: int | None = None,
+            refresh: bool | None = None,
+    ) -> dict:
         """Populate the table, loading the classifier once before iterating over keys.
 
         The classifier, chirp features, and bar features are loaded from the
@@ -85,17 +84,19 @@ class CelltypeAssignmentV2Template(dj.Computed):
 
         Args:
             *restrictions: DataJoint restrictions; must resolve to a single classifier entry.
-            keys: Optional explicit list of keys to populate.
             suppress_errors: If ``True``, suppress errors during population.
             return_exception_objects: If ``True``, return exception objects instead of raising.
             reserve_jobs: If ``True``, use the job reservation mechanism.
-            order: Population order, e.g. ``"original"`` or ``"random"``.
-            limit: Maximum number of keys to populate.
             max_calls: Maximum number of ``make`` calls.
             display_progress: If ``True``, display a progress bar.
             processes: Number of parallel processes; must be 1.
             make_kwargs: Additional keyword arguments forwarded to ``make``. The keys
                 ``'classifier'``, ``'chirp_feats'``, and ``'bar_feats'`` are reserved.
+            priority: Minimum job priority when using distributed population.
+            refresh: Whether to refresh the distributed job queue.
+
+        Returns:
+            DataJoint population summary with ``success_count`` and ``error_list``.
 
         Raises:
             NotImplementedError: If ``processes > 1``.
@@ -108,16 +109,13 @@ class CelltypeAssignmentV2Template(dj.Computed):
                 "Parallel processing is not implemented for this table."
             )
 
-        if len(restrictions) == 0:
-            restrictions = dict()
-
-        if len(self.classifier_table & restrictions) > 1:
+        classifier_table = self.classifier_table & dj.AndList(restrictions)
+        if len(classifier_table) > 1:
             raise ValueError(
                 "Multiple classifiers found for the given restrictions. "
                 "Please specify a single classifier.")
 
-        if make_kwargs is None:
-            make_kwargs = dict()
+        make_kwargs = dict(make_kwargs or {})
 
         for key in ['classifier', 'chirp_feats', 'bar_feats']:
             if key in make_kwargs:
@@ -125,7 +123,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
                     f"The '{key}' key is reserved and should not be provided in make_kwargs. "
                     "It will be automatically set based on the classifier_table.")
 
-        classifier_file = (self.classifier_table & restrictions).fetch1('classifier_file')
+        classifier_file = classifier_table.fetch1('classifier_file')
         clf_dict = load_classifier_from_file(classifier_file)
         check_classifier_dict(clf_dict)
 
@@ -137,18 +135,17 @@ class CelltypeAssignmentV2Template(dj.Computed):
             raise ValueError("The classifier's classes do not match the expected classes.")
 
         # populate
-        super().populate(
+        return super().populate(
             *restrictions,
-            keys=keys,
             suppress_errors=suppress_errors,
             return_exception_objects=return_exception_objects,
             reserve_jobs=reserve_jobs,
-            order=order,
-            limit=limit,
             max_calls=max_calls,
             display_progress=display_progress,
             processes=processes,
-            make_kwargs=make_kwargs
+            make_kwargs=make_kwargs,
+            priority=priority,
+            refresh=refresh,
         )
 
     def make(self, key: dict, classifier, chirp_feats: np.ndarray, bar_feats: np.ndarray) -> None:

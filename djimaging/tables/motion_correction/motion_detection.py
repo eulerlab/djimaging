@@ -114,12 +114,12 @@ class MotionDetectionTemplate(dj.Computed):
             suppress_errors: bool = False,
             return_exception_objects: bool = False,
             reserve_jobs: bool = False,
-            order: str = "original",
-            limit: int = None,
             max_calls: int = None,
             display_progress: bool = False,
             processes: int = 1,
             make_kwargs: dict = None,
+            priority: int | None = None,
+            refresh: bool | None = None,
     ):
         """Populate the table, enforcing single-process execution.
 
@@ -131,13 +131,13 @@ class MotionDetectionTemplate(dj.Computed):
             suppress_errors: Passed through to ``super().populate``.
             return_exception_objects: Passed through to ``super().populate``.
             reserve_jobs: Passed through to ``super().populate``.
-            order: Passed through to ``super().populate``.
-            limit: Passed through to ``super().populate``.
             max_calls: Passed through to ``super().populate``.
             display_progress: Passed through to ``super().populate``.
             processes: Number of parallel processes. Values greater than 1 are
                 reset to 1 with a warning.
             make_kwargs: Passed through to ``super().populate``.
+            priority: Passed through to ``super().populate``.
+            refresh: Passed through to ``super().populate``.
         """
         if processes > 1:
             warnings.warn(
@@ -151,12 +151,12 @@ class MotionDetectionTemplate(dj.Computed):
             suppress_errors=suppress_errors,
             return_exception_objects=return_exception_objects,
             reserve_jobs=reserve_jobs,
-            order=order,
-            limit=limit,
             max_calls=max_calls,
             display_progress=display_progress,
             processes=processes,
             make_kwargs=make_kwargs,
+            priority=priority,
+            refresh=refresh,
         )
 
     def make(self, key: dict, verbose: bool = False) -> None:
