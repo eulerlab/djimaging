@@ -193,7 +193,7 @@ class STATemplate(dj.Computed):
             rf_dataset_key = deepcopy(key)
             rf_dataset_key['kind'] = k
             rf_dataset_key['burn_in'] = rf_pred['burn_in']
-            rf_dataset_key['x'] = x[k].astype(np.float32) if store_x == 'data' else x[k].shape
+            rf_dataset_key['x'] = x[k].astype(np.float32) if store_x == 'data' else np.array(x[k].shape)
             rf_dataset_key['y'] = y[k].astype(np.float32) if store_y == 'data' else y[k].shape
             rf_dataset_key['y_pred'] = rf_pred[f'y_pred_{k}'].astype(np.float32) \
                 if store_y == 'data' else rf_pred[f'y_pred_{k}'].shape
