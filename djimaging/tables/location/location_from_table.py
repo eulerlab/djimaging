@@ -27,6 +27,7 @@ import datajoint as dj
 import pandas as pd
 from matplotlib import pyplot as plt
 
+from djimaging.utils.dj_storage import open_object
 from djimaging.utils.dj_utils import make_hash
 
 
@@ -100,7 +101,8 @@ class RetinalFieldLocationFromTableTemplate(dj.Computed):
     def make(self, key):
         params = (self.params_table() & key).fetch1()
 
-        df = pd.read_csv(params['table_path'])
+        with open_object(params['table_path'], mode='r', store=self.params_table.store) as f:
+            df = pd.read_csv(f)
         df.date = df.date.apply(lambda x: datetime.date(datetime.strptime(str(x), '%Y%m%d')))
         df.head()
 

@@ -208,7 +208,7 @@ class RoiMaskTemplate(dj.Manual):
         for f in all_filepaths:
             store_path = relative_store_path(f, self.presentation_table._filepath_store)
             pres_key_list = (
-                (self.presentation_table & field_key) & dict(pres_data_file=store_path)
+                (self.presentation_table & field_key) & {"pres_data_file.path": store_path}
             ).proj().to_dicts()
             if len(pres_key_list) == 1:
                 pres_keys.append(pres_key_list[0])
