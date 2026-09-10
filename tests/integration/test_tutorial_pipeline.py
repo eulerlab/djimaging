@@ -34,7 +34,13 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
     tutorial_schema.RawDataParams().add_default(experimenter_list=["synthetic"])
 
     tutorial_schema.Experiment().rescan_filesystem(restrictions=experiment_key, verboselvl=0)
+
+    processed = dj_test_stores["processed"]
+    external_files_before = {path for path in processed.rglob("*") if path.is_file()}
     tutorial_schema.Field().rescan_filesystem(restrictions=experiment_key, verboselvl=0)
+    assert {path for path in processed.rglob("*") if path.is_file()} == external_files_before, (
+        "Field channel averages must stay in the database"
+    )
 
     tutorial_schema.Stimulus().add_nostim(skip_duplicates=True)
     tutorial_schema.Stimulus().add_chirp(
@@ -63,6 +69,7 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
     )
     tutorial_schema.Stimulus().add_movingbar(skip_duplicates=True)
 
+    external_files_before = {path for path in processed.rglob("*") if path.is_file()}
     tutorial_schema.Presentation().populate(display_progress=False)
     tutorial_schema.RoiMask().rescan_filesystem(
         restrictions=experiment_key,
@@ -70,9 +77,6 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
         roi_mask_dir="AutoROIs",
     )
     tutorial_schema.Roi().populate(experiment_key, display_progress=False)
-
-    processed = dj_test_stores["processed"]
-    external_files_before = {path for path in processed.rglob("*") if path.is_file()}
 
     tutorial_schema.Traces().populate(experiment_key, display_progress=False)
     tutorial_schema.PreprocessParams().add_default(skip_duplicates=True)
@@ -86,7 +90,8 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
 
     external_files_after = {path for path in processed.rglob("*") if path.is_file()}
     assert external_files_after == external_files_before, (
-        "Per-ROI traces, snippets, averages, and response metrics must stay in the database"
+        "Presentation channel averages, ROI masks, traces, snippets, averages, "
+        "and response metrics must stay in the database"
     )
 
     tutorial_schema.OpticDisk().populate(experiment_key, display_progress=False)

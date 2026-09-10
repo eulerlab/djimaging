@@ -50,10 +50,11 @@ The template uses a reference-only DataJoint store rooted at
 `/gpfs01/euler/data` for externally managed acquisition, stimulus, and model
 files. DataJoint does not write `<filepath>` values, although filesystem tools
 such as ROI-mask editors may still require write access to adjacent folders.
-Traces, snippets, response vectors, and small analysis arrays/objects use
-`<blob>` and are stored directly in the database. Large stimulus and population
-matrices, full spatiotemporal receptive fields, image-sized maps/masks, and model
-objects use `<npy@processed>` or `<blob@processed>` in the separate writable
+Traces, snippets, response vectors, field/presentation channel averages, ROI masks,
+and small analysis arrays/objects use `<blob>` and are stored directly in the
+database. Large stimulus and population matrices, full spatiotemporal receptive
+fields, high-resolution channel averages, correlation maps, and model objects
+use `<npy@processed>` or `<blob@processed>` in the separate writable
 `processed` store. Paths inserted into `<filepath@reference>` fields must be
 relative to the common reference root.
 JSON does not support comments, so these store roles are documented here rather

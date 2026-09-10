@@ -36,7 +36,7 @@ class RoiMaskTemplate(dj.Manual):
         -> self.raw_params_table
         ---
         -> self.presentation_table
-        roi_mask     : <npy@processed>                   # ROI mask for recording field
+        roi_mask     : <blob>                   # ROI mask for recording field
         """
         return definition
 
@@ -48,7 +48,7 @@ class RoiMaskTemplate(dj.Manual):
             -> master
             -> self.presentation_table
             ---
-            roi_mask      : <npy@processed>       # ROI mask for presentation field
+            roi_mask      : <blob>       # ROI mask for presentation field
             as_field_mask : enum('same', 'different', 'shifted')  # relationship to field mask
             shift_dx=0    : int32  # Shift in x
             shift_dy=0    : int32  # Shift in y

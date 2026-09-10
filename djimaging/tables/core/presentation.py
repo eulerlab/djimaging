@@ -121,7 +121,7 @@ class PresentationTemplate(dj.Computed):
             -> master
             ch_name : varchar(32)  # name of the channel
             ---
-            ch_average : <npy@processed>  # Stack median over time
+            ch_average : <blob>  # Stack median over time
             """
             return definition
 

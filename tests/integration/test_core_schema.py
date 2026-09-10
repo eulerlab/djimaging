@@ -10,7 +10,10 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_all_tutorial_tables_initialize(tutorial_schema):
-    assert tutorial_schema.schema.list_tables()
+    tables = tutorial_schema.schema.list_tables()
+    assert tables
+    for name in ("ClassifierV2", "Baden16TracesV2", "CelltypeAssignmentV2"):
+        assert getattr(tutorial_schema, name).table_name in tables
 
 
 def test_user_info_round_trip(tutorial_schema, tmp_path):
