@@ -28,7 +28,8 @@ def get_time_dir_kernels(sorted_responses, dt):
     singular_value  float, 1st singular value
     """
 
-    U, S, V = np.linalg.svd(sorted_responses)
+    # Only the leading components are used; avoid the full time-by-time U matrix.
+    U, S, V = np.linalg.svd(sorted_responses, full_matrices=False)
 
     time_component = U[:, 0]
     dir_component = V[0, :]
