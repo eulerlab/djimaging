@@ -329,7 +329,7 @@ def cluster_gmm(X: np.ndarray, ncomp_max: int = 6, ncomp_min: int = 1, cv: int =
         return -estimator.bic(X_)
 
     def gmm_aic_score(estimator, X_):
-        return -estimator.bic(X_)
+        return -estimator.aic(X_)
 
     def gmm_loglikelihood_score(estimator, X_):
         return estimator.score(X_)
