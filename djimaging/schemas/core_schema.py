@@ -87,6 +87,7 @@ class HighRes(misc.HighResTemplate):
 @schema
 class RoiMask(core.RoiMaskTemplate):
     _max_shift = 5  # Maximum shift of ROI mask in pixels
+    _roi_file_format = 'numpy'
 
     field_table = Field
     presentation_table = Presentation

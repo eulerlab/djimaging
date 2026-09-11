@@ -24,7 +24,8 @@ def get_time_dir_kernels(sorted_responses: np.ndarray, dt: float):
     Returns:
     tuple: Contains time_kernel (array, time x 1), direction_tuning (array, directions x 1), and singular_value (float).
     """
-    U, S, Vh = np.linalg.svd(sorted_responses)
+    # Only the leading components are used; avoid the full time-by-time U matrix.
+    U, S, Vh = np.linalg.svd(sorted_responses, full_matrices=False)
 
     time_component = U[:, 0]
     dir_component = Vh[0, :]

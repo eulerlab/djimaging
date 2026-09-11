@@ -22,6 +22,7 @@ from matplotlib import pyplot as plt
 
 from djimaging.tables.motion_correction.motion_utils import compute_shifts_jnormcorre, correct_shifts_in_stack, \
     plot_stack_and_corr_stack
+from djimaging.utils.dj_storage import load_array, local_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import set_long_title
 from djimaging.utils.scanm import read_utils
@@ -35,10 +36,10 @@ class MotionDetectionParamsTemplate(dj.Lookup):
     @property
     def definition(self) -> str:
         definition = f"""
-        mcorr_id : tinyint unsigned
+        mcorr_id : int32
         ---
         mcorr_method : varchar(191)
-        mcorr_params : longblob
+        mcorr_params : <blob>
         """
         return definition
 
@@ -77,11 +78,11 @@ class MotionDetectionTemplate(dj.Computed):
         -> self.presentation_table
         -> self.mcorr_params_table
         ---
-        max_shift_x : float  # Maximum shift after stimulus onset in x direction
-        max_shift_y : float  # Maximum shift after stimulus onset in y direction
-        shifts_x : mediumblob  # Shift in x direction
-        shifts_y : mediumblob  # Shift in y direction
-        idx_stim_onset : int  # Index of stimulus onset
+        max_shift_x : float32  # Maximum shift after stimulus onset in x direction
+        max_shift_y : float32  # Maximum shift after stimulus onset in y direction
+        shifts_x : <blob>  # Shift in x direction
+        shifts_y : <blob>  # Shift in y direction
+        idx_stim_onset : int32  # Index of stimulus onset
         """
         return definition
 
@@ -113,12 +114,12 @@ class MotionDetectionTemplate(dj.Computed):
             suppress_errors: bool = False,
             return_exception_objects: bool = False,
             reserve_jobs: bool = False,
-            order: str = "original",
-            limit: int = None,
             max_calls: int = None,
             display_progress: bool = False,
             processes: int = 1,
             make_kwargs: dict = None,
+            priority: int | None = None,
+            refresh: bool | None = None,
     ):
         """Populate the table, enforcing single-process execution.
 
@@ -130,13 +131,13 @@ class MotionDetectionTemplate(dj.Computed):
             suppress_errors: Passed through to ``super().populate``.
             return_exception_objects: Passed through to ``super().populate``.
             reserve_jobs: Passed through to ``super().populate``.
-            order: Passed through to ``super().populate``.
-            limit: Passed through to ``super().populate``.
             max_calls: Passed through to ``super().populate``.
             display_progress: Passed through to ``super().populate``.
             processes: Number of parallel processes. Values greater than 1 are
                 reset to 1 with a warning.
             make_kwargs: Passed through to ``super().populate``.
+            priority: Passed through to ``super().populate``.
+            refresh: Passed through to ``super().populate``.
         """
         if processes > 1:
             warnings.warn(
@@ -150,12 +151,12 @@ class MotionDetectionTemplate(dj.Computed):
             suppress_errors=suppress_errors,
             return_exception_objects=return_exception_objects,
             reserve_jobs=reserve_jobs,
-            order=order,
-            limit=limit,
             max_calls=max_calls,
             display_progress=display_progress,
             processes=processes,
             make_kwargs=make_kwargs,
+            priority=priority,
+            refresh=refresh,
         )
 
     def make(self, key: dict, verbose: bool = False) -> None:
@@ -171,11 +172,13 @@ class MotionDetectionTemplate(dj.Computed):
         scan_frequency = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
         pres_data_file, triggertimes, pixel_size_um, npixartifact = (self.presentation_table & key).fetch1(
             'pres_data_file', 'triggertimes', 'pixel_size_um', 'npixartifact')
+        triggertimes = load_array(triggertimes)
         data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
         from_raw_data = (self.presentation_table.raw_params_table & key).fetch1('from_raw_data')
 
-        stacks, wparams = read_utils.load_stacks(
-            pres_data_file, from_raw_data=from_raw_data, ch_names=(data_stack_name,))
+        with local_path(pres_data_file, self.presentation_table._filepath_store) as filepath:
+            stacks, wparams = read_utils.load_stacks(
+                filepath, from_raw_data=from_raw_data, ch_names=(data_stack_name,))
         stack = stacks[data_stack_name].copy()[npixartifact:, :]
 
         idx_stim_onset = int(np.floor(triggertimes[0] * scan_frequency))
@@ -212,11 +215,13 @@ class MotionDetectionTemplate(dj.Computed):
         fs = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
         from_raw_data = (self.presentation_table.raw_params_table & key).fetch1('from_raw_data')
 
-        stacks, wparams = read_utils.load_stacks(
-            pres_data_file, from_raw_data=from_raw_data, ch_names=(data_stack_name,))
+        with local_path(pres_data_file, self.presentation_table._filepath_store) as filepath:
+            stacks, wparams = read_utils.load_stacks(
+                filepath, from_raw_data=from_raw_data, ch_names=(data_stack_name,))
         stack = stacks[data_stack_name].copy()
 
         shifts_x, shifts_y = (self & key).fetch1('shifts_x', 'shifts_y')
+        shifts_x, shifts_y = load_array(shifts_x), load_array(shifts_y)
 
         stack_corrected = correct_shifts_in_stack(
             stack=stack, shifts_x=shifts_x, shifts_y=shifts_y, fs=fs, fupsample=fupsample, f_cutoff=f_cutoff)
@@ -229,10 +234,11 @@ class MotionDetectionTemplate(dj.Computed):
         key = get_primary_key(table=self, key=key)
 
         fs = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
-        triggertimes = (self.presentation_table & key).fetch1('triggertimes')
+        triggertimes = load_array((self.presentation_table & key).fetch1('triggertimes'))
 
         shifts_x, shifts_y, max_shift_x, max_shift_y, idx_stim_onset = (self & key).fetch1(
             'shifts_x', 'shifts_y', 'max_shift_x', 'max_shift_y', 'idx_stim_onset')
+        shifts_x, shifts_y = load_array(shifts_x), load_array(shifts_y)
 
         time = np.arange(shifts_x.size) / fs
 

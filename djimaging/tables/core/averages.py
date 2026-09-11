@@ -6,6 +6,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.core.snippets import get_aligned_snippets_times
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils import plot_utils, math_utils, trace_utils
 
@@ -20,11 +21,11 @@ class AveragesTemplate(dj.Computed):
         # Averages of snippets
         -> self.snippets_table
         ---
-        average             :longblob  # array of snippet average (time)
-        average_norm        :longblob  # normalized array of snippet average (time)
-        average_t0          :float     # time of the first sample of the average
-        average_dt          :float     # time between samples of the average
-        triggertimes_rel    :longblob  # array of relative triggertimes
+        average             :<blob>  # array of snippet average (time)
+        average_norm        :<blob>  # normalized array of snippet average (time)
+        average_t0          :float32     # time of the first sample of the average
+        average_dt          :float32     # time between samples of the average
+        triggertimes_rel    :<blob>  # array of relative triggertimes
         """
         return definition
 
@@ -128,6 +129,8 @@ class AveragesTemplate(dj.Computed):
 
         average, average_norm, average_t0, average_dt, triggertimes_rel = \
             (self & key).fetch1('average', 'average_norm', 'average_t0', 'average_dt', 'triggertimes_rel')
+        average, average_norm, triggertimes_rel = (
+            load_array(average), load_array(average_norm), load_array(triggertimes_rel))
 
         snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
                           + snippets_t0)
@@ -161,8 +164,8 @@ class AveragesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        averages = (self & restriction).fetch('average')
-        averages_norm = (self & restriction).fetch('average_norm')
+        averages = (self & restriction).to_arrays('average')
+        averages_norm = (self & restriction).to_arrays('average_norm')
 
         averages = math_utils.padded_vstack(averages, cval=np.nan)
         averages_norm = math_utils.padded_vstack(averages_norm, cval=np.nan)
@@ -259,6 +262,8 @@ class ResampledAveragesTemplate(AveragesTemplate):
 
         average, average_norm, average_t0, average_dt, triggertimes_rel = \
             (self & key).fetch1('average', 'average_norm', 'average_t0', 'average_dt', 'triggertimes_rel')
+        average, average_norm, triggertimes_rel = (
+            load_array(average), load_array(average_norm), load_array(triggertimes_rel))
 
         snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
                           + snippets_t0)

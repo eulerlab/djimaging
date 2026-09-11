@@ -8,6 +8,7 @@ from abc import abstractmethod
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from scipy import interpolate
 import datajoint as dj
@@ -29,8 +30,8 @@ class Baden16TracesTemplate(dj.Computed):
         -> self.averages_table().proj(avg_stim_name='stim_name')
         -> self.os_ds_table().proj(os_ds_stim_name='stim_name')
         ---
-        preproc_chirp:   blob  # preprocessed chirp trace (averaged, downsampled and normalized)
-        preproc_bar:     blob  # preprocessed bar (time component in pref. dir., averaged and rolled)
+        preproc_chirp:   <blob>  # preprocessed chirp trace (averaged, downsampled and normalized)
+        preproc_bar:     <blob>  # preprocessed bar (time component in pref. dir., averaged and rolled)
         """
         return definition
 
@@ -55,9 +56,11 @@ class Baden16TracesTemplate(dj.Computed):
     def make(self, key):
         chirp_average, chirp_dt = (self.averages_table & dict(stim_name=self._stim_name_chirp) & key).fetch1(
             'average', 'average_dt')
+        chirp_average = load_array(chirp_average)
 
         bar_time_component, bar_dt = (self.os_ds_table & dict(stim_name=self._stim_name_bar) & key).fetch1(
             'time_component', 'time_component_dt')
+        bar_time_component = load_array(bar_time_component)
 
         preproc_chirp = preprocess_chirp(chirp_average, dt=chirp_dt, shift=self._shift_chirp)
         preproc_bar = preprocess_bar(bar_time_component, dt=bar_dt, shift=self._shift_bar)
@@ -70,8 +73,8 @@ class Baden16TracesTemplate(dj.Computed):
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
-        preproc_chirp = (self & key).fetch1('preproc_chirp')
-        preproc_bar = (self & key).fetch1('preproc_bar')
+        preproc_chirp = load_array((self & key).fetch1('preproc_chirp'))
+        preproc_bar = load_array((self & key).fetch1('preproc_bar'))
 
         fig, axs = plt.subplots(1, 2, figsize=(12, 3), gridspec_kw=dict(width_ratios=(3, 1)))
 

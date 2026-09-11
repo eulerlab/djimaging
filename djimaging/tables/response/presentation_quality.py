@@ -37,14 +37,14 @@ class RepeatQIPresentationTemplate(dj.Computed):
         # Summarizes Quality Indexes for all ROIs in one presentation 
         -> self.presentation_table
         ---
-        p_qidx_n_rois : int  # Number of ROIs
-        p_qidx_median: float  # median quality index
-        p_qidx_mean: float   # mean quality index
-        p_qidx_min: float   # min quality index
-        p_qidx_max: float   # max quality index
+        p_qidx_n_rois : int32  # Number of ROIs
+        p_qidx_median: float32  # median quality index
+        p_qidx_mean: float32   # mean quality index
+        p_qidx_min: float32   # min quality index
+        p_qidx_max: float32   # max quality index
         '''
         for level in self._levels:
-            definition += f'p_qidx_f{int(level * 100):03d}: float   # fraction of ROIs with qidx >= {level}\n'
+            definition += f'p_qidx_f{int(level * 100):03d}: float32   # fraction of ROIs with qidx >= {level}\n'
         return definition
 
     @property
@@ -65,7 +65,7 @@ class RepeatQIPresentationTemplate(dj.Computed):
             pass
 
     def make(self, key):
-        qidxs = (self.qi_table() & key).fetch(self._qidx_col)
+        qidxs = (self.qi_table() & key).to_arrays(self._qidx_col)
         new_key = dict(
             key,
             p_qidx_n_rois=len(qidxs),

@@ -34,15 +34,24 @@ class ReceptiveFieldGLM:
                  fit_R: bool = False, fit_intercept: bool = True,
                  num_subunits: int = 1, distr: str = 'gaussian',
                  frac_test: float = 0.2, t_burn_min: float = 0.,
-                 shift: int = None):
+                 shift: int = None, channel_names=None):
         """Initialize a GLM-based receptive field estimator.
+
+        Supports single-channel and multi-channel (e.g. two-color) stimuli.
+        For multi-channel data, one filter per channel is fit and the
+        contributions are summed before the output nonlinearity:
+            y = nonlin( sum_c X_c @ w_c + intercept )
 
         Parameters
         ----------
         dt : float
             Time step in seconds.
         stim : np.ndarray
-            Stimulus array, shape (n_frames,) or (n_frames, n_y, n_x).
+            Stimulus array. Accepted shapes:
+              - (n_frames,)                       1D flicker, single channel
+              - (n_frames, n_colors)              1D flicker, multi-channel
+              - (n_frames, n_y, n_x)              spatial, single channel
+              - (n_frames, n_y, n_x, n_colors)    spatial, multi-channel
         trace : np.ndarray
             Neural response trace, shape (n_frames,).
         filter_dur_s_past : float
@@ -99,6 +108,9 @@ class ReceptiveFieldGLM:
             Minimum burn-in time in seconds. Default is 0.
         shift : int, optional
             Expected temporal shift; if provided, validated against computed value.
+        channel_names : list of str, optional
+            Names for each color/stimulus channel. If None, defaults to
+            ['stimulus'] for single-channel or ['ch0', 'ch1', ...] for multi-channel.
         """
         # Data
         self.dt = dt
@@ -146,29 +158,115 @@ class ReceptiveFieldGLM:
 
         self.burn_in = np.maximum(int(np.ceil(t_burn_min / dt)), burn_in)
 
-        if stim.ndim == 3:
+        # Detect stimulus shape: how many channels, and what spatial dims
+        # Shapes supported:
+        #   (T,)             -> 1D flicker, 1 channel
+        #   (T, C)           -> 1D flicker, C channels
+        #   (T, Y, X)        -> spatial, 1 channel
+        #   (T, Y, X, C)     -> spatial, C channels
+        if stim.ndim == 4:
+            self.n_colors = stim.shape[3]
             self.hdims = stim.shape[1]
             self.wdims = stim.shape[2]
             self.dims = (self.dim_t, self.hdims, self.wdims)
-        elif stim.ndim == 1:
+            self.is_spatial = True
+        elif stim.ndim == 3:
+            self.n_colors = 1
+            self.hdims = stim.shape[1]
+            self.wdims = stim.shape[2]
+            self.dims = (self.dim_t, self.hdims, self.wdims)
+            self.is_spatial = True
+        elif stim.ndim == 2:
+            self.n_colors = stim.shape[1]
+            self.hdims = None
+            self.wdims = None
             self.dims = (self.dim_t,)
+            self.is_spatial = False
+        elif stim.ndim == 1:
+            self.n_colors = 1
+            self.hdims = None
+            self.wdims = None
+            self.dims = (self.dim_t,)
+            self.is_spatial = False
         else:
-            raise NotImplementedError()
+            raise NotImplementedError(f"{stim.ndim=}")
+
+        # Channel naming: keep 'stimulus' as the single-channel name for
+        # backward compatibility with downstream code that reads model.w['opt']['stimulus'].
+        if channel_names is None:
+            if self.n_colors == 1:
+                self.channel_names = ['stimulus']
+            else:
+                self.channel_names = [f'ch{i}' for i in range(self.n_colors)]
+        else:
+            assert len(channel_names) == self.n_colors, \
+                f"channel_names has length {len(channel_names)} but stim has {self.n_colors} channels"
+            self.channel_names = list(channel_names)
 
         self.df_ts = self.clip_dfs(np.sort(np.asarray(df_ts)), self.dim_t)
-        if stim.ndim == 3:
+        if self.is_spatial:
             self.df_ws = self.clip_dfs(np.sort(np.asarray(df_ws)), self.wdims)
         else:
             assert not df_ws
 
-    def compute_glm_receptive_field(self) -> tuple[np.ndarray, dict, dict]:
+    def _get_channel_stim(self, stim: np.ndarray, c: int) -> np.ndarray:
+        """Extract the c-th channel from a (possibly multi-channel) stimulus array.
+
+        Parameters
+        ----------
+        stim : np.ndarray
+            Stimulus array in any of the supported shapes.
+        c : int
+            Channel index.
+
+        Returns
+        -------
+        np.ndarray
+            Single-channel stimulus, shape (T,) or (T, Y, X).
+        """
+        if self.n_colors == 1:
+            return stim
+        if self.is_spatial:
+            # (T, Y, X, C) -> (T, Y, X)
+            return stim[..., c]
+        else:
+            # (T, C) -> (T,)
+            return stim[:, c]
+
+    def _build_design_matrices(self, stim: np.ndarray) -> dict:
+        """Build a per-channel dict of design matrices.
+
+        Parameters
+        ----------
+        stim : np.ndarray
+            Stimulus array (may include channel dim).
+
+        Returns
+        -------
+        dict
+            Mapping channel_name -> design matrix (np.ndarray).
+        """
+        Xs = {}
+        for c, name in enumerate(self.channel_names):
+            stim_c = self._get_channel_stim(stim, c)
+            Xs[name] = build_design_matrix(
+                X=stim_c, n_lag=self.dims[0], shift=self.shift, dtype=np.float32)
+        return Xs
+
+    def _slice_design_matrices(self, Xs: dict, idx) -> dict:
+        """Slice every per-channel design matrix along axis 0 with the same index."""
+        return {name: X[idx] for name, X in Xs.items()}
+
+    def compute_glm_receptive_field(self) -> tuple:
         """Estimate RF for given data. Return RF and quality.
 
         Returns
         -------
         tuple[np.ndarray, dict, dict]
             w : np.ndarray
-                Estimated receptive field.
+                Estimated receptive field. For single-channel: shape == self.dims.
+                For multi-channel: shape == (n_colors,) + self.dims, with channels
+                ordered according to self.channel_names.
             quality_dict : dict
                 Quality metrics including correlation coefficients and permutation test results.
             model_dict : dict
@@ -187,10 +285,28 @@ class ReceptiveFieldGLM:
         if self.verbose > 0:
             print("############ Evaluate model performance ############")
 
+        # Build per-channel design matrices for test data (used by perm test + predict)
+        if self.frac_test > 0:
+            Xs_test = self._build_design_matrices(stim_dict['test'])
+        else:
+            Xs_test = None
+
         if (self.n_perm is not None) and (self.n_perm > 0) and (self.frac_test > 0):
             assert trace_dict['test'].size > 1, trace_dict['test']
-            score_trueX, score_permX = rfest.check.compute_permutation_test(
-                model, stim_dict['test'], trace_dict['test'], n_perm=self.n_perm, metric=self.metric, history=False)
+            # rfest.check.compute_permutation_test expects either a single stim array
+            # (single-channel case) or a dict of per-channel design matrices.
+            if self.n_colors == 1:
+                perm_input = stim_dict['test']
+                score_trueX, score_permX = rfest.check.compute_permutation_test(
+                    model, perm_input, trace_dict['test'],
+                    n_perm=self.n_perm, metric=self.metric, history=False)
+            else:
+                # Manual permutation test for multi-channel: jointly shuffle
+                # all channels in time so cross-channel correlations are preserved
+                # under the null but the stim<->trace mapping is broken.
+                score_trueX, score_permX = self._compute_permutation_test_multichannel(
+                    model, Xs_test, trace_dict['test'], n_perm=self.n_perm, metric=self.metric)
+
             p_value = quality_test(
                 score_trueX=score_trueX, score_permX=score_permX, metric=self.metric)
             quality_dict = dict(
@@ -199,24 +315,33 @@ class ReceptiveFieldGLM:
         if self.kfold != 1:
             y_pred_train = model.forwardpass(kind='train', p=model.p['opt'])
         else:
-            y_pred_train = model.predict({'stimulus': stim_dict['train']})
+            # For prediction, build per-channel design matrices from training stim.
+            Xs_train_pred = self._build_design_matrices(stim_dict['train'])
+            y_pred_train = model.predict(Xs_train_pred)
 
         for metric_ in ['corrcoef', 'mse']:
             quality_dict[f'{metric_}_train'] = model.compute_score(
                 y=trace_dict['train'][model.burn_in:], y_pred=y_pred_train, metric=metric_)
 
             if self.frac_test > 0:
-                y_test_pred = model.predict({'stimulus': stim_dict['test']})
+                y_test_pred = model.predict(Xs_test)
                 quality_dict[f'{metric_}_test'] = model.compute_score(
                     y=trace_dict['test'][model.burn_in:], y_pred=y_test_pred, metric=metric_)
             else:
                 y_test_pred = None
 
-        w = rfest.utils.uvec(model.w['opt']['stimulus'])
-        if w.shape[1] != 1:
-            raise NotImplementedError('Not implemented for more than one subunit')
+        # Extract per-channel RFs.
+        ws = {}
+        for name in self.channel_names:
+            w_c = rfest.utils.uvec(model.w['opt'][name])
+            if w_c.shape[1] != 1:
+                raise NotImplementedError('Not implemented for more than one subunit')
+            ws[name] = np.array(w_c.reshape(model.dims[name]))
 
-        w = np.array(w.reshape(model.dims['stimulus']))
+        if self.n_colors == 1:
+            w = ws[self.channel_names[0]]
+        else:
+            w = np.stack([ws[name] for name in self.channel_names], axis=0)
 
         model_dict = dict(
             rf_time=self.rf_time, dt=self.dt,
@@ -233,6 +358,9 @@ class ReceptiveFieldGLM:
             train_stop=model.train_stop,
             y_train=np.array(trace_dict['train'][model.burn_in:]).astype(np.float32),
             y_pred_train=np.array(y_pred_train).astype(np.float32),
+            channel_names=list(self.channel_names),
+            n_colors=self.n_colors,
+            ws_per_channel={name: ws[name] for name in self.channel_names},
         )
 
         if self.frac_test > 0:
@@ -261,6 +389,44 @@ class ReceptiveFieldGLM:
 
         return w, quality_dict, model_dict
 
+    def _compute_permutation_test_multichannel(
+            self, model, Xs_test: dict, y_test: np.ndarray,
+            n_perm: int, metric: str) -> tuple:
+        """Permutation test for multi-channel models.
+
+        Permutes y_test (rather than the stimulus) so cross-channel correlation
+        structure is preserved under the null. Equivalent to jointly shuffling
+        all channels in time.
+
+        Parameters
+        ----------
+        model : object
+            Fitted GLM.
+        Xs_test : dict
+            Per-channel test design matrices.
+        y_test : np.ndarray
+            Test response trace.
+        n_perm : int
+            Number of permutations.
+        metric : str
+            Score metric ('corrcoef' or 'mse').
+
+        Returns
+        -------
+        tuple
+            (score_true, score_perm_array)
+        """
+        y_pred = model.predict(Xs_test)
+        y_true = y_test[model.burn_in:]
+        score_true = float(model.compute_score(y=y_true, y_pred=y_pred, metric=metric))
+
+        rng = np.random.RandomState(self.seed)
+        score_perm = np.zeros(n_perm, dtype=np.float32)
+        for i in range(n_perm):
+            y_shuf = rng.permutation(y_true)
+            score_perm[i] = float(model.compute_score(y=y_shuf, y_pred=y_pred, metric=metric))
+        return score_true, score_perm
+
     def dfh_from_dfw(self, df_w: int) -> int:
         """Compute height degrees of freedom from width degrees of freedom.
 
@@ -284,7 +450,7 @@ class ReceptiveFieldGLM:
         trace : np.ndarray
             Neural response trace.
         stim : np.ndarray
-            Stimulus array.
+            Stimulus array (may include channel dim).
 
         Returns
         -------
@@ -296,41 +462,57 @@ class ReceptiveFieldGLM:
         """
 
         if self.verbose > 0 and (self.betas.size > 1):
+            df_ws_size = self.df_ws.size if self.is_spatial else 1
             print(f"################## Optimizing dfs ##################\n" + \
-                  f"\tTrying {self.df_ts.size * self.df_ws.size} combination:" + \
-                  f" df_ts={self.df_ts} and df_ws={self.df_ws}")
+                  f"\tTrying {self.df_ts.size * df_ws_size} combination:" + \
+                  f" df_ts={self.df_ts} and df_ws={self.df_ws if self.is_spatial else None}")
 
         # Define HP grid
-        dfs = [(df_t, self.dfh_from_dfw(df_w), df_w) for df_t, df_w in list(itertools.product(self.df_ts, self.df_ws))]
+        if self.is_spatial:
+            dfs = [(df_t, self.dfh_from_dfw(df_w), df_w)
+                   for df_t, df_w in list(itertools.product(self.df_ts, self.df_ws))]
+        else:
+            dfs = [(df_t,) for df_t in self.df_ts]
+
         metrics_dev_opt = np.zeros((np.maximum(self.kfold, 1), len(dfs), len(self.betas)))
 
-        # Prepare data
-        X = build_design_matrix(X=stim, n_lag=self.dims[0], shift=self.shift, dtype=np.float32)
+        # Prepare data: build a design matrix for every channel.
+        Xs = self._build_design_matrices(stim)
         y = trace.copy().astype(np.float32)
+
+        # Number of samples is the same across channels.
+        n_samples = next(iter(Xs.values())).shape[0]
 
         # Folds
         if self.kfold == 0:
-            splits = [(X, y, None, None)]
+            splits = [(Xs, y, None, None)]
         elif self.kfold == 1:
             split_idx = int(y.size * 0.8)
-            splits = [(X[:split_idx], y[:split_idx], X[split_idx:], y[split_idx:])]
+            splits = [(self._slice_design_matrices(Xs, slice(None, split_idx)),
+                       y[:split_idx],
+                       self._slice_design_matrices(Xs, slice(split_idx, None)),
+                       y[split_idx:])]
         else:
             splits = []
-            for train_idx, dev_idx in KFold(n_splits=self.kfold, shuffle=False).split(X, y):
+            for train_idx, dev_idx in KFold(n_splits=self.kfold, shuffle=False).split(np.arange(n_samples), y):
                 train_idx = train_idx[(train_idx < np.min(dev_idx)) | (train_idx > np.max(dev_idx) + self.burn_in)]
-                splits += [(X[train_idx], y[train_idx], X[dev_idx], y[dev_idx])]
+                splits += [(self._slice_design_matrices(Xs, train_idx),
+                            y[train_idx],
+                            self._slice_design_matrices(Xs, dev_idx),
+                            y[dev_idx])]
 
         best_model = None
         for idx_dfs, df in enumerate(dfs):
             if self.verbose > 0:
                 print(f'############ Optimize for df={df} ############')
 
-            for idx_kf, (X_train_k, y_train_k, X_dev_k, y_dev_k) in enumerate(splits):
+            for idx_kf, (Xs_train_k, y_train_k, Xs_dev_k, y_dev_k) in enumerate(splits):
                 if self.verbose > 0 and self.kfold > 1:
                     print(f"###### Fold: {idx_kf + 1}/{self.kfold} ######")
 
                 best_model, metrics_dev_opt_i = self.create_and_fit_glm(
-                    df=df, X_train=X_train_k, y_train=y_train_k, X_dev=X_dev_k, y_dev=y_dev_k,
+                    df=df, Xs_train=Xs_train_k, y_train=y_train_k,
+                    Xs_dev=Xs_dev_k, y_dev=y_dev_k,
                     alphas=self.alphas, betas=self.betas)
 
                 metrics_dev_opt[idx_kf, idx_dfs, :] = metrics_dev_opt_i
@@ -361,7 +543,7 @@ class ReceptiveFieldGLM:
                       f'\tdf={best_df} and beta={best_beta:.4g}')
 
             best_model, _ = self.create_and_fit_glm(
-                df=best_df, X_train=X, y_train=y, X_dev=None, y_dev=None,
+                df=best_df, Xs_train=Xs, y_train=y, Xs_dev=None, y_dev=None,
                 alphas=self.alphas, betas=[best_beta])
             best_model.metric_dev_opt = np.mean(metrics_dev_opt[:, best_df_idx, best_beta_idx])
 
@@ -398,86 +580,70 @@ class ReceptiveFieldGLM:
             warnings.warn(' All df_ts larger than dims, use only dims as df')
             return np.array([dims])
 
-    @staticmethod
-    def _df_w2df_h(df_w: int, X_train: np.ndarray, hdims: int) -> int:
-        """Convert width degrees of freedom to height degrees of freedom.
-
-        Parameters
-        ----------
-        df_w : int
-            Degrees of freedom for the width dimension.
-        X_train : np.ndarray
-            Training design matrix (used for shape reference).
-        hdims : int
-            Maximum allowed height degrees of freedom.
-
-        Returns
-        -------
-        int
-            Height degrees of freedom.
-        """
-        df_h = np.minimum(int(np.round(df_w * X_train.shape[1] / X_train.shape[2])), hdims)
-        return df_h
-
-    def create_and_fit_glm(self, df: tuple, X_train: np.ndarray, y_train: np.ndarray,
+    def create_and_fit_glm(self, df: tuple, Xs_train: dict, y_train: np.ndarray,
                            alphas, betas,
-                           X_dev: np.ndarray = None,
+                           Xs_dev: dict = None,
                            y_dev: np.ndarray = None) -> tuple:
         """Create and fit a GLM model for given hyperparameters.
 
         Parameters
         ----------
         df : tuple
-            Degrees of freedom per dimension (df_t, df_h, df_w) or (df_t,).
-        X_train : np.ndarray
-            Training design matrix.
+            Degrees of freedom per dimension.
+        Xs_train : dict
+            Per-channel training design matrices.
         y_train : np.ndarray
             Training response.
         alphas : array-like
             Candidate alpha values.
         betas : array-like
             Candidate beta values.
-        X_dev : np.ndarray, optional
-            Development design matrix. Default is None.
+        Xs_dev : dict, optional
+            Per-channel dev design matrices. Default is None.
         y_dev : np.ndarray, optional
             Development response. Default is None.
 
         Returns
         -------
         tuple
-            model : object
-                Fitted GLM model.
-            metric_dev_opt_hp_sets : list or np.ndarray
-                Development set metrics for each HP combination.
+            model, metric_dev_opt_hp_sets
         """
-        assert X_train.shape[0] == y_train.shape[0]
-        if X_dev is not None:
+        # Sanity checks across channels.
+        first_X = next(iter(Xs_train.values()))
+        assert first_X.shape[0] == y_train.shape[0]
+        for name, X in Xs_train.items():
+            assert X.shape[0] == y_train.shape[0], f"channel {name} train length mismatch"
+
+        if Xs_dev is not None:
             assert y_dev is not None
-            assert X_dev.shape[0] == y_dev.shape[0]
-            assert X_train.shape[1:] == X_dev.shape[1:]
+            first_Xd = next(iter(Xs_dev.values()))
+            assert first_Xd.shape[0] == y_dev.shape[0]
+            for name in Xs_train:
+                assert name in Xs_dev, f"channel {name} missing in dev set"
+                assert Xs_train[name].shape[1:] == Xs_dev[name].shape[1:]
 
         model = self.create_glm(
-            df=df, X_train=X_train, y_train=y_train, X_dev=X_dev)
+            df=df, Xs_train=Xs_train, y_train=y_train, Xs_dev=Xs_dev)
 
         model, metric_dev_opt_hp_sets = self.fit_glm(
             model=model, y_train=y_train, y_dev=y_dev, alphas=alphas, betas=betas)
 
         return model, metric_dev_opt_hp_sets
 
-    def create_glm(self, df: tuple, X_train: np.ndarray,
-                   y_train: np.ndarray, X_dev: np.ndarray) -> object:
+    def create_glm(self, df: tuple, Xs_train: dict,
+                   y_train: np.ndarray, Xs_dev: dict) -> object:
         """Create and initialize a GLM model.
 
         Parameters
         ----------
         df : tuple
             Degrees of freedom per dimension.
-        X_train : np.ndarray
-            Training design matrix.
+        Xs_train : dict
+            Per-channel training design matrices.
         y_train : np.ndarray
             Training response.
-        X_dev : np.ndarray
-            Development design matrix (or None).
+        Xs_dev : dict
+            Per-channel dev design matrices (or None).
 
         Returns
         -------
@@ -501,7 +667,7 @@ class ReceptiveFieldGLM:
                 df[i] = dim
 
         df = tuple(df)
-        model = self.initialize_model(df=df, X_train=X_train, y_train=y_train, X_dev=X_dev)
+        model = self.initialize_model(df=df, Xs_train=Xs_train, y_train=y_train, Xs_dev=Xs_dev)
         return model
 
     def fit_glm(self, model: object, alphas, betas,
@@ -524,10 +690,7 @@ class ReceptiveFieldGLM:
         Returns
         -------
         tuple
-            model : object
-                Fitted GLM model.
-            metric_dev_opt_hp_sets : list or np.ndarray
-                Development set metrics for each HP combination.
+            model, metric_dev_opt_hp_sets
         """
         min_iters_other = self.min_iters // 5
 
@@ -562,20 +725,24 @@ class ReceptiveFieldGLM:
 
         return model, metric_dev_opt_hp_sets
 
-    def initialize_model(self, df: tuple, X_train: np.ndarray,
-                         y_train: np.ndarray, X_dev: np.ndarray = None) -> object:
+    def initialize_model(self, df: tuple, Xs_train: dict,
+                         y_train: np.ndarray, Xs_dev: dict = None) -> object:
         """Initialize model parameters for faster optimization.
+
+        For multi-channel data, adds one design matrix per channel under
+        the channel's name, so the GLM forward pass becomes
+            y = nonlin( sum_c X_c @ w_c + intercept ).
 
         Parameters
         ----------
         df : tuple
-            Degrees of freedom per dimension.
-        X_train : np.ndarray
-            Training design matrix.
+            Degrees of freedom per dimension. Shared across channels.
+        Xs_train : dict
+            Per-channel training design matrices.
         y_train : np.ndarray
             Training response.
-        X_dev : np.ndarray, optional
-            Development design matrix. Default is None.
+        Xs_dev : dict, optional
+            Per-channel dev design matrices. Default is None.
 
         Returns
         -------
@@ -585,12 +752,16 @@ class ReceptiveFieldGLM:
 
         model = rfest.GLM(distr=self.distr, output_nonlinearity=self.output_nonlinearity)
         model.burn_in = self.burn_in
-        model.add_design_matrix(X_train, is_design_matrix=True, df=df, dims=self.dims, shift=self.shift,
-                                smooth='cr', filter_nonlinearity='none', name='stimulus')
 
-        if X_dev is not None:
-            model.add_design_matrix(X_dev, is_design_matrix=True, dims=self.dims, shift=self.shift,
-                                    name='stimulus', kind='dev')
+        for name in self.channel_names:
+            model.add_design_matrix(
+                Xs_train[name], is_design_matrix=True, df=df, dims=self.dims, shift=self.shift,
+                smooth='cr', filter_nonlinearity='none', name=name)
+
+            if Xs_dev is not None:
+                model.add_design_matrix(
+                    Xs_dev[name], is_design_matrix=True, dims=self.dims, shift=self.shift,
+                    name=name, kind='dev')
 
         model.initialize(num_subunits=self.num_subunits, dt=self.dt,
                          method=self.init_method,
@@ -620,18 +791,7 @@ class ReceptiveFieldGLM:
 
     @staticmethod
     def _get_model_info(model: object) -> str:
-        """Format a summary string of key model hyperparameters and metrics.
-
-        Parameters
-        ----------
-        model : object
-            Fitted GLM model with attributes metric, metric_dev_opt, alpha, beta, df, dims.
-
-        Returns
-        -------
-        str
-            Human-readable info string.
-        """
+        """Format a summary string of key model hyperparameters and metrics."""
         info = f"{model.metric}={model.metric_dev_opt:.4f} "
         info += f"for HP-set: alpha={model.alpha:.5g}, beta={model.beta:.5g}, df={model.df}, dims={model.dims}"
         return info
@@ -670,26 +830,50 @@ def plot_rf_summary(rf: np.ndarray, quality_dict: dict, model_dict: dict,
                     title: str = "") -> tuple:
     """Plot tRF and sRFs and quality test.
 
+    For multi-channel RFs, this function recurses and produces one summary
+    figure per channel.
+
     Parameters
     ----------
     rf : np.ndarray
-        Receptive field array, shape (n_t,) for 1D or (n_t, n_y, n_x) for 3D.
+        Receptive field array. Single-channel: (n_t,) or (n_t, n_y, n_x).
+        Multi-channel: (n_colors, n_t) or (n_colors, n_t, n_y, n_x).
     quality_dict : dict
-        Quality metrics dict, may contain 'score_permX', 'quality', 'corrcoef_*', etc.
+        Quality metrics dict.
     model_dict : dict
-        Model metadata dict, may contain 'metric_train', 'y_train', 'y_test', etc.
+        Model metadata dict, may contain 'channel_names' / 'n_colors' /
+        'ws_per_channel' for multi-channel data.
     title : str, optional
         Figure title. Default is "".
 
     Returns
     -------
-    tuple
-        fig : matplotlib.figure.Figure
-            The figure object.
-        axs : np.ndarray
-            Array of axes objects.
+    tuple or list of tuples
+        Single-channel: (fig, axs).
+        Multi-channel: list of (fig, axs), one per channel.
     """
+    n_colors = (model_dict or {}).get('n_colors', 1)
 
+    # Multi-channel: recurse, one figure per channel.
+    if n_colors > 1:
+        channel_names = model_dict.get('channel_names', [f'ch{i}' for i in range(n_colors)])
+        results = []
+        for c, name in enumerate(channel_names):
+            rf_c = rf[c]
+            md_c = dict(model_dict)  # shallow copy
+            md_c['n_colors'] = 1  # prevent re-recursion
+            md_c['channel_names'] = [name]
+            ch_title = f"{title} [{name}]" if title else f"[{name}]"
+            res = _plot_rf_summary_single(rf_c, quality_dict, md_c, title=ch_title)
+            results.append(res)
+        return results
+
+    return _plot_rf_summary_single(rf, quality_dict, model_dict, title=title)
+
+
+def _plot_rf_summary_single(rf: np.ndarray, quality_dict: dict, model_dict: dict,
+                            title: str = "") -> tuple:
+    """Single-channel RF summary plot. (Original plot_rf_summary logic.)"""
     plot_training = model_dict is not None and 'metric_train' in model_dict
     plot_y_train = model_dict is not None and 'y_train' in model_dict
     plot_y_dev = model_dict is not None and 'y_dev' in model_dict
@@ -752,7 +936,7 @@ def plot_rf_summary(rf: np.ndarray, quality_dict: dict, model_dict: dict,
 
     if not plot_training:
         plt.tight_layout(rect=(0.01, 0.01, 0.99, 0.90), h_pad=0.2, w_pad=0.2)
-        return
+        return fig, axs
 
     if model_dict is not None and 'metric_train' in model_dict:
         ax = axs[4]

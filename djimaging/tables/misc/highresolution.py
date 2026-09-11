@@ -22,6 +22,7 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 
+from djimaging.utils.dj_storage import load_array, relative_store_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm.recording import ScanMRecording
@@ -31,6 +32,7 @@ class HighResTemplate(dj.Computed):
     """DataJoint computed table template for high-resolution stack metadata and averages."""
 
     database = ""
+    _filepath_store = "reference"
     _fallback_to_raw = True  # If h5 not available, try to load from raw data
 
     incl_region = True  # Include region as primary key?
@@ -54,22 +56,22 @@ class HighResTemplate(dj.Computed):
         if self.incl_cond3 and not self.field_table.incl_cond3:
             definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
 
-        definition += """
+        definition += f"""
         ---
-        highres_file :varchar(191)          # path to file (e.g. h5 file)
-        absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
-        absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
-        absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
-        scan_type: enum("xy", "xz", "xyz")  # Type of scan
-        npixartifact : int unsigned         # number of pixel with light artifact
-        nxpix: int unsigned                 # number of pixels in x
-        nypix: int unsigned                 # number of pixels in y
-        nzpix: int unsigned                 # number of pixels in z
-        nxpix_offset: int unsigned          # number of offset pixels in x
-        nxpix_retrace: int unsigned         # number of retrace pixels in x
-        pixel_size_um :float                # width of a pixel in um (also height if y is second dimension)
-        z_step_um = NULL :float             # z-step in um
-        nframes: int unsigned               # number of pixels in time
+        highres_file :<filepath@{self._filepath_store}>  # source acquisition file (e.g. HDF5)
+        absx: float32  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
+        absy: float32  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
+        absz: float32  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
+        scan_type: enum('xy', 'xz', 'xyz')  # Type of scan
+        npixartifact : int64         # number of pixel with light artifact
+        nxpix: int64                 # number of pixels in x
+        nypix: int64                 # number of pixels in y
+        nzpix: int64                 # number of pixels in z
+        nxpix_offset: int64          # number of offset pixels in x
+        nxpix_retrace: int64         # number of retrace pixels in x
+        pixel_size_um :float32                # width of a pixel in um (also height if y is second dimension)
+        z_step_um = NULL :float32             # z-step in um
+        nframes: int64               # number of pixels in time
         """
         return definition
 
@@ -122,7 +124,7 @@ class HighResTemplate(dj.Computed):
             -> master
             ch_name : varchar(191)  # name of the channel
             ---
-            ch_average :longblob  # Stack median over time
+            ch_average :<npy@processed>  # Stack median over time
             """
             return definition
 
@@ -221,8 +223,7 @@ class HighResTemplate(dj.Computed):
         for avg_key in avg_entries:
             (self.StackAverages & key).insert1(avg_key, allow_direct_insert=True)
 
-    @staticmethod
-    def _complete_keys(base_key: dict, rec) -> tuple:
+    def _complete_keys(self, base_key: dict, rec) -> tuple:
         """Build the high-resolution entry dict and per-channel average entry dicts.
 
         Args:
@@ -235,7 +236,7 @@ class HighResTemplate(dj.Computed):
             to insert into ``StackAverages``.
         """
         hr_entry = deepcopy(base_key)
-        hr_entry["highres_file"] = rec.filepath
+        hr_entry["highres_file"] = relative_store_path(rec.filepath, self._filepath_store)
 
         hr_entry["absx"] = rec.pos_x_um
         hr_entry["absy"] = rec.pos_y_um
@@ -266,9 +267,10 @@ class HighResTemplate(dj.Computed):
 
         scan_type = (self & key).fetch1('scan_type')
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        main_ch_average = load_array((self.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         try:
-            alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+            alt_ch_average = load_array(
+                (self.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average'))
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
         plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,

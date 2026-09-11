@@ -46,9 +46,9 @@ def get_input_tables(definition: str) -> list:
     return tables
 
 
-def activate_schema(schema: dj.Schema, schema_name: str | None = None,
+def activate_schema(schema: dj.Schema, schema_name: str,
                     create_schema: bool = True, create_tables: bool = True) -> None:
-    """Activate a DataJoint schema, resolving the name from config or parameter.
+    """Activate a DataJoint schema with an explicit schema name.
 
     Based on: https://github.com/datajoint/element-lab
 
@@ -56,27 +56,16 @@ def activate_schema(schema: dj.Schema, schema_name: str | None = None,
     ----------
     schema : dj.Schema
         The DataJoint schema object to activate.
-    schema_name : str | None, optional
-        Schema name to use. If None, the name is read from ``dj.config['schema_name']``.
+    schema_name : str
+        Schema name to use. DataJoint 2 configuration is strongly typed, so custom
+        settings such as ``dj.config['schema_name']`` are not supported.
     create_schema : bool, optional
         Whether to create the schema in the database if it does not exist. Default is True.
     create_tables : bool, optional
         Whether to create tables in the database if they do not exist. Default is True.
 
-    Raises
-    ------
-    ValueError
-        If no schema name can be resolved, or if the provided name conflicts with the
-        one stored in ``dj.config``.
     """
-    config_schema_name = dj.config.get('schema_name', None)
-
-    if not schema_name and not config_schema_name:
-        raise ValueError('Must provide schema_name in config or as parameter')
-    elif schema_name and config_schema_name and schema_name != config_schema_name:
-        raise ValueError('Schema name in config must match schema_name parameter')
-
-    schema.activate(schema_name or config_schema_name, create_schema=create_schema, create_tables=create_tables)
+    schema.activate(schema_name, create_schema=create_schema, create_tables=create_tables)
 
 
 def make_hash(obj: Any) -> str:
@@ -169,7 +158,7 @@ def get_primary_key(table: dj.Table, key: dict | None = None) -> dict:
     if key is not None:
         key = {k: v for k, v in key.items() if k in table.primary_key}
     else:
-        key = random.choice(table.proj().fetch(as_dict=True))
+        key = random.choice(table.proj().to_dicts())
     return key
 
 

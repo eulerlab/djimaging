@@ -1,22 +1,28 @@
 import pickle
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
 
+from djimaging.utils.dj_storage import file_store_path, open_object, relative_store_path
+
 
 class ClassifierV2Template(dj.Manual):
     database = ""
+    _filepath_store = "reference"
 
     @property
     def definition(self) -> str:
-        definition = """
-        classifier_id : int unsigned  # Unique identifier for the classifier
+        definition = f"""
+        classifier_id : int64  # Unique identifier for the classifier
         ---
-        classifier_file : varchar(255)
+        classifier_file : <filepath@{self._filepath_store}>
         """
         return definition
 
-    def add(self, classifier_file: str = '/gpfs01/euler/data/Resources/Classifier_v2/rgc_classifier_v2.pkl',
+    def add(
+            self,
+            classifier_file: str | Path = 'Resources/Classifier_v2/rgc_classifier_v2.pkl',
             classifier_id: int = 1) -> None:
         """Validate a classifier file and insert a new entry into the table.
 
@@ -29,15 +35,20 @@ class ClassifierV2Template(dj.Manual):
                 :func:`check_classifier_dict`.
         """
         # Test if classifier is valid
-        clf_dict = load_classifier_from_file(classifier_file)
+        classifier_path = file_store_path(classifier_file, self._filepath_store)
+        classifier_store_path = relative_store_path(classifier_path, self._filepath_store)
+        clf_dict = load_classifier_from_file(classifier_path)
         check_classifier_dict(clf_dict)
 
         self.insert1(dict(
             classifier_id=classifier_id,
-            classifier_file=classifier_file))
+            classifier_file=classifier_store_path))
 
 
-def load_classifier_from_file(classifier_file: str) -> dict:
+def load_classifier_from_file(
+        classifier_file: str | Path | dj.ObjectRef,
+        store: str = "reference",
+) -> dict:
     """Load and return the classifier dictionary from a pickle file.
 
     Args:
@@ -46,7 +57,7 @@ def load_classifier_from_file(classifier_file: str) -> dict:
     Returns:
         Dictionary containing the classifier and its associated metadata.
     """
-    with open(classifier_file, 'rb') as f:
+    with open_object(classifier_file, 'rb', store=store) as f:
         clf_dict = pickle.load(f)
     return clf_dict
 

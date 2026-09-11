@@ -25,6 +25,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.utils import mask_format_utils
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.scanm import read_utils
 from djimaging.utils.dj_utils import get_primary_key
 
@@ -45,7 +46,7 @@ class SrIndexTemplate(dj.Computed):
         -> self.roimask_table
         -> self.roi_table
         ---
-        sr_idx = NULL  : float  # SR index >= 0 of ROI normalized to min of stack average and light_artifact = 1.
+        sr_idx = NULL  : float32  # SR index >= 0 of ROI normalized to min of stack average and light_artifact = 1.
         """
         return definition
 
@@ -95,11 +96,11 @@ class SrIndexTemplate(dj.Computed):
             A 2-tuple ``(roi_ids, sr_idxs)`` where ``roi_ids`` is an array of ROI
             identifiers and ``sr_idxs`` is the corresponding array of SR index values.
         """
-        roi_mask = (self.roimask_table & key).fetch1('roi_mask')
+        roi_mask = load_array((self.roimask_table & key).fetch1('roi_mask'))
 
         try:
-            triggertimes = (self.presentation_table & key).fetch1('triggertimes')
-            fs = (self.presentation_table.ScanInfo & key).fetch('scan_frequency')
+            triggertimes = load_array((self.presentation_table & key).fetch1('triggertimes'))
+            fs = (self.presentation_table.ScanInfo & key).to_arrays('scan_frequency')
             ntrigger_rep = (self.stimulus_table & key).fetch1('ntrigger_rep')
 
             # Find stim onset and offset for faster computations
@@ -121,7 +122,7 @@ class SrIndexTemplate(dj.Computed):
 
         ch1_stack = ch_stacks['wDataCh1'][:, :, stim_onset_idx:stim_offset_idx]
 
-        roi_ids = (self.roi_table & key).fetch('roi_id')
+        roi_ids = (self.roi_table & key).to_arrays('roi_id')
 
         sr_idxs, roi_avgs, roi_avgs_means, lb, ub = compute_sr_idxs(
             ch1_stack, roi_ids, roi_mask, npixartifact=npixartifact)

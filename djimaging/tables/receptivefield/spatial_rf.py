@@ -14,6 +14,7 @@ from matplotlib import pyplot as plt
 from djimaging.utils.receptive_fields.plot_rf_utils import plot_srf_gauss_fit
 from djimaging.utils.receptive_fields.spatial_rf_utils import compute_gauss_srf_area, compute_surround_index, \
     compute_center_index, fit_rf_model
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_srf, prep_long_title
 
@@ -26,13 +27,13 @@ class FitGauss2DRFTemplate(dj.Computed):
         definition = """
         -> self.split_rf_table
         ---
-        srf_fit: mediumblob
-        srf_params: blob
-        rf_area_um2: float # Area covered by 2 standard deviations
-        rf_cdia_um: float # Circle equivalent diameter
-        center_index: float # Weight and sign of center in sRF
-        surround_index: float # Weight and sign of surround in sRF
-        rf_qidx: float # Quality index as explained variance of the sRF estimation between 0 and 1
+        srf_fit: <blob>
+        srf_params: <blob>
+        rf_area_um2: float32 # Area covered by 2 standard deviations
+        rf_cdia_um: float32 # Circle equivalent diameter
+        center_index: float32 # Weight and sign of center in sRF
+        surround_index: float32 # Weight and sign of surround in sRF
+        rf_qidx: float32 # Quality index as explained variance of the sRF estimation between 0 and 1
         """
         return definition
 
@@ -56,7 +57,7 @@ class FitGauss2DRFTemplate(dj.Computed):
         pass
 
     def make(self, key):
-        srf = (self.split_rf_table() & key).fetch1("srf")
+        srf = load_array((self.split_rf_table() & key).fetch1("srf"))
         stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
 
         # Fit RF model
@@ -81,8 +82,9 @@ class FitGauss2DRFTemplate(dj.Computed):
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
-        srf = (self.split_rf_table() & key).fetch1("srf")
+        srf = load_array((self.split_rf_table() & key).fetch1("srf"))
         srf_fit, rf_qidx = (self & key).fetch1("srf_fit", 'rf_qidx')
+        srf_fit = load_array(srf_fit)
         srf_params = (self & key).fetch1("srf_params")
 
         vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
@@ -109,7 +111,7 @@ class FitGauss2DRFTemplate(dj.Computed):
 
     def plot(self, by=("preprocess_id",)):
         columns = ["rf_qidx", "rf_cdia_um", "center_index", "surround_index"]
-        df = self.proj(*columns).fetch(format='frame').reset_index()
+        df = self.proj(*columns).to_pandas().reset_index()
         for params, group in df.groupby(list(by)):
             print(by)
             print(params)
@@ -117,7 +119,7 @@ class FitGauss2DRFTemplate(dj.Computed):
             plt.show()
 
     def plot_multiple(self):
-        srf_params_list = self.fetch("srf_params")
+        srf_params_list = self.to_arrays("srf_params")
 
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
 
@@ -136,17 +138,17 @@ class FitDoG2DRFTemplate(dj.Computed):
         definition = """
         -> self.split_rf_table
         ---
-        srf_fit: mediumblob
-        srf_center_fit: mediumblob
-        srf_surround_fit: mediumblob
-        srf_params: blob
-        srf_eff_center: mediumblob
-        srf_eff_center_params: blob
-        rf_qidx: float
-        rf_area_um2: float # Area covered by 2 standard deviations
-        rf_cdia_um: float # Circle equivalent diameter
-        center_index: float # Weight and sign of center in sRF
-        surround_index: float # Weight and sign of surround in sRF
+        srf_fit: <blob>
+        srf_center_fit: <blob>
+        srf_surround_fit: <blob>
+        srf_params: <blob>
+        srf_eff_center: <blob>
+        srf_eff_center_params: <blob>
+        rf_qidx: float32
+        rf_area_um2: float32 # Area covered by 2 standard deviations
+        rf_cdia_um: float32 # Circle equivalent diameter
+        center_index: float32 # Weight and sign of center in sRF
+        surround_index: float32 # Weight and sign of surround in sRF
         """
         return definition
 
@@ -170,7 +172,7 @@ class FitDoG2DRFTemplate(dj.Computed):
         pass
 
     def make(self, key, plot=False):
-        srf = (self.split_rf_table() & key).fetch1("srf")
+        srf = load_array((self.split_rf_table() & key).fetch1("srf"))
         stim_dict = (self.stimulus_table() & key).fetch1("stim_dict")
 
         srf_fit, srf_center_fit, srf_surround_fit, srf_params, eff_polarity, qi = fit_rf_model(
@@ -220,9 +222,11 @@ class FitDoG2DRFTemplate(dj.Computed):
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
-        srf = (self.split_rf_table() & key).fetch1("srf")
+        srf = load_array((self.split_rf_table() & key).fetch1("srf"))
         srf_fit, srf_center_fit, srf_surround_fit, srf_eff_center, rf_qidx, srf_ec_params = (self & key).fetch1(
             "srf_fit", 'srf_center_fit', 'srf_surround_fit', 'srf_eff_center', 'rf_qidx', 'srf_eff_center_params')
+        srf_fit, srf_center_fit, srf_surround_fit, srf_eff_center = (
+            load_array(srf_fit), load_array(srf_center_fit), load_array(srf_surround_fit), load_array(srf_eff_center))
 
         vabsmax = np.maximum(np.max(np.abs(srf)), np.max(np.abs(srf_fit)))
 
@@ -259,7 +263,7 @@ class FitDoG2DRFTemplate(dj.Computed):
 
     def plot(self, by=("preprocess_id",)):
         columns = ["rf_qidx", "rf_cdia_um", "center_index", "surround_index"]
-        df = self.proj(*columns).fetch(format='frame').reset_index()
+        df = self.proj(*columns).to_pandas().reset_index()
         for params, group in df.groupby(list(by)):
             print(by)
             print(params)

@@ -19,6 +19,8 @@ from abc import abstractmethod
 import datajoint as dj
 import numpy as np
 
+from djimaging.utils.dj_storage import load_array
+
 
 class IplBinParamsTemplate(dj.Manual):
     database = ""
@@ -26,11 +28,11 @@ class IplBinParamsTemplate(dj.Manual):
     @property
     def definition(self):
         definition = """
-            ipl_bin_id : tinyint unsigned # ipl bin id
+            ipl_bin_id : int32 # ipl bin id
             ---
-            n_bins : tinyint unsigned # number of bins
-            bin_borders   :blob    # pixel index where gcl/ipl border intersects on left of image (with GCL up)
-            bin_names  = NULL :blob    # pixel index where gcl/ipl border intersects on right side of image
+            n_bins : int32 # number of bins
+            bin_borders   :<blob>    # pixel index where gcl/ipl border intersects on left of image (with GCL up)
+            bin_names  = NULL :<blob>    # pixel index where gcl/ipl border intersects on right side of image
             """
         return definition
 
@@ -60,7 +62,7 @@ class RoiIplBinTemplate(dj.Computed):
             -> self.roi_ipl_table
             -> self.ipl_bin_params_table
             ---
-            roi_ipl_bin : tinyint unsigned # ipl bin id -1 if too low, n_bins if too high
+            roi_ipl_bin : int32 # ipl bin id -1 if too low, n_bins if too high
             """
         return definition
 
@@ -83,6 +85,6 @@ class RoiIplBinTemplate(dj.Computed):
 
     def make(self, key):
         roi_ipl_depth = (self.roi_ipl_table & key).fetch1('ipl_depth')
-        bin_borders = (self.ipl_bin_params_table & key).fetch1('bin_borders')
+        bin_borders = load_array((self.ipl_bin_params_table & key).fetch1('bin_borders'))
         roi_ipl_bin = np.digitize(roi_ipl_depth, bin_borders) - 1
         self.insert1(dict(**key, roi_ipl_bin=roi_ipl_bin))

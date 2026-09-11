@@ -68,6 +68,7 @@ from copy import deepcopy
 import datajoint as dj
 import numpy as np
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.receptive_fields.fit_rf_utils import compute_linear_rf
 from djimaging.utils.receptive_fields.plot_rf_utils import plot_rf_frames, plot_rf_video
@@ -79,16 +80,16 @@ class STAParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        sta_params_id: tinyint unsigned # unique param set id
+        sta_params_id: int32 # unique param set id
         ---
-        rf_method : enum("sta", "mle")
-        filter_dur_s_past : float # filter duration in seconds into the past
-        filter_dur_s_future : float # filter duration in seconds into the future
-        frac_train : float  # Fraction of data used for training in (0, 1].
-        frac_dev : float  # Fraction of data used for hyperparameter optimization in [0, 1).
-        frac_test : float  # Fraction of data used for testing [0, 1).
-        store_x : enum("shape", "data")  # Store x (stimulus) as data or shape (less storage)?
-        store_y : enum("shape", "data")  # Store y (response) as data or shape (less storage)?
+        rf_method : enum('sta', 'mle')
+        filter_dur_s_past : float32 # filter duration in seconds into the past
+        filter_dur_s_future : float32 # filter duration in seconds into the future
+        frac_train : float32  # Fraction of data used for training in (0, 1].
+        frac_dev : float32  # Fraction of data used for hyperparameter optimization in [0, 1).
+        frac_test : float32  # Fraction of data used for testing [0, 1).
+        store_x : enum('shape', 'data')  # Store x (stimulus) as data or shape (less storage)?
+        store_y : enum('shape', 'data')  # Store y (response) as data or shape (less storage)?
         """
         return definition
 
@@ -122,10 +123,10 @@ class STATemplate(dj.Computed):
         -> self.noise_traces_table
         -> self.params_table
         ---
-        rf: longblob  # spatio-temporal receptive field
-        rf_time: longblob #  time of RF, depends on dt and shift
-        dt: float  # Time step between frames
-        shift: int  # Shift of stimulus relative to trace. If negative, prediction looks into future.
+        rf: <npy@processed>  # spatio-temporal receptive field
+        rf_time: <blob> #  time of RF, depends on dt and shift
+        dt: float32  # Time step between frames
+        shift: int32  # Shift of stimulus relative to trace. If negative, prediction looks into future.
         '''
         return definition
 
@@ -153,12 +154,12 @@ class STATemplate(dj.Computed):
             -> master
             kind : enum('train', 'dev', 'test')  # Data set kind
             ---
-            x : longblob  # Input
-            y : longblob  # Output
-            burn_in : int unsigned  # Burned output s.t. y_pred.size + burn_in == y.size
-            y_pred : longblob # predicted output
-            cc : float  # Correlation
-            mse : float  # Mean Squared Error
+            x : <npy@processed>  # Input
+            y : <blob>  # Output
+            burn_in : int64  # Burned output s.t. y_pred.size + burn_in == y.size
+            y_pred : <blob> # predicted output
+            cc : float32  # Correlation
+            mse : float32  # Mean Squared Error
             """
             return definition
 
@@ -172,7 +173,8 @@ class STATemplate(dj.Computed):
         assert np.isclose(frac_train + frac_dev + frac_test, 1.0)
 
         noise_dt, trace, stim_idxs = (self.noise_traces_table() & key).fetch1('noise_dt', 'trace', 'stim_idxs')
-        stim = (self.noise_traces_table.stimulus_table() & key).fetch1("stim_trace")
+        trace, stim_idxs = load_array(trace), load_array(stim_idxs)
+        stim = load_array((self.noise_traces_table.stimulus_table() & key).fetch1("stim_trace"))
         stim = stim[stim_idxs].astype(trace.dtype)
 
         rf, rf_time, rf_pred, x, y, shift = compute_linear_rf(
@@ -191,7 +193,7 @@ class STATemplate(dj.Computed):
             rf_dataset_key = deepcopy(key)
             rf_dataset_key['kind'] = k
             rf_dataset_key['burn_in'] = rf_pred['burn_in']
-            rf_dataset_key['x'] = x[k].astype(np.float32) if store_x == 'data' else x[k].shape
+            rf_dataset_key['x'] = x[k].astype(np.float32) if store_x == 'data' else np.array(x[k].shape)
             rf_dataset_key['y'] = y[k].astype(np.float32) if store_y == 'data' else y[k].shape
             rf_dataset_key['y_pred'] = rf_pred[f'y_pred_{k}'].astype(np.float32) \
                 if store_y == 'data' else rf_pred[f'y_pred_{k}'].shape
@@ -204,7 +206,7 @@ class STATemplate(dj.Computed):
 
         from matplotlib import pyplot as plt
 
-        data = (self * self.DataSet() & key).fetch()
+        data = (self * self.DataSet() & key).to_arrays()
 
         fig, axs = plt.subplots(len(data), 1, figsize=(10, 3 * len(data)), squeeze=False)
         axs = axs.flat
@@ -230,9 +232,11 @@ class STATemplate(dj.Computed):
     def plot1_frames(self, key=None, downsample=1):
         key = get_primary_key(table=self, key=key)
         rf, rf_time = (self & key).fetch1('rf', 'rf_time')
+        rf, rf_time = load_array(rf), load_array(rf_time)
         plot_rf_frames(rf, rf_time, downsample=downsample)
 
     def plot1_video(self, key=None, fps=10):
         key = get_primary_key(table=self, key=key)
         rf, rf_time = (self & key).fetch1('rf', 'rf_time')
+        rf, rf_time = load_array(rf), load_array(rf_time)
         return plot_rf_video(rf, rf_time, fps=fps)

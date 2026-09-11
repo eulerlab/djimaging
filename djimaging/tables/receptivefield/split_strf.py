@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 from djimaging.utils.receptive_fields.temporal_rf_utils import compute_polarity_and_peak_idxs
 from djimaging.utils.receptive_fields.split_rf_utils import compute_explained_rf, resize_srf, merge_strf, split_strf
 from djimaging.utils import math_utils
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_srf, plot_trf, plot_signals_heatmap
 from djimaging.utils.trace_utils import sort_traces
@@ -20,20 +21,20 @@ class SplitRFParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        split_rf_params_id: tinyint unsigned # unique param set id
+        split_rf_params_id: int32 # unique param set id
         """
         if self._color_idxs:
             definition += """
-            color_idx: tinyint unsigned
+            color_idx: int32
         """
         definition += """
         ---
         method : varchar(63)  # Method used to split RF, currently available are SVD, STD, and MAX
-        blur_std : float
-        blur_npix : int unsigned
-        upsample_srf_scale : int unsigned
-        peak_nstd : float  # How many standard deviations does a peak need to be considered peak?
-        npeaks_max : int unsigned # Maximum number of peaks, ignored if zero
+        blur_std : float32
+        blur_npix : int64
+        upsample_srf_scale : int64
+        peak_nstd : float32  # How many standard deviations does a peak need to be considered peak?
+        npeaks_max : int64 # Maximum number of peaks, ignored if zero
         """
 
         return definition
@@ -70,11 +71,11 @@ class SplitRFTemplate(dj.Computed):
         -> self.rf_table
         -> self.split_rf_params_table
         ---
-        srf: longblob  # spatio receptive field
-        trf: longblob  # temporal receptive field
-        polarity : tinyint  # Polarity of the RF, 1 for positive, -1 for negative
-        split_qidx : float  # Quality index as explained variance of the sRF tRF split between 0 and 1
-        trf_peak_idxs : blob  # Indexes of peaks in tRF
+        srf: <blob>  # spatio receptive field
+        trf: <blob>  # temporal receptive field
+        polarity : int32  # Polarity of the RF, 1 for positive, -1 for negative
+        split_qidx : float32  # Quality index as explained variance of the sRF tRF split between 0 and 1
+        trf_peak_idxs : <blob>  # Indexes of peaks in tRF
         '''
         return definition
 
@@ -120,7 +121,7 @@ class SplitRFTemplate(dj.Computed):
 
     def make(self, key):
         # Get data
-        strf = (self.rf_table() & key).fetch1("rf")
+        strf = load_array((self.rf_table() & key).fetch1("rf"))
         rf_time = self.fetch1_rf_time(key=key)
 
         # Get preprocess params
@@ -159,13 +160,14 @@ class SplitRFTemplate(dj.Computed):
                 rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
             except dj.DataJointError:
                 rf_time = (self.rf_table.params_table & key).fetch1('rf_time')
-        return rf_time
+        return load_array(rf_time)
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
         rf_time = self.fetch1_rf_time(key=key)
         srf, trf, peak_idxs = (self & key).fetch1("srf", "trf", "trf_peak_idxs")
+        srf, trf, peak_idxs = load_array(srf), load_array(trf), load_array(peak_idxs)
 
         fig, axs = plt.subplots(1, 2, figsize=(8, 3), sharex='col')
 
@@ -183,7 +185,7 @@ class SplitRFTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        trf = math_utils.padded_vstack((self & restriction).fetch('trf'))
+        trf = math_utils.padded_vstack((self & restriction).to_arrays('trf'))
 
         if sort:
             trf = sort_traces(trf)

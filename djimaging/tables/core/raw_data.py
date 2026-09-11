@@ -12,14 +12,14 @@ class RawDataParamsTemplate(dj.Lookup):
     def definition(self):
         definition = """
         -> self.userinfo_table
-        raw_id: tinyint unsigned  # unique param set id
+        raw_id: int32  # unique param set id
         ---
-        from_raw_data: tinyint unsigned  # Load raw smp data (1) or h5 data (0)
-        compute_from_stack: tinyint unsigned  # Compute traces from stack. Otherwise try to import Igor traces.
-        include_artifacts: tinyint unsigned  # automatically exclude all ROIs with artifacts?
-        trace_precision: enum("line", "pixel")  # Compute traces with either line precision or pixel precision?
-        trigger_precision: enum("line", "pixel")   # Compute triggers with either line precision or pixel precision?
-        igor_roi_masks: enum("yes", "init", "no")  # Either load or ignore existing ROI masks, e.g. from Igor 
+        from_raw_data: bool  # Load raw smp data (1) or h5 data (0)
+        compute_from_stack: bool  # Compute traces from stack. Otherwise try to import Igor traces.
+        include_artifacts: bool  # automatically exclude all ROIs with artifacts?
+        trace_precision: enum('line', 'pixel')  # Compute traces with either line precision or pixel precision?
+        trigger_precision: enum('line', 'pixel')   # Compute triggers with either line precision or pixel precision?
+        igor_roi_masks: enum('yes', 'init', 'no')  # Either load or ignore existing ROI masks, e.g. from Igor
         """
         return definition
 
@@ -64,7 +64,7 @@ class RawDataParamsTemplate(dj.Lookup):
                 Default is True.
         """
         if experimenter_list is None:
-            experimenter_list = self.userinfo_table.fetch('experimenter')
+            experimenter_list = self.userinfo_table.to_arrays('experimenter')
 
         for experimenter in experimenter_list:
             key = dict(

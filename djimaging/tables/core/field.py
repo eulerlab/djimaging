@@ -8,6 +8,7 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 
+from djimaging.utils.dj_storage import load_array, relative_store_path
 from djimaging.utils.filesystem_utils import get_file_info_df
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
@@ -16,6 +17,7 @@ from djimaging.utils.scanm.recording import ScanMRecording
 
 class FieldTemplate(dj.Computed):
     database = ""
+    _filepath_store = "reference"
     incl_region = True  # Include region as primary key?
     incl_cond1 = False  # Include condition 1 as primary key?
     incl_cond2 = False  # Include condition 2 as primary key?
@@ -39,21 +41,21 @@ class FieldTemplate(dj.Computed):
         if self.incl_cond3:
             definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
 
-        definition += """
+        definition += f"""
         ---
-        field_data_file: varchar(191)  # info extracted from which file?
-        absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
-        absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
-        absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
-        scan_type: enum("xy", "xz", "xyz")  # Type of scan
-        npixartifact : int unsigned         # Number of pixel with light artifact
-        nxpix: int unsigned                 # number of pixels in x
-        nypix: int unsigned                 # number of pixels in y
-        nzpix: int unsigned                 # number of pixels in z
-        nxpix_offset: int unsigned          # number of offset pixels in x
-        nxpix_retrace: int unsigned         # number of retrace pixels in x
-        pixel_size_um :float                # width of a pixel in um (also height if y is second dimension)
-        z_step_um = NULL :float             # z-step in um
+        field_data_file: <filepath@{self._filepath_store}>  # source acquisition file
+        absx: float32  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
+        absy: float32  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
+        absz: float32  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
+        scan_type: enum('xy', 'xz', 'xyz')  # Type of scan
+        npixartifact : int64         # Number of pixel with light artifact
+        nxpix: int64                 # number of pixels in x
+        nypix: int64                 # number of pixels in y
+        nzpix: int64                 # number of pixels in z
+        nxpix_offset: int64          # number of offset pixels in x
+        nxpix_retrace: int64         # number of retrace pixels in x
+        pixel_size_um :float32                # width of a pixel in um (also height if y is second dimension)
+        z_step_um = NULL :float32             # z-step in um
         """
         return definition
 
@@ -107,7 +109,7 @@ class FieldTemplate(dj.Computed):
             -> master
             ch_name : varchar(32)  # name of the channel
             ---
-            ch_average :longblob  # Stack median over time
+            ch_average :<blob>  # Stack median over time
             """
             return definition
 
@@ -379,8 +381,7 @@ class FieldTemplate(dj.Computed):
 
         return rec
 
-    @staticmethod
-    def complete_keys(base_key: dict, rec: ScanMRecording) -> tuple[dict, list]:
+    def complete_keys(self, base_key: dict, rec: ScanMRecording) -> tuple[dict, list]:
         """Build the field entry dict and stack-average entry dicts from a recording.
 
         Parameters
@@ -400,7 +401,7 @@ class FieldTemplate(dj.Computed):
         """
         field_entry = deepcopy(base_key)
 
-        field_entry["field_data_file"] = rec.filepath
+        field_entry["field_data_file"] = relative_store_path(rec.filepath, self._filepath_store)
         field_entry["absx"] = rec.pos_x_um
         field_entry["absy"] = rec.pos_y_um
         field_entry["absz"] = rec.pos_z_um
@@ -437,9 +438,10 @@ class FieldTemplate(dj.Computed):
         """
         key = get_primary_key(table=self, key=key)
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        main_ch_average = load_array((self.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         try:
-            alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+            alt_ch_average = load_array(
+                (self.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average'))
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
 

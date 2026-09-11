@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt
 
 from djimaging.tables.core.stimulus import reformat_numerical_trial_info
 from djimaging.utils import plot_utils
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.snippet_utils import split_trace_by_reps, split_trace_by_group_reps, compute_repeat_correlation
 
@@ -71,11 +72,11 @@ class SnippetsTemplate(dj.Computed):
         # Snippets created from slicing traces using the triggertimes. 
         -> self.preprocesstraces_table
         ---
-        snippets               :longblob          # array of snippets (time x repetitions)
-        snippets_t0            :blob              # array of snippet start times (repetitions, ) 
-        snippets_dt            :float
-        triggertimes_snippets  :longblob          # snippeted triggertimes (ntrigger_rep x repetitions)
-        droppedlastrep_flag    :tinyint unsigned  # Was the last repetition incomplete and therefore dropped?
+        snippets               :<blob>          # array of snippets (time x repetitions)
+        snippets_t0            :<blob>              # array of snippet start times (repetitions, )
+        snippets_dt            :float32
+        triggertimes_snippets  :<blob>          # snippeted triggertimes (ntrigger_rep x repetitions)
+        droppedlastrep_flag    :bool  # Was the last repetition incomplete and therefore dropped?
         """
         return definition
 
@@ -123,9 +124,10 @@ class SnippetsTemplate(dj.Computed):
         """
         stim_name, stim_dict, ntrigger_rep = (self.stimulus_table() & key).fetch1(
             'stim_name', 'stim_dict', 'ntrigger_rep')
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
         pp_trace_t0, pp_trace_dt, pp_trace = (self.preprocesstraces_table() & key).fetch1(
             'pp_trace_t0', 'pp_trace_dt', 'pp_trace')
+        pp_trace = load_array(pp_trace)
 
         delay = stim_dict.get('trigger_delay', 0.) if stim_dict is not None else 0
 
@@ -167,7 +169,7 @@ class SnippetsTemplate(dj.Computed):
         """
         try:
             dt_baseline = (self.stimulus_table & dict(stim_name=stim_name)).fetch1('snippet_base_dt')
-            if not np.isfinite(dt_baseline):
+            if dt_baseline is None or not np.isfinite(dt_baseline):
                 dt_baseline = None
         except dj.DataJointError:
             dt_baseline = None
@@ -266,11 +268,11 @@ class GroupSnippetsTemplate(dj.Computed):
         # Snippets created from slicing traces using the triggertimes. 
         -> self.preprocesstraces_table
         ---
-        snippets               :longblob          # dict of array of snippets (group: time [x repetitions])
-        snippets_t0           :blob              # dict of array of snippet start times (group: repetitions) 
-        snippets_dt            :float
-        triggertimes_snippets  :longblob          # dict of array of triggertimes (group: time [x repetitions])
-        droppedlastrep_flag    :tinyint unsigned  # Was the last repetition incomplete and therefore dropped?
+        snippets               :<blob>          # dict of array of snippets (group: time [x repetitions])
+        snippets_t0           :<blob>              # dict of array of snippet start times (group: repetitions)
+        snippets_dt            :float32
+        triggertimes_snippets  :<blob>          # dict of array of triggertimes (group: time [x repetitions])
+        droppedlastrep_flag    :bool  # Was the last repetition incomplete and therefore dropped?
         """
         return definition
 
@@ -317,9 +319,10 @@ class GroupSnippetsTemplate(dj.Computed):
             allow_incomplete: If True, allow incomplete last repetitions.
         """
         trial_info, stim_dict = (self.stimulus_table() & key).fetch1('trial_info', 'stim_dict')
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
         pp_trace_t0, pp_trace_dt, pp_trace = (self.preprocesstraces_table() & key).fetch1(
             'pp_trace_t0', 'pp_trace_dt', 'pp_trace')
+        pp_trace = load_array(pp_trace)
 
         pp_trace_times = np.arange(len(pp_trace)) * pp_trace_dt + pp_trace_t0
 

@@ -18,8 +18,8 @@ class RepeatQITemplate(dj.Computed):
         # Computes the QI index for responses for repeated stimuli as a signal to noise ratio
         -> self.snippets_table
         ---
-        qidx: float   # quality index as signal to noise ratio
-        min_qidx: float   # minimum quality index as 1/r (r = #repetitions)
+        qidx: float32   # quality index as signal to noise ratio
+        min_qidx: float32   # minimum quality index as 1/r (r = #repetitions)
         '''
         return definition
 
@@ -72,7 +72,7 @@ class RepeatQITemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        qidx, min_qidx = (self & restriction).fetch('qidx', 'min_qidx')
+        qidx, min_qidx = (self & restriction).to_arrays('qidx', 'min_qidx')
         fig, axs = plt.subplots(1, 2, figsize=(8, 3))
         ax = axs[0]
         ax.set(title='qidx')

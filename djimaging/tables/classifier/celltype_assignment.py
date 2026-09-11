@@ -9,6 +9,7 @@ from cached_property import cached_property
 from matplotlib import pyplot as plt
 
 from djimaging.utils.baden16_utils import load_baden_data
+from djimaging.utils.dj_storage import local_path, open_object
 from djimaging.utils.dj_utils import merge_keys
 
 
@@ -149,9 +150,9 @@ class CelltypeAssignmentTemplate(dj.Computed):
         -> self.baden_trace_table
         -> self.classifier_table
         ---
-        cell_label:      int         # predicted label with highest probability. Meaning of label depends on classifier
-        max_confidence:  float       # confidence score for assigned cell_label, can be celltype, supergroup etc.
-        confidence:      blob        # confidence scores (probabilities) for all celltypes
+        cell_label:      int32         # predicted label with highest probability. Meaning of label depends on classifier
+        max_confidence:  float32       # confidence score for assigned cell_label, can be celltype, supergroup etc.
+        confidence:      <blob>        # confidence scores (probabilities) for all celltypes
         """
         return definition
 
@@ -219,7 +220,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
     def classifier(self):
         """Load and cache the trained classifier from its stored file path."""
         model_path = (self.classifier_table() & self.current_model_key).fetch1('classifier_file')
-        with open(model_path, "rb") as f:
+        with open_object(model_path, "rb") as f:
             model = pkl.load(f)
         return model
 
@@ -228,7 +229,8 @@ class CelltypeAssignmentTemplate(dj.Computed):
         """Load and cache the bar feature basis matrix from its stored file path."""
         features_bar_file = (self.classifier_training_data_table() & self.current_model_key).fetch1(
             "bar_feats_file")
-        features_bar = np.load(features_bar_file)
+        with local_path(features_bar_file) as path:
+            features_bar = np.load(path)
         return features_bar
 
     @cached_property
@@ -236,15 +238,17 @@ class CelltypeAssignmentTemplate(dj.Computed):
         """Load and cache the chirp feature basis matrix from its stored file path."""
         features_chirp_file = (self.classifier_training_data_table() & self.current_model_key).fetch1(
             "chirp_feats_file")
-        features_chirp = np.load(features_chirp_file)
+        with local_path(features_chirp_file) as path:
+            features_chirp = np.load(path)
         return features_chirp
 
     def populate(
             self, *restrictions, suppress_errors: bool = False,
             return_exception_objects: bool = False, reserve_jobs: bool = False,
-            order: str = "original", limit=None, max_calls=None,
+            max_calls=None,
             display_progress: bool = False, processes: int = 1, make_kwargs=None,
-    ) -> None:
+            priority: int | None = None, refresh: bool | None = None,
+    ) -> dict:
         """Populate the table, enforcing single-process execution.
 
         Args:
@@ -252,21 +256,25 @@ class CelltypeAssignmentTemplate(dj.Computed):
             suppress_errors: If True, suppress errors during population.
             return_exception_objects: If True, return exception objects instead of raising.
             reserve_jobs: If True, use the job reservation mechanism.
-            order: Population order, e.g. ``"original"`` or ``"random"``.
-            limit: Maximum number of keys to populate.
             max_calls: Maximum number of ``make`` calls.
             display_progress: If True, display a progress bar.
             processes: Number of parallel processes. Values greater than 1 are not
                 supported and will emit a warning.
             make_kwargs: Additional keyword arguments forwarded to ``make``.
+            priority: Minimum job priority when using distributed population.
+            refresh: Whether to refresh the distributed job queue.
+
+        Returns:
+            DataJoint population summary with ``success_count`` and ``error_list``.
         """
         if processes > 1:
             warnings.warn('Parallel processing not implemented!')
-        super().populate(
+        return super().populate(
             *restrictions,
             suppress_errors=suppress_errors, return_exception_objects=return_exception_objects,
-            reserve_jobs=reserve_jobs, order=order, limit=limit, max_calls=max_calls,
-            display_progress=display_progress, processes=1, make_kwargs=make_kwargs)
+            reserve_jobs=reserve_jobs, max_calls=max_calls,
+            display_progress=display_progress, processes=1, make_kwargs=make_kwargs,
+            priority=priority, refresh=refresh)
 
     def make(self, key: dict) -> None:
         """Classify all ROIs for the given key and insert results into the table.
@@ -304,7 +312,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
             classifier_params_hash=key["classifier_params_hash"],
             training_data_hash=key["training_data_hash"])
 
-        roi_keys = (self.baden_trace_table & key & restriction).fetch('KEY')
+        roi_keys = (self.baden_trace_table & key & restriction).keys()
         if len(roi_keys) == 0:
             return None, None, None, None, None
 
@@ -313,7 +321,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
         else:
             data_tab = (self.baden_trace_table & key & restriction) * self.roi_table
 
-        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = data_tab.fetch(
+        preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = data_tab.to_arrays(
             'preproc_chirp', 'preproc_bar', 'ds_pvalue', 'roi_size_um2')
 
         preproc_chirps = np.vstack(preproc_chirps)
@@ -353,7 +361,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
             classifier_level: Label level to display; one of ``'cluster'``, ``'group'``,
                 or ``'super'``.
         """
-        df = self.fetch(format='frame')
+        df = self.to_pandas()
         groups = df.groupby(['training_data_hash', 'classifier_params_hash', 'preprocess_id'])
 
         fig, axs = plt.subplots(len(groups), 1, figsize=(12, 3 * len(groups)), squeeze=False)
@@ -374,7 +382,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
 
         Args:
             ax: Matplotlib axes on which to draw.
-            df: DataFrame subset for this group, as returned by ``fetch(format='frame')``.
+            df: DataFrame subset for this group, as returned by ``to_pandas()``.
             classifier_params_hash: Hash identifying the classifier parameter set.
             training_data_hash: Hash identifying the training data set.
             preprocess_id: Preprocessing identifier for this group.
@@ -422,7 +430,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
             xlim_bar: Optional x-axis limits for the bar trace panel.
             plot_baden_data: If ``True``, overlay traces from the Baden training data.
         """
-        df = self.fetch(format='frame')
+        df = self.to_pandas()
         groups = df.groupby(['training_data_hash', 'classifier_params_hash', 'preprocess_id'])
 
         for (tdh, cph, pid), df_group in groups:
@@ -458,7 +466,7 @@ class CelltypeAssignmentTemplate(dj.Computed):
         # Get new data
         roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = self._fetch_data(
             key=key, restriction=(self & f'max_confidence>={threshold_confidence}'))
-        data_celltypes = (self & roi_keys).fetch('cell_label')
+        data_celltypes = (self & roi_keys).to_arrays('cell_label')
 
         # Get training data
         self.current_model_key = dict(classifier_params_hash=classifier_params_hash,

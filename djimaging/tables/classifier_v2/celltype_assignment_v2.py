@@ -8,12 +8,14 @@ import seaborn as sns
 from djimaging.tables.classifier_v2.rgc_classifier_v2 import load_classifier_from_file, check_classifier_dict
 from djimaging.utils.baden16_utils import baden_cluster_id_to_group_id, baden_group_id_to_supergroup, \
     BADEN_CLUSTER_INFO, load_baden_data, baden_cluster_name_to_cluster_id
+from djimaging.utils.dj_storage import file_store_path
 from djimaging.utils.dj_utils import merge_keys
 
 
 class CelltypeAssignmentV2Template(dj.Computed):
     database = ""
-    _baden_data_file = '/gpfs01/euler/data/Resources/Classifier/rgc_classifier_v2/RGCData_postprocessed.mat'
+    _reference_store = "reference"
+    _baden_data_file = 'Resources/Classifier/rgc_classifier_v2/RGCData_postprocessed.mat'
     __expected_classes = np.arange(1, 75 + 1)  # Expected classes for the classifier
 
     @property
@@ -22,14 +24,14 @@ class CelltypeAssignmentV2Template(dj.Computed):
         -> self.baden_trace_table
         -> self.classifier_table
         ---
-        cluster_id :       tinyint unsigned      # cluster ID, ranging from 1 to 75
-        group_id :         tinyint unsigned      # group ID, ranging from 1 to 46
+        cluster_id :       int32      # cluster ID, ranging from 1 to 75
+        group_id :         int32      # group ID, ranging from 1 to 46
         supergroup :       enum('OFF', 'ON-OFF', 'Fast ON', 'Slow ON', 'Unc. ON', 'Unc. SbC', 'dAC', 'error')
-        prob_cluster :     float                 # probability of being in the given cluster
-        prob_group :       float                 # aggregated probability of being in the given group
-        prob_supergroup :  float                 # aggregated probability of being in the given supergroup
-        prob_class :       float                 # aggregated probability of being the given cell class (RGC or dAC)
-        probs_per_cluster : blob                 # probabilities for each cluster
+        prob_cluster :     float32                 # probability of being in the given cluster
+        prob_group :       float32                 # aggregated probability of being in the given group
+        prob_supergroup :  float32                 # aggregated probability of being in the given supergroup
+        prob_class :       float32                 # aggregated probability of being the given cell class (RGC or dAC)
+        probs_per_cluster : <blob>                 # probabilities for each cluster
         """
         return definition
 
@@ -64,17 +66,16 @@ class CelltypeAssignmentV2Template(dj.Computed):
     def populate(
             self,
             *restrictions,
-            keys=None,
             suppress_errors: bool = False,
             return_exception_objects: bool = False,
             reserve_jobs: bool = False,
-            order: str = "original",
-            limit=None,
             max_calls=None,
             display_progress: bool = False,
             processes: int = 1,
             make_kwargs=None,
-    ) -> None:
+            priority: int | None = None,
+            refresh: bool | None = None,
+    ) -> dict:
         """Populate the table, loading the classifier once before iterating over keys.
 
         The classifier, chirp features, and bar features are loaded from the
@@ -83,17 +84,19 @@ class CelltypeAssignmentV2Template(dj.Computed):
 
         Args:
             *restrictions: DataJoint restrictions; must resolve to a single classifier entry.
-            keys: Optional explicit list of keys to populate.
             suppress_errors: If ``True``, suppress errors during population.
             return_exception_objects: If ``True``, return exception objects instead of raising.
             reserve_jobs: If ``True``, use the job reservation mechanism.
-            order: Population order, e.g. ``"original"`` or ``"random"``.
-            limit: Maximum number of keys to populate.
             max_calls: Maximum number of ``make`` calls.
             display_progress: If ``True``, display a progress bar.
             processes: Number of parallel processes; must be 1.
             make_kwargs: Additional keyword arguments forwarded to ``make``. The keys
                 ``'classifier'``, ``'chirp_feats'``, and ``'bar_feats'`` are reserved.
+            priority: Minimum job priority when using distributed population.
+            refresh: Whether to refresh the distributed job queue.
+
+        Returns:
+            DataJoint population summary with ``success_count`` and ``error_list``.
 
         Raises:
             NotImplementedError: If ``processes > 1``.
@@ -106,16 +109,13 @@ class CelltypeAssignmentV2Template(dj.Computed):
                 "Parallel processing is not implemented for this table."
             )
 
-        if len(restrictions) == 0:
-            restrictions = dict()
-
-        if len(self.classifier_table & restrictions) > 1:
+        classifier_table = self.classifier_table & dj.AndList(restrictions)
+        if len(classifier_table) > 1:
             raise ValueError(
                 "Multiple classifiers found for the given restrictions. "
                 "Please specify a single classifier.")
 
-        if make_kwargs is None:
-            make_kwargs = dict()
+        make_kwargs = dict(make_kwargs or {})
 
         for key in ['classifier', 'chirp_feats', 'bar_feats']:
             if key in make_kwargs:
@@ -123,7 +123,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
                     f"The '{key}' key is reserved and should not be provided in make_kwargs. "
                     "It will be automatically set based on the classifier_table.")
 
-        classifier_file = (self.classifier_table & restrictions).fetch1('classifier_file')
+        classifier_file = classifier_table.fetch1('classifier_file')
         clf_dict = load_classifier_from_file(classifier_file)
         check_classifier_dict(clf_dict)
 
@@ -135,18 +135,17 @@ class CelltypeAssignmentV2Template(dj.Computed):
             raise ValueError("The classifier's classes do not match the expected classes.")
 
         # populate
-        super().populate(
+        return super().populate(
             *restrictions,
-            keys=keys,
             suppress_errors=suppress_errors,
             return_exception_objects=return_exception_objects,
             reserve_jobs=reserve_jobs,
-            order=order,
-            limit=limit,
             max_calls=max_calls,
             display_progress=display_progress,
             processes=processes,
-            make_kwargs=make_kwargs
+            make_kwargs=make_kwargs,
+            priority=priority,
+            refresh=refresh,
         )
 
     def make(self, key: dict, classifier, chirp_feats: np.ndarray, bar_feats: np.ndarray) -> None:
@@ -191,8 +190,8 @@ class CelltypeAssignmentV2Template(dj.Computed):
             restriction = dict()
 
         roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = (
-                (self.baden_trace_table & key & restriction) * self.roi_table).fetch(
-            'KEY', 'preproc_chirp', 'preproc_bar', 'ds_pvalue', 'roi_size_um2')
+                (self.baden_trace_table & key & restriction) * self.roi_table).to_arrays(
+            'preproc_chirp', 'preproc_bar', 'ds_pvalue', 'roi_size_um2', include_key=True)
 
         if len(roi_keys) > 0:
             preproc_chirps = np.vstack(preproc_chirps)
@@ -224,7 +223,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
         if int(group_id is not None) + int(cluster_id is not None) + int(cluster_name is not None) != 1:
             raise ValueError("Provide exactly one of 'cluster_id', 'cluster_name', or 'group_id'.")
 
-        df = self.fetch(format='frame')
+        df = self.to_pandas()
         groups = df.groupby('classifier_id')
 
         for classifier_id, df_group in groups:
@@ -279,7 +278,9 @@ class CelltypeAssignmentV2Template(dj.Computed):
 
         if plot_baden_data:
             b_cis, b_gis, b_sgs, b_chirps, b_chirp_qi, b_bars, b_mb_qi, b_dsi, b_ds_pvalues, b_soma_um2s = \
-                load_baden_data(self._baden_data_file, quality_filter=True)
+                load_baden_data(
+                    file_store_path(self._baden_data_file, self._reference_store),
+                    quality_filter=True)
 
             if cluster_id is not None:
                 b_idxs = b_cis == cluster_id
@@ -368,7 +369,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
         if level not in ['cluster', 'group', 'super']:
             raise ValueError("Invalid level. Choose from 'cluster', 'group', or 'super'.")
 
-        df = self.fetch(format='frame').reset_index()
+        df = self.to_pandas().reset_index()
         groups = df.groupby('classifier_id')
 
         for classifier_id, df_classifier in groups:
@@ -382,7 +383,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
         """Render the cell-type count plot for a single classifier entry.
 
         Args:
-            df: DataFrame for one classifier, as returned by ``fetch(format='frame')``.
+            df: DataFrame for one classifier, as returned by ``to_pandas()``.
             min_prob: Minimum probability threshold for including a cell.
             level: Label level; one of ``'cluster'``, ``'group'``, or ``'super'``.
             plot_baden_data: If ``True``, overlay counts from the Baden reference data.
@@ -403,7 +404,9 @@ class CelltypeAssignmentV2Template(dj.Computed):
             raise NotImplementedError(f"Level '{level}' is not implemented.")
 
         if plot_baden_data:
-            b_cis, b_gis, b_sgs = load_baden_data(self._baden_data_file, quality_filter=True)[:3]
+            b_cis, b_gis, b_sgs = load_baden_data(
+                file_store_path(self._baden_data_file, self._reference_store),
+                quality_filter=True)[:3]
 
             if level == 'cluster':
                 b_dist = b_cis

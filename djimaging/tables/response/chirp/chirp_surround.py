@@ -32,9 +32,9 @@ class ChirpSurroundTemplate(dj.Computed):
         -> self.snippets_table.proj(lChirp='stim_name')
         -> self.snippets_table.proj(gChirp='stim_name')
         ---
-        l_polarity_index : float
-        g_polarity_index : float
-        surround_strength = NULL : float
+        l_polarity_index : float32
+        g_polarity_index : float32
+        surround_strength = NULL : float32
         """
         return definition
 
