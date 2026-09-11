@@ -282,7 +282,7 @@ class FastStaTemplate(dj.Computed):
         # reconstructed in make_compute matches the design matrix built in
         # prepare_stimulus. Falls back to the old name 'ntrigger_per_frame'
         # and to 1 if neither is present.
-        stim_dict = (self.params_table.stimulus_table & restriction).fetch1('stim_dict')
+        stim_dict = (self.params_table.stimulus_table & params_table).fetch1('stim_dict')
         nframes_per_trigger = int(stim_dict.get(
             'nframes_per_trigger', stim_dict.get('ntrigger_per_frame', 1)))
 
