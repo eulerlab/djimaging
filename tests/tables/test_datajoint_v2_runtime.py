@@ -37,6 +37,15 @@ class _Relation:
                 row for row in self.rows
                 if all(row.get(name) == value for name, value in restriction.items() if name in row)
             ]
+        elif isinstance(restriction, _Relation):
+            # Match related rows on all shared attributes (DataJoint's semijoin).
+            rows = [
+                row for row in self.rows
+                if any(
+                    all(row[name] == other[name] for name in row.keys() & other.keys())
+                    for other in restriction.rows
+                )
+            ]
         elif restriction == 'aborted = 0':
             rows = [row for row in self.rows if not row['aborted']]
         else:
