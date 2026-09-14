@@ -20,7 +20,7 @@ import datajoint as dj
 
 from djimaging.utils.math_utils import normalize_amp_one
 from djimaging.utils.snippet_utils import split_trace_by_reps
-from djimaging.tables.response.movingbar.orientation_utils_v2 import compute_os_ds_idxs as compute_os_ds_idxs_v2
+from djimaging.tables.response.movingbar.orientation_utils import compute_os_ds_idxs
 
 
 class Baden16TracesV2Template(dj.Computed):
@@ -84,7 +84,8 @@ class Baden16TracesV2Template(dj.Computed):
         qi, chirp_average = preprocess_chirp_v2(chirp_trace, chirp_t0, chirp_dt, chirp_triggertimes, chirp_ntrigger_rep)
 
         # Fetch bar and preprocess
-        dir_order = (self.stimulus_table() & dict(stim_name=self._stim_name_bar) & key).fetch1('trial_info')
+        trial_info = (self.stimulus_table() & dict(stim_name=self._stim_name_bar) & key).fetch1('trial_info')
+        dir_order = np.asarray([trial['name'] for trial in trial_info])
         bar_triggertimes = (self.presentation_table & dict(stim_name=self._stim_name_bar) & key).fetch1(
             'triggertimes')
         bar_trace, bar_t0, bar_dt = (self.traces_table & dict(stim_name=self._stim_name_bar) & key).fetch1(
@@ -192,7 +193,7 @@ def preprocess_bar_v2(trace, t0, dt, triggertimes, dir_order,
     # Compute the preferred direction and projections
     dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
         on_off, qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses = \
-        compute_os_ds_idxs_v2(snippets=snippets, dir_order=dir_order, dt=dt, n_shuffles=n_shuffles)
+        compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=dt, n_shuffles=n_shuffles)
 
     # Normalize
     baden16like_average = time_component[:32]

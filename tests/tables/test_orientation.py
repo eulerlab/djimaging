@@ -5,7 +5,7 @@ import pickle as pkl
 import numpy as np
 import pytest
 
-from djimaging.tables.response.movingbar.orientation_utils_v2 import compute_os_ds_idxs
+from djimaging.tables.response.movingbar.orientation_utils import compute_os_ds_idxs
 
 _TEST_DATA_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'test_data'))
 

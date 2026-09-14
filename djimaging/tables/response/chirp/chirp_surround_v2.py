@@ -1,7 +1,7 @@
 """
 Example usage:
 @schema
-class ChirpSurround(response.ChirpSurroundTemplate):
+class ChirpSurroundV2(response.ChirpSurroundTemplateV2):
     _l_name = 'lChirp'
     _g_name = 'gChirp'
 
@@ -20,11 +20,11 @@ import numpy as np
 
 from matplotlib import pyplot as plt
 
-from djimaging.utils.dj_utils import get_primary_key, get_secondary_keys
+from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.trace_utils import get_mean_dt
 
 
-class ChirpSurroundTemplate(dj.Computed):
+class ChirpSurroundTemplateV2(dj.Computed):
     database = ""
 
     _l_name = 'lChirp'

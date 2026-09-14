@@ -115,7 +115,6 @@ def preprocess_stimulus(stim: np.ndarray, triggertimes: np.ndarray,
     nframes_per_trigger : int, optional
         Number of stimulus frames per trigger. Use when triggers are less
         frequent than frames (e.g. one trigger every N frames). Default is 1.
-        Mutually exclusive with ``ntrigger_per_frame > 1``.
     fupsample_stim : int, optional
         Upsampling factor for the stimulus. Default is None.
 

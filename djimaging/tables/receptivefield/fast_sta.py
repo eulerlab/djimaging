@@ -144,8 +144,7 @@ class FastStaParamsTemplate(dj.Lookup):
 
             x_stimulus, rf_time, dims, burn_in, shift, dt, t0 = self.prepare_stimulus(
                 stim=stim, triggertimes=stimtime,
-                nframes_per_trigger=stim_dict.get('nframes_per_trigger', stim_dict.get('ntrigger_per_frame', 1)),
-                # Old name was ntrigger_per_frame
+                nframes_per_trigger=stim_dict.get('nframes_per_trigger', 1),
                 fupsample_stim=fupsample_stim,
                 filter_dur_s_past=filter_dur_s_past,
                 filter_dur_s_future=filter_dur_s_future,
@@ -280,11 +279,9 @@ class FastStaTemplate(dj.Computed):
 
         # Fetch nframes_per_trigger from the stimulus table so that stimtime
         # reconstructed in make_compute matches the design matrix built in
-        # prepare_stimulus. Falls back to the old name 'ntrigger_per_frame'
-        # and to 1 if neither is present.
+        # prepare_stimulus.
         stim_dict = (self.params_table.stimulus_table & params_table).fetch1('stim_dict')
-        nframes_per_trigger = int(stim_dict.get(
-            'nframes_per_trigger', stim_dict.get('ntrigger_per_frame', 1)))
+        nframes_per_trigger = int(stim_dict.get('nframes_per_trigger', 1))
 
         sta_params = dict(
             x_stimulus=x_stimulus, rf_time=rf_time, burn_in=burn_in, shift=shift, kind=kind, dims=dims,

@@ -16,7 +16,7 @@ from djimaging.utils.dj_storage import file_store_path, load_array, local_file_p
 from djimaging.utils.dj_utils import get_primary_key, check_unique_one
 from djimaging.utils.mask_utils import (
     to_roi_mask_file, sort_roi_mask_files,
-    load_preferred_roi_mask_igor, load_preferred_roi_mask_pickle, compare_roi_masks,
+    load_preferred_roi_mask_igor, load_preferred_roi_mask_file, compare_roi_masks,
     save_roi_mask_file, load_roi_mask_file, _ROI_FILE_FORMAT_HELP,
 )
 from djimaging.utils.mask_format_utils import to_igor_format, to_python_format
@@ -26,7 +26,7 @@ from djimaging.utils.plot_utils import plot_field
 class RoiMaskTemplate(dj.Manual):
     database = ""
     _max_shift = 5
-    _roi_file_format: str | None = None  # set to 'numpy' (recommended) or 'pickle' (old standard)
+    _roi_file_format: str = 'numpy'
 
     @property
     def definition(self):
@@ -104,7 +104,7 @@ class RoiMaskTemplate(dj.Manual):
                 f"_roi_file_format is not set on {type(self).__name__}. "
                 f"{_ROI_FILE_FORMAT_HELP} "
                 f"Add `_roi_file_format = 'numpy'` (recommended) or "
-                f"`_roi_file_format = 'pickle'` (old standard) as a class attribute."
+                f"`_roi_file_format = 'pickle'` for existing pickle masks as a class attribute."
             )
         return self._roi_file_format
 
@@ -348,7 +348,7 @@ class RoiMaskTemplate(dj.Manual):
             return roi_mask, 'database'
 
         if igor_roi_masks != 'yes':
-            roi_mask, src_file = self.load_field_roi_mask_pickle(
+            roi_mask, src_file = self.load_field_roi_mask_file(
                 field_key=field_key, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
                 verbose=verbose)
             if roi_mask is not None:
@@ -385,7 +385,7 @@ class RoiMaskTemplate(dj.Manual):
 
         return database_roi_mask
 
-    def load_field_roi_mask_pickle(
+    def load_field_roi_mask_file(
             self,
             field_key: dict,
             roi_mask_dir: str = 'ROIs',
@@ -393,11 +393,11 @@ class RoiMaskTemplate(dj.Manual):
             new_prefix: str = None,
             verbose: bool = True,
     ) -> tuple[np.ndarray | None, str | None]:
-        """Load ROI mask from a pickle file on the filesystem.
+        """Load an ROI mask file in the configured NumPy or pickle format.
 
         Args:
             field_key: Primary key dict for the field.
-            roi_mask_dir: Sub-directory name containing ROI mask pickle files.
+            roi_mask_dir: Sub-directory name containing ROI mask files.
             old_prefix: Path prefix to replace when resolving file paths.
             new_prefix: Replacement path prefix.
             verbose: If True, print a message when a mask is loaded.
@@ -413,7 +413,7 @@ class RoiMaskTemplate(dj.Manual):
             for value in (self.presentation_table() & field_key).to_arrays("pres_data_file")
         ]
 
-        roi_mask, src_file = load_preferred_roi_mask_pickle(
+        roi_mask, src_file = load_preferred_roi_mask_file(
             files, mask_alias=mask_alias, highres_alias=highres_alias,
             roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
             file_format=self._get_roi_file_format())
@@ -530,7 +530,7 @@ class RoiMaskTemplate(dj.Manual):
             restrictions: Optional DataJoint restriction applied to
                 RoiMaskPresentation before iterating (e.g. a field key dict).
             source: Source of ROI masks to check for. Can be 'infer' (to automatically infer from parameters), 'igor' (to only check Igor files) or 'autorois' (to only check AutoROIs files).
-            roi_mask_dir: Sub-directory name containing ROI mask pickle files.
+            roi_mask_dir: Sub-directory name containing ROI mask files.
             old_prefix: Path prefix to replace when resolving file paths.
             new_prefix: Replacement path prefix.
             verbose: If True, print progress and a summary at the end.
@@ -644,7 +644,7 @@ class RoiMaskTemplate(dj.Manual):
                 are filled with the main field mask (zero shift).
             add_primary_keys: Optional extra primary key columns to inject into
                 every inserted row.
-            roi_mask_dir: Sub-directory name containing ROI mask pickle files.
+            roi_mask_dir: Sub-directory name containing ROI mask files.
             old_prefix: Path prefix to replace when resolving file paths.
             new_prefix: Replacement path prefix.
             max_shift: Maximum allowed pixel shift between presentations.
@@ -757,7 +757,7 @@ class RoiMaskTemplate(dj.Manual):
 
         Args:
             key: Primary key dict for the presentation.
-            roi_mask_dir: Sub-directory name containing ROI mask pickle files.
+            roi_mask_dir: Sub-directory name containing ROI mask files.
             old_prefix: Path prefix to replace when resolving file paths.
             new_prefix: Replacement path prefix.
 

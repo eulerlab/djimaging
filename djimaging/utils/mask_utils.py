@@ -13,8 +13,7 @@ from djimaging.utils.scanm import read_h5_utils
 from djimaging.utils.cellpose_utils import intersection_over_union
 
 _ROI_FILE_FORMAT_HELP = (
-    "Set file_format to 'numpy' (recommended) or 'pickle' (old standard). "
-    "New files should always use 'numpy'. Use 'pickle' only for backward compatibility with existing files."
+    "Use file_format='numpy' for new ROI masks, or 'pickle' to access existing pickle masks."
 )
 
 
@@ -747,7 +746,7 @@ def generate_roi_suggestions(mask_pred: np.ndarray, mask_true: np.ndarray, n_art
     return rois_to_add
 
 
-def to_roi_mask_file(data_file: str, old_suffix: str | None = None, new_suffix: str = '_ROIs.pkl',
+def to_roi_mask_file(data_file: str, old_suffix: str | None = None, new_suffix: str = '_ROIs.npy',
                      roi_mask_dir: str | None = None, old_prefix: str | None = None,
                      new_prefix: str | None = None, file_format: str | None = None) -> str:
     """Derive the ROI mask file path from a data file path.
@@ -760,7 +759,7 @@ def to_roi_mask_file(data_file: str, old_suffix: str | None = None, new_suffix: 
         Suffix to strip from the filename. If None, the existing file extension
         is used.
     new_suffix : str, optional
-        Suffix to append after stripping `old_suffix`. Default is ``'_ROIs.pkl'``.
+        Suffix to append after stripping `old_suffix`. Default is ``'_ROIs.npy'``.
     roi_mask_dir : str | None, optional
         Subdirectory name where the mask file should be located. If None, the
         same directory as `data_file` is used.
@@ -890,10 +889,10 @@ def load_preferred_roi_mask_igor(files: list, mask_alias: str = '',
         return None, None
 
 
-def load_preferred_roi_mask_pickle(files: list, mask_alias: str = '', highres_alias: str = '',
+def load_preferred_roi_mask_file(files: list, mask_alias: str = '', highres_alias: str = '',
                                    roi_mask_dir: str | None = None, old_prefix: str | None = None,
                                    new_prefix: str | None = None,
-                                   file_format: str | None = None) -> tuple[np.ndarray | None, str | None]:
+                                   file_format: str = 'numpy') -> tuple[np.ndarray | None, str | None]:
     """Load the most preferred ROI mask from a list of files (Igor format).
 
     Parameters
@@ -912,7 +911,7 @@ def load_preferred_roi_mask_pickle(files: list, mask_alias: str = '', highres_al
         Prefix to prepend when deriving the mask file name.
     file_format : str | None, optional
         ``'numpy'`` to look for ``.npy`` files, ``'pickle'`` to look for
-        ``.pkl`` files. If None, a ``ValueError`` is raised with guidance.
+        ``.pkl`` files. Defaults to ``'numpy'``.
 
     Returns
     -------

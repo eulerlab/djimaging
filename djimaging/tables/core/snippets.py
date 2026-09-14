@@ -7,7 +7,6 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.core.stimulus import reformat_numerical_trial_info
 from djimaging.utils import plot_utils
 from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
@@ -53,18 +52,6 @@ def get_aligned_snippets_times(
 class SnippetsTemplate(dj.Computed):
     database = ""
     _pad_trace = False  # If True, chose snippet times always contain the trigger times
-    _dt_base_line_dict = None  # dict of baseline time for each stimulus with stimulus based baseline correction
-
-    """
-    Examples for _dt_base_line_dict:
-    This is deprecated and should be replaced by the snippet_base_dt in the stimulus table.
-    
-    Baden 16 / Franke 17:
-    _dt_base_line_dict = {
-        'gChirp': 8*0.128,
-        'movingbar':  5*0.128,
-    }
-    """
 
     @property
     def definition(self):
@@ -152,40 +139,9 @@ class SnippetsTemplate(dj.Computed):
         ))
 
     def get_snippet_base_dt(self, stim_name: str) -> float | None:
-        """Return the baseline duration for snippet baseline correction.
-
-        Checks first in the stimulus table's ``snippet_base_dt`` column, then
-        falls back to the class-level ``_dt_base_line_dict`` lookup.
-
-        Args:
-            stim_name: Stimulus name used to look up the baseline duration.
-
-        Returns:
-            Baseline window duration in seconds, or None if no baseline
-            correction should be applied.
-
-        Raises:
-            ValueError: If both sources provide different non-None values.
-        """
-        try:
-            dt_baseline = (self.stimulus_table & dict(stim_name=stim_name)).fetch1('snippet_base_dt')
-            if dt_baseline is None or not np.isfinite(dt_baseline):
-                dt_baseline = None
-        except dj.DataJointError:
-            dt_baseline = None
-
-        dt_baseline_alt = None if self._dt_base_line_dict is None else self._dt_base_line_dict.get(stim_name, None)
-
-        if dt_baseline is not None and dt_baseline_alt is not None:
-            if dt_baseline != dt_baseline_alt:
-                raise ValueError(
-                    f"dt_baseline[Stimulus]={dt_baseline} and dt_baseline[Snippets]={dt_baseline_alt} are not equal. "
-                    f"Please set only one of them, ideally in the stimulus table."
-                )
-        elif dt_baseline is None and dt_baseline_alt is not None:
-            dt_baseline = dt_baseline_alt
-
-        return dt_baseline
+        """Return the stimulus's baseline duration, or None when unset."""
+        dt_baseline = (self.stimulus_table() & dict(stim_name=stim_name)).fetch1('snippet_base_dt')
+        return dt_baseline if dt_baseline is not None and np.isfinite(dt_baseline) else None
 
     def plot1(self, key: dict = None, xlim: tuple = None, xlim_aligned: tuple = None) -> None:
         """Plot the raw, repetition-aligned, and averaged snippets for one entry.
@@ -325,9 +281,6 @@ class GroupSnippetsTemplate(dj.Computed):
         pp_trace = load_array(pp_trace)
 
         pp_trace_times = np.arange(len(pp_trace)) * pp_trace_dt + pp_trace_t0
-
-        if not isinstance(trial_info[0], dict):
-            trial_info = reformat_numerical_trial_info(trial_info)
 
         delay = stim_dict.get('trigger_delay', 0.) if stim_dict is not None else 0
 

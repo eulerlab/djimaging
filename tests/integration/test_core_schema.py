@@ -16,6 +16,14 @@ def test_all_tutorial_tables_initialize(tutorial_schema):
         assert getattr(tutorial_schema, name).table_name in tables
 
 
+def test_full_rgc_tables_initialize(tutorial_schema):
+    from djimaging.schemas import full_rgc_schema
+
+    tables = tutorial_schema.schema.list_tables()
+    for name in ('FastStaParams', 'FastSta', 'FastStaQuality', 'SplitRF'):
+        assert getattr(full_rgc_schema, name).table_name in tables
+
+
 def test_user_info_round_trip(tutorial_schema, tmp_path):
     user_info = tutorial_schema.UserInfo()
     user_info.upload_user(

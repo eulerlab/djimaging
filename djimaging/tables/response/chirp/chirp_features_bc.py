@@ -20,6 +20,8 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.tables.core.averages import compute_upsampled_average
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -99,16 +101,12 @@ class ChirpFeaturesBcTemplate(dj.Computed):
             plateau_index, tonic_release_index, l_freq_response, h_freq_response,
             lh_freq_index, l_contrast_response, h_contrast_response, lh_contrast_index).
         """
-        try:
-            # Deprecated
-            snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-                "snippets", "snippets_times", "triggertimes_snippets")
-        except dj.DataJointError:
-            snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-                "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-
-            snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
-                              + snippets_t0)
+        snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
+            "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
+        snippets, triggertimes_snippets = load_array(snippets), load_array(triggertimes_snippets)
+        snippets_t0 = load_array(snippets_t0)
+        snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
+                          + snippets_t0)
 
         average, average_times, _ = compute_upsampled_average(
             snippets, snippets_times, triggertimes_snippets, f_resample=self._fs_resample)
@@ -724,48 +722,3 @@ def compute_contrast_response_ratio(
         ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.1g}\n{x / fs}s")
 
     return low_contrast_response, high_contrast_response, lh_contrast_index
-
-
-def compute_upsampled_average(
-        snippets: np.ndarray,
-        snippets_times: np.ndarray,
-        triggertimes_snippets: np.ndarray,
-        f_resample: float = 500,
-) -> tuple:
-    """Resample and average snippets at the given sampling frequency.
-
-    Parameters
-    ----------
-    snippets : np.ndarray
-        2D array of response snippets with shape (time, trials).
-    snippets_times : np.ndarray
-        2D array of timestamps for each snippet with shape (time, trials).
-    triggertimes_snippets : np.ndarray
-        2D array of trigger times for each snippet with shape (n_triggers, trials).
-    f_resample : float, optional
-        Target sampling frequency in Hz. Default is 500.
-
-    Returns
-    -------
-    tuple
-        Tuple of (average, average_times, snippets_resampled) where average is the
-        mean across trials, average_times is the time axis, and snippets_resampled
-        contains all resampled trials.
-    """
-    dt = 1 / f_resample
-    stim_dur = np.median(np.diff(triggertimes_snippets[0]))
-    resampled_n = int(np.ceil(stim_dur * f_resample))
-    n_reps = snippets.shape[1]
-
-    average_times = np.arange(0, resampled_n) * dt
-
-    snippets_resampled = np.zeros((resampled_n, n_reps))
-    for rep_idx in range(n_reps):
-        snippets_resampled[:, rep_idx] = np.interp(
-            x=average_times,
-            xp=snippets_times[:, rep_idx] - triggertimes_snippets[0, rep_idx],
-            fp=snippets[:, rep_idx])
-
-    average = np.mean(snippets_resampled, axis=1)
-
-    return average, average_times, snippets_resampled

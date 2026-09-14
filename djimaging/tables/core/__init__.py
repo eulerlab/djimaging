@@ -1,4 +1,4 @@
-from .averages import AveragesTemplate, ResampledAveragesTemplate
+from .averages import ResampledAveragesTemplate
 from .experiment import ExperimentTemplate
 from .preprocesstraces import PreprocessTracesTemplate, PreprocessParamsTemplate
 from .snippets import SnippetsTemplate, GroupSnippetsTemplate

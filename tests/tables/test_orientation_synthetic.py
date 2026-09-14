@@ -1,6 +1,6 @@
 import numpy as np
 
-from djimaging.tables.response.movingbar.orientation_utils_v2 import compute_os_ds_idxs
+from djimaging.tables.response.movingbar.orientation_utils import compute_os_ds_idxs
 from tests.fixtures.random_utils import numpy_seed
 
 

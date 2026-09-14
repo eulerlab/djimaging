@@ -128,48 +128,6 @@ def get_roi2trace(
     return roi2trace
 
 
-def compare_roi_masks(roi_mask1: np.ndarray, roi_mask2: np.ndarray, max_shift: int = 4) -> str:
-    """Test if two ROI masks are the same, possibly up to a spatial shift.
-
-    Parameters
-    ----------
-    roi_mask1 : np.ndarray
-        First 2-D integer ROI mask in Igor format.
-    roi_mask2 : np.ndarray
-        Second 2-D integer ROI mask in Igor format.
-    max_shift : int, optional
-        Maximum number of pixels to try shifting in each direction when
-        testing for a shifted match. Default is 4.
-
-    Returns
-    -------
-    str
-        ``'same'`` if the masks are identical, ``'shifted'`` if they match
-        after a spatial shift within ``max_shift``, or ``'different'``
-        otherwise.
-    """
-    assert_igor_format(roi_mask1)
-    assert_igor_format(roi_mask2)
-
-    if roi_mask1.shape != roi_mask2.shape:
-        return 'different'
-    if np.all(roi_mask1 == roi_mask2):
-        return 'same'
-
-    max_shift_x = np.minimum(max_shift, roi_mask1.shape[0] - 2)
-    max_shift_y = np.minimum(max_shift, roi_mask1.shape[1] - 2)
-
-    for dx in range(-max_shift_x, max_shift_x + 1):
-        for dy in range(-max_shift_y, max_shift_y + 1):
-            shifted1 = roi_mask1[dx:, dy:]
-            dx = -roi_mask2.shape[0] if dx == 0 else dx  # Handle zero case
-            dy = -roi_mask2.shape[0] if dy == 0 else dy
-            shifted2 = roi_mask2[:-dx, :-dy]
-            if np.all(shifted1 == shifted2):
-                return 'shifted'
-    return 'different'
-
-
 def get_roi_center(roi_mask: np.ndarray, roi_id: int) -> Tuple[float, float]:
     """Return the centre of mass of a single ROI in pixel coordinates.
 

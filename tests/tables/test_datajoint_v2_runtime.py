@@ -7,7 +7,6 @@ import numpy as np
 import pytest
 from sklearn.dummy import DummyClassifier
 
-from djimaging.tables.classifier.celltype_assignment import CelltypeAssignmentTemplate
 from djimaging.tables.classifier_v2 import celltype_assignment_v2
 from djimaging.tables.core.stim_logs import PresentationLogTemplate
 from djimaging.tables.motion_correction.motion_detection import MotionDetectionTemplate
@@ -70,7 +69,6 @@ class _Relation:
 
 @pytest.mark.parametrize('table_class', [
     celltype_assignment_v2.CelltypeAssignmentV2Template,
-    CelltypeAssignmentTemplate,
     MotionDetectionTemplate,
     FastStaTemplate,
 ])
