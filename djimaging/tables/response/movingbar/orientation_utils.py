@@ -94,16 +94,6 @@ def get_dir_idx(snippets, dir_order):
     return dir_idx, dir_rad
 
 
-def compute_mb_qi(snippets, dir_order):
-    assert snippets.ndim == 2
-    assert np.asarray(dir_order).ndim == 1
-
-    dir_idx, dir_rad = get_dir_idx(snippets, dir_order)
-    sorted_responses, sorted_directions = sort_response_matrix(snippets, dir_idx, dir_rad)
-    d_qi = quality_index_ds(sorted_responses)
-    return d_qi
-
-
 def preprocess_mb_snippets(snippets, dir_order):
     dir_idx, dir_rad = get_dir_idx(snippets, dir_order)
 

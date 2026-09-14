@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import warnings
 from abc import abstractmethod
+from collections.abc import Callable
 
 import datajoint as dj
 import numpy as np
@@ -204,31 +205,13 @@ class PreprocessTracesTemplate(dj.Computed):
         trace, smoothed_trace, trace_t0, trace_dt = (self & key).fetch1(
             'pp_trace', 'smoothed_trace', 'pp_trace_t0', 'pp_trace_dt')
         trace, smoothed_trace = load_array(trace), load_array(smoothed_trace)
-        trace_t = np.arange(trace.size) * trace_dt + trace_t0
 
-        import ipywidgets as widgets
+        def save_clip(i0: int, i1: int) -> None:
+            self.update_key_from_gui(
+                key, trace=trace[i0:i1], smoothed_trace=smoothed_trace[i0:i1],
+                trace_t0=trace_t0 + i0 * trace_dt, trace_dt=trace_dt)
 
-        w_left = widgets.IntSlider(0, min=0, max=trace.size - 1, step=1,
-                                   layout=widgets.Layout(width='800px'))
-        w_right = widgets.IntSlider(trace.size - 1, min=0, max=trace.size - 1, step=1,
-                                    layout=widgets.Layout(width='800px'))
-        w_save = widgets.Checkbox(False)
-
-        title = 'Not saved\n' + prep_long_title(key)
-
-        @widgets.interact(left=w_left, right=w_right, save=w_save)
-        def plot_fit(left=0, right=trace.size - 1, save=False):
-            nonlocal title
-
-            plot_left_right_clipping(trace, trace_t, left, right, title)
-
-            if save:
-                i0, i1 = (right, left + 1) if right < left else (left, right + 1)
-                self.update_key_from_gui(
-                    key, trace=trace[i0:i1], smoothed_trace=smoothed_trace[i0:i1],
-                    trace_t0=trace_t0 + left * trace_dt, trace_dt=trace_dt)
-                title = f'SAVED: left={left}, right={right}\n{prep_long_title(key)}'
-                w_save.value = False
+        gui_clip_trace(trace, trace_t0, trace_dt, key, save_clip)
 
     def update_key_from_gui(
             self,
@@ -659,6 +642,36 @@ def process_trace(
         trace_dt_new = trace_dt
 
     return trace, smoothed_trace, trace_dt_new
+
+
+def gui_clip_trace(
+        trace: np.ndarray,
+        trace_t0: float,
+        trace_dt: float,
+        key: dict,
+        save_clip: Callable[[int, int], None],
+) -> None:
+    """Show clip controls; call save_clip(start, stop) with slice bounds on save."""
+    import ipywidgets as widgets
+
+    trace_t = np.arange(trace.size) * trace_dt + trace_t0
+    w_left = widgets.IntSlider(0, min=0, max=trace.size - 1, step=1,
+                               layout=widgets.Layout(width='800px'))
+    w_right = widgets.IntSlider(trace.size - 1, min=0, max=trace.size - 1, step=1,
+                                layout=widgets.Layout(width='800px'))
+    w_save = widgets.Checkbox(False)
+    title = 'Not saved\n' + prep_long_title(key)
+
+    @widgets.interact(left=w_left, right=w_right, save=w_save)
+    def plot_fit(left: int = 0, right: int = trace.size - 1, save: bool = False) -> None:
+        nonlocal title
+        plot_left_right_clipping(trace, trace_t, left, right, title)
+
+        if save:
+            i0, i1 = min(left, right), max(left, right) + 1
+            save_clip(i0, i1)
+            title = f'SAVED: left={left}, right={right}\n{prep_long_title(key)}'
+            w_save.value = False
 
 
 def plot_left_right_clipping(

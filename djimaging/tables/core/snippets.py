@@ -13,6 +13,24 @@ from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.snippet_utils import split_trace_by_reps, split_trace_by_group_reps, compute_repeat_correlation
 
 
+def fetch_snippets_and_times(
+        snippets_table: dj.Table | type[dj.Table],
+        key: dict,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Fetch repeated snippets, absolute sample times, and trigger times as arrays.
+
+    This handles SnippetsTemplate rows with shape (time, repetitions), including
+    arrays stored externally. GroupSnippetsTemplate rows contain dictionaries
+    and must be handled separately.
+    """
+    snippets_t0, snippets_dt, snippets, triggertimes = (snippets_table & key).fetch1(
+        'snippets_t0', 'snippets_dt', 'snippets', 'triggertimes_snippets')
+    snippets, snippets_t0, triggertimes = (
+        load_array(snippets), load_array(snippets_t0), load_array(triggertimes))
+    snippets_times = (np.arange(snippets.shape[0]) * snippets_dt)[:, None] + snippets_t0
+    return snippets, snippets_times, triggertimes
+
+
 def get_aligned_snippets_times(
         snippets_times: np.ndarray,
         raise_error: bool = True,
@@ -153,11 +171,7 @@ class SnippetsTemplate(dj.Computed):
             xlim_aligned: x-axis limits for the aligned snippet panels.
         """
         key = get_primary_key(table=self, key=key)
-        snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self & key).fetch1(
-            "snippets_t0", "snippets_dt", "snippets", "triggertimes_snippets")
-
-        snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
-                          + snippets_t0)
+        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self, key)
 
         fig, axs = plt.subplots(3, 1, figsize=(10, 6))
 

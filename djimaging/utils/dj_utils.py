@@ -162,25 +162,6 @@ def get_primary_key(table: dj.Table, key: dict | None = None) -> dict:
     return key
 
 
-def get_secondary_keys(table: dj.Table) -> list:
-    """Get all secondary (non-primary) key names of a DataJoint table.
-
-    Parameters
-    ----------
-    table : dj.Table
-        DataJoint table to inspect.
-
-    Returns
-    -------
-    list
-        List of attribute name strings that are not part of the primary key.
-    """
-    key = get_primary_key(table)
-    row = (table & key).fetch1()
-    secondary_keys = list(set(row.keys()) - set(key.keys()))
-    return secondary_keys
-
-
 def merge_keys(key1: dict, key2: dict) -> dict:
     """Merge two DataJoint key dictionaries, raising on conflicts.
 

@@ -21,7 +21,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.core.averages import compute_upsampled_average
-from djimaging.utils.dj_storage import load_array
+from djimaging.tables.core.snippets import fetch_snippets_and_times
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -101,12 +101,7 @@ class ChirpFeaturesBcTemplate(dj.Computed):
             plateau_index, tonic_release_index, l_freq_response, h_freq_response,
             lh_freq_index, l_contrast_response, h_contrast_response, lh_contrast_index).
         """
-        snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-            "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-        snippets, triggertimes_snippets = load_array(snippets), load_array(triggertimes_snippets)
-        snippets_t0 = load_array(snippets_t0)
-        snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
-                          + snippets_t0)
+        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, key)
 
         average, average_times, _ = compute_upsampled_average(
             snippets, snippets_times, triggertimes_snippets, f_resample=self._fs_resample)

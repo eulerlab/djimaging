@@ -5,6 +5,7 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.tables.core.snippets import fetch_snippets_and_times
 from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils import plot_utils, math_utils, trace_utils
@@ -129,17 +130,11 @@ class ResampledAveragesTemplate(dj.Computed):
         key : dict
             The primary key identifying the entry to populate.
         """
-        snippets_t0, snippets_dt, snippets = (self.snippets_table() & key).fetch1(
-            'snippets_t0', 'snippets_dt', 'snippets')
+        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, key)
 
         if snippets.shape[1] <= 1:
             warnings.warn(f"Skipping {key} because it has only one repetition.")
             return
-
-        triggertimes_snippets = (self.snippets_table() & key).fetch1('triggertimes_snippets')
-
-        snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
-                          + snippets_t0)
 
         average, average_times, _ = compute_upsampled_average(
             snippets, snippets_times, triggertimes_snippets, f_resample=self._f_resample)
@@ -168,16 +163,13 @@ class ResampledAveragesTemplate(dj.Computed):
         """
         key = get_primary_key(table=self, key=key)
 
-        snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table & key).fetch1(
-            'snippets_t0', 'snippets_dt', 'snippets', 'triggertimes_snippets')
+        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, key)
 
         average, average_norm, average_t0, average_dt, triggertimes_rel = \
             (self & key).fetch1('average', 'average_norm', 'average_t0', 'average_dt', 'triggertimes_rel')
         average, average_norm, triggertimes_rel = (
             load_array(average), load_array(average_norm), load_array(triggertimes_rel))
 
-        snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
-                          + snippets_t0)
         average_times = np.arange(len(average)) * average_dt + average_t0
 
         fig, axs = plt.subplots(2, 1, figsize=(10, 4), sharex='all')

@@ -14,6 +14,18 @@ from djimaging.utils.plot_utils import plot_srf, plot_trf, plot_signals_heatmap
 from djimaging.utils.trace_utils import sort_traces
 
 
+def fetch1_rf_time(rf_table: dj.Table | type[dj.Table], key: dict) -> np.ndarray:
+    """Load RF times from the RF row, its model dictionary, or its params table."""
+    try:
+        rf_time = (rf_table & key).fetch1('rf_time')
+    except dj.DataJointError:
+        try:
+            rf_time = (rf_table & key).fetch1('model_dict')['rf_time']
+        except dj.DataJointError:
+            rf_time = (rf_table.params_table & key).fetch1('rf_time')
+    return load_array(rf_time)
+
+
 class SplitRFParamsTemplate(dj.Lookup):
     database = ""
     _color_idxs = None
@@ -152,15 +164,8 @@ class SplitRFTemplate(dj.Computed):
 
         self.insert(entries)
 
-    def fetch1_rf_time(self, key):
-        try:
-            rf_time = (self.rf_table & key).fetch1('rf_time')
-        except dj.DataJointError:
-            try:
-                rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
-            except dj.DataJointError:
-                rf_time = (self.rf_table.params_table & key).fetch1('rf_time')
-        return load_array(rf_time)
+    def fetch1_rf_time(self, key: dict) -> np.ndarray:
+        return fetch1_rf_time(self.rf_table, key)
 
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)

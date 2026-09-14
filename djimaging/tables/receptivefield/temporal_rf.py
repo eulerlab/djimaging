@@ -4,6 +4,7 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.tables.receptivefield.split_strf import fetch1_rf_time
 from djimaging.utils.receptive_fields.temporal_rf_utils import compute_trf_transience_index, compute_half_amp_width, \
     compute_main_peak_lag, compute_rel_weight_baseline
 from djimaging.utils.dj_storage import load_array
@@ -45,15 +46,8 @@ class TempRFPropertiesTemplate(dj.Computed):
     def split_rf_table(self):
         pass
 
-    def fetch1_rf_time(self, key):
-        try:
-            rf_time = (self.rf_table & key).fetch1('rf_time')
-        except dj.DataJointError:
-            try:
-                rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
-            except dj.DataJointError:
-                rf_time = (self.rf_table.params_table & key).fetch1('rf_time')
-        return load_array(rf_time)
+    def fetch1_rf_time(self, key: dict) -> np.ndarray:
+        return fetch1_rf_time(self.rf_table, key)
 
     def make(self, key, plot=False):
         rf_time = self.fetch1_rf_time(key=key)

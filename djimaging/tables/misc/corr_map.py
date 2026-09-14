@@ -221,7 +221,7 @@ class CrossCondCorrMapTemplate(dj.Computed):
             key: DataJoint primary key dict identifying the pair of conditions.
             plot: If ``True``, generate a diagnostic plot during computation.
         """
-        correlation, x_shift, z_shift, max_corr = self._make_compute(key)
+        correlation, x_shift, z_shift, max_corr = self._make_compute(key, plot=plot)
         self.insert1(dict(key, cross_corr_map=correlation, shift_x=x_shift, shift_z=z_shift, max_corr=max_corr))
 
     def _make_compute(self, key: dict, plot: bool = False) -> tuple:
@@ -237,19 +237,7 @@ class CrossCondCorrMapTemplate(dj.Computed):
         key_a = {**key, 'cond1': key[f'{self._split_cond}_A']}
         key_b = {**key, 'cond1': key[f'{self._split_cond}_B']}
 
-        corr_map_a = load_array((self.corr_map_table & key_a).fetch1('corr_map'))
-        corr_map_b = load_array((self.corr_map_table & key_b).fetch1('corr_map'))
-
-        cut_x = self.corr_map_table().get_cut_x()
-        cut_z = self.corr_map_table().get_cut_z()
-
-        image1 = corr_map_a[cut_x[0]:-cut_x[1], cut_z[1]:-cut_z[0]]
-        image2 = corr_map_b[cut_x[0]:-cut_x[1], cut_z[1]:-cut_z[0]]
-
-        correlation, x_shift, z_shift, max_corr = cross_correlate_images(
-            image1, image2, plot=plot, max_shift=self._max_shift)
-
-        return correlation, x_shift, z_shift, max_corr
+        return _fetch_and_correlate_maps(self.corr_map_table, key_a, key_b, self._max_shift, plot=plot)
 
     def plot1(self, key: dict = None) -> None:
         """Plot the cross-condition correlation map for a given key.
@@ -303,7 +291,7 @@ class CrossStimCorrMapTemplate(dj.Computed):
             key: DataJoint primary key dict identifying the pair of stimuli.
             plot: If ``True``, generate a diagnostic plot during computation.
         """
-        correlation, x_shift, z_shift, max_corr = self._make_compute(key)
+        correlation, x_shift, z_shift, max_corr = self._make_compute(key, plot=plot)
         self.insert1(dict(key, cross_corr_map=correlation, shift_x=x_shift, shift_z=z_shift, max_corr=max_corr))
 
     def _make_compute(self, key: dict, plot: bool = False) -> tuple:
@@ -319,19 +307,7 @@ class CrossStimCorrMapTemplate(dj.Computed):
         key_a = {**key, 'stim_name': key['stim_A']}
         key_b = {**key, 'stim_name': key['stim_B']}
 
-        corr_map_a = load_array((self.corr_map_table & key_a).fetch1('corr_map'))
-        corr_map_b = load_array((self.corr_map_table & key_b).fetch1('corr_map'))
-
-        cut_x = self.corr_map_table().get_cut_x()
-        cut_z = self.corr_map_table().get_cut_z()
-
-        image1 = corr_map_a[cut_x[0]:-cut_x[1], cut_z[1]:-cut_z[0]]
-        image2 = corr_map_b[cut_x[0]:-cut_x[1], cut_z[1]:-cut_z[0]]
-
-        correlation, x_shift, z_shift, max_corr = cross_correlate_images(
-            image1, image2, plot=plot, max_shift=self._max_shift)
-
-        return correlation, x_shift, z_shift, max_corr
+        return _fetch_and_correlate_maps(self.corr_map_table, key_a, key_b, self._max_shift, plot=plot)
 
     def plot1(self, key: dict = None) -> None:
         """Plot the cross-stimulus correlation map for a given key.
@@ -341,6 +317,22 @@ class CrossStimCorrMapTemplate(dj.Computed):
         """
         key = get_primary_key(self, key=key)
         self._make_compute(key, plot=True)
+
+
+def _fetch_and_correlate_maps(
+        corr_map_table: type[CorrMapTemplate],
+        key_a: dict,
+        key_b: dict,
+        max_shift: int | None,
+        plot: bool = False,
+) -> tuple[np.ndarray, np.integer, np.integer, np.floating]:
+    """Load and crop a pair of correlation maps using the table's scan margins."""
+    corr_map_a = load_array((corr_map_table & key_a).fetch1('corr_map'))
+    corr_map_b = load_array((corr_map_table & key_b).fetch1('corr_map'))
+    cut_x = corr_map_table().get_cut_x()
+    cut_z = corr_map_table().get_cut_z()
+    crop = (slice(cut_x[0], -cut_x[1] or None), slice(cut_z[1], -cut_z[0] or None))
+    return cross_correlate_images(corr_map_a[crop], corr_map_b[crop], plot=plot, max_shift=max_shift)
 
 
 def normalized_cross_correlation(image1: np.ndarray, image2: np.ndarray) -> np.ndarray:

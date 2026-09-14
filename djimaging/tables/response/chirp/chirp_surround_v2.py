@@ -20,6 +20,7 @@ import numpy as np
 
 from matplotlib import pyplot as plt
 
+from djimaging.tables.core.snippets import fetch_snippets_and_times
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.trace_utils import get_mean_dt
 
@@ -92,15 +93,8 @@ class ChirpSurroundTemplateV2(dj.Computed):
 
         polarity_index = (self.chirp_features_table & l_key).fetch1('polarity_index')
 
-        l_snippets_t0, l_snippets_dt, l_snippets, l_triggertimes_snippets = (self.snippets_table() & l_key).fetch1(
-            "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-        g_snippets_t0, g_snippets_dt, g_snippets, g_triggertimes_snippets = (self.snippets_table() & g_key).fetch1(
-            "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-
-        l_snippets_times = (np.tile(np.arange(l_snippets.shape[0]) * l_snippets_dt, (len(l_snippets_t0), 1)).T
-                            + l_snippets_t0)
-        g_snippets_times = (np.tile(np.arange(g_snippets.shape[0]) * g_snippets_dt, (len(g_snippets_t0), 1)).T
-                            + g_snippets_t0)
+        l_snippets, l_snippets_times, l_triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, l_key)
+        g_snippets, g_snippets_times, g_triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, g_key)
 
         dt = get_mean_dt(l_snippets_times.T)[0]
         dt_g = get_mean_dt(g_snippets_times.T)[0]

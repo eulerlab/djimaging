@@ -19,7 +19,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy import signal
 
-from djimaging.utils.dj_storage import load_array
+from djimaging.tables.core.snippets import fetch_snippets_and_times
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 from djimaging.utils.trace_utils import get_mean_dt, find_closest
@@ -73,12 +73,7 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         key : dict
             DataJoint primary key identifying the entry to populate.
         """
-        snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-            "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-        snippets, triggertimes_snippets = load_array(snippets), load_array(triggertimes_snippets)
-        snippets_t0 = load_array(snippets_t0)
-        snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
-                          + snippets_t0)
+        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, key)
 
         on_off_index = compute_on_off_index(snippets, snippets_times, triggertimes_snippets[0])
         transience_index = compute_transience_index(snippets, snippets_times, triggertimes_snippets[0])
@@ -95,12 +90,7 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         """
         key = get_primary_key(table=self, key=key)
 
-        snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-            "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-        snippets, triggertimes_snippets = load_array(snippets), load_array(triggertimes_snippets)
-        snippets_t0 = load_array(snippets_t0)
-        snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
-                          + snippets_t0)
+        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, key)
 
         on_off_index, transience_index = (self & key).fetch1('on_off_index', 'transience_index')
 
