@@ -21,15 +21,15 @@ class FeaturesParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        features_id: tinyint unsigned # unique param set id
+        features_id: int32 # unique param set id
         ---
         kind: varchar(191)
-        params_dict: longblob
-        norm_trace: tinyint unsigned  # Used normalized averages or averages?
+        params_dict: <blob>
+        norm_trace: bool  # Used normalized averages or averages?
         stim_names: varchar(191)  # Stimuli to consider, separated by '_'
         ncomps: varchar(191)  # Number of components separated by '_'
-        pre_standardize: tinyint unsigned  # Standardize features before decomposition?
-        post_standardize: tinyint unsigned  # Standardize features after decomposition?
+        pre_standardize: bool  # Standardize features before decomposition?
+        post_standardize: bool  # Standardize features after decomposition?
         """
         return definition
 
@@ -72,10 +72,10 @@ class FeaturesTemplate(dj.Computed):
         definition = """
         -> self.params_table
         ---
-        features: longblob  # Feature matrix.
-        traces: longblob  # Input traces.
-        traces_reconstructed: longblob  # Reconstructed traces.
-        decomp_infos: longblob  # information about decomposition of different stimuli
+        features: <blob@processed>  # Feature matrix.
+        traces: <blob@processed>  # Input traces.
+        traces_reconstructed: <blob@processed>  # Reconstructed traces.
+        decomp_infos: <blob@processed>  # information about decomposition of different stimuli
         """
         return definition
 
@@ -133,13 +133,16 @@ class FeaturesTemplate(dj.Computed):
 
         times = [
             truncated_vstack(
-                np.arange(tab.fetch(f'{stim_i}_avgs').shape[0]) * tab.fetch1(f'{stim_i}_dt')
+                np.arange(tab.to_arrays(f'{stim_i}_avgs').shape[0]) * tab.fetch1(f'{stim_i}_dt')
                 + tab.fetch1(f'{stim_i}_t0'), rtol=rtol)
             for stim_i in stim_names]
         traces = [
-            truncated_vstack(tab.fetch(f'{stim_i}_avgs'), rtol=rtol)
+            truncated_vstack(tab.to_arrays(f'{stim_i}_avgs'), rtol=rtol)
             for stim_i in stim_names]
-        roi_keys = tab.fetch(*self.roi_table.primary_key, as_dict=True)
+        roi_keys = [
+            {name: row[name] for name in self.roi_table.primary_key}
+            for row in tab.to_dicts()
+        ]
         return traces, times, roi_keys, stim_names
 
     def make(self, key: dict, verboselvl: int = 1) -> None:
@@ -177,7 +180,7 @@ class FeaturesTemplate(dj.Computed):
             -> master
             -> master.roi_table
             ---
-            features_idx : int
+            features_idx : int32
             """
             return definition
 

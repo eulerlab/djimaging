@@ -45,6 +45,21 @@ e.g. based on the template <code>djimaging/djconfig/djconf_template.json</code>.
 Fill out the missing values; if you don't know how, ask someone in your group.
 > ❗ Never upload this personal config file to GitHub.
 
+DataJoint 2 requires MySQL 8 with `utf8mb4`/`utf8mb4_bin` and named stores.
+The template uses a reference-only DataJoint store rooted at
+`/gpfs01/euler/data` for externally managed acquisition, stimulus, and model
+files. DataJoint does not write `<filepath>` values, although filesystem tools
+such as ROI-mask editors may still require write access to adjacent folders.
+Traces, snippets, response vectors, field/presentation channel averages, ROI masks,
+and small analysis arrays/objects use `<blob>` and are stored directly in the
+database. Large stimulus and population matrices, full spatiotemporal receptive
+fields, high-resolution channel averages, correlation maps, and model objects
+use `<npy@processed>` or `<blob@processed>` in the separate writable
+`processed` store. Paths inserted into `<filepath@reference>` fields must be
+relative to the common reference root.
+JSON does not support comments, so these store roles are documented here rather
+than inside the config template.
+
 ### Create a user folder
 
 Inside the root folder <code>djimaging</code> (not in <code>djimaging/djimaging</code>)
@@ -70,10 +85,10 @@ calling <code>schema.drop()</code> and confirm by entering <code>yes</code>.
 
 ## Local testing
 
-Install the test environment with DataJoint 0.14.7:
+Install the test environment with DataJoint 2.3.x:
 
 ```bash
-uv pip install pytest "setuptools<81" "datajoint==0.14.7" -e .
+uv pip install pytest "setuptools<81" -e .
 ```
 
 Run unit tests:
@@ -87,7 +102,8 @@ Run integration tests against a temporary MySQL 8.0.43 server:
 ```bash
 docker run --rm --name djimaging-mysql-test \
   -e MYSQL_ROOT_PASSWORD=datajoint -e MYSQL_ROOT_HOST=% \
-  -p 3307:3306 -d mysql:8.0.43
+  -p 3307:3306 -d mysql:8.0.43 \
+  --character-set-server=utf8mb4 --collation-server=utf8mb4_bin
 until docker exec djimaging-mysql-test mysqladmin ping -h 127.0.0.1 -pdatajoint; do sleep 1; done
 
 DJ_TEST_MYSQL=1 DJ_HOST=127.0.0.1 DJ_PORT=3307 \

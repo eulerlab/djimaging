@@ -1,5 +1,4 @@
-import djimaging.tables.classifier.celltype_assignment
-from djimaging.tables import classifier, response, location, misc
+from djimaging.tables import classifier_v2, response, location, receptivefield
 from djimaging.utils.dj_utils import get_input_tables, get_class_attributes
 
 
@@ -8,6 +7,7 @@ def _test_definition(djclass):
     class_attrs = get_class_attributes(djclass)
 
     for table in tables:
+        table = table.split('.', 1)[0].removesuffix('()')
         assert table == 'master' or table in class_attrs, table
 
     for class_attr in class_attrs:
@@ -30,26 +30,30 @@ def test_definition_ChirpQITemplate():
 
 
 # orientation
-def test_definition_OsDsIndexesTemplateV1():
-    _test_definition(response.OsDsIndexesTemplateV1)
+def test_definition_OsDsIndexesTemplate():
+    _test_definition(response.OsDsIndexesTemplate)
 
 
-def test_definition_OsDsIndexesTemplateV2():
-    _test_definition(response.OsDsIndexesTemplateV2)
+def test_definition_ChirpSurroundTemplateV2():
+    _test_definition(response.ChirpSurroundTemplateV2)
 
 
-# rgc_classifier
-def test_definition_ClassifierTemplate():
-    _test_definition(classifier.ClassifierTemplate)
+# pretrained classifier
+def test_definition_ClassifierV2Template():
+    _test_definition(classifier_v2.ClassifierV2Template)
 
 
-def test_definition_ClassifierTrainingDataTemplate():
-    _test_definition(classifier.ClassifierTrainingDataTemplate)
+def test_definition_Baden16TracesV2Template():
+    _test_definition(classifier_v2.Baden16TracesV2Template)
 
 
-def test_definition_CelltypeAssignmentTemplate():
-    _test_definition(classifier.CelltypeAssignmentTemplate)
+def test_definition_CelltypeAssignmentV2Template():
+    _test_definition(classifier_v2.CelltypeAssignmentV2Template)
 
 
-def test_definition_ClassifierMethodTemplate():
-    _test_definition(classifier.ClassifierMethodTemplate)
+def test_definition_FastStaParamsTemplate():
+    _test_definition(receptivefield.FastStaParamsTemplate)
+
+
+def test_definition_FastStaTemplate():
+    _test_definition(receptivefield.FastStaTemplate)

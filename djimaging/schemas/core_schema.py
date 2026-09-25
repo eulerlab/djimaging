@@ -49,7 +49,7 @@ class Field(core.FieldTemplate):
 
 @schema
 class Stimulus(core.StimulusTemplate):
-    _incl_snippet_base_dt = True
+    pass
 
 
 @schema
@@ -87,6 +87,7 @@ class HighRes(misc.HighResTemplate):
 @schema
 class RoiMask(core.RoiMaskTemplate):
     _max_shift = 5  # Maximum shift of ROI mask in pixels
+    _roi_file_format = 'numpy'
 
     field_table = Field
     presentation_table = Presentation
@@ -146,24 +147,3 @@ class Averages(core.ResampledAveragesTemplate):
     _norm_kind = 'amp_one'  # How to normalize averages?
 
     snippets_table = Snippets
-
-
-"""
-# Replace Snippet and Averages above if you want to use the old way of defining snippets and averages
-
-@schema
-class Snippets(core.SnippetsTemplate):
-    _pad_trace = False
-
-    stimulus_table = Stimulus
-    presentation_table = Presentation
-    traces_table = Traces
-    preprocesstraces_table = PreprocessTraces
-
-
-@schema
-class Averages(core.AveragesTemplate):
-    _norm_kind = 'amp_one'  # How to normalize averages
-
-    snippets_table = Snippets
-"""

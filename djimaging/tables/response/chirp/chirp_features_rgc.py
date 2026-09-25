@@ -19,6 +19,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy import signal
 
+from djimaging.tables.core.snippets import fetch_snippets_and_times
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 from djimaging.utils.trace_utils import get_mean_dt, find_closest
@@ -33,8 +34,8 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         # Computes an OnOff and a transience index based on the chirp step response
         -> self.snippets_table
         ---
-        on_off_index:       float   # index indicating light preference (-1 Off, 1 On)
-        transience_index:   float   # index indicating transience of response
+        on_off_index:       float32   # index indicating light preference (-1 Off, 1 On)
+        transience_index:   float32   # index indicating transience of response
         '''
         return definition
 
@@ -72,16 +73,7 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         key : dict
             DataJoint primary key identifying the entry to populate.
         """
-        try:
-            # Deprecated
-            snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-                "snippets", "snippets_times", "triggertimes_snippets")
-        except dj.DataJointError:
-            snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-                "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-
-            snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
-                              + snippets_t0)
+        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, key)
 
         on_off_index = compute_on_off_index(snippets, snippets_times, triggertimes_snippets[0])
         transience_index = compute_transience_index(snippets, snippets_times, triggertimes_snippets[0])
@@ -98,16 +90,7 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         """
         key = get_primary_key(table=self, key=key)
 
-        try:
-            # Deprecated
-            snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-                "snippets", "snippets_times", "triggertimes_snippets")
-        except dj.DataJointError:
-            snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-                "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-
-            snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
-                              + snippets_t0)
+        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, key)
 
         on_off_index, transience_index = (self & key).fetch1('on_off_index', 'transience_index')
 
@@ -130,7 +113,7 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        on_off_index, transience_index = (self & restriction).fetch('on_off_index', 'transience_index')
+        on_off_index, transience_index = (self & restriction).to_arrays('on_off_index', 'transience_index')
 
         fig, axs = plt.subplots(1, 2, figsize=(8, 3))
         ax = axs[0]

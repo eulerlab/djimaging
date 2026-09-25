@@ -53,9 +53,9 @@ class RelativeFieldLocationTemplate(dj.Computed):
         -> self.opticdisk_table
         -> self.field_table
         ---
-        relx   :float      # XCoord_um relative to the optic disk
-        rely   :float      # YCoord_um relative to the optic disk
-        relz   :float      # ZCoord_um relative to the optic disk
+        relx   :float32      # XCoord_um relative to the optic disk
+        rely   :float32      # YCoord_um relative to the optic disk
+        relz   :float32      # ZCoord_um relative to the optic disk
         """
         return definition
 
@@ -94,7 +94,7 @@ class RelativeFieldLocationTemplate(dj.Computed):
         absx, absy, absz = (self.field_table() & key).fetch1('absx', 'absy', 'absz')
 
         if self.presentation_table is not None:
-            pres_absx, pres_absy, pres_absz = (self.presentation_table() & key).fetch('absx', 'absy', 'absz')
+            pres_absx, pres_absy, pres_absz = (self.presentation_table() & key).to_arrays('absx', 'absy', 'absz')
             if np.abs(np.median(pres_absx) - absx) > 200 or np.abs(np.median(pres_absy) - absy) > 200:
                 warnings.warn(f"Position is different from the presentation table for {key}. "
                               f"Using heuristic to determine location.")
@@ -126,7 +126,7 @@ class RelativeFieldLocationTemplate(dj.Computed):
         Args:
             view: Axis orientation; one of ``'igor_local'`` or ``'igor_setup'``.
         """
-        relx, rely = self.fetch("relx", "rely")
+        relx, rely = self.to_arrays("relx", "rely")
         plot_relxy_pos(relx, rely, view=view)
 
 
@@ -142,8 +142,8 @@ class RetinalFieldLocationTemplate(dj.Computed):
 
         -> self.relativefieldlocation_table
         ---
-        ventral_dorsal_pos_um       :float      # position on the ventral-dorsal axis, greater 0 means dorsal
-        temporal_nasal_pos_um       :float      # position on the temporal-nasal axis, greater 0 means nasal
+        ventral_dorsal_pos_um       :float32      # position on the ventral-dorsal axis, greater 0 means dorsal
+        temporal_nasal_pos_um       :float32      # position on the temporal-nasal axis, greater 0 means nasal
         """
         return definition
 
@@ -192,7 +192,7 @@ class RetinalFieldLocationTemplate(dj.Computed):
             key: Optional DataJoint primary key dict. If provided, the matching entry is
                 highlighted with a separate scatter marker.
         """
-        temporal_nasal_pos_um, ventral_dorsal_pos_um = self.fetch("temporal_nasal_pos_um", "ventral_dorsal_pos_um")
+        temporal_nasal_pos_um, ventral_dorsal_pos_um = self.to_arrays("temporal_nasal_pos_um", "ventral_dorsal_pos_um")
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
         ax.scatter(temporal_nasal_pos_um, ventral_dorsal_pos_um, label='all')
         if key is not None:

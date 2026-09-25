@@ -22,6 +22,7 @@ def assert_igor_format(roi_mask: np.ndarray) -> None:
         If the mask is not 2-D, contains non-integer values, or has unexpected
         min/max values.
     """
+    roi_mask = np.asarray(roi_mask)
     vmin = np.min(roi_mask)
     vmax = np.max(roi_mask)
 

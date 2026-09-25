@@ -1,7 +1,7 @@
 """
 Example usage:
 @schema
-class ChirpSurround(response.ChirpSurroundTemplate):
+class ChirpSurroundV2(response.ChirpSurroundTemplateV2):
     _l_name = 'lChirp'
     _g_name = 'gChirp'
 
@@ -20,11 +20,12 @@ import numpy as np
 
 from matplotlib import pyplot as plt
 
-from djimaging.utils.dj_utils import get_primary_key, get_secondary_keys
+from djimaging.tables.core.snippets import fetch_snippets_and_times
+from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.trace_utils import get_mean_dt
 
 
-class ChirpSurroundTemplate(dj.Computed):
+class ChirpSurroundTemplateV2(dj.Computed):
     database = ""
 
     _l_name = 'lChirp'
@@ -42,9 +43,9 @@ class ChirpSurroundTemplate(dj.Computed):
         -> self.snippets_table.proj({self._l_name}='stim_name')
         -> self.snippets_table.proj({self._g_name}='stim_name')
         ---
-        chirp_surround_index = NULL : float
-        l_response_mus : blob  # (repetitions,) local response means
-        g_response_mus : blob  # (repetitions,) global response means 
+        chirp_surround_index = NULL : float32
+        l_response_mus : <blob>  # (repetitions,) local response means
+        g_response_mus : <blob>  # (repetitions,) global response means
         """
         return definition
 
@@ -92,15 +93,8 @@ class ChirpSurroundTemplate(dj.Computed):
 
         polarity_index = (self.chirp_features_table & l_key).fetch1('polarity_index')
 
-        l_snippets_t0, l_snippets_dt, l_snippets, l_triggertimes_snippets = (self.snippets_table() & l_key).fetch1(
-            "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-        g_snippets_t0, g_snippets_dt, g_snippets, g_triggertimes_snippets = (self.snippets_table() & g_key).fetch1(
-            "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-
-        l_snippets_times = (np.tile(np.arange(l_snippets.shape[0]) * l_snippets_dt, (len(l_snippets_t0), 1)).T
-                            + l_snippets_t0)
-        g_snippets_times = (np.tile(np.arange(g_snippets.shape[0]) * g_snippets_dt, (len(g_snippets_t0), 1)).T
-                            + g_snippets_t0)
+        l_snippets, l_snippets_times, l_triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, l_key)
+        g_snippets, g_snippets_times, g_triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, g_key)
 
         dt = get_mean_dt(l_snippets_times.T)[0]
         dt_g = get_mean_dt(g_snippets_times.T)[0]

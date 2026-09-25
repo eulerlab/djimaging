@@ -1,6 +1,6 @@
 import os.path
-import pickle
 import warnings
+from collections import deque
 from datetime import datetime
 from typing import Optional, Dict
 
@@ -222,7 +222,20 @@ class RoiCanvas:
     def add_to_current_delete_mask_at_loc(self, mask, ix, iy):
         """Add a potentially smaller mask to the current delete mask at location ix, iy"""
         w, h = mask.shape
-        self.current_delete_mask[ix - w // 2:ix + w // 2 + 1, iy - h // 2:iy + h // 2 + 1] |= mask.astype(bool)
+        i_l = ix - w // 2
+        i_r = ix + w // 2 + 1
+        i_b = iy - h // 2
+        i_t = iy + h // 2 + 1
+
+        if i_l > 0 and i_r < self.nx and i_b > 0 and i_t < self.ny:
+            self.current_delete_mask[i_l:i_r, i_b:i_t] |= mask.astype(bool)
+        else:
+            rm_l = abs(min(0, i_l))
+            rm_r = abs(min(0, self.nx - i_r))
+            rm_b = abs(min(0, i_b))
+            rm_t = abs(min(0, self.ny - i_t))
+            self.current_delete_mask[i_l + rm_l:i_r - rm_r, i_b + rm_b:i_t - rm_t] |= (
+                mask[rm_l:mask.shape[0] - rm_r, rm_b:mask.shape[1] - rm_t].astype(bool))
 
     def load_current_mask(self):
         """Load current mask from all masks"""
@@ -308,18 +321,23 @@ class RoiCanvas:
 
     def update_roi_mask_img(self):
         """Update ROI masks image"""
-        self.roi_mask_img = np.zeros_like(self.roi_mask_img)
+        self.roi_mask_img[:] = 0
 
         if self._selected_view == 'none':
             return
 
-        new_roi_mask_img = np.zeros_like(self.roi_mask_img)
+        unique_rois = np.unique(self.roi_masks)[1:]  # skip background label 0
+        if unique_rois.size == 0:
+            return
 
-        for roi in np.unique(self.roi_masks)[1:]:
-            xs, ys = np.where(self.roi_masks == roi)
-            new_roi_mask_img[xs, ys, :] = self._get_roi_rgba255(roi)
+        # Build a per-label RGBA lookup table; index 0 = background (stays 0)
+        max_label = int(self.roi_masks.max())
+        lut = np.zeros((max_label + 1, 4), dtype=int)
+        for roi in unique_rois:
+            lut[roi] = self._get_roi_rgba255(roi)
 
-        self.roi_mask_img = new_roi_mask_img
+        # Single vectorized index: no per-label np.where needed
+        self.roi_mask_img[:] = lut[self.roi_masks]
 
     def print_state(self):
         print('bg'.ljust(15), self._selected_bg)
@@ -392,7 +410,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.canvas_width = canvas_width
 
         # Create output widget
-        self.log_messages = []
+        self.log_messages = deque(maxlen=26)
         self.log_counter = 0
         self.log_widget = Output()
 
@@ -484,11 +502,11 @@ class InteractiveRoiCanvas(RoiCanvas):
             return
 
         self.log_counter += 1
-        self.log_messages = [f"{self.log_counter}: {message}"] + self.log_messages[:25]
+        self.log_messages.appendleft(f"{self.log_counter}: {message}")
         with self.log_widget:
             self.log_widget.clear_output(wait=True)
-            for message in self.log_messages:
-                print(message)
+            for msg in self.log_messages:
+                print(msg)
 
     def create_widget_canvas(self):
         widget = MultiCanvas(n_canvases=4, width=self.npx, height=self.npy)
@@ -685,7 +703,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.log(f'Setting stim: {value}')
 
         self.widget_sel_stim.value = value
-        self._selected_stim_idx = np.argmax([stim_name == value for stim_name in self.pres_names])
+        self._selected_stim_idx = self.pres_names.index(value)
 
         self.update_roi_masks_backup()
         self.output_file = self.output_files[self._selected_stim_idx]
@@ -711,7 +729,7 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def create_widget_sel_autorois(self):
         """Create and return button"""
-        options = [key for key in self.autorois_models]
+        options = list(self.autorois_models)
         widget = Dropdown(options=options, value=options[0], description='AutoROIs:', disabled=False)
 
         def change(value):
@@ -1103,8 +1121,9 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.exec_save_current_roi()
         roi_mask = self.roi_masks.copy()
         roi_shift = self.shifts[self._selected_stim_idx]
-        roi_shift = np.array([-roi_shift[0], -roi_shift[1]])
-        roi_mask = mask_utils.shift_array(img=roi_mask, shift=roi_shift, inplace=True, cval=0)
+        # Negate: shift_array moves content in the opposite direction to the acquisition shift
+        inv_roi_shift = (-roi_shift[0], -roi_shift[1])
+        roi_mask = mask_utils.shift_array(img=roi_mask, shift=inv_roi_shift, inplace=True, cval=0)
         return roi_mask
 
     def _prep_save_to_file(self):
@@ -1127,8 +1146,8 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         roi_mask, output_file = self._prep_save_to_file()
 
-        with open(self.output_file, 'wb') as f:
-            pickle.dump(roi_mask, f)
+        mask_utils.save_roi_mask_file(self.output_file, roi_mask,
+                                      mask_utils._infer_roi_file_format(self.output_file))
 
         success = os.path.isfile(self.output_file)
         if success:
@@ -1143,7 +1162,6 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def exec_save_all_to_file(self, button=None, raise_error=False):
         self.log('Saving all to file')
-        import time
         self.update_progress(0)
 
         roi_masks, output_files = [], []
@@ -1159,19 +1177,18 @@ class InteractiveRoiCanvas(RoiCanvas):
                     raise e
                 self.widget_save_info.description = 'Error!'.ljust(20)
                 warnings.warn(f'Error saving {stim}: {e}')
-            time.sleep(0.5)
-
-            for roi_mask, output_file in zip(roi_masks, output_files):
-                with open(output_file, 'wb') as f:
-                    pickle.dump(roi_mask, f)
 
             self.update_progress(100 * i / len(self.pres_names))
 
-            success = all([os.path.isfile(output_file) for output_file in output_files])
-            if success:
-                self.widget_save_info.description = 'Success!'.ljust(20)
-            else:
-                self.widget_save_info.description = 'Error!'.ljust(20)
+        for roi_mask, output_file in zip(roi_masks, output_files):
+            mask_utils.save_roi_mask_file(output_file, roi_mask,
+                                          mask_utils._infer_roi_file_format(output_file))
+
+        success = all(os.path.isfile(f) for f in output_files)
+        if success:
+            self.widget_save_info.description = 'Success!'.ljust(20)
+        else:
+            self.widget_save_info.description = 'Error!'.ljust(20)
 
     def create_widget_save_info(self):
         widget = HTML(value=f'{self.output_file}', placeholder='output_file', description=''.ljust(20))
@@ -1200,7 +1217,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.update_diagnostics(update=False)
 
     def _compute_traces(self):
-        return self.get_current_stack()[self.get_current_selected_roi_mask()]
+        mask = self.get_current_selected_roi_mask()
+        return self.get_current_stack()[mask]
 
     def _compute_cc(self, traces):
         if len(traces) <= 1:
@@ -1265,7 +1283,6 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.add_to_current_mask_at_loc(self.brush_mask, ix, iy)
         elif self._selected_tool == 'erase':
             self.log(f'Erasing from mask at x={x}, y={y}, ix={ix}, iy={iy}')
-            self.add_to_current_mask_at_loc(np.zeros_like(self.brush_mask), ix, iy)
             self.add_to_current_delete_mask_at_loc(self.brush_mask, ix, iy)
         elif self._selected_tool == 'cc':
             mask = mask_utils.get_mask_by_cc(

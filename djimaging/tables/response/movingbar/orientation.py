@@ -1,5 +1,5 @@
 """
-Moving Bar feature extraction similar but not the same as in Baden et al. 2016
+Moving-bar feature extraction following the Baden et al. 2016 MATLAB implementation
 
 Example usage:
 
@@ -13,16 +13,16 @@ class OsDsIndexes(response.OsDsIndexesTemplate):
     stimulus_table = Stimulus
     snippets_table = Snippets
 """
-import warnings
 from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.response.movingbar.orientation_utils import preprocess_mb_snippets, T_START, T_CHANGE, T_END
-from djimaging.tables.response.movingbar.orientation_utils_v1 import compute_os_ds_idxs as compute_os_ds_idxs_v1
-from djimaging.tables.response.movingbar.orientation_utils_v2 import compute_os_ds_idxs as compute_os_ds_idxs_v2
+from djimaging.tables.response.movingbar.orientation_utils import (
+    compute_os_ds_idxs, preprocess_mb_snippets, T_START, T_CHANGE, T_END,
+)
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -30,7 +30,6 @@ class OsDsIndexesTemplate(dj.Computed):
     database = ""
     _reduced_storage = True  # Don't save all intermediate results
     _n_shuffles = 100  # Number of shuffles for null distribution
-    _version = 1  # or 2
 
     @property
     def definition(self):
@@ -39,26 +38,26 @@ class OsDsIndexesTemplate(dj.Computed):
         #as well as a quality index of DS responses as described in Baden et al. (2016)
         -> self.snippets_table
         ---
-        ds_index:   float     # direction selectivity index as resulting vector length (absolute of projection on complex exponential)
-        ds_pvalue:  float     # p-value indicating the percentile of the vector length in null distribution
-        pref_dir:   float     # preferred direction
-        os_index:   float     # orientation selectivity index in analogy to ds_index
-        os_pvalue:  float     # analogous to ds_pvalue for orientation tuning
-        pref_or:    float     # preferred orientation
-        on_off:     float     # on off index based on time kernel
-        d_qi:       float     # quality index for moving bar response
-        dir_component:     blob
-        time_component:    blob
-        time_component_dt: float
-        surrogate_v:       blob    # computed by projecting on time
-        surrogate_dsi:     float   # DSI of surrogate v 
+        ds_index:   float32     # direction selectivity index as resulting vector length (absolute of projection on complex exponential)
+        ds_pvalue:  float32     # p-value indicating the percentile of the vector length in null distribution
+        pref_dir:   float32     # preferred direction
+        os_index:   float32     # orientation selectivity index in analogy to ds_index
+        os_pvalue:  float32     # analogous to ds_pvalue for orientation tuning
+        pref_or:    float32     # preferred orientation
+        on_off:     float32     # on off index based on time kernel
+        d_qi:       float32     # quality index for moving bar response
+        dir_component:     <blob>
+        time_component:    <blob>
+        time_component_dt: float32
+        surrogate_v:       <blob>    # computed by projecting on time
+        surrogate_dsi:     float32   # DSI of surrogate v
         """
 
         if not self._reduced_storage:
             definition += """
-        ds_null:    blob      # null distribution of DSIs
-        os_null:    blob      # null distribution of OSIs
-        avg_sorted_resp: longblob
+        ds_null:    <blob>      # null distribution of DSIs
+        os_null:    <blob>      # null distribution of OSIs
+        avg_sorted_resp: <blob>
         """
 
         return definition
@@ -82,16 +81,10 @@ class OsDsIndexesTemplate(dj.Computed):
             pass
 
     def make(self, key):
-        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
+        trial_info = (self.stimulus_table() & key).fetch1('trial_info')
+        dir_order = np.asarray([trial['name'] for trial in trial_info])
         snippets_dt, snippets = (self.snippets_table() & key).fetch1('snippets_dt', 'snippets')
-
-        # Pick version
-        if self._version == 1:
-            compute_os_ds_idxs = compute_os_ds_idxs_v1
-        elif self._version == 2:
-            compute_os_ds_idxs = compute_os_ds_idxs_v2
-        else:
-            raise ValueError(f"Version {self._version} not supported.")
+        snippets = load_array(snippets)
 
         dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
             on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses = \
@@ -117,13 +110,15 @@ class OsDsIndexesTemplate(dj.Computed):
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
-        dir_order = (self.stimulus_table() & key).fetch1('trial_info')
+        trial_info = (self.stimulus_table() & key).fetch1('trial_info')
+        dir_order = np.asarray([trial['name'] for trial in trial_info])
         sorted_directions_rad = np.deg2rad(np.sort(dir_order))
 
         (time_component_dt, dir_component, ds_index, ds_pvalue, os_index, os_pvalue, pref_dir, pref_or, on_off) = (
-                self & key).fetch1(
+            self & key).fetch1(
             'time_component_dt', 'dir_component', 'ds_index', 'ds_pvalue', 'os_index', 'os_pvalue',
             'pref_dir', 'pref_or', 'on_off')
+        dir_component = load_array(dir_component)
 
         fig, axs = plt.subplots(3, 3, figsize=(6, 6), facecolor='w', sharex=True, sharey=True)
 
@@ -148,9 +143,9 @@ class OsDsIndexesTemplate(dj.Computed):
         dir_idxs = [3, 2, 1, 4, 0, 5, 6, 7]
 
         if not self._reduced_storage:
-            avg_sorted_resp = (self & key).fetch1('avg_sorted_resp')
+            avg_sorted_resp = load_array((self & key).fetch1('avg_sorted_resp'))
         else:
-            snippets = (self.snippets_table() & key).fetch1('snippets')
+            snippets = load_array((self.snippets_table() & key).fetch1('snippets'))
             sorted_directions, sorted_responses, avg_sorted_resp = preprocess_mb_snippets(snippets, dir_order)
 
         for idx, (ax_idx, dir_idx) in enumerate(zip(ax_idxs, dir_idxs)):
@@ -176,47 +171,9 @@ class OsDsIndexesTemplate(dj.Computed):
         fig, axs = plt.subplots(1, len(var_names), figsize=(len(var_names) * 2, 2), squeeze=False)
         axs = axs.flatten()
         for ax, var_name in zip(axs, var_names):
-            dat = (self & restriction).fetch(var_name)
+            dat = (self & restriction).to_arrays(var_name)
             ax.hist(dat)
             ax.set(title=var_name)
         plt.tight_layout()
         plt.show()
         return fig, axs
-
-
-class OsDsIndexesTemplateV1(OsDsIndexesTemplate):
-    _version = 1
-
-    def __init__(self, *args, **kwargs):
-        warnings.warn("OsDsIndexesTemplateV1 is deprecated. Use OsDsIndexesTemplate with _version=1 instead.",
-                      DeprecationWarning, stacklevel=2)
-        super().__init__(*args, **kwargs)
-
-    @property
-    @abstractmethod
-    def stimulus_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def snippets_table(self):
-        pass
-
-
-class OsDsIndexesTemplateV2(OsDsIndexesTemplate):
-    _version = 2
-
-    def __init__(self, *args, **kwargs):
-        warnings.warn("OsDsIndexesTemplateV2 is deprecated. Use OsDsIndexesTemplate with _version=2 instead.",
-                      DeprecationWarning, stacklevel=2)
-        super().__init__(*args, **kwargs)
-
-    @property
-    @abstractmethod
-    def stimulus_table(self):
-        pass
-
-    @property
-    @abstractmethod
-    def snippets_table(self):
-        pass

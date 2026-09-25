@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import warnings
 from abc import abstractmethod
+from collections.abc import Callable
 
 import datajoint as dj
 import numpy as np
@@ -9,6 +10,7 @@ from matplotlib import pyplot as plt
 from scipy import signal
 
 from djimaging.utils import filter_utils, math_utils, plot_utils, trace_utils
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.filter_utils import lowpass_filter_trace
 from djimaging.utils.plot_utils import plot_trace_and_trigger, prep_long_title
@@ -21,15 +23,15 @@ class PreprocessParamsTemplate(dj.Lookup):
     def definition(self):
         definition = """
         -> self.stimulus_table
-        preprocess_id:       tinyint unsigned    # unique param set id
+        preprocess_id:       int32    # unique param set id
         ---
-        window_length:       int       # window length for SavGol filter in seconds
-        poly_order:          int       # order of polynomial for savgol filter
-        non_negative:        tinyint unsigned  # Clip negative values of trace
-        subtract_baseline:   tinyint unsigned  # Subtract baseline
-        standardize:         tinyint unsigned  # standardize (1: with sd of baseline, 2: sd of trace, 0: nothing)
-        f_cutoff = 0 : float  # Cutoff frequency for low pass filter, only applied when > 0.
-        fs_resample = 0 : float  # Resampling frequency, only applied when > 0.
+        window_length:       int32       # window length for SavGol filter in seconds
+        poly_order:          int32       # order of polynomial for savgol filter
+        non_negative:        bool  # Clip negative values of trace
+        subtract_baseline:   bool  # Subtract baseline
+        standardize:         int32  # standardize (1: with sd of baseline, 2: sd of trace, 0: nothing)
+        f_cutoff = 0 : float32  # Cutoff frequency for low pass filter, only applied when > 0.
+        fs_resample = 0 : float32  # Resampling frequency, only applied when > 0.
         """
         return definition
 
@@ -82,7 +84,7 @@ class PreprocessParamsTemplate(dj.Lookup):
             If True, silently skip duplicate entries. Default is False.
         """
         if stim_names is None:
-            stim_names = (self.stimulus_table()).fetch('stim_name')
+            stim_names = (self.stimulus_table()).to_arrays('stim_name')
 
         key = dict(
             preprocess_id=preprocess_id,
@@ -113,10 +115,10 @@ class PreprocessTracesTemplate(dj.Computed):
         -> self.traces_table
         -> self.preprocessparams_table
         ---
-        pp_trace: longblob    # preprocessed trace
-        smoothed_trace:   longblob    # output of savgol filter which is subtracted from the raw trace
-        pp_trace_t0:         float       # numerical array of trace times
-        pp_trace_dt:         float       # time between frames
+        pp_trace: <blob>    # preprocessed trace
+        smoothed_trace:   <blob>    # output of savgol filter which is subtracted from the raw trace
+        pp_trace_t0:         float32       # numerical array of trace times
+        pp_trace_dt:         float32       # time between frames
         """
         return definition
 
@@ -165,7 +167,8 @@ class PreprocessTracesTemplate(dj.Computed):
                 'f_cutoff', 'fs_resample')
 
         trace, trace_t0, trace_dt = (self.traces_table() & key).fetch1('trace', 'trace_t0', 'trace_dt')
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        trace = load_array(trace)
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
 
         stim_start = triggertimes[0] if len(triggertimes) > 0 else None
 
@@ -201,31 +204,14 @@ class PreprocessTracesTemplate(dj.Computed):
 
         trace, smoothed_trace, trace_t0, trace_dt = (self & key).fetch1(
             'pp_trace', 'smoothed_trace', 'pp_trace_t0', 'pp_trace_dt')
-        trace_t = np.arange(trace.size) * trace_dt + trace_t0
+        trace, smoothed_trace = load_array(trace), load_array(smoothed_trace)
 
-        import ipywidgets as widgets
+        def save_clip(i0: int, i1: int) -> None:
+            self.update_key_from_gui(
+                key, trace=trace[i0:i1], smoothed_trace=smoothed_trace[i0:i1],
+                trace_t0=trace_t0 + i0 * trace_dt, trace_dt=trace_dt)
 
-        w_left = widgets.IntSlider(0, min=0, max=trace.size - 1, step=1,
-                                   layout=widgets.Layout(width='800px'))
-        w_right = widgets.IntSlider(trace.size - 1, min=0, max=trace.size - 1, step=1,
-                                    layout=widgets.Layout(width='800px'))
-        w_save = widgets.Checkbox(False)
-
-        title = 'Not saved\n' + prep_long_title(key)
-
-        @widgets.interact(left=w_left, right=w_right, save=w_save)
-        def plot_fit(left=0, right=trace.size - 1, save=False):
-            nonlocal title
-
-            plot_left_right_clipping(trace, trace_t, left, right, title)
-
-            if save:
-                i0, i1 = (right, left + 1) if right < left else (left, right + 1)
-                self.update_key_from_gui(
-                    key, trace=trace[i0:i1], smoothed_trace=smoothed_trace[i0:i1],
-                    trace_t0=trace_t0 + left * trace_dt, trace_dt=trace_dt)
-                title = f'SAVED: left={left}, right={right}\n{prep_long_title(key)}'
-                w_save.value = False
+        gui_clip_trace(trace, trace_t0, trace_dt, key, save_clip)
 
     def update_key_from_gui(
             self,
@@ -271,7 +257,9 @@ class PreprocessTracesTemplate(dj.Computed):
         pp_trace_t0, pp_trace_dt, pp_trace, smoothed_trace = (self & key).fetch1(
             "pp_trace_t0", "pp_trace_dt", "pp_trace", "smoothed_trace")
         trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1("trace_t0", "trace_dt", "trace")
-        triggertimes = (self.presentation_table() & key).fetch1("triggertimes")
+        pp_trace, smoothed_trace = load_array(pp_trace), load_array(smoothed_trace)
+        trace = load_array(trace)
+        triggertimes = load_array((self.presentation_table() & key).fetch1("triggertimes"))
 
         trace_times = np.arange(trace.size) * trace_dt + pp_trace_t0
         pp_trace_times = np.arange(pp_trace.size) * pp_trace_dt + pp_trace_t0
@@ -309,7 +297,7 @@ class PreprocessTracesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        preprocess_traces = (self & restriction).fetch("pp_trace")
+        preprocess_traces = (self & restriction).to_arrays("pp_trace")
         preprocess_traces = math_utils.padded_vstack(preprocess_traces, cval=np.nan)
         n = preprocess_traces.shape[0]
 
@@ -654,6 +642,36 @@ def process_trace(
         trace_dt_new = trace_dt
 
     return trace, smoothed_trace, trace_dt_new
+
+
+def gui_clip_trace(
+        trace: np.ndarray,
+        trace_t0: float,
+        trace_dt: float,
+        key: dict,
+        save_clip: Callable[[int, int], None],
+) -> None:
+    """Show clip controls; call save_clip(start, stop) with slice bounds on save."""
+    import ipywidgets as widgets
+
+    trace_t = np.arange(trace.size) * trace_dt + trace_t0
+    w_left = widgets.IntSlider(0, min=0, max=trace.size - 1, step=1,
+                               layout=widgets.Layout(width='800px'))
+    w_right = widgets.IntSlider(trace.size - 1, min=0, max=trace.size - 1, step=1,
+                                layout=widgets.Layout(width='800px'))
+    w_save = widgets.Checkbox(False)
+    title = 'Not saved\n' + prep_long_title(key)
+
+    @widgets.interact(left=w_left, right=w_right, save=w_save)
+    def plot_fit(left: int = 0, right: int = trace.size - 1, save: bool = False) -> None:
+        nonlocal title
+        plot_left_right_clipping(trace, trace_t, left, right, title)
+
+        if save:
+            i0, i1 = min(left, right), max(left, right) + 1
+            save_clip(i0, i1)
+            title = f'SAVED: left={left}, right={right}\n{prep_long_title(key)}'
+            w_save.value = False
 
 
 def plot_left_right_clipping(

@@ -1,100 +1,64 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Iterable
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
 
-try:
-    from collections.abc import Iterable
-except ImportError:
-    from collections import Iterable
-
-
-def reformat_numerical_trial_info(trial_info: list) -> list:
-    """Change old list format to new list[dict] format.
-
-    Args:
-        trial_info: List of numerical trial identifiers (e.g. direction angles).
-
-    Returns:
-        A list of dicts with keys 'name' and 'ntrigger' (always 1) derived
-        from the input list.
-    """
-    return [dict(name=trial_info_i, ntrigger=1) for i, trial_info_i in enumerate(trial_info)]
+from djimaging.utils.dj_storage import relative_store_path
 
 
 def check_trial_info(trial_info: list, ntrigger_rep: int) -> list:
-    """Validate trial info and normalise to the list[dict] format if necessary.
+    """Validate canonical trial dictionaries and their trigger counts.
 
-    Args:
-        trial_info: Trial information as either a list of dicts (each with
-            'name' and 'ntrigger' keys) or a legacy list of numerical values.
-        ntrigger_rep: Expected total number of triggers per repetition. Must
-            equal the sum of 'ntrigger' values across all trial_info entries.
-
-    Returns:
-        Trial info in the canonical list[dict] format.
-
-    Raises:
-        TypeError: If trial_info is not a list or array.
-        AssertionError: If an unknown key is present in a trial_info entry or
-            if a trigger count is not an integer.
-        ValueError: If the trigger count sum does not match ntrigger_rep (only
-            raised when ntrigger_rep > 1).
+    ``ntrigger_rep == 1`` denotes one snippet per trial, as used for moving
+    bars. Otherwise the trial sequence must contain ``ntrigger_rep`` triggers.
     """
-    if not isinstance(trial_info, (list, np.ndarray)):
-        raise TypeError('trial_info must either be a list or an array')
+    if not isinstance(trial_info, (list, np.ndarray)) or len(trial_info) == 0:
+        raise TypeError('trial_info must be a nonempty list of dictionaries')
 
-    if not isinstance(trial_info[0], dict):
-        trial_info = reformat_numerical_trial_info(trial_info)
+    for trial in trial_info:
+        if not isinstance(trial, dict):
+            raise TypeError("Each trial must be a dictionary with 'name' and 'ntrigger' keys")
+        if not {'name', 'ntrigger'} <= trial.keys():
+            raise ValueError("Each trial must define 'name' and 'ntrigger'")
+        for key, value in trial.items():
+            if key not in ('name', 'ntrigger', 'ntrigger_split'):
+                raise ValueError(f'Unknown trial_info key: {key}')
+            if key in ('ntrigger', 'ntrigger_split') and (int(value) != value or value < 1):
+                raise ValueError(f'{key} must be a positive integer, got {value}')
 
-    for trial_info_i in trial_info:
-        for k, v in trial_info_i.items():
-            assert k in ['name', 'ntrigger', 'ntrigger_split'], f'Unknown key in trial_info k={k}'
-
-            if k in ['ntrigger', 'ntrigger_split']:
-                assert int(v) == v, f'Value for k={k} but be an integer but is v={v}'
-
-    ntrigger_ti = sum([trial_info_i["ntrigger"] for trial_info_i in trial_info])
-    if not (ntrigger_ti == ntrigger_rep):
-        msg = f'Number of triggers in trial_info={ntrigger_ti} must match ntrigger_rep={ntrigger_rep}.'
-        if ntrigger_rep > 1:
-            raise ValueError(msg)
-        else:
-            # Raise only warnings for previous work-around solution
-            warnings.warn(msg)
-
+    ntrigger_total = sum(trial['ntrigger'] for trial in trial_info)
+    if ntrigger_rep != 1 and ntrigger_total != ntrigger_rep:
+        raise ValueError(f'Number of triggers in trial_info={ntrigger_total} must match ntrigger_rep={ntrigger_rep}.')
     return trial_info
 
 
 class StimulusTemplate(dj.Manual):
     database = ""
-    _incl_snippet_base_dt = False  # Optional for compatibility with previous versions
+    _filepath_store = "reference"
 
     @property
     def definition(self):
-        definition = """
+        definition = f"""
         # Light stimuli
         stim_name           :varchar(32)       # Unique string identifier
         ---
         alias               :varchar(999)       # Strings (_ seperator) to identify this stimulus, not case sensitive!
         stim_family=""      :varchar(191)       # To group stimuli (e.g. gChirp and lChirp) for downstream processing 
-        framerate=0         :float              # framerate in Hz
-        isrepeated=0        :tinyint unsigned   # Is the stimulus repeated? Used for snippets
-        ntrigger_rep=0      :mediumint unsigned # Number of triggers (per repetition)
-        stim_path=""        :varchar(191)       # Path to hdf5 file containing numerical array and info about stim
+        framerate=0         :float32              # framerate in Hz
+        isrepeated=0        :bool   # Is the stimulus repeated? Used for snippets
+        ntrigger_rep=0      :int32 # Number of triggers (per repetition)
+        stim_path=NULL       :<filepath@{self._filepath_store}>  # optional source stimulus file
         commit_id=""        :varchar(191)       # Commit id corresponding to stimulus entry in GitHub repo
         stim_hash=""        :varchar(191)       # QDSpy hash
-        trial_info=NULL     :longblob           # trial information, e.g. directions of moving bar
-        stim_trace=NULL     :longblob           # array of stimulus if available
-        stim_dict=NULL      :longblob           # stimulus information dictionary, contains e.g. spatial extent
+        snippet_base_dt=NULL :float32             # Time used for snippet baseline estimation
+        trial_info=NULL     :<blob>           # trial information, e.g. directions of moving bar
+        stim_trace=NULL     :<npy@processed>           # array of stimulus if available
+        stim_dict=NULL      :<blob>           # stimulus information dictionary, contains e.g. spatial extent
         """
-
-        if self._incl_snippet_base_dt:
-            definition += """
-            snippet_base_dt=NULL : float           # Time used for snippet baseline estimation
-            """
 
         return definition
 
@@ -110,7 +74,7 @@ class StimulusTemplate(dj.Manual):
             AssertionError: If any individual alias token already exists in the
                 table for a different stimulus.
         """
-        existing_aliases = (self - [dict(stim_name=stim_name)]).fetch('alias')  # Skip duplicate comparison
+        existing_aliases = (self - [dict(stim_name=stim_name)]).to_arrays('alias')  # Skip duplicate comparison
         for existing_alias in existing_aliases:
             for existing_alias_i in existing_alias.split('_'):
                 assert existing_alias_i not in alias.split('_'), \
@@ -118,7 +82,7 @@ class StimulusTemplate(dj.Manual):
 
     def add_stimulus(self, stim_name: str, alias: str, stim_family: str = "", framerate: float = 0,
                      isrepeated: bool = 0, ntrigger_rep: int = 0, snippet_base_dt: float = None,
-                     stim_path: str = "", commit_id: str = "",
+                     stim_path: str | Path | None = None, commit_id: str = "",
                      trial_info: Iterable = None, stim_trace: np.ndarray = None, stim_dict: dict = None,
                      skip_duplicates: bool = False, unique_alias: bool = True) -> None:
         """
@@ -152,7 +116,7 @@ class StimulusTemplate(dj.Manual):
 
         if trial_info is not None:
             # noinspection PyTypeChecker
-            check_trial_info(trial_info=trial_info, ntrigger_rep=ntrigger_rep)
+            trial_info = check_trial_info(trial_info=trial_info, ntrigger_rep=ntrigger_rep)
 
         key = {
             "stim_name": stim_name,
@@ -161,41 +125,18 @@ class StimulusTemplate(dj.Manual):
             "ntrigger_rep": int(np.round(ntrigger_rep)),
             "isrepeated": int(np.round(isrepeated)),
             "framerate": framerate,
-            "stim_path": stim_path,
+            "stim_path": (
+                relative_store_path(stim_path, self._filepath_store)
+                if stim_path not in (None, "") else None
+            ),
             "commit_id": commit_id,
+            "snippet_base_dt": snippet_base_dt,
             "trial_info": trial_info,
             "stim_trace": stim_trace,
             "stim_dict": stim_dict,
         }
 
-        if self._incl_snippet_base_dt:
-            key["snippet_base_dt"] = snippet_base_dt
-        elif snippet_base_dt is not None:
-            raise ValueError(
-                'Snippet base dt is not supported for this table. '
-                'Set `_incl_snippet_base_dt` to True in the table definition or remove the parameter.'
-            )
-
         self.insert1(key, skip_duplicates=skip_duplicates)
-
-    def update_trial_info_format(self, restriction: dict = None) -> None:
-        """Update all trial info entries to the list[dict] format.
-
-        Note: This modifies existing rows in-place and breaks compatibility
-        with code that expects the old numerical list format.
-
-        Args:
-            restriction: Optional restriction dict applied before fetching
-                keys. Defaults to no restriction (all entries).
-        """
-        if restriction is None:
-            restriction = dict()
-
-        for key in (self & restriction).proj().fetch(as_dict=True):
-            trial_info, ntrigger_rep = (self & key).fetch1('trial_info', 'ntrigger_rep')
-            if trial_info is not None:
-                trial_info = check_trial_info(trial_info=trial_info, ntrigger_rep=ntrigger_rep)
-                self.update1(dict(**key, trial_info=trial_info))
 
     def add_nostim(self, alias: str = "nostim_none", skip_duplicates: bool = False) -> None:
         """Add a placeholder 'no stimulus' entry to the table.
@@ -223,8 +164,9 @@ class StimulusTemplate(dj.Manual):
             isrepeated: bool = False,
             snippet_base_dt: float = None,
             alias: str = None,
-            ntrigger_per_frame: int = 1,
+            nframes_per_trigger: int = 1,
             stim_trace: np.ndarray = None,
+            stim_path: str | Path | None = None,
             pix_n_x: int = None,
             pix_n_y: int = None,
             pix_scale_x_um: float = None,
@@ -246,9 +188,10 @@ class StimulusTemplate(dj.Manual):
             isrepeated: Whether the stimulus is repeated. Default is False.
             snippet_base_dt: Baseline window duration for snippet correction.
             alias: Custom alias string; auto-generated from pixel scale if None.
-            ntrigger_per_frame: Number of triggers sent per stimulus frame.
+            nframes_per_trigger: Number of stimulus frames per trigger.
                 Default is 1.
             stim_trace: Optional numerical stimulus trace array.
+            stim_path: Optional source stimulus file in the configured reference store.
             pix_n_x: Number of stimulus pixels in x.
             pix_n_y: Number of stimulus pixels in y.
             pix_scale_x_um: Pixel scale in x (micrometers).
@@ -267,7 +210,7 @@ class StimulusTemplate(dj.Manual):
             alias = f"dn_noise_dn{pix_scale_x_um}m_noise{pix_scale_x_um}m"
 
         stim_dict = {
-            "ntrigger_per_frame": ntrigger_per_frame,
+            "nframes_per_trigger": nframes_per_trigger,
         }
 
         if n_colors is not None:
@@ -309,6 +252,7 @@ class StimulusTemplate(dj.Manual):
             skip_duplicates=skip_duplicates,
             unique_alias=True,
             stim_trace=stim_trace,
+            stim_path=stim_path,
             stim_dict=stim_dict,
         )
 
@@ -317,11 +261,12 @@ class StimulusTemplate(dj.Manual):
             stim_name: str = "chirp",
             stim_family: str = 'chirp',
             spatialextent: float = None,
-            framerate: float = 1 / 60.,
+            framerate: float = 60.,
             ntrigger_rep: int = 2,
             isrepeated: bool = True,
             snippet_base_dt: float = None,
             stim_trace: np.ndarray = None,
+            stim_path: str | Path | None = None,
             alias: str = None,
             skip_duplicates: bool = False,
     ) -> None:
@@ -331,11 +276,12 @@ class StimulusTemplate(dj.Manual):
             stim_name: Unique string identifier. Default is 'chirp'.
             stim_family: Stimulus family label. Default is 'chirp'.
             spatialextent: Spatial extent of the stimulus in micrometers.
-            framerate: Stimulus frame rate in Hz. Default is 1/60.
+            framerate: Stimulus frame rate in Hz. Default is 60 [Hz].
             ntrigger_rep: Number of triggers per repetition. Default is 2.
             isrepeated: Whether the stimulus is repeated. Default is True.
             snippet_base_dt: Baseline window duration for snippet correction.
             stim_trace: Optional numerical stimulus trace array.
+            stim_path: Optional source stimulus file in the configured reference store.
             alias: Custom alias string; defaults to a standard chirp alias if
                 None.
             skip_duplicates: If True, silently skip duplicate entries.
@@ -360,6 +306,7 @@ class StimulusTemplate(dj.Manual):
             skip_duplicates=skip_duplicates,
             unique_alias=True,
             stim_trace=stim_trace,
+            stim_path=stim_path,
             stim_dict=stim_dict,
         )
 
@@ -370,13 +317,14 @@ class StimulusTemplate(dj.Manual):
             ntrigger_rep: int = 1,
             isrepeated: bool = True,
             trial_info: list = None,
-            framerate: float = 1 / 60.,
+            framerate: float = 60.,
             snippet_base_dt: float = None,
             bardx: float = None,
             bardy: float = None,
             velumsec: float = None,
             tmovedurs: float = None,
             stim_dict_other: dict = None,
+            stim_path: str | Path | None = None,
             alias: str = None,
             skip_duplicates: bool = False,
     ) -> None:
@@ -390,7 +338,7 @@ class StimulusTemplate(dj.Manual):
             trial_info: List of trial dicts (each with 'name' and 'ntrigger').
                 If None, defaults to the standard 8-direction protocol
                 [0, 180, 45, 225, 90, 270, 135, 315].
-            framerate: Stimulus frame rate in Hz. Default is 1/60.
+            framerate: Stimulus frame rate in Hz. Default is 60 Hz.
             snippet_base_dt: Baseline window duration for snippet correction.
             bardx: Bar width in micrometers.
             bardy: Bar height in micrometers.
@@ -398,6 +346,7 @@ class StimulusTemplate(dj.Manual):
             tmovedurs: Movement duration in seconds.
             stim_dict_other: Additional key-value pairs to merge into the
                 stimulus dict.
+            stim_path: Optional source stimulus file in the configured reference store.
             alias: Custom alias string; defaults to a standard moving-bar alias
                 if None.
             skip_duplicates: If True, silently skip duplicate entries.
@@ -405,7 +354,7 @@ class StimulusTemplate(dj.Manual):
         """
 
         if trial_info is None:
-            trial_info = np.array([0, 180, 45, 225, 90, 270, 135, 315])
+            trial_info = [dict(name=direction, ntrigger=1) for direction in (0, 180, 45, 225, 90, 270, 135, 315)]
             # ===============================================================================
             # Version "a574d90497d97ff9b93381f6b2eb207d"
             # Example users:
@@ -469,6 +418,7 @@ class StimulusTemplate(dj.Manual):
             snippet_base_dt=snippet_base_dt,
             framerate=framerate,
             trial_info=trial_info,
+            stim_path=stim_path,
             stim_dict=stim_dict,
             skip_duplicates=skip_duplicates,
             unique_alias=True,

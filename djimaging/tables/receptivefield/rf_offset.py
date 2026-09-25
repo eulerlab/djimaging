@@ -26,9 +26,9 @@ from abc import abstractmethod
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
-from sympy.physics.vector.tests.test_printing import alpha
 
 from djimaging.tables.receptivefield import FitGauss2DRFTemplate, FitDoG2DRFTemplate, RfContoursTemplate
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.receptive_fields.srf_contour_utils import compute_cntr_center
 
 
@@ -41,9 +41,9 @@ class RfOffsetTemplate(dj.Computed):
         # Computes distance to center of stimulus
         -> self.rf_fit_tab
         ---
-        rf_dx_um: float  # Offset in x direction in microns (x as in the field coordinates)
-        rf_dy_um: float  # Offset in x direction in microns (y as in the field coordinates)
-        rf_d_um: float  # Euclidean distance to the center in microns
+        rf_dx_um: float32  # Offset in x direction in microns (x as in the field coordinates)
+        rf_dy_um: float32  # Offset in x direction in microns (y as in the field coordinates)
+        rf_d_um: float32  # Euclidean distance to the center in microns
         """
         return definition
 
@@ -108,7 +108,7 @@ class RfOffsetTemplate(dj.Computed):
                 rf_dx_um, rf_dy_um = compute_cntr_center(srf_contours[levels[0]][0])
 
         elif isinstance(self.rf_fit_tab(), (FitDoG2DRFTemplate, FitGauss2DRFTemplate)):
-            srf = (self.rf_split_tab & key).fetch1('srf')
+            srf = load_array((self.rf_split_tab & key).fetch1('srf'))
             if isinstance(self.rf_fit_tab(), FitDoG2DRFTemplate):
                 srf_params = (self.rf_fit_tab & key).fetch1('srf_eff_center_params')
             else:
@@ -160,7 +160,7 @@ class RfOffsetTemplate(dj.Computed):
         tuple
             Tuple of (fig, ax) matplotlib objects.
         """
-        rf_dx_um, rf_dy_um = (self & exp_key).fetch('rf_dx_um', 'rf_dy_um')
+        rf_dx_um, rf_dy_um = (self & exp_key).to_arrays('rf_dx_um', 'rf_dy_um')
 
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
 
@@ -179,8 +179,8 @@ class RfRoiOffsetTemplate(dj.Computed):
         -> self.rf_offset_tab
         -> self.roi_pos_wrt_field_tab
         ---
-        relx_rf_roi_um: float
-        rely_rf_roi_um: float
+        relx_rf_roi_um: float32
+        rely_rf_roi_um: float32
         """
         return definition
 
@@ -292,7 +292,7 @@ class RfRoiOffsetTemplate(dj.Computed):
             restriction = {}
 
         df = (self * self.roi_pos_wrt_field_tab() & restriction).proj(
-            'relx_wrt_field', 'rely_wrt_field', 'relx_rf_roi_um', 'rely_rf_roi_um').fetch(format='frame')
+            'relx_wrt_field', 'rely_wrt_field', 'relx_rf_roi_um', 'rely_rf_roi_um').to_pandas()
         df['relx_rf_wrt_field'] = df['relx_rf_roi_um'] + df['relx_wrt_field']
         df['rely_rf_wrt_field'] = df['rely_rf_roi_um'] + df['rely_wrt_field']
 
@@ -360,12 +360,13 @@ class RfRoiOffsetTemplate(dj.Computed):
         from matplotlib.patches import Ellipse
         import seaborn as sns
 
-        roi_mask = (self.roimask_tab & key).fetch1("roi_mask")
-        pixel_size_um, npixartifact, scan_type = (self.pres_tab & key).fetch(
+        roi_mask = load_array((self.roimask_tab & key).fetch1("roi_mask"))
+        pixel_size_um, npixartifact, scan_type = (self.pres_tab & key).to_arrays(
             'pixel_size_um', 'npixartifact', 'scan_type')
 
         data_name, alt_name = (self.userinfo_tab & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.pres_tab.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        main_ch_average = load_array(
+            (self.pres_tab.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         stim_dict = (self.stimulus_tab & key).fetch1('stim_dict')
         pix_scale_x_um, pix_scale_y_um = stim_dict['pix_scale_x_um'], stim_dict['pix_scale_y_um']
 
@@ -390,7 +391,7 @@ class RfRoiOffsetTemplate(dj.Computed):
         _rois[_rois < 0] = -1
         ax.contour(-_rois.T, cmap='Reds', origin='lower', extent=extent, levels=[0.99], vmin=0, vmax=1)
 
-        roi_keys = (self.rf_fit_tab & f"rf_qidx>{rf_qidx_thresh}" & key).fetch('KEY')
+        roi_keys = (self.rf_fit_tab & f"rf_qidx>{rf_qidx_thresh}" & key).keys()
         colors = sns.color_palette('Spectral', len(roi_keys))
 
         for i, roi_key in enumerate(roi_keys):

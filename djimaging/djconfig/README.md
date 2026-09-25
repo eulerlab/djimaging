@@ -1,3 +1,6 @@
-You need a working DJ configuratin to create a DataBase.
-This folder provides a default, with dummy values.
-Make sure to never upload a real configuration to GitHub because it may contain sensitive information.
+You need a working DataJoint configuration to create a database. This folder
+provides a DataJoint 2 template with dummy values and the standard
+`acquisition`, `processed`, and `models` stores.
+
+Keep store credentials in DataJoint's `.secrets` files or environment variables,
+never in the JSON configuration. Do not upload a real personal configuration.

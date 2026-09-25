@@ -1,7 +1,17 @@
+from unittest.mock import Mock
+
 import numpy as np
 import pytest
 
-from djimaging.utils.dj_utils import check_unique_one, is_equal, make_hash, merge_keys
+from djimaging.utils.dj_utils import activate_schema, check_unique_one, is_equal, make_hash, merge_keys
+
+
+def test_activate_schema_uses_explicit_name():
+    schema = Mock()
+
+    activate_schema(schema, schema_name='test_schema', create_schema=False, create_tables=False)
+
+    schema.activate.assert_called_once_with('test_schema', create_schema=False, create_tables=False)
 
 
 def test_check_unique_one_int():

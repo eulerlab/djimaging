@@ -15,7 +15,7 @@ class AnimalAgeTemplate(dj.Computed):
         definition = """
         -> self.experiment_table
         ---
-        age : int  # age of the animal in days
+        age : int32  # age of the animal in days
         """
         return definition
 
@@ -80,7 +80,6 @@ def date_str_to_date(date_str: str) -> Optional[date]:
         except ValueError:
             continue
     return None
-
 
 
 

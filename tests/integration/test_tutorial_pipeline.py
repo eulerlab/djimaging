@@ -3,7 +3,9 @@ import os
 import h5py
 import numpy as np
 import pytest
+from sklearn.dummy import DummyClassifier
 
+from djimaging.tables.classifier_v2.rgc_classifier_v2 import save_classifier_to_file
 from tests.fixtures.random_utils import numpy_seed
 
 
@@ -13,7 +15,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
+def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
     experiment_key = {"experimenter": "synthetic"}
 
     tutorial_schema.UserInfo().upload_user(
@@ -34,7 +36,13 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
     tutorial_schema.RawDataParams().add_default(experimenter_list=["synthetic"])
 
     tutorial_schema.Experiment().rescan_filesystem(restrictions=experiment_key, verboselvl=0)
+
+    processed = dj_test_stores["processed"]
+    external_files_before = {path for path in processed.rglob("*") if path.is_file()}
     tutorial_schema.Field().rescan_filesystem(restrictions=experiment_key, verboselvl=0)
+    assert {path for path in processed.rglob("*") if path.is_file()} == external_files_before, (
+        "Field channel averages must stay in the database"
+    )
 
     tutorial_schema.Stimulus().add_nostim(skip_duplicates=True)
     tutorial_schema.Stimulus().add_chirp(
@@ -57,11 +65,13 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
         pix_n_y=15,
         pix_scale_x_um=30,
         pix_scale_y_um=30,
+        stim_path=tutorial_data_dir / "resources" / "noise.h5",
         stim_trace=noise_stimulus,
         skip_duplicates=True,
     )
     tutorial_schema.Stimulus().add_movingbar(skip_duplicates=True)
 
+    external_files_before = {path for path in processed.rglob("*") if path.is_file()}
     tutorial_schema.Presentation().populate(display_progress=False)
     tutorial_schema.RoiMask().rescan_filesystem(
         restrictions=experiment_key,
@@ -69,6 +79,7 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
         roi_mask_dir="AutoROIs",
     )
     tutorial_schema.Roi().populate(experiment_key, display_progress=False)
+
     tutorial_schema.Traces().populate(experiment_key, display_progress=False)
     tutorial_schema.PreprocessParams().add_default(skip_duplicates=True)
     tutorial_schema.PreprocessTraces().populate(experiment_key, display_progress=False)
@@ -78,6 +89,12 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
 
     with numpy_seed(42):
         tutorial_schema.OsDsIndexes().populate(experiment_key, display_progress=False)
+
+    external_files_after = {path for path in processed.rglob("*") if path.is_file()}
+    assert external_files_after == external_files_before, (
+        "Presentation channel averages, ROI masks, traces, snippets, averages, "
+        "and response metrics must stay in the database"
+    )
 
     tutorial_schema.OpticDisk().populate(experiment_key, display_progress=False)
     tutorial_schema.RelativeFieldLocation().populate(experiment_key, display_progress=False)
@@ -110,7 +127,37 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir):
             }
     assert not count_mismatches, f"Unexpected table counts: {count_mismatches}"
 
-    assert np.all((tutorial_schema.Presentation() & experiment_key).fetch("trigger_valid") == 1)
-    assert np.all(np.isfinite((tutorial_schema.ChirpQI() & experiment_key).fetch("qidx")))
-    assert np.all(np.isfinite((tutorial_schema.OsDsIndexes() & experiment_key).fetch("ds_index")))
-    assert np.all(np.isfinite((tutorial_schema.OsDsIndexes() & experiment_key).fetch("os_index")))
+    assert np.all((tutorial_schema.Presentation() & experiment_key).to_arrays("trigger_valid") == 1)
+    assert np.all(np.isfinite((tutorial_schema.ChirpQI() & experiment_key).to_arrays("qidx")))
+    assert np.all(np.isfinite((tutorial_schema.OsDsIndexes() & experiment_key).to_arrays("ds_index")))
+    assert np.all(np.isfinite((tutorial_schema.OsDsIndexes() & experiment_key).to_arrays("os_index")))
+
+    with numpy_seed(42):
+        tutorial_schema.Baden16TracesV2().populate(experiment_key, display_progress=False)
+    baden_traces = (tutorial_schema.Baden16TracesV2() & experiment_key).to_dicts()
+    assert len(baden_traces) == 2
+
+    # Exercise classifier loading and population with a model trained in this environment.
+    train_x = np.zeros((75, 4))
+    train_y = np.arange(1, 76)
+    classifier = DummyClassifier(strategy="uniform").fit(train_x, train_y)
+    classifier_file = tutorial_data_dir / "resources" / "test_classifier.pkl"
+    save_classifier_to_file(
+        classifier=classifier,
+        chirp_feats=np.ones((baden_traces[0]["preproc_chirp"].size, 1)),
+        bar_feats=np.ones((baden_traces[0]["preproc_bar"].size, 1)),
+        feature_names=["chirp", "bar", "ds", "size"],
+        train_x=train_x,
+        train_y=train_y,
+        y_names={label: str(label) for label in train_y},
+        classifier_file=classifier_file,
+    )
+    tutorial_schema.ClassifierV2().add(classifier_file=classifier_file)
+    summary = tutorial_schema.CelltypeAssignmentV2().populate(
+        experiment_key, {"classifier_id": 1}, display_progress=False,
+    )
+    assert summary == {"success_count": 1, "error_list": []}
+    assignments = (tutorial_schema.CelltypeAssignmentV2() & experiment_key).to_dicts()
+    assert len(assignments) == 2
+    for row in assignments:
+        np.testing.assert_allclose(row["probs_per_cluster"], np.full(75, 1 / 75))

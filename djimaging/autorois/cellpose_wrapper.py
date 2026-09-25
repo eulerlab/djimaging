@@ -30,7 +30,7 @@ class CellposeWrapper:
 
         from cellpose import models, io
         io.logger_setup()
-        self.model = models.Cellpose(**self.init_kwargs)
+        self.model = models.CellposeModel(**self.init_kwargs)
 
     @staticmethod
     def stack_to_image(stack: np.ndarray, n_artifact: int) -> np.ndarray:
@@ -139,7 +139,7 @@ class CellposeWrapper:
         if multiple_stacks and 'stitch_threshold' not in eval_kwargs:
             eval_kwargs['stitch_threshold'] = 1e-9  # Stitch everything together
 
-        masks, flows, styles, diams = self.model.eval(imgs, do_3D=do_3D, **eval_kwargs)
+        masks, flows, *_ = self.model.eval(imgs, do_3D=do_3D, **eval_kwargs)
 
         if plot:
             self.plot_results(imgs, masks, flows)

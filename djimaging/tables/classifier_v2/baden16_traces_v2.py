@@ -14,12 +14,13 @@ from scipy.interpolate import interpolate
 
 from djimaging.tables.core.averages import compute_upsampled_average
 from djimaging.tables.core.preprocesstraces import process_trace
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 import datajoint as dj
 
 from djimaging.utils.math_utils import normalize_amp_one
 from djimaging.utils.snippet_utils import split_trace_by_reps
-from djimaging.tables.response.movingbar.orientation_utils_v2 import compute_os_ds_idxs as compute_os_ds_idxs_v2
+from djimaging.tables.response.movingbar.orientation_utils import compute_os_ds_idxs
 
 
 class Baden16TracesV2Template(dj.Computed):
@@ -35,15 +36,15 @@ class Baden16TracesV2Template(dj.Computed):
         -> self.traces_table().proj(chirp_stim_name='stim_name')
         -> self.traces_table().proj(bar_stim_name='stim_name')
         ---
-        preproc_chirp: blob  # preprocessed chirp trace (averaged, downsampled and normalized)
-        preproc_bar:   blob  # preprocessed bar (time component in pref. dir., averaged and rolled)
-        dir_component: blob  # projection of bar trace on direction component
-        ds_index:      float # direction selectivity index as resulting vector length (absolute of projection on complex exponential)
-        ds_pvalue:     float # p-value indicating the percentile of the vector length in null distribution
-        pref_dir:      float # preferred direction
-        os_index:      float # orientation selectivity index in analogy to ds_index
-        os_pvalue:     float # analogous to ds_pvalue for orientation tuning
-        pref_or:       float # preferred orientation
+        preproc_chirp: <blob>  # preprocessed chirp trace (averaged, downsampled and normalized)
+        preproc_bar:   <blob>  # preprocessed bar (time component in pref. dir., averaged and rolled)
+        dir_component: <blob>  # projection of bar trace on direction component
+        ds_index:      float32 # direction selectivity index as resulting vector length (absolute of projection on complex exponential)
+        ds_pvalue:     float32 # p-value indicating the percentile of the vector length in null distribution
+        pref_dir:      float32 # preferred direction
+        os_index:      float32 # orientation selectivity index in analogy to ds_index
+        os_pvalue:     float32 # analogous to ds_pvalue for orientation tuning
+        pref_or:       float32 # preferred orientation
         """
         return definition
 
@@ -78,15 +79,18 @@ class Baden16TracesV2Template(dj.Computed):
             'triggertimes')
         chirp_trace, chirp_t0, chirp_dt = (self.traces_table & dict(stim_name=self._stim_name_chirp) & key).fetch1(
             'trace', 'trace_t0', 'trace_dt')
+        chirp_triggertimes, chirp_trace = load_array(chirp_triggertimes), load_array(chirp_trace)
 
         qi, chirp_average = preprocess_chirp_v2(chirp_trace, chirp_t0, chirp_dt, chirp_triggertimes, chirp_ntrigger_rep)
 
         # Fetch bar and preprocess
-        dir_order = (self.stimulus_table() & dict(stim_name=self._stim_name_bar) & key).fetch1('trial_info')
+        trial_info = (self.stimulus_table() & dict(stim_name=self._stim_name_bar) & key).fetch1('trial_info')
+        dir_order = np.asarray([trial['name'] for trial in trial_info])
         bar_triggertimes = (self.presentation_table & dict(stim_name=self._stim_name_bar) & key).fetch1(
             'triggertimes')
         bar_trace, bar_t0, bar_dt = (self.traces_table & dict(stim_name=self._stim_name_bar) & key).fetch1(
             'trace', 'trace_t0', 'trace_dt')
+        bar_triggertimes, bar_trace = load_array(bar_triggertimes), load_array(bar_trace)
 
         bar_qi, dsi, p_dsi, pref_dir, osi, p_osi, pref_or, time_component, dir_component = preprocess_bar_v2(
             bar_trace, bar_t0, bar_dt, bar_triggertimes, dir_order)
@@ -107,8 +111,8 @@ class Baden16TracesV2Template(dj.Computed):
     def plot1(self, key=None):
         key = get_primary_key(table=self, key=key)
 
-        preproc_chirp = (self & key).fetch1('preproc_chirp')
-        preproc_bar = (self & key).fetch1('preproc_bar')
+        preproc_chirp = load_array((self & key).fetch1('preproc_chirp'))
+        preproc_bar = load_array((self & key).fetch1('preproc_bar'))
 
         fig, axs = plt.subplots(1, 2, figsize=(12, 3), gridspec_kw=dict(width_ratios=(3, 1)))
 
@@ -189,7 +193,7 @@ def preprocess_bar_v2(trace, t0, dt, triggertimes, dir_order,
     # Compute the preferred direction and projections
     dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
         on_off, qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses = \
-        compute_os_ds_idxs_v2(snippets=snippets, dir_order=dir_order, dt=dt, n_shuffles=n_shuffles)
+        compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=dt, n_shuffles=n_shuffles)
 
     # Normalize
     baden16like_average = time_component[:32]

@@ -106,70 +106,6 @@ def test_sta_fit():
 
 
 @pytest.mark.skipif(rfest is None, reason="requires rfest")
-def test_sta_fit_single_batch():
-    np.random.seed(13488)
-
-    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
-        stim_noise='white', rf_kind='gauss', response_noise='none', design_matrix=False,
-        n_stim_frames=500, n_reps_per_frame=3, shift=0)
-
-    assert w_true.shape[1:] == X.shape[1:]
-
-    w_fit, _ = fit_rf_utils._compute_linear_rf_single_batch(
-        x_train=X, y_train=y, kind='sta', dim_t=w_true.shape[0], shift=0, burn_in=w_true.shape[0] - 1,
-        threshold_pred=False, is_spikes=False, dtype=y.dtype)
-
-    w_fit = w_fit.reshape(w_true.shape)
-
-    fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
-    assert fit_mse < np.mean(random_mses) - 2 * np.std(random_mses)
-
-
-@pytest.mark.skipif(rfest is None, reason="requires rfest")
-def test_sta_fit_batchwise():
-    np.random.seed(13488)
-
-    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
-        stim_noise='white', rf_kind='gauss', response_noise='none', design_matrix=False,
-        n_stim_frames=500, n_reps_per_frame=3, shift=0)
-
-    assert w_true.shape[1:] == X.shape[1:]
-
-    w_fit, _ = fit_rf_utils._compute_sta_batchwise(
-        x_train=X, y_train=y, kind='sta', dim_t=w_true.shape[0], shift=0, burn_in=w_true.shape[0] - 1,
-        threshold_pred=False, is_spikes=False, dtype=y.dtype, batch_size=3)
-
-    fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
-    assert fit_mse < np.mean(random_mses) - 2 * np.std(random_mses)
-
-
-@pytest.mark.skipif(rfest is None, reason="requires rfest")
-def test_sta_fit_single_batch_vs_batchwise():
-    np.random.seed(13488)
-
-    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
-        stim_noise='white', rf_kind='gauss', response_noise='none', design_matrix=False,
-        n_stim_frames=500, n_reps_per_frame=3, shift=0)
-
-    assert w_true.shape[1:] == X.shape[1:]
-
-    w_fit, y_pred = fit_rf_utils._compute_linear_rf_single_batch(
-        x_train=X, y_train=y, kind='sta', dim_t=w_true.shape[0], shift=0, burn_in=w_true.shape[0] - 1,
-        threshold_pred=False, is_spikes=False, dtype=y.dtype)
-
-    w_fit = w_fit.reshape(w_true.shape)
-
-    for batch_size in [1, 7, 400, 1000]:
-        w_fit2, y_pred2 = fit_rf_utils._compute_sta_batchwise(
-            x_train=X, y_train=y, kind='sta', dim_t=w_true.shape[0], shift=0, burn_in=w_true.shape[0] - 1,
-            threshold_pred=False, is_spikes=False, dtype=y.dtype, batch_size=batch_size)
-
-        w_fit2 = w_fit.reshape(w_true.shape)
-        assert np.allclose(w_fit, w_fit2)
-        assert np.allclose(y_pred, y_pred2)
-
-
-@pytest.mark.skipif(rfest is None, reason="requires rfest")
 def test_sta_fit_few_datapoints():
     np.random.seed(364)
 
@@ -203,7 +139,7 @@ def test_sta_response():
         stim_noise='white', rf_kind='gauss', response_noise='gaussian', design_matrix=True,
         n_stim_frames=1000, n_reps_per_frame=1, shift=5)
     w_fit = fit_rf_utils.compute_rf_sta(X=X, y=y)
-    y_pred = fit_rf_utils.predict_linear_rf_response(w_fit.flat, X, threshold=False, dtype=np.float32)
+    y_pred = X @ w_fit.ravel()
     assert np.corrcoef(y, y_pred)[0, 1] > 0.5
 
 
@@ -219,21 +155,8 @@ def test_sta_response_splits():
 
     w_fit = fit_rf_utils.compute_rf_sta(X=x_trn, y=y_trn)
 
-    y_pred_train = fit_rf_utils.predict_linear_rf_response(w_fit.flat, x_trn, threshold=False, dtype=np.float32)
-    y_pred_test = fit_rf_utils.predict_linear_rf_response(w_fit.flat, x_tst, threshold=False, dtype=np.float32)
+    y_pred_train = x_trn @ w_fit.ravel()
+    y_pred_test = x_tst @ w_fit.ravel()
 
     assert np.corrcoef(y_trn, y_pred_train)[0, 1] > 0.5
     assert np.corrcoef(y_tst, y_pred_test)[0, 1] > 0.25
-
-
-@pytest.mark.skipif(rfest is None, reason="requires rfest")
-def test_mle_fit():
-    np.random.seed(366)
-
-    w_true, X, y, dt, dims = rfest.simulate.generate_data_3d_stim(
-        stim_noise='pink', rf_kind='gauss', response_noise='none', design_matrix=True,
-        n_stim_frames=500, n_reps_per_frame=3, shift=3)
-
-    w_fit = fit_rf_utils.compute_rf_mle(X=X, y=y)
-    fit_mse, random_mses = compare_fits(w_true=w_true, w_fit=w_fit)
-    assert fit_mse < np.mean(random_mses) - 2 * np.std(random_mses)

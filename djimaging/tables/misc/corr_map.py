@@ -20,6 +20,7 @@ from scipy import signal
 
 from djimaging.autorois.autoshift_utils import shift_img
 from djimaging.autorois.corr_roi_mask_utils import stack_corr_image
+from djimaging.utils.dj_storage import load_array, local_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.math_utils import normalize_zscore
 from djimaging.utils.plot_utils import prep_long_title
@@ -44,14 +45,14 @@ class CorrMapTemplate(dj.Computed):
         definition = """
         -> self.presentation_table
         ---
-        corr_map : longblob  # Correlation mask for stack, after stimulus onset
-        corr_map_max : float  # Maximum correlation
-        corr_map_mean : float  # Mean correlation
+        corr_map : <npy@processed>  # Correlation mask for stack, after stimulus onset
+        corr_map_max : float32  # Maximum correlation
+        corr_map_mean : float32  # Mean correlation
         """
 
         if self._include_prestim:
             definition += """
-            corr_map_pre_stim : longblob  # Correlation mask for stack before stimulus
+            corr_map_pre_stim : <npy@processed>  # Correlation mask for stack before stimulus
             """
 
         return definition
@@ -100,13 +101,14 @@ class CorrMapTemplate(dj.Computed):
         Args:
             key: DataJoint primary key dict identifying the presentation entry.
         """
-        filepath = (self.presentation_table & key).fetch1('pres_data_file')
+        filepath_ref = (self.presentation_table & key).fetch1('pres_data_file')
         from_raw_data = (self.raw_params_table & key).fetch1('from_raw_data')
         data_name = (self.userinfo_table & key).fetch1('data_stack_name')
 
-        triggertimes = (self.presentation_table & key).fetch1('triggertimes')
+        triggertimes = load_array((self.presentation_table & key).fetch1('triggertimes'))
         fs = (self.presentation_table.ScanInfo & key).fetch1('scan_frequency')
-        stack = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_name,))[0][data_name]
+        with local_path(filepath_ref, self.presentation_table._filepath_store) as filepath:
+            stack = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_name,))[0][data_name]
 
         if len(triggertimes) > 0:
             idx_start = int(triggertimes[0] * fs)
@@ -133,11 +135,12 @@ class CorrMapTemplate(dj.Computed):
         key = get_primary_key(self, key=key)
 
         data_name = (self.userinfo_table & key).fetch1('data_stack_name')
-        main_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        main_ch_average = load_array(
+            (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
 
-        corr_map = (self & key).fetch1('corr_map')
+        corr_map = load_array((self & key).fetch1('corr_map'))
         if self._include_prestim:
-            corr_map_pre_stim = (self & key).fetch1('corr_map_pre_stim')
+            corr_map_pre_stim = load_array((self & key).fetch1('corr_map_pre_stim'))
 
         vabsmax = np.max(np.abs(corr_map))
 
@@ -187,10 +190,10 @@ class CrossCondCorrMapTemplate(dj.Computed):
         -> self.corr_map_table.proj(cond1_A='{self._split_cond}')
         -> self.corr_map_table.proj(cond1_B='{self._split_cond}')
         ---
-        cross_corr_map : blob  # Cross correlation between stacks of same stimulus but different conditions
-        shift_x : int  # Shift in pixels
-        shift_z : int  # Shift in pixels
-        max_corr : float  # Maximum correlation
+        cross_corr_map : <npy@processed>  # Cross correlation between stacks of same stimulus but different conditions
+        shift_x : int32  # Shift in pixels
+        shift_z : int32  # Shift in pixels
+        max_corr : float32  # Maximum correlation
         """
         return definition
 
@@ -218,7 +221,7 @@ class CrossCondCorrMapTemplate(dj.Computed):
             key: DataJoint primary key dict identifying the pair of conditions.
             plot: If ``True``, generate a diagnostic plot during computation.
         """
-        correlation, x_shift, z_shift, max_corr = self._make_compute(key)
+        correlation, x_shift, z_shift, max_corr = self._make_compute(key, plot=plot)
         self.insert1(dict(key, cross_corr_map=correlation, shift_x=x_shift, shift_z=z_shift, max_corr=max_corr))
 
     def _make_compute(self, key: dict, plot: bool = False) -> tuple:
@@ -234,19 +237,7 @@ class CrossCondCorrMapTemplate(dj.Computed):
         key_a = {**key, 'cond1': key[f'{self._split_cond}_A']}
         key_b = {**key, 'cond1': key[f'{self._split_cond}_B']}
 
-        corr_map_a = (self.corr_map_table & key_a).fetch1('corr_map')
-        corr_map_b = (self.corr_map_table & key_b).fetch1('corr_map')
-
-        cut_x = self.corr_map_table().get_cut_x()
-        cut_z = self.corr_map_table().get_cut_z()
-
-        image1 = corr_map_a[cut_x[0]:-cut_x[1], cut_z[1]:-cut_z[0]]
-        image2 = corr_map_b[cut_x[0]:-cut_x[1], cut_z[1]:-cut_z[0]]
-
-        correlation, x_shift, z_shift, max_corr = cross_correlate_images(
-            image1, image2, plot=plot, max_shift=self._max_shift)
-
-        return correlation, x_shift, z_shift, max_corr
+        return _fetch_and_correlate_maps(self.corr_map_table, key_a, key_b, self._max_shift, plot=plot)
 
     def plot1(self, key: dict = None) -> None:
         """Plot the cross-condition correlation map for a given key.
@@ -271,10 +262,10 @@ class CrossStimCorrMapTemplate(dj.Computed):
         -> self.corr_map_table.proj(stim_A='stim_name')
         -> self.corr_map_table.proj(stim_B='stim_name')
         ---
-        cross_corr_map : blob  # Cross correlation between stacks of same stimulus but different conditions
-        shift_x : int  # Shift in pixels
-        shift_z : int  # Shift in pixels
-        max_corr : float  # Maximum correlation
+        cross_corr_map : <npy@processed>  # Cross correlation between stacks of same stimulus but different conditions
+        shift_x : int32  # Shift in pixels
+        shift_z : int32  # Shift in pixels
+        max_corr : float32  # Maximum correlation
         """
         return definition
 
@@ -300,7 +291,7 @@ class CrossStimCorrMapTemplate(dj.Computed):
             key: DataJoint primary key dict identifying the pair of stimuli.
             plot: If ``True``, generate a diagnostic plot during computation.
         """
-        correlation, x_shift, z_shift, max_corr = self._make_compute(key)
+        correlation, x_shift, z_shift, max_corr = self._make_compute(key, plot=plot)
         self.insert1(dict(key, cross_corr_map=correlation, shift_x=x_shift, shift_z=z_shift, max_corr=max_corr))
 
     def _make_compute(self, key: dict, plot: bool = False) -> tuple:
@@ -316,19 +307,7 @@ class CrossStimCorrMapTemplate(dj.Computed):
         key_a = {**key, 'stim_name': key['stim_A']}
         key_b = {**key, 'stim_name': key['stim_B']}
 
-        corr_map_a = (self.corr_map_table & key_a).fetch1('corr_map')
-        corr_map_b = (self.corr_map_table & key_b).fetch1('corr_map')
-
-        cut_x = self.corr_map_table().get_cut_x()
-        cut_z = self.corr_map_table().get_cut_z()
-
-        image1 = corr_map_a[cut_x[0]:-cut_x[1], cut_z[1]:-cut_z[0]]
-        image2 = corr_map_b[cut_x[0]:-cut_x[1], cut_z[1]:-cut_z[0]]
-
-        correlation, x_shift, z_shift, max_corr = cross_correlate_images(
-            image1, image2, plot=plot, max_shift=self._max_shift)
-
-        return correlation, x_shift, z_shift, max_corr
+        return _fetch_and_correlate_maps(self.corr_map_table, key_a, key_b, self._max_shift, plot=plot)
 
     def plot1(self, key: dict = None) -> None:
         """Plot the cross-stimulus correlation map for a given key.
@@ -338,6 +317,22 @@ class CrossStimCorrMapTemplate(dj.Computed):
         """
         key = get_primary_key(self, key=key)
         self._make_compute(key, plot=True)
+
+
+def _fetch_and_correlate_maps(
+        corr_map_table: type[CorrMapTemplate],
+        key_a: dict,
+        key_b: dict,
+        max_shift: int | None,
+        plot: bool = False,
+) -> tuple[np.ndarray, np.integer, np.integer, np.floating]:
+    """Load and crop a pair of correlation maps using the table's scan margins."""
+    corr_map_a = load_array((corr_map_table & key_a).fetch1('corr_map'))
+    corr_map_b = load_array((corr_map_table & key_b).fetch1('corr_map'))
+    cut_x = corr_map_table().get_cut_x()
+    cut_z = corr_map_table().get_cut_z()
+    crop = (slice(cut_x[0], -cut_x[1] or None), slice(cut_z[1], -cut_z[0] or None))
+    return cross_correlate_images(corr_map_a[crop], corr_map_b[crop], plot=plot, max_shift=max_shift)
 
 
 def normalized_cross_correlation(image1: np.ndarray, image2: np.ndarray) -> np.ndarray:

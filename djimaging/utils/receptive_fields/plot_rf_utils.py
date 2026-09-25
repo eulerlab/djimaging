@@ -91,7 +91,8 @@ def plot_rf_video(rf: np.ndarray, rf_time: np.ndarray, fps: int = 10):
     Parameters
     ----------
     rf : np.ndarray
-        Receptive field array, shape (n_t, n_y, n_x) or (n_t, n_y, n_x, n_colors).
+        Receptive field array, shape (n_t, n_y, n_x), (n_t, n_y, n_x, n_colors),
+        or (n_t, n_features) for 1-D / color-only RFs.
     rf_time : np.ndarray
         Time axis, shape (n_t,).
     fps : int, optional
@@ -109,32 +110,38 @@ def plot_rf_video(rf: np.ndarray, rf_time: np.ndarray, fps: int = 10):
     if rf.ndim == 4:
         rf = flatten_color_channels(rf)
 
-    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-    ax.set_aspect('equal')
+    if rf.ndim == 2:
+        # 1-D or color-only RF: animate as a line plot
+        fig, ax = plt.subplots(1, 1, figsize=(6, 3))
+        vabsmax = np.nanmax(np.abs(rf))
+        line, = ax.plot(rf[0])
+        ax.set_ylim(-vabsmax * 1.1, vabsmax * 1.1)
+        ax.set_title(f"t={rf_time[0]:.3f}")
 
-    vabsmax = np.nanmax(np.abs(rf))
-    im = ax.imshow(rf[0], cmap='coolwarm', vmin=-vabsmax, vmax=vabsmax, origin='lower')
+        def update(frame: int):
+            if frame < len(rf):
+                line.set_ydata(rf[frame])
+                ax.set_title(f"t={rf_time[frame]:.3f}")
+            else:
+                line.set_ydata(np.zeros_like(rf[0]))
+                ax.set_title("pause")
+            return line,
+    else:
+        # 2-D spatial RF: animate as imshow
+        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+        ax.set_aspect('equal')
 
-    def update(frame: int):
-        """Update the animation frame.
+        vabsmax = np.nanmax(np.abs(rf))
+        im = ax.imshow(rf[0], cmap='coolwarm', vmin=-vabsmax, vmax=vabsmax, origin='lower')
 
-        Parameters
-        ----------
-        frame : int
-            Current frame index.
-
-        Returns
-        -------
-        tuple
-            Updated image artist.
-        """
-        if frame < len(rf):
-            im.set_data(rf[frame])
-            ax.set_title(f"t={rf_time[frame]:.3f}")
-        else:
-            im.set_data(np.zeros_like(rf[0]))
-            ax.set_title("pause")
-        return im,
+        def update(frame: int):
+            if frame < len(rf):
+                im.set_data(rf[frame])
+                ax.set_title(f"t={rf_time[frame]:.3f}")
+            else:
+                im.set_data(np.zeros_like(rf[0]))
+                ax.set_title("pause")
+            return im,
 
     plt.close(fig)
 

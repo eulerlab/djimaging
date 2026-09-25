@@ -43,6 +43,7 @@ import numpy as np
 from djimaging.tables.core.preprocesstraces import process_trace
 from djimaging.tables.response.csl.naka_rushton_utils import fit_naka_rushton
 from djimaging.tables.response.csl.sigmoid_utils import fit_sigmoid
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.math_utils import normalize_zero_one
 from djimaging.utils.snippet_utils import split_trace_by_reps
@@ -73,25 +74,25 @@ class CslMetricsTemplate(dj.Computed):
         # Normalized contrast step light response
         -> self.traces_table
         ---
-        average: longblob  # Average of the normalized snippets (time, )
-        snippets: longblob  # Baseline corrected snippets (times x repetitions)
-        fs: float  # Sampling frequency in which average and snippets are stored
-        fs_metrics: float  # Sampling frequency used to compute metrics
-        qidx_full: float  # Quality index for full trace (as in Baden et al 2016)
-        qidx_contrast: float  # Quality index for contrast steps only (i.e. excluding half-steps)
-        on_off_index: float  # Index indicating light preference (-1 Off, 1 On)
-        contrast_sensitivity: float  # Relating step responses to contrast responses
-        tonic_release_index: float  # Tonic release index as in Franke et al 2017, but for last contrast step
-        plateau_index: float  # Plateau index (a - b) / (a + b), similar to Franke et al 2017
-        contrast_{self._metric_kind}s: blob  # Metric per contrast (e.g., auc or fft_f1), incl. baseline at i=0 if _w_zero_fit=1
+        average: <blob>  # Average of the normalized snippets (time, )
+        snippets: <blob>  # Baseline corrected snippets (times x repetitions)
+        fs: float32  # Sampling frequency in which average and snippets are stored
+        fs_metrics: float32  # Sampling frequency used to compute metrics
+        qidx_full: float32  # Quality index for full trace (as in Baden et al 2016)
+        qidx_contrast: float32  # Quality index for contrast steps only (i.e. excluding half-steps)
+        on_off_index: float32  # Index indicating light preference (-1 Off, 1 On)
+        contrast_sensitivity: float32  # Relating step responses to contrast responses
+        tonic_release_index: float32  # Tonic release index as in Franke et al 2017, but for last contrast step
+        plateau_index: float32  # Plateau index (a - b) / (a + b), similar to Franke et al 2017
+        contrast_{self._metric_kind}s: <blob>  # Metric per contrast (e.g., auc or fft_f1), incl. baseline at i=0 if _w_zero_fit=1
         '''
         # Add an optional phases field when using FFT metric
         if getattr(self, '_metric_kind', 'auc') == 'fft_f1':
-            definition += '        contrast_fft_f1_phases: blob  # Phase of F1 (degrees) per contrast; baseline at i=0 if present\n'
-        definition += f'''        fit_half_amp_y = NULL : float  # y at half amplitude of fit
-        fit_half_amp_x = NULL : float  # x at half amplitude of fit
-        fit_half_amp_slope = NULL : float  # Slope at half amplitude of fit
-        droppedlastrep_flag: tinyint unsigned  # Was the last repetition incomplete and therefore dropped?
+            definition += '        contrast_fft_f1_phases: <blob>  # Phase of F1 (degrees) per contrast; baseline at i=0 if present\n'
+        definition += f'''        fit_half_amp_y = NULL : float32  # y at half amplitude of fit
+        fit_half_amp_x = NULL : float32  # x at half amplitude of fit
+        fit_half_amp_slope = NULL : float32  # Slope at half amplitude of fit
+        droppedlastrep_flag: bool  # Was the last repetition incomplete and therefore dropped?
         '''
 
         return definition
@@ -135,6 +136,7 @@ class CslMetricsTemplate(dj.Computed):
             average, snippets, quality indices, response indices, and fit parameters.
         """
         trace_dt, trace_t0, trace = (self.traces_table & key).fetch1('trace_dt', 'trace_t0', 'trace')
+        trace = load_array(trace)
 
         if len(trace) == 0:
             raise ValueError(f'Cannot compute CSL metrics for empty trace with key={key}')
@@ -143,7 +145,7 @@ class CslMetricsTemplate(dj.Computed):
         scan_type, nypix, nzpix = (self.presentation_table & key).fetch1('scan_type', 'nypix', 'nzpix')
         n_lines = int(nzpix if scan_type == 'xz' else nypix)
 
-        triggertimes = (self.presentation_table & key).fetch1('triggertimes')
+        triggertimes = load_array((self.presentation_table & key).fetch1('triggertimes'))
         ntrigger_rep = (self.stimulus_table & key).fetch1('ntrigger_rep')
 
         fs_resample = 1 / line_duration
@@ -200,7 +202,7 @@ class CslMetricsTemplate(dj.Computed):
         if verbose:
             print(f'Populating {key}')
 
-        trace = (self.traces_table & key).fetch1('trace')
+        trace = load_array((self.traces_table & key).fetch1('trace'))
         if len(trace) == 0:
             if verbose:
                 print(f'Skipping CSL metrics for empty trace with key={key}')

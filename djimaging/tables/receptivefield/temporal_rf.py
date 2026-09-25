@@ -4,8 +4,10 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
+from djimaging.tables.receptivefield.split_strf import fetch1_rf_time
 from djimaging.utils.receptive_fields.temporal_rf_utils import compute_trf_transience_index, compute_half_amp_width, \
     compute_main_peak_lag, compute_rel_weight_baseline
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trf, set_long_title
 
@@ -20,10 +22,10 @@ class TempRFPropertiesTemplate(dj.Computed):
         definition = """
         -> self.split_rf_table
         ---
-        rel_weight_baseline : float
-        transience_idx : float
-        half_amp_width : float
-        main_peak_lag : float
+        rel_weight_baseline : float32
+        transience_idx : float32
+        half_amp_width : float32
+        main_peak_lag : float32
         """
         return definition
 
@@ -44,19 +46,13 @@ class TempRFPropertiesTemplate(dj.Computed):
     def split_rf_table(self):
         pass
 
-    def fetch1_rf_time(self, key):
-        try:
-            rf_time = (self.rf_table & key).fetch1('rf_time')
-        except dj.DataJointError:
-            try:
-                rf_time = (self.rf_table & key).fetch1('model_dict')['rf_time']
-            except dj.DataJointError:
-                rf_time = (self.rf_table.params_table & key).fetch1('rf_time')
-        return rf_time
+    def fetch1_rf_time(self, key: dict) -> np.ndarray:
+        return fetch1_rf_time(self.rf_table, key)
 
     def make(self, key, plot=False):
         rf_time = self.fetch1_rf_time(key=key)
         trf, trf_peak_idxs = (self.split_rf_table & key).fetch1('trf', 'trf_peak_idxs')
+        trf, trf_peak_idxs = load_array(trf), load_array(trf_peak_idxs)
 
         if np.any(rf_time[trf_peak_idxs] > self._max_dt_future):
             raise ValueError(f'Peak too the future. max_dt_future={self._max_dt_future}.'
@@ -82,7 +78,7 @@ class TempRFPropertiesTemplate(dj.Computed):
     def plot(self):
         fig, axs = plt.subplots(1, 4, figsize=(12, 3))
         for ax, name in zip(axs, ['rel_weight_baseline', 'transience_idx', 'half_amp_width', 'main_peak_lag']):
-            ax.hist(self.fetch(name))
+            ax.hist(self.to_arrays(name))
             ax.set_title(name)
         plt.tight_layout()
         return fig, axs
@@ -92,6 +88,7 @@ class TempRFPropertiesTemplate(dj.Computed):
 
         rf_time = self.fetch1_rf_time(key=key)
         trf, peak_idxs = (self.split_rf_table & key).fetch1('trf', 'trf_peak_idxs')
+        trf, peak_idxs = load_array(trf), load_array(peak_idxs)
         rel_weight_baseline, transience_idx, half_amp_width, main_peak_lag = (self & key).fetch1(
             'rel_weight_baseline', 'transience_idx', 'half_amp_width', 'main_peak_lag')
 

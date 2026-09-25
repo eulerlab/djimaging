@@ -20,9 +20,9 @@ class ExperimentTemplate(dj.Computed):
         # Header-File location, name and path
         -> self.userinfo_table
         date                        :date                     # date of recording
-        exp_num                     :tinyint unsigned         # experiment number in a day
+        exp_num                     :int32         # experiment number in a day
         ---
-        header_path                 :varchar(191)             # path to header file
+        header_path                 :varchar(191)             # experiment directory containing the header file
         header_name                 :varchar(63)              # name of header file
         """
         return definition
@@ -76,7 +76,7 @@ class ExperimentTemplate(dj.Computed):
         if restrictions is None:
             restrictions = dict()
 
-        for key in (self.key_source & restrictions).fetch(as_dict=True):
+        for key in (self.key_source & restrictions).to_dicts():
             if verboselvl > 0:
                 print(f"Scanning for experimenter: {key['experimenter']}")
 
@@ -327,19 +327,19 @@ class ExperimentTemplate(dj.Computed):
                # General preparation details set by user in preprocessing
                -> master
                ---
-               eye                :enum("left", "right", "unknown") # left or right eye of the animal
+               eye                :enum('left', 'right', 'unknown') # left or right eye of the animal
                projname           :varchar(191)                     # name of experimental project
                setupid            :varchar(191)                     # setup 1-3
-               prep="wholemount"  :enum("wholemount", "slice")      # preparation type of the retina
+               prep="wholemount"  :enum('wholemount', 'slice')      # preparation type of the retina
                preprem            :varchar(191)                     # comments on the preparation
                darkadapt_hrs      :varchar(191)                     # time spent dark adapting animal before disection
                slicethickness_um  :varchar(191)                     # thickness of each slice in slice preparation
                bathtemp_degc      :varchar(191)                     # temperature of bath chamber
-               prepwmorient       :smallint         # retina orientation in chamber (0° = dorsal away from experimenter). Defaults to 0. Use -1, 111 or "unkown" to encode unknown.
-               odx                :float            # x location of optic disk as read in from .ini file
-               ody                :float            # y location of optic disk as read in from .ini file (if available)
-               odz                :float            # z location of optic disk as read in from .ini file (if available)
-               od_ini_flag        :tinyint unsigned # flag (0, 1) indicating whether (1) or whether not (0)
+               prepwmorient       :int32         # retina orientation in chamber (0° = dorsal away from experimenter). Defaults to 0. Use -1, 111 or "unkown" to encode unknown.
+               odx                :float32            # x location of optic disk as read in from .ini file
+               ody                :float32            # y location of optic disk as read in from .ini file (if available)
+               odz                :float32            # z location of optic disk as read in from .ini file (if available)
+               od_ini_flag        :bool # flag (0, 1) indicating whether (1) or whether not (0)
                                                     # the optic disk position was documented in .ini file and
                                                     # is valid to use
                """
@@ -393,7 +393,7 @@ class ExperimentTemplate(dj.Computed):
             # Pharmacology Info
             -> master
             ---
-            pharmaflag      :tinyint unsigned # 1 there was pharma, 0 no pharma
+            pharmaflag      :bool # 1 there was pharma, 0 no pharma
             drug            :varchar(191)     # which drug was applied
             pharmconc       :varchar(191)     # concentration used in micromolar
             preapptime      :varchar(191)     # preapplication time

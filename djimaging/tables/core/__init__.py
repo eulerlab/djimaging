@@ -1,4 +1,4 @@
-from .averages import AveragesTemplate, ResampledAveragesTemplate
+from .averages import ResampledAveragesTemplate
 from .experiment import ExperimentTemplate
 from .preprocesstraces import PreprocessTracesTemplate, PreprocessParamsTemplate
 from .snippets import SnippetsTemplate, GroupSnippetsTemplate
@@ -10,4 +10,4 @@ from .field import FieldTemplate
 from .roi_mask import RoiMaskTemplate
 from .roi import RoiTemplate
 from .traces import TracesTemplate
-from .stim_logs import QdsPyLogFileTemplate, QdsPyLogTemplate
+from .stim_logs import QdsPyLogFileTemplate, QdsPyLogTemplate, PresentationLogTemplate

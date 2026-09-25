@@ -21,6 +21,7 @@ from matplotlib import pyplot as plt
 from djimaging.autorois.corr_roi_mask_utils import stack_corr_image
 from djimaging.tables.core.averages import compute_upsampled_average
 from djimaging.tables.core.snippets import get_aligned_snippets_times
+from djimaging.utils.dj_storage import load_array, local_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.math_utils import normalize
 from djimaging.utils.scanm import read_utils
@@ -39,8 +40,8 @@ class LightArtifactTemplate(dj.Computed):
         definition = """
         -> self.presentation_table
         ---
-        light_artifact : longblob  # Normalized mean light artifact trace in line precision
-        triggertimes_rel : blob # Relative triggertimes
+        light_artifact : <blob>  # Normalized mean light artifact trace in line precision
+        triggertimes_rel : <blob> # Relative triggertimes
         """
         return definition
 
@@ -77,17 +78,18 @@ class LightArtifactTemplate(dj.Computed):
         Args:
             key: DataJoint primary key dict identifying the presentation entry.
         """
-        filepath = (self.presentation_table & key).fetch1('pres_data_file')
+        filepath_ref = (self.presentation_table & key).fetch1('pres_data_file')
         from_raw_data = (self.raw_params_table & key).fetch1('from_raw_data')
         data_name = (self.userinfo_table & key).fetch1('data_stack_name'
                                                        if self._use_main_channel else 'alt_stack_name')
 
-        stack = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_name,))[0][data_name]
+        with local_path(filepath_ref, self.presentation_table._filepath_store) as filepath:
+            stack = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_name,))[0][data_name]
         light_artifact = stack[0, :, :].T.flatten()
 
         ntrigger_rep = (self.stimulus_table() & key).fetch1('ntrigger_rep')
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
-        line_duration = (self.presentation_table.ScanInfo & key).fetch('line_duration')
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
+        line_duration = (self.presentation_table.ScanInfo & key).to_arrays('line_duration')
 
         times = np.arange(light_artifact.size) * line_duration
 
@@ -102,9 +104,9 @@ class LightArtifactTemplate(dj.Computed):
 
     def plot1(self, key: dict = None) -> None:
         key = get_primary_key(self, key=key)
-        light_artifact = (self & key).fetch1('light_artifact')
-        line_duration = (self.presentation_table.ScanInfo & key).fetch('line_duration')
-        triggertimes_rel = (self & key).fetch1('triggertimes_rel')
+        light_artifact = load_array((self & key).fetch1('light_artifact'))
+        line_duration = (self.presentation_table.ScanInfo & key).to_arrays('line_duration')
+        triggertimes_rel = load_array((self & key).fetch1('triggertimes_rel'))
 
         time = np.arange(light_artifact.size) * line_duration
 
