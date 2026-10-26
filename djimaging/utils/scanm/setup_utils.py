@@ -32,8 +32,8 @@ def get_stimulator_delay(date: str, setupid: int, file: Optional[str] = None) ->
 
     df = pd.read_csv(file, sep=';', parse_dates=['date'])
     df.loc[np.max(df.index) + 1] = {'date': eval_time}
-    df.set_index('date', inplace=True)
-    df.sort_index(ascending=True, inplace=True)
+    df = df.set_index('date')
+    df = df.sort_index(ascending=True)
     df.ffill(inplace=True)
     stimulator_delay_ms = df.loc[eval_time, f"setup{setupid}"] / 1000.
     return stimulator_delay_ms
