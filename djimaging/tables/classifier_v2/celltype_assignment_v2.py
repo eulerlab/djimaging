@@ -224,6 +224,8 @@ class CelltypeAssignmentV2Template(dj.Computed):
             raise ValueError("Provide exactly one of 'cluster_id', 'cluster_name', or 'group_id'.")
 
         df = self.to_pandas()
+        if df.empty:
+            raise ValueError("No cell type assignments found to plot.")
         groups = df.groupby('classifier_id')
 
         for classifier_id, df_group in groups:
@@ -420,7 +422,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
             ax_baden = ax.twinx()
             sns.countplot(ax=ax_baden, x=b_dist, order=order, color='gray', alpha=0.5, label='Baden')
             ax_baden.set(ylabel='Count (Baden)')
-            ax.legend(loc='upper right')
+            ax_baden.legend(loc='upper right')
 
         if level == 'cluster':
             df_filt = df[df['prob_cluster'] >= min_prob]

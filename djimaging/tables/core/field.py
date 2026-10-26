@@ -161,7 +161,7 @@ class FieldTemplate(dj.Computed):
                     filter_kind = [filter_kind]
                 file_info_df = file_info_df[file_info_df['kind'].isin(filter_kind)]
 
-            file_info_df.sort_values('mask_order', inplace=True, ascending=True)
+            file_info_df = file_info_df.sort_values('mask_order', ascending=True)
 
             # Set defaults
             if self.incl_cond1:

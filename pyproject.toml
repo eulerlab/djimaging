@@ -19,7 +19,7 @@ dependencies = [
     "pandas>=2.2.2",
     "seaborn>=0.13.2",
     # Saved classifiers additionally require their exact scikit-learn version.
-    "scikit-learn>=1.7.2",
+    "scikit-learn==1.7.2",
     "opencv-python>=4.10.0.84",
     "astropy>=6.1.0",
     "ipython>=8.12.3",

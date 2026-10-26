@@ -10,7 +10,7 @@ from abc import abstractmethod
 
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy.interpolate import interpolate
+from scipy.interpolate import interp1d
 
 from djimaging.tables.core.averages import compute_upsampled_average
 from djimaging.tables.core.preprocesstraces import process_trace
@@ -174,7 +174,7 @@ def preprocess_chirp_v2(trace, t0, dt, triggertimes, ntrigger_rep=2, poly_order=
 
     baden16like_times = np.concatenate([ts1, ts2, ts3])
 
-    baden16like_average = interpolate.interp1d(
+    baden16like_average = interp1d(
         average_times + 0.128, average, assume_sorted=True, bounds_error=False,
         fill_value=(average[0], average[-1]))(baden16like_times)
 

@@ -12,16 +12,18 @@ from matplotlib.colors import rgb2hex, hex2color
 from djimaging.autorois.autoshift_utils import compute_corr_map, compute_corr_map_match_indexes, extract_best_shift
 from djimaging.utils import image_utils, mask_utils, math_utils
 
+_widgets_import_error = None
 try:
     from ipywidgets import HTML, Dropdown, FloatSlider, Button, HBox, VBox, Checkbox, IntSlider, BoundedIntText, \
         IntProgress, FloatProgress, Layout, Output
-except ImportError:
-    warnings.warn('Failed to import ipywidgets. AutoROIs will not work.')
+except ImportError as exc:
+    _widgets_import_error = exc
 
+_canvas_import_error = None
 try:
     from ipycanvas import MultiCanvas, hold_canvas
-except ImportError:
-    warnings.warn('Failed to import ipycanvas. AutoROIs will not work.')
+except ImportError as exc:
+    _canvas_import_error = exc
 
 
 class RoiCanvas:
@@ -394,6 +396,13 @@ class InteractiveRoiCanvas(RoiCanvas):
             show_diagnostics=False,
             swap_channels=False,
     ):
+        if _widgets_import_error is not None:
+            raise ImportError('InteractiveRoiCanvas requires ipywidgets; install djimaging[autorois].') \
+                from _widgets_import_error
+        if _canvas_import_error is not None:
+            raise ImportError('InteractiveRoiCanvas requires ipycanvas; install djimaging[autorois].') \
+                from _canvas_import_error
+
         super().__init__(ch0_stacks=ch0_stacks if not swap_channels else ch1_stacks,
                          ch1_stacks=ch1_stacks if not swap_channels else ch0_stacks,
                          pres_names=pres_names, bg_dict=bg_dict, n_artifact=n_artifact,
