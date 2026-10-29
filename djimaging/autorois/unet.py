@@ -325,10 +325,11 @@ class UNet(pl.LightningModule):
             Integer 2-D ROI mask.
         """
         image_stack_torch = torch.from_numpy(image_stack).unsqueeze(0).to(torch.float32)
-        binary_mask_logits_pred, offset_pred, center_pred = self.forward(image_stack_torch)
-        binary_mask_pred = torch.sigmoid(binary_mask_logits_pred).squeeze(0)
-        predicted_mask = create_mask(binary_mask_pred.squeeze(0), offset_pred.squeeze(0),
-                                     center_pred.squeeze(0).squeeze(0))
+        with torch.no_grad():
+            binary_mask_logits_pred, offset_pred, center_pred = self.forward(image_stack_torch)
+            binary_mask_pred = torch.sigmoid(binary_mask_logits_pred).squeeze(0)
+            predicted_mask = create_mask(binary_mask_pred.squeeze(0), offset_pred.squeeze(0),
+                                         center_pred.squeeze(0).squeeze(0))
         return predicted_mask.cpu().numpy()
 
     @classmethod
