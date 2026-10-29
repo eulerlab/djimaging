@@ -253,26 +253,32 @@ class UNet(pl.LightningModule):
             Integer 2-D ROI mask.
         """
         return self.create_mask_from_data(
-            ch0_stack=data_dict["ch0_stack"], ch1_stack=data_dict["ch1_stack"],
+            ch0_stack=data_dict["ch0_stack"], ch1_stack=data_dict.get("ch1_stack"),
             n_artifact=data_dict.get("meta", {}).get("n_artifact", 0))
 
     def create_mask_from_data(
             self,
             ch0_stack: np.ndarray,
-            ch1_stack: np.ndarray,
+            ch1_stack: Optional[np.ndarray] = None,
             n_artifact: int = 0,
+            multiple_stacks: bool = False,
             **kwargs,
     ) -> np.ndarray:
-        """Create a ROI mask from two imaging channel stacks.
+        """Create a ROI mask from imaging channel stacks.
+
+        Models with ``in_channels == 1`` only use ``ch0_stack`` and normalize the stack before averaging over
+        time (as in training); models with two input channels use the normalized time-averages of both channels.
 
         Parameters
         ----------
         ch0_stack : np.ndarray
-            Primary channel stack of shape (nx, ny, nt).
-        ch1_stack : np.ndarray
-            Secondary channel stack of shape (nx, ny, nt).
+            Primary channel stack of shape (nx, ny, nt), or a list of such stacks if ``multiple_stacks``.
+        ch1_stack : np.ndarray, optional
+            Secondary channel stack of shape (nx, ny, nt). Required if the model has two input channels.
         n_artifact : int, optional
             Number of artifact rows to exclude. Default is 0.
+        multiple_stacks : bool, optional
+            If ``True``, ``ch0_stack`` and ``ch1_stack`` are lists of stacks, which are concatenated in time.
         **kwargs
             Additional keyword arguments; ``'pixel_size_um'`` is silently
             ignored and any other keys trigger a warning.
@@ -286,14 +292,24 @@ class UNet(pl.LightningModule):
         if len(kwargs) > 0:
             warnings.warn(f'ignoring kwargs: {kwargs}')
 
-        ch0_img = ch0_stack.mean(axis=-1)
-        ch1_img = ch1_stack.mean(axis=-1)
-        ch0_img_normalized = _normalize_image(ch0_img, n_artifact=n_artifact)
-        ch1_img_normalized = _normalize_image(ch1_img, n_artifact=n_artifact)
+        if multiple_stacks:
+            ch0_stack = np.concatenate(ch0_stack, axis=-1)
+            if ch1_stack is not None:
+                ch1_stack = np.concatenate(ch1_stack, axis=-1)
 
-        neural_input = np.stack([ch0_img_normalized, ch1_img_normalized])
-        predicted_mask = self.create_mask_image_stack(neural_input)
-        return predicted_mask
+        if self.in_channels == 1:
+            ch0_img = _normalize_image(ch0_stack.astype(np.float32), n_artifact=n_artifact).mean(axis=-1)
+            neural_input = _normalize_image(ch0_img, n_artifact=n_artifact)[np.newaxis]
+        elif self.in_channels == 2:
+            if ch1_stack is None:
+                raise ValueError("This UNet uses two input channels, but ch1_stack was not provided.")
+            ch0_img = _normalize_image(ch0_stack.mean(axis=-1), n_artifact=n_artifact)
+            ch1_img = _normalize_image(ch1_stack.mean(axis=-1), n_artifact=n_artifact)
+            neural_input = np.stack([ch0_img, ch1_img])
+        else:
+            raise NotImplementedError(f"in_channels={self.in_channels} is not supported.")
+
+        return self.create_mask_image_stack(neural_input)
 
     def create_mask_image_stack(self, image_stack: np.ndarray) -> np.ndarray:
         """Run inference on a pre-stacked normalised image array.

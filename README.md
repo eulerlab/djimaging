@@ -35,6 +35,16 @@ uv pip install -e ".[rf]"
 uv pip install -e ".[autorois,rf]"
 ```
 
+By default, `draw_roi_mask` / `load_default_autorois_models` only offer the latest U-Net (plus the
+correlation-based model). Other models have to be requested explicitly and need additional extras
+(`autorois-cellpose` for the finetuned Cellpose3 model and `autorois-mediar` for the finetuned MEDIAR model):
+```bash
+uv pip install -e ".[autorois,autorois-cellpose,autorois-mediar]"
+```
+```python
+autorois_models = load_default_autorois_models(models=['UNet', 'Cellpose3', 'MEDIAR'])  # also: 'UNet_v1', 'CorrRoiMask'
+```
+
 > ❗ To test if the package was successfully installed, e.g.
 > open a jupyter notebook in your container and call <code>import djimaging</code>.
 

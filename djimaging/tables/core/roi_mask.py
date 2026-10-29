@@ -146,7 +146,7 @@ class RoiMaskTemplate(dj.Manual):
             field_key: dict | None = None,
             pres_key: dict | None = None,
             canvas_width: int = 20,
-            autorois_models: str = 'default_rgc',
+            autorois_models: str | list | dict = 'default_rgc',
             show_diagnostics: bool = True,
             load_high_res: bool = True,
             max_shift: int | None = None,
@@ -166,8 +166,10 @@ class RoiMaskTemplate(dj.Manual):
                 used. Takes precedence over field_key when both are given.
             canvas_width: Width of the canvas as a percentage of the screen
                 width (must be between 0 and 100 exclusive).
-            autorois_models: Either a dict of auto-ROI models or a string key
-                ('default_rgc', etc.) to load the default model set.
+            autorois_models: Either a dict of auto-ROI models, a string key
+                ('default_rgc', etc.) to load the default model set (latest UNet), or a list of model
+                names (e.g. ['UNet', 'Cellpose3', 'MEDIAR']) to load specific models, see
+                ``load_default_autorois_models``.
             show_diagnostics: Whether to show diagnostic panels in the GUI.
             load_high_res: Whether to load high-resolution background stacks.
             max_shift: Maximum allowed pixel shift between presentations.
@@ -275,6 +277,8 @@ class RoiMaskTemplate(dj.Manual):
         # Load default AutoROIs models
         if isinstance(autorois_models, str):
             autorois_models = load_default_autorois_models(autorois_models)
+        elif isinstance(autorois_models, (list, tuple)):
+            autorois_models = load_default_autorois_models(models=list(autorois_models))
 
         # Load shifts if available
         shifts = self.init_shifts(field_key, pres_keys)
@@ -917,42 +921,80 @@ def load_stack_data(
     return ch0_stacks, ch1_stacks, output_files
 
 
-def load_default_autorois_models(kind: str = 'default_rgc') -> dict | None:
-    """Load the default set of auto-ROI models for a given cell type.
+def load_default_autorois_models(kind: str = 'default_rgc', models: list[str] | None = None) -> dict | None:
+    """Load auto-ROI models for a given cell type.
+
+    By default only the latest UNet (and the correlation-based model) is loaded. Other models have to be
+    requested explicitly via ``models``, e.g. ``models=['UNet', 'Cellpose3', 'MEDIAR']``.
 
     Args:
         kind: Model variant to load. Supported values are 'default_rgc',
             'default_bc', and 'default_ac'.
+        models: Names of the models to load. Available for 'default_rgc': 'UNet' (latest, v0.2.0),
+            'UNet_v1' (v0.1.0), 'Cellpose3' (finetuned), 'MEDIAR' (finetuned) and 'CorrRoiMask'.
+            If None, the default set is loaded and models that fail to load are skipped with a warning.
+            Explicitly requested models raise an error if they cannot be loaded.
 
     Returns:
         A dict mapping model names to model objects, or None if the dict is
         empty (e.g. if all models failed to load).
     """
     autorois_models = dict()
-    if kind == 'default_rgc':
-        _add_autorois_unet(autorois_models)
-    _add_autorois_corr(autorois_models, kind=kind)
+
+    if models is None:
+        if kind == 'default_rgc':
+            try:
+                _add_autorois_unet(autorois_models)
+            except Exception as e:
+                warnings.warn(f'Failed to load default AutoROIs model UNet because of error:\n{e}')
+        _add_autorois_corr(autorois_models, kind=kind)
+    else:
+        if isinstance(models, str):
+            models = [models]
+        loaders = {
+            'UNet': _add_autorois_unet,
+            'UNet_v1': _add_autorois_unet_v1,
+            'Cellpose3': _add_cellpose,
+            'MEDIAR': _add_mediar,
+            'CorrRoiMask': lambda d: _add_autorois_corr(d, kind=kind),
+        }
+        unknown = [m for m in models if m not in loaders]
+        if unknown:
+            raise ValueError(f'Unknown AutoROIs models {unknown}. Available: {list(loaders)}')
+        if kind != 'default_rgc' and any(m not in ('CorrRoiMask',) for m in models):
+            raise NotImplementedError(f"Only 'CorrRoiMask' is available for {kind}.")
+        for m in models:
+            loaders[m](autorois_models)
+
     return autorois_models if len(autorois_models) > 0 else None
 
 
+def _add_autorois_unet_v1(autorois_models: dict) -> None:
+    """Load the first UNet (v0.1.0, two input channels) and add it to the model dict.
+
+    Args:
+        autorois_models: Dict to add the loaded model to under the key 'UNet_v1'.
+    """
+    from djimaging.autorois.unet import UNet
+    config_path = file_store_path(
+        "Resources/AutoROIs/models/UNET_v0.1.0/sd_images.yaml", "reference")
+    checkpoint_path = file_store_path(
+        "Resources/AutoROIs/models/UNET_v0.1.0/dropout_and_aug_regul.ckpt", "reference")
+    autorois_models['UNet_v1'] = UNet.from_checkpoint(config_path, checkpoint_path)
+
+
 def _add_autorois_unet(autorois_models: dict) -> None:
-    """Attempt to load a UNet auto-ROI model and add it to the model dict.
+    """Load the latest, retrained UNet (v0.2.0, one input channel) and add it to the model dict.
 
     Args:
         autorois_models: Dict to add the loaded model to under the key 'UNet'.
     """
-    try:
-        from djimaging.autorois.unet import UNet
-        config_path = file_store_path(
-            "Resources/AutoROIs/models/UNET_v0.1.0/sd_images.yaml", "reference")
-        checkpoint_path = file_store_path(
-            "Resources/AutoROIs/models/UNET_v0.1.0/dropout_and_aug_regul.ckpt", "reference")
-        unet_model = UNet.from_checkpoint(config_path, checkpoint_path)
-
-        autorois_models['UNet'] = unet_model
-
-    except Exception as e:
-        warnings.warn(f'Failed to load default AutoROIs models because of error:\n{e}')
+    from djimaging.autorois.unet import UNet
+    config_path = file_store_path(
+        "Resources/AutoROIs/models/UNET_v0.2.0/config_init.yaml", "reference")
+    checkpoint_path = file_store_path(
+        "Resources/AutoROIs/models/UNET_v0.2.0/_epoch=199.ckpt", "reference")
+    autorois_models['UNet'] = UNet.from_checkpoint(config_path, checkpoint_path)
 
 
 def _add_autorois_corr(autorois_models: dict, kind: str) -> None:
@@ -982,28 +1024,44 @@ def _add_autorois_corr(autorois_models: dict, kind: str) -> None:
 
 
 def _add_cellpose(autorois_models: dict, kind: str = 'default_rgc') -> None:
-    """Load a Cellpose auto-ROI model and add it to the model dict.
+    """Load the finetuned Cellpose3 auto-ROI model and add it to the model dict.
+
+    Requires the ``autorois-cellpose`` extra.
 
     Args:
-        autorois_models: Dict to add the loaded model to under the key
-            'Cellpose'.
+        autorois_models: Dict to add the loaded model to under the key 'Cellpose3'.
         kind: Model variant. Currently only 'default_rgc' is supported.
     """
-    from djimaging.autorois.cellpose_wrapper import CellposeWrapper
-
-    if kind == 'default_rgc':
-        init_params = dict(
-            model_type='cyto',
-            gpu=False,
-        )
-
-        eval_params = dict(
-            min_size=4,
-            diameter=15,
-            channels=[0, 0],
-        )
-    else:
+    if kind != 'default_rgc':
         raise NotImplementedError(kind)
 
-    model_cellpose = CellposeWrapper(init_kwargs=init_params, eval_kwargs=eval_params)
-    autorois_models['Cellpose'] = model_cellpose
+    from djimaging.autorois.cellpose_wrapper import CellposeWrapper
+
+    model_path = file_store_path(
+        "Resources/AutoROIs/models/CELLPOSE3_v0.2.0/cellpose", "reference")
+
+    # Diameter and min_size are given in um (and rescaled with the pixel size), the model was
+    # trained on data with ~2 um pixels and a median ROI diameter of ~4.8 pixels.
+    init_params = dict(pretrained_model=model_path, gpu=False, nchan=2)
+    eval_params = dict(min_size=4, diameter=10, channels=[0, 0], flow_threshold=0.4)
+
+    autorois_models['Cellpose3'] = CellposeWrapper(init_kwargs=init_params, eval_kwargs=eval_params)
+
+
+def _add_mediar(autorois_models: dict, kind: str = 'default_rgc') -> None:
+    """Load the finetuned MEDIAR auto-ROI model and add it to the model dict.
+
+    Requires the ``autorois-mediar`` extra.
+
+    Args:
+        autorois_models: Dict to add the loaded model to under the key 'MEDIAR'.
+        kind: Model variant. Currently only 'default_rgc' is supported.
+    """
+    if kind != 'default_rgc':
+        raise NotImplementedError(kind)
+
+    from djimaging.autorois.mediar_wrapper import MediarWrapper
+
+    model_path = file_store_path(
+        "Resources/AutoROIs/models/MEDIAR_v0.2.0/mediar_best_finetuned_model.pth", "reference")
+    autorois_models['MEDIAR'] = MediarWrapper(model_path=model_path, device='cpu')
