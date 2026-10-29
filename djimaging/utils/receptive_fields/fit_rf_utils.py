@@ -77,6 +77,32 @@ def compute_rf_sta(X: np.ndarray, y: np.ndarray) -> np.ndarray:
     return w
 
 
+def compute_whitening_matrix(X: np.ndarray, reg: float = 1e-3) -> np.ndarray:
+    """Compute the ridge-regularized inverse stimulus covariance, used to whiten an STA.
+
+    The whitened STA is inv(C + lambda * I) @ STA with C = X.T @ X / n_samples
+    (Schwartz et al., 2006, J Vis). The regularization is relative to the mean eigenvalue of C,
+    i.e. lambda = reg * trace(C) / n_features, which makes it invariant to the stimulus scale.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Design matrix, shape (n_samples, n_features).
+    reg : float, optional
+        Ridge strength relative to the mean eigenvalue of the covariance. Default is 1e-3.
+
+    Returns
+    -------
+    np.ndarray
+        Whitening matrix, shape (n_features, n_features), same dtype as X.
+    """
+    n_samples, n_features = X.shape
+    cov = (X.T @ X).astype(np.float64) / n_samples
+    lam = reg * np.trace(cov) / n_features
+    cov[np.diag_indices(n_features)] += lam
+    return np.linalg.inv(cov).astype(X.dtype)
+
+
 def split_data(x: np.ndarray, y: np.ndarray,
                frac_train: float = 0.8, frac_dev: float = 0.1,
                as_dict: bool = False):

@@ -23,7 +23,8 @@ from tqdm.auto import tqdm
 
 from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.receptive_fields.fit_rf_utils import build_design_matrix, get_rf_timing_params, compute_rf_sta
+from djimaging.utils.receptive_fields.fit_rf_utils import build_design_matrix, get_rf_timing_params, compute_rf_sta, \
+    compute_whitening_matrix
 from djimaging.utils.receptive_fields.plot_rf_utils import plot_rf_frames, plot_rf_video
 from djimaging.utils.receptive_fields.preprocess_rf_utils import preprocess_stimulus, finalize_stim, \
     preprocess_trace, finalize_trace
@@ -46,6 +47,8 @@ class FastStaParamsTemplate(dj.Lookup):
         lowpass_cutoff = 0: float32  # Cutoff frequency low pass filter, applied if larger 0.
         pre_blur_sigma_s = 0: float32  # Gaussian blur applied after low pass filter.
         post_blur_sigma_s = 0: float32  # Gaussian blur applied after all other steps.
+        whiten = 0 : int32  # If 1, whiten the STA with the ridge-regularized inverse stimulus covariance.
+        whiten_reg = 0.001 : float32  # Ridge strength relative to the mean eigenvalue of the covariance.
         filter_dur_s_past : float32 # filter duration in seconds into the past
         filter_dur_s_future : float32 # filter duration in seconds into the future
         rf_time: <blob> #  time of RF, depends on dt and shift
@@ -70,6 +73,7 @@ class FastStaParamsTemplate(dj.Lookup):
             self, stim_names: list | None = None, dnoise_params_id: int = 1, fit_kind: str = "gradient",
             fupsample_trace: int = 10, fupsample_stim: int = 10, lowpass_cutoff: float = 0,
             pre_blur_sigma_s: float = 0, post_blur_sigma_s: float = 0,
+            whiten: bool = False, whiten_reg: float = 1e-3,
             filter_dur_s_past: float = 1., filter_dur_s_future: float = 0.,
             skip_duplicates: bool = False, verbose: bool = True) -> None:
         """Add default preprocess parameter to table.
@@ -92,6 +96,10 @@ class FastStaParamsTemplate(dj.Lookup):
             Gaussian blur sigma applied after low pass filter (in seconds). Default is 0.
         post_blur_sigma_s : float, optional
             Gaussian blur sigma applied after all other steps (in seconds). Default is 0.
+        whiten : bool, optional
+            If True, whiten the STA with the ridge-regularized inverse stimulus covariance. Default is False.
+        whiten_reg : float, optional
+            Ridge strength relative to the mean eigenvalue of the stimulus covariance. Default is 1e-3.
         filter_dur_s_past : float, optional
             Filter duration in seconds into the past. Default is 1.0.
         filter_dur_s_future : float, optional
@@ -109,6 +117,7 @@ class FastStaParamsTemplate(dj.Lookup):
                    fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
                    lowpass_cutoff=lowpass_cutoff,
                    pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s,
+                   whiten=int(whiten), whiten_reg=whiten_reg,
                    filter_dur_s_past=filter_dur_s_past, filter_dur_s_future=filter_dur_s_future)
 
         for stim_name in stim_names:
@@ -279,12 +288,16 @@ class FastStaTemplate(dj.Computed):
         params_table = self._select_params(*restrictions)
 
         (x_stimulus, dt, rf_time, burn_in, shift, dims, fupsample_stim, fupsample_trace,
-         fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s) = params_table.fetch1(
+         fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s, whiten, whiten_reg) = params_table.fetch1(
             'x_stimulus', 'dt', 'rf_time', 'burn_in', 'shift', 'dims', 'fupsample_stim',
-            "fupsample_trace", "fit_kind", "lowpass_cutoff", "pre_blur_sigma_s", "post_blur_sigma_s")
+            "fupsample_trace", "fit_kind", "lowpass_cutoff", "pre_blur_sigma_s", "post_blur_sigma_s",
+            "whiten", "whiten_reg")
 
         x_stimulus = np.ascontiguousarray(load_array(x_stimulus).astype(np.float32))
         rf_time = load_array(rf_time)
+
+        # Shared by all traces, so computed once per parameter set.
+        whitening_matrix = compute_whitening_matrix(x_stimulus, reg=whiten_reg) if whiten else None
 
         # Fetch nframes_per_trigger from the stimulus table so that stimtime
         # reconstructed in make_compute matches the design matrix built in
@@ -298,6 +311,7 @@ class FastStaTemplate(dj.Computed):
             nframes_per_trigger=nframes_per_trigger,
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
             pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s,
+            whitening_matrix=whitening_matrix,
         )
 
         return sta_params
@@ -396,6 +410,7 @@ class FastStaTemplate(dj.Computed):
             lowpass_cutoff = sta_params['lowpass_cutoff']
             pre_blur_sigma_s = sta_params['pre_blur_sigma_s']
             post_blur_sigma_s = sta_params['post_blur_sigma_s']
+            whitening_matrix = sta_params.get('whitening_matrix')
         else:
             raise NotImplementedError("Only dict supported")
 
@@ -436,7 +451,8 @@ class FastStaTemplate(dj.Computed):
             tracetime = tracetime_base + trace_t0
             rf = self._compute_rf(
                 tracetime, trace, stimtime, x_stimulus,
-                dims, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s)
+                dims, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s,
+                whitening_matrix=whitening_matrix)
 
             if np.any(np.isnan(rf)):
                 print(f"Skipping {key}, RF contains NaNs. "
@@ -471,7 +487,7 @@ class FastStaTemplate(dj.Computed):
             tracetime: np.ndarray, trace: np.ndarray, stimtime: np.ndarray,
             x_stimulus: np.ndarray, dims: tuple, fupsample_trace: int,
             fit_kind: str, lowpass_cutoff: float, pre_blur_sigma_s: float,
-            post_blur_sigma_s: float) -> np.ndarray:
+            post_blur_sigma_s: float, whitening_matrix: np.ndarray | None = None) -> np.ndarray:
         """Compute the receptive field for a single trace.
 
         Parameters
@@ -496,6 +512,8 @@ class FastStaTemplate(dj.Computed):
             Gaussian blur sigma applied before STA (in seconds).
         post_blur_sigma_s : float
             Gaussian blur sigma applied after STA (in seconds).
+        whitening_matrix : np.ndarray or None, optional
+            Inverse stimulus covariance of shape (n_features, n_features). If given, the STA is whitened.
 
         Returns
         -------
@@ -516,9 +534,11 @@ class FastStaTemplate(dj.Computed):
         assert trace.size <= x_stimulus.shape[0], f"stim-shape: {x_stimulus.shape}, trace-shape: {trace.shape}"
         assert trace.dtype == x_stimulus.dtype, (trace.dtype, x_stimulus.dtype)
         rf = compute_rf_sta(np.ascontiguousarray(x_stimulus[:trace.size]),
-                            np.ascontiguousarray(trace)).reshape(dims)
+                            np.ascontiguousarray(trace))
+        if whitening_matrix is not None:
+            rf = whitening_matrix @ rf
 
-        return rf
+        return rf.reshape(dims)
 
     def plot1(self, key: dict | None = None, kind: str = 'frames', **kwargs) -> None:
         """Plot the receptive field as frames.

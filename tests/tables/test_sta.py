@@ -160,3 +160,39 @@ def test_sta_response_splits():
 
     assert np.corrcoef(y_trn, y_pred_train)[0, 1] > 0.5
     assert np.corrcoef(y_tst, y_pred_test)[0, 1] > 0.25
+
+
+def _correlated_stim_data(n=20000, d=6, seed=0):
+    rng = np.random.default_rng(seed)
+    x = np.ascontiguousarray((rng.standard_normal((n, d)) @ rng.standard_normal((d, d))).astype(np.float32))
+    w_true = rng.standard_normal(d).astype(np.float32)
+    u = x @ w_true
+    y = np.exp(0.5 * u / np.std(u)).astype(np.float32)
+    return x, y, w_true
+
+
+def test_whitening_matrix_inverts_covariance():
+    x, _, _ = _correlated_stim_data()
+    w = fit_rf_utils.compute_whitening_matrix(x, reg=0.)
+    cov = x.T.astype(np.float64) @ x / x.shape[0]
+    assert w.dtype == x.dtype
+    np.testing.assert_allclose(w.astype(np.float64) @ cov, np.eye(x.shape[1]), atol=1e-3)
+
+
+def test_whitened_sta_recovers_filter_for_correlated_stimulus():
+    x, y, w_true = _correlated_stim_data()
+    sta = fit_rf_utils.compute_rf_sta(x, y)
+    wsta = fit_rf_utils.compute_whitening_matrix(x, reg=1e-6) @ sta
+
+    corr_sta = np.corrcoef(sta, w_true)[0, 1]
+    corr_wsta = np.corrcoef(wsta, w_true)[0, 1]
+    assert corr_wsta > 0.99
+    assert corr_wsta > corr_sta
+
+
+def test_whitening_regularization_shrinks_towards_sta_direction():
+    x, _, _ = _correlated_stim_data()
+    # Large ridge: C + lam*I ~ lam*I, so the whitening matrix becomes (nearly) a scaled identity.
+    w = fit_rf_utils.compute_whitening_matrix(x, reg=1e6)
+    off_diag = w - np.diag(np.diag(w))
+    assert np.max(np.abs(off_diag)) < 1e-3 * np.max(np.abs(np.diag(w)))
