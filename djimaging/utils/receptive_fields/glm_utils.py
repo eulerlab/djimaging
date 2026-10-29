@@ -22,8 +22,8 @@ except ImportError:
 
 
 class ReceptiveFieldGLM:
-    def __init__(self, dt: float, stim: np.ndarray, trace: np.ndarray,
-                 filter_dur_s_past: float, filter_dur_s_future: float,
+    def __init__(self, dt: float, x_stimulus: np.ndarray, trace: np.ndarray,
+                 dims: tuple, rf_time: np.ndarray, shift: int, burn_in: int,
                  df_ts, df_ws, betas, metric: str,
                  output_nonlinearity: str = 'none', alphas: tuple = (1.,),
                  kfold: int = 1, tolerance: int = 5, atol: float = 1e-5,
@@ -34,7 +34,7 @@ class ReceptiveFieldGLM:
                  fit_R: bool = False, fit_intercept: bool = True,
                  num_subunits: int = 1, distr: str = 'gaussian',
                  frac_test: float = 0.2, t_burn_min: float = 0.,
-                 shift: int = None, channel_names=None):
+                 channel_names=None):
         """Initialize a GLM-based receptive field estimator.
 
         Supports single-channel and multi-channel (e.g. two-color) stimuli.
@@ -44,20 +44,30 @@ class ReceptiveFieldGLM:
 
         Parameters
         ----------
+        The design matrix is built once per stimulus (see `build_design_matrix`) and shared by all traces.
+        Use `ReceptiveFieldGLM.from_stim` to build it from a raw stimulus.
+
+        Parameters
+        ----------
         dt : float
             Time step in seconds.
-        stim : np.ndarray
-            Stimulus array. Accepted shapes:
-              - (n_frames,)                       1D flicker, single channel
-              - (n_frames, n_colors)              1D flicker, multi-channel
-              - (n_frames, n_y, n_x)              spatial, single channel
-              - (n_frames, n_y, n_x, n_colors)    spatial, multi-channel
+        x_stimulus : np.ndarray
+            Design matrix of shape (n_frames, dim_t * n_features), as returned by `build_design_matrix`
+            (lag-major, features flattened in C-order with the channel axis last).
         trace : np.ndarray
             Neural response trace, shape (n_frames,).
-        filter_dur_s_past : float
-            Duration of the filter extending into the past (seconds).
-        filter_dur_s_future : float
-            Duration of the filter extending into the future (seconds).
+        dims : tuple
+            Dimensions of the full receptive field, (dim_t,) + stimulus.shape[1:]. Accepted shapes:
+              - (dim_t,)                       1D flicker, single channel
+              - (dim_t, n_colors)              1D flicker, multi-channel
+              - (dim_t, n_y, n_x)              spatial, single channel
+              - (dim_t, n_y, n_x, n_colors)    spatial, multi-channel
+        rf_time : np.ndarray
+            Time axis of the filter in seconds.
+        shift : int
+            Temporal shift used to build the design matrix.
+        burn_in : int
+            Number of initial frames to discard when scoring.
         df_ts : array-like
             Candidate degrees of freedom for temporal spline basis.
         df_ws : array-like
@@ -106,20 +116,16 @@ class ReceptiveFieldGLM:
             Fraction of data reserved for testing. Default is 0.2.
         t_burn_min : float, optional
             Minimum burn-in time in seconds. Default is 0.
-        shift : int, optional
-            Expected temporal shift; if provided, validated against computed value.
         channel_names : list of str, optional
             Names for each color/stimulus channel. If None, defaults to
             ['stimulus'] for single-channel or ['ch0', 'ch1', ...] for multi-channel.
         """
         # Data
         self.dt = dt
-        self.stim = stim
+        self.x_stimulus = x_stimulus
         self.trace = trace
 
         # Filter settings
-        self.filter_dur_s_past = filter_dur_s_past
-        self.filter_dur_s_future = filter_dur_s_future
         self.output_nonlinearity = output_nonlinearity
         assert num_subunits == 1
         self.num_subunits = num_subunits
@@ -150,58 +156,64 @@ class ReceptiveFieldGLM:
         self.min_cc = min_cc
 
         # Filter dims
-        self.rf_time, self.dim_t, self.shift, burn_in = get_rf_timing_params(
-            filter_dur_s_past, filter_dur_s_future, dt)
-
-        if shift is not None:
-            assert shift == self.shift
-
-        self.burn_in = np.maximum(int(np.ceil(t_burn_min / dt)), burn_in)
+        self.rf_time = np.asarray(rf_time)
+        self.shift = int(shift)
+        self.dim_t = int(dims[0])
+        self.burn_in = np.maximum(int(np.ceil(t_burn_min / dt)), int(burn_in))
+        self.stim_dims = tuple(int(d) for d in dims)
 
         # Detect stimulus shape: how many channels, and what spatial dims
-        # Shapes supported:
-        #   (T,)             -> 1D flicker, 1 channel
-        #   (T, C)           -> 1D flicker, C channels
-        #   (T, Y, X)        -> spatial, 1 channel
-        #   (T, Y, X, C)     -> spatial, C channels
-        if stim.ndim == 4:
-            self.n_colors = stim.shape[3]
-            self.hdims = stim.shape[1]
-            self.wdims = stim.shape[2]
+        # Shapes supported (per frame):
+        #   ()          -> 1D flicker, 1 channel
+        #   (C,)        -> 1D flicker, C channels
+        #   (Y, X)      -> spatial, 1 channel
+        #   (Y, X, C)   -> spatial, C channels
+        n_stim_dims = len(self.stim_dims) - 1
+        if n_stim_dims == 3:
+            self.n_colors = self.stim_dims[3]
+            self.hdims = self.stim_dims[1]
+            self.wdims = self.stim_dims[2]
             self.dims = (self.dim_t, self.hdims, self.wdims)
             self.is_spatial = True
-        elif stim.ndim == 3:
+        elif n_stim_dims == 2:
             self.n_colors = 1
-            self.hdims = stim.shape[1]
-            self.wdims = stim.shape[2]
+            self.hdims = self.stim_dims[1]
+            self.wdims = self.stim_dims[2]
             self.dims = (self.dim_t, self.hdims, self.wdims)
             self.is_spatial = True
-        elif stim.ndim == 2:
-            self.n_colors = stim.shape[1]
+        elif n_stim_dims == 1:
+            self.n_colors = self.stim_dims[1]
             self.hdims = None
             self.wdims = None
             self.dims = (self.dim_t,)
             self.is_spatial = False
-        elif stim.ndim == 1:
+        elif n_stim_dims == 0:
             self.n_colors = 1
             self.hdims = None
             self.wdims = None
             self.dims = (self.dim_t,)
             self.is_spatial = False
         else:
-            raise NotImplementedError(f"{stim.ndim=}")
+            raise NotImplementedError(f"{dims=}")
+
+        n_features = int(np.prod(self.stim_dims))
+        if x_stimulus.shape[1] != n_features:
+            raise ValueError(f"x_stimulus has {x_stimulus.shape[1]} features, "
+                             f"but dims={self.stim_dims} require {n_features}")
+        if x_stimulus.shape[0] != np.shape(trace)[0]:
+            raise ValueError(f"x_stimulus and trace differ in length: {x_stimulus.shape[0]} != {np.shape(trace)[0]}")
 
         # Channel naming: keep 'stimulus' as the single-channel name for
         # backward compatibility with downstream code that reads model.w['opt']['stimulus'].
         if channel_names is None:
             if self.n_colors == 1:
-                self.channel_names = ['stimulus']
+                channel_names = ['stimulus']
             else:
-                self.channel_names = [f'ch{i}' for i in range(self.n_colors)]
+                channel_names = [f'ch{i}' for i in range(self.n_colors)]
         else:
             assert len(channel_names) == self.n_colors, \
                 f"channel_names has length {len(channel_names)} but stim has {self.n_colors} channels"
-            self.channel_names = list(channel_names)
+        self.channel_names = list(channel_names)
 
         self.df_ts = self.clip_dfs(np.sort(np.asarray(df_ts)), self.dim_t)
         if self.is_spatial:
@@ -209,49 +221,51 @@ class ReceptiveFieldGLM:
         else:
             assert not df_ws
 
-    def _get_channel_stim(self, stim: np.ndarray, c: int) -> np.ndarray:
-        """Extract the c-th channel from a (possibly multi-channel) stimulus array.
+    @classmethod
+    def from_stim(cls, dt: float, stim: np.ndarray, trace: np.ndarray,
+                  filter_dur_s_past: float, filter_dur_s_future: float, **kwargs):
+        """Build the design matrix from a raw stimulus and create the estimator.
 
         Parameters
         ----------
+        dt : float
+            Time step in seconds.
         stim : np.ndarray
-            Stimulus array in any of the supported shapes.
-        c : int
-            Channel index.
-
-        Returns
-        -------
-        np.ndarray
-            Single-channel stimulus, shape (T,) or (T, Y, X).
+            Stimulus of shape (n_frames, ...), see `dims` in `__init__` for the supported shapes.
+        trace : np.ndarray
+            Neural response trace, shape (n_frames,).
+        filter_dur_s_past : float
+            Duration of the filter extending into the past (seconds).
+        filter_dur_s_future : float
+            Duration of the filter extending into the future (seconds).
+        **kwargs
+            Passed on to `__init__`.
         """
-        if self.n_colors == 1:
-            return stim
-        if self.is_spatial:
-            # (T, Y, X, C) -> (T, Y, X)
-            return stim[..., c]
-        else:
-            # (T, C) -> (T,)
-            return stim[:, c]
+        rf_time, dim_t, shift, burn_in = get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt)
+        x_stimulus = build_design_matrix(X=stim, n_lag=dim_t, shift=shift, dtype=np.float32)
+        return cls(dt=dt, x_stimulus=x_stimulus, trace=trace, dims=(dim_t,) + stim.shape[1:],
+                   rf_time=rf_time, shift=shift, burn_in=burn_in, **kwargs)
 
-    def _build_design_matrices(self, stim: np.ndarray) -> dict:
-        """Build a per-channel dict of design matrices.
+    def _split_channels(self, x: np.ndarray) -> dict:
+        """Split a design matrix into a per-channel dict of design matrices.
 
         Parameters
         ----------
-        stim : np.ndarray
-            Stimulus array (may include channel dim).
+        x : np.ndarray
+            Design matrix of shape (n_samples, dim_t * n_features), with the channel axis last in the features.
 
         Returns
         -------
         dict
-            Mapping channel_name -> design matrix (np.ndarray).
+            Mapping channel_name -> design matrix of shape (n_samples, dim_t * n_features_per_channel).
         """
-        Xs = {}
-        for c, name in enumerate(self.channel_names):
-            stim_c = self._get_channel_stim(stim, c)
-            Xs[name] = build_design_matrix(
-                X=stim_c, n_lag=self.dims[0], shift=self.shift, dtype=np.float32)
-        return Xs
+        if self.n_colors == 1:
+            return {self.channel_names[0]: x}
+
+        # Columns are ordered (lag, *spatial, color), so the color axis can be selected after reshaping.
+        x_split = x.reshape((x.shape[0],) + self.stim_dims)
+        return {name: np.ascontiguousarray(x_split[..., c].reshape(x.shape[0], -1))
+                for c, name in enumerate(self.channel_names)}
 
     def _slice_design_matrices(self, Xs: dict, idx) -> dict:
         """Slice every per-channel design matrix along axis 0 with the same index."""
@@ -275,10 +289,10 @@ class ReceptiveFieldGLM:
         np.random.seed(self.seed)
         starttime = time.time()
 
-        stim_dict, trace_dict = split_data(
-            x=self.stim, y=self.trace, frac_train=1. - self.frac_test, frac_dev=0, as_dict=True)
+        x_dict, trace_dict = split_data(
+            x=self.x_stimulus, y=self.trace, frac_train=1. - self.frac_test, frac_dev=0, as_dict=True)
 
-        model, metric_dev_opt_hp_sets = self.compute_best_rf_model(stim=stim_dict['train'], trace=trace_dict['train'])
+        model, metric_dev_opt_hp_sets = self.compute_best_rf_model(x_stimulus=x_dict['train'], trace=trace_dict['train'])
 
         quality_dict = dict(metric=self.metric)
 
@@ -287,25 +301,16 @@ class ReceptiveFieldGLM:
 
         # Build per-channel design matrices for test data (used by perm test + predict)
         if self.frac_test > 0:
-            Xs_test = self._build_design_matrices(stim_dict['test'])
+            Xs_test = self._split_channels(x_dict['test'])
         else:
             Xs_test = None
 
         if (self.n_perm is not None) and (self.n_perm > 0) and (self.frac_test > 0):
             assert trace_dict['test'].size > 1, trace_dict['test']
-            # rfest.check.compute_permutation_test expects either a single stim array
-            # (single-channel case) or a dict of per-channel design matrices.
-            if self.n_colors == 1:
-                perm_input = stim_dict['test']
-                score_trueX, score_permX = rfest.check.compute_permutation_test(
-                    model, perm_input, trace_dict['test'],
-                    n_perm=self.n_perm, metric=self.metric, history=False)
-            else:
-                # Manual permutation test for multi-channel: jointly shuffle
-                # all channels in time so cross-channel correlations are preserved
-                # under the null but the stim<->trace mapping is broken.
-                score_trueX, score_permX = self._compute_permutation_test_multichannel(
-                    model, Xs_test, trace_dict['test'], n_perm=self.n_perm, metric=self.metric)
+            # Permute the trace rather than the stimulus, so that the stimulus design matrix is reused
+            # and cross-channel correlations are preserved under the null.
+            score_trueX, score_permX = self._compute_permutation_test(
+                model, Xs_test, trace_dict['test'], n_perm=self.n_perm, metric=self.metric)
 
             p_value = quality_test(
                 score_trueX=score_trueX, score_permX=score_permX, metric=self.metric)
@@ -316,7 +321,7 @@ class ReceptiveFieldGLM:
             y_pred_train = model.forwardpass(kind='train', p=model.p['opt'])
         else:
             # For prediction, build per-channel design matrices from training stim.
-            Xs_train_pred = self._build_design_matrices(stim_dict['train'])
+            Xs_train_pred = self._split_channels(x_dict['train'])
             y_pred_train = model.predict(Xs_train_pred)
 
         for metric_ in ['corrcoef', 'mse']:
@@ -389,10 +394,10 @@ class ReceptiveFieldGLM:
 
         return w, quality_dict, model_dict
 
-    def _compute_permutation_test_multichannel(
+    def _compute_permutation_test(
             self, model, Xs_test: dict, y_test: np.ndarray,
             n_perm: int, metric: str) -> tuple:
-        """Permutation test for multi-channel models.
+        """Permutation test for single- and multi-channel models.
 
         Permutes y_test (rather than the stimulus) so cross-channel correlation
         structure is preserved under the null. Equivalent to jointly shuffling
@@ -442,15 +447,15 @@ class ReceptiveFieldGLM:
         """
         return np.minimum(int(np.round(df_w * self.hdims / self.wdims)), self.hdims)
 
-    def compute_best_rf_model(self, trace: np.ndarray, stim: np.ndarray) -> tuple:
+    def compute_best_rf_model(self, trace: np.ndarray, x_stimulus: np.ndarray) -> tuple:
         """Compute the best RF model using K-Fold cross-validation.
 
         Parameters
         ----------
         trace : np.ndarray
             Neural response trace.
-        stim : np.ndarray
-            Stimulus array (may include channel dim).
+        x_stimulus : np.ndarray
+            Design matrix for the training data (may include channel dim).
 
         Returns
         -------
@@ -476,8 +481,8 @@ class ReceptiveFieldGLM:
 
         metrics_dev_opt = np.zeros((np.maximum(self.kfold, 1), len(dfs), len(self.betas)))
 
-        # Prepare data: build a design matrix for every channel.
-        Xs = self._build_design_matrices(stim)
+        # Prepare data: one design matrix for every channel.
+        Xs = self._split_channels(x_stimulus)
         y = trace.copy().astype(np.float32)
 
         # Number of samples is the same across channels.

@@ -75,7 +75,7 @@ class FastStaParamsTemplate(dj.Lookup):
             pre_blur_sigma_s: float = 0, post_blur_sigma_s: float = 0,
             whiten: bool = False, whiten_reg: float = 1e-3,
             filter_dur_s_past: float = 1., filter_dur_s_future: float = 0.,
-            skip_duplicates: bool = False, verbose: bool = True) -> None:
+            skip_duplicates: bool = False, verbose: bool = True, **extra_key) -> None:
         """Add default preprocess parameter to table.
 
         Parameters
@@ -108,6 +108,8 @@ class FastStaParamsTemplate(dj.Lookup):
             If True, skip duplicate entries. Default is False.
         verbose : bool, optional
             If True, print progress information. Default is True.
+        **extra_key
+            Additional attributes added to every inserted entry, e.g. by subclasses with more parameters.
         """
 
         if stim_names is None:
@@ -118,7 +120,8 @@ class FastStaParamsTemplate(dj.Lookup):
                    lowpass_cutoff=lowpass_cutoff,
                    pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s,
                    whiten=int(whiten), whiten_reg=whiten_reg,
-                   filter_dur_s_past=filter_dur_s_past, filter_dur_s_future=filter_dur_s_future)
+                   filter_dur_s_past=filter_dur_s_past, filter_dur_s_future=filter_dur_s_future,
+                   **extra_key)
 
         for stim_name in stim_names:
             """Add default preprocess parameter to table"""
@@ -402,15 +405,8 @@ class FastStaTemplate(dj.Computed):
         """
         if isinstance(sta_params, dict):
             x_stimulus = sta_params['x_stimulus']
-            dims = sta_params['dims']
-            fupsample_trace = sta_params['fupsample_trace']
             fupsample_stim = sta_params['fupsample_stim']
             nframes_per_trigger = sta_params['nframes_per_trigger']
-            fit_kind = sta_params['fit_kind']
-            lowpass_cutoff = sta_params['lowpass_cutoff']
-            pre_blur_sigma_s = sta_params['pre_blur_sigma_s']
-            post_blur_sigma_s = sta_params['post_blur_sigma_s']
-            whitening_matrix = sta_params.get('whitening_matrix')
         else:
             raise NotImplementedError("Only dict supported")
 
@@ -449,11 +445,12 @@ class FastStaTemplate(dj.Computed):
         for trace, trace_t0, rf_key in tqdm(
                 zip(traces, trace_t0s, rf_keys), total=len(rf_keys), desc=str(key), leave=False):
             tracetime = tracetime_base + trace_t0
-            rf = self._compute_rf(
-                tracetime, trace, stimtime, x_stimulus,
-                dims, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s,
-                whitening_matrix=whitening_matrix)
+            entry = self._compute_entry(tracetime, trace, stimtime, sta_params)
 
+            if entry is None:
+                continue
+
+            rf = entry['rf']
             if np.any(np.isnan(rf)):
                 print(f"Skipping {key}, RF contains NaNs. "
                       f"x_stimulus contained {np.sum(np.isnan(x_stimulus))} NaNs. "
@@ -461,7 +458,7 @@ class FastStaTemplate(dj.Computed):
                       f"tracetime contained {np.sum(np.isnan(tracetime))} NaNs. "
                       f"[{tracetime[0]=} ... {tracetime[-1]}] and [{stimtime[0]=} ... {stimtime[-1]}]")
             else:
-                rf_entries.append({**key, **rf_key, "rf": rf})
+                rf_entries.append({**key, **rf_key, **entry})
 
         if len(rf_entries) == 0 and len(traces) > 0:
             print(f"All RFs contain NaNs for {key}, skipping.")
@@ -482,8 +479,84 @@ class FastStaTemplate(dj.Computed):
         if rf_entries:
             self.insert(rf_entries)
 
+    def _compute_entry(self, tracetime: np.ndarray, trace: np.ndarray, stimtime: np.ndarray,
+                       sta_params: dict) -> dict | None:
+        """Compute the attributes to insert for a single trace.
+
+        Subclasses override this to store more than the STA.
+
+        Parameters
+        ----------
+        tracetime : np.ndarray
+            Timestamps corresponding to the trace samples.
+        trace : np.ndarray
+            1-D neural response trace.
+        stimtime : np.ndarray
+            Timestamps corresponding to the stimulus frames.
+        sta_params : dict
+            Parameters from `prepare_sta_params`.
+
+        Returns
+        -------
+        dict or None
+            Non-key attributes of the entry, must contain "rf". None skips the trace.
+        """
+        rf = self._compute_rf(
+            tracetime, trace, stimtime, sta_params['x_stimulus'],
+            sta_params['dims'], sta_params['fupsample_trace'], sta_params['fit_kind'],
+            sta_params['lowpass_cutoff'], sta_params['pre_blur_sigma_s'], sta_params['post_blur_sigma_s'],
+            whitening_matrix=sta_params.get('whitening_matrix'))
+        return {"rf": rf}
+
     @staticmethod
+    def _prepare_trace(
+            tracetime: np.ndarray, trace: np.ndarray, stimtime: np.ndarray, n_frames: int,
+            fupsample_trace: int, fit_kind: str, lowpass_cutoff: float, pre_blur_sigma_s: float,
+            post_blur_sigma_s: float) -> np.ndarray:
+        """Preprocess a trace and align it to the stimulus frames.
+
+        Parameters
+        ----------
+        tracetime : np.ndarray
+            Timestamps corresponding to the trace samples.
+        trace : np.ndarray
+            1-D neural response trace.
+        stimtime : np.ndarray
+            Timestamps corresponding to the stimulus frames.
+        n_frames : int
+            Number of rows of the stimulus design matrix.
+        fupsample_trace : int
+            Upsampling factor for the trace.
+        fit_kind : str
+            Kind of fitting procedure (e.g. "gradient").
+        lowpass_cutoff : float
+            Cutoff frequency for the low-pass filter.
+        pre_blur_sigma_s : float
+            Gaussian blur sigma applied before alignment (in seconds).
+        post_blur_sigma_s : float
+            Gaussian blur sigma applied after alignment (in seconds).
+
+        Returns
+        -------
+        np.ndarray
+            Float32 trace on the stimulus time grid.
+        """
+        tracetime, trace = preprocess_trace(
+            tracetime, trace, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s)
+        trace, dt, t0, dt_rel_error = align_trace_to_stim(
+            stimtime=stimtime, trace=trace, tracetime=tracetime)
+        trace = finalize_trace(trace, dt, post_blur_sigma_s).astype(np.float32)
+
+        if trace.size < n_frames * 1 / 3:
+            print(f"WARNING: Trace doesn't cover much of the stimulus duration."
+                  f"trace-size: {trace.size}, stim-size: {n_frames}")
+
+        assert trace.size <= n_frames, f"stim-frames: {n_frames}, trace-shape: {trace.shape}"
+        return trace
+
+    @classmethod
     def _compute_rf(
+            cls,
             tracetime: np.ndarray, trace: np.ndarray, stimtime: np.ndarray,
             x_stimulus: np.ndarray, dims: tuple, fupsample_trace: int,
             fit_kind: str, lowpass_cutoff: float, pre_blur_sigma_s: float,
@@ -521,17 +594,9 @@ class FastStaTemplate(dj.Computed):
             Receptive field array reshaped to `dims`.
         """
 
-        tracetime, trace = preprocess_trace(
-            tracetime, trace, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s)
-        trace, dt, t0, dt_rel_error = align_trace_to_stim(
-            stimtime=stimtime, trace=trace, tracetime=tracetime)
-        trace = finalize_trace(trace, dt, post_blur_sigma_s).astype(np.float32)
-
-        if trace.size < x_stimulus.shape[0] * 1 / 3:
-            print(f"WARNING: Trace doesn't cover much of the stimulus duration."
-                  f"trace-size: {trace.size}, stim-size: {x_stimulus.shape[0]}")
-
-        assert trace.size <= x_stimulus.shape[0], f"stim-shape: {x_stimulus.shape}, trace-shape: {trace.shape}"
+        trace = cls._prepare_trace(
+            tracetime, trace, stimtime, x_stimulus.shape[0],
+            fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s)
         assert trace.dtype == x_stimulus.dtype, (trace.dtype, x_stimulus.dtype)
         rf = compute_rf_sta(np.ascontiguousarray(x_stimulus[:trace.size]),
                             np.ascontiguousarray(trace))

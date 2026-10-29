@@ -11,7 +11,6 @@ from djimaging.tables.classifier_v2 import celltype_assignment_v2
 from djimaging.tables.core.stim_logs import PresentationLogTemplate
 from djimaging.tables.motion_correction.motion_detection import MotionDetectionTemplate
 from djimaging.tables.receptivefield.fast_sta import FastStaTemplate
-from djimaging.tables.receptivefield.glm import _get_shared_model_shift
 
 
 class _Relation:
@@ -143,21 +142,6 @@ def test_custom_populate_calls_datajoint_v2(table_class, reserve_jobs, monkeypat
         np.testing.assert_array_equal(sta_params['x_stimulus'], np.ones((4, 2)))
         assert sta_params['x_stimulus'].dtype == np.float32
     assert make_kwargs == {}
-
-
-def test_get_shared_model_shift_supports_multiple_channels():
-    assert _get_shared_model_shift({
-        'shift': {'ch0': -4, 'ch1': -4},
-        'channel_names': ['ch0', 'ch1'],
-    }) == -4
-
-
-def test_get_shared_model_shift_rejects_different_channel_shifts():
-    with pytest.raises(ValueError, match="different shifts"):
-        _get_shared_model_shift({
-            'shift': {'ch0': -4, 'ch1': -3},
-            'channel_names': ['ch0', 'ch1'],
-        })
 
 
 def test_presentation_log_uses_configured_scan_params_table():

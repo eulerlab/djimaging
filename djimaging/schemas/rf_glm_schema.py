@@ -3,37 +3,16 @@ from djimaging.tables import receptivefield
 
 
 @schema
-class DNoiseTraceParams(receptivefield.DNoiseTraceParamsTemplate):
+class RfGlmParams(receptivefield.RfGlmParamsTemplate):
     stimulus_table = Stimulus
-
-
-@schema
-class DNoiseTrace(receptivefield.DNoiseTraceTemplate):
     presentation_table = Presentation
-    stimulus_table = Stimulus
-    traces_table = PreprocessTraces
-    params_table = DNoiseTraceParams
-
-
-@schema
-class RfGlmParams(receptivefield.glm.RfGlmParamsTemplate):
-    pass
 
 
 @schema
 class RfGlm(receptivefield.RfGlmTemplate):
-    noise_traces_table = DNoiseTrace
     params_table = RfGlmParams
-    preprocesstraces_table = PreprocessTraces
-    stimulus_table = Stimulus
     presentation_table = Presentation
-    traces_table = Traces
-
-
-@schema
-class RfGlmSingleModel(receptivefield.RfGlmSingleModelTemplate):
-    noise_traces_table = DNoiseTrace
-    glm_table = RfGlm
+    traces_table = PreprocessTraces
 
 
 @schema
@@ -43,7 +22,6 @@ class RfGlmQualityParams(receptivefield.RfGlmQualityParamsTemplate):
 
 @schema
 class RfGlmQuality(receptivefield.RfGlmQualityTemplate):
-    glm_single_model_table = RfGlmSingleModel
     glm_table = RfGlm
     params_table = RfGlmQualityParams
 

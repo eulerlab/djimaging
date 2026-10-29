@@ -1,5 +1,5 @@
 from .glm import (RfGlmParamsTemplate, RfGlmTemplate, RfGlmQualityParamsTemplate, RfGlmQualityDictTemplate,
-                  RfGlmQualityTemplate, RfGlmSingleModelTemplate)
+                  RfGlmQualityTemplate)
 from .noise_traces import DNoiseTraceParamsTemplate, DNoiseTraceTemplate
 from .spatial_rf import FitDoG2DRFTemplate, FitGauss2DRFTemplate
 from .split_strf import SplitRFParamsTemplate, SplitRFTemplate

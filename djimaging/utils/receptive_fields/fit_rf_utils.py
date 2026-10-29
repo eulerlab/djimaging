@@ -191,7 +191,7 @@ def build_design_matrix(X: np.ndarray, n_lag: int, shift: int = 0,
         dtype = X.dtype
 
     n_frames = X.shape[0]
-    n_feature = np.prod(X.shape[1:])
+    n_feature = int(np.prod(X.shape[1:]))
 
     X_design = np.reshape(X.copy(), (n_frames, n_feature))
 
