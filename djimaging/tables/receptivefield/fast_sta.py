@@ -13,12 +13,13 @@ class FastSta(receptivefield.FastStaTemplate):
     traces_table = PreprocessTraces
 """
 
+import warnings
 from abc import abstractmethod
 
 import datajoint as dj
 from matplotlib import pyplot as plt
 import numpy as np
-from tqdm.notebook import tqdm
+from tqdm.auto import tqdm
 
 from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
@@ -216,7 +217,7 @@ class FastStaTemplate(dj.Computed):
     @property
     def definition(self):
         definition = '''
-        # Preprocess traces for receptive field estimation
+        # Spatio-temporal receptive fields estimated with fast STA
         -> self.params_table
         -> self.traces_table
         ---
@@ -246,6 +247,17 @@ class FastStaTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
+    def _select_params(self, *restrictions):
+        """Return the params table restricted to the single parameter set that `restrictions` select.
+
+        Restrictions are applied to the key source, so they may also restrict presentations or traces
+        (e.g. by field), as long as they leave exactly one parameter set.
+        """
+        params_table = self.params_table() & (self.key_source & dj.AndList(restrictions))
+        if len(params_table) != 1:
+            raise NotImplementedError("Only one parameter set supported. Provide `restrictions` that selects one.")
+        return params_table
+
     def prepare_sta_params(self, *restrictions) -> dict:
         """Fetch and prepare STA parameters from the params table.
 
@@ -264,14 +276,11 @@ class FastStaTemplate(dj.Computed):
         NotImplementedError
             If the restrictions do not select exactly one parameter set.
         """
-        restriction = dj.AndList(restrictions)
-        params_table = self.params_table() & restriction
-        if len(params_table) != 1:
-            raise NotImplementedError("Only one parameter set supported. Provide `restrictions` that selects one.")
+        params_table = self._select_params(*restrictions)
 
-        (x_stimulus, dt, rf_time, burn_in, shift, kind, dims, fupsample_stim, fupsample_trace,
+        (x_stimulus, dt, rf_time, burn_in, shift, dims, fupsample_stim, fupsample_trace,
          fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s) = params_table.fetch1(
-            'x_stimulus', 'dt', 'rf_time', 'burn_in', 'shift', 'fit_kind', 'dims', 'fupsample_stim',
+            'x_stimulus', 'dt', 'rf_time', 'burn_in', 'shift', 'dims', 'fupsample_stim',
             "fupsample_trace", "fit_kind", "lowpass_cutoff", "pre_blur_sigma_s", "post_blur_sigma_s")
 
         x_stimulus = np.ascontiguousarray(load_array(x_stimulus).astype(np.float32))
@@ -284,7 +293,7 @@ class FastStaTemplate(dj.Computed):
         nframes_per_trigger = int(stim_dict.get('nframes_per_trigger', 1))
 
         sta_params = dict(
-            x_stimulus=x_stimulus, rf_time=rf_time, burn_in=burn_in, shift=shift, kind=kind, dims=dims,
+            x_stimulus=x_stimulus, rf_time=rf_time, burn_in=burn_in, shift=shift, dims=dims,
             dt=dt, fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
             nframes_per_trigger=nframes_per_trigger,
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
@@ -341,9 +350,6 @@ class FastStaTemplate(dj.Computed):
         NotImplementedError
             If the restrictions do not select exactly one parameter set.
         """
-        if len(self.params_table() & dj.AndList(restrictions)) != 1:
-            raise NotImplementedError("Only one parameter set supported. Provide `restrictions` that selects one.")
-
         make_kwargs = dict(make_kwargs or {})
         make_kwargs['sta_params'] = self.prepare_sta_params(*restrictions)
 
@@ -408,6 +414,12 @@ class FastStaTemplate(dj.Computed):
         stimtime = np.interp(
             xidxs_stim, xidxs, np.append(triggertimes, triggertimes[-1] + dt_triggertimes))[:-total_upsample]
 
+        if stimtime.size != x_stimulus.shape[0]:
+            warnings.warn(
+                f"Number of stimulus frames from triggertimes ({stimtime.size}) differs from the design matrix "
+                f"({x_stimulus.shape[0]}) for {key}. Using the overlapping part.")
+            stimtime = stimtime[:x_stimulus.shape[0]]
+
         rf_keys, trace_t0s, trace_dts, traces = (self.traces_table() & key).to_arrays(
             self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace',
             include_key=True)
@@ -451,7 +463,8 @@ class FastStaTemplate(dj.Computed):
             Pre-computed STA parameters dictionary. Default is None.
         """
         rf_entries = self.make_compute(key=key, sta_params=sta_params)
-        self.insert(rf_entries)
+        if rf_entries:
+            self.insert(rf_entries)
 
     @staticmethod
     def _compute_rf(
@@ -621,13 +634,13 @@ class FastStaQualityTemplate(dj.Computed):
     @property
     def definition(self):
         definition = """
-        # Signal-to-noise ratio for STA receptive fields (peak-to-baseline at best pixel).
+        # Signal-to-noise ratio for STA receptive fields (peak-to-baseline, pooled over all pixels).
         -> self.sta_table
         ---
-        snr: float32              # peak_amplitude / noise_std at the best spatial location
-        peak_amplitude = NULL: float32   # max(|rf|) at the best spatial location, over all time
-        peak_z = NULL : float32
-        noise_std : float32        # std of rf at the best spatial location, within the baseline window
+        snr = NULL : float32       # peak_z / expected max|z| under pure noise (size-invariant)
+        peak_amplitude = NULL: float32   # max(|rf|) over all space and time
+        peak_z = NULL : float32    # peak_amplitude / noise_std
+        noise_std : float32        # std of rf pooled over all pixels within the baseline window
         n_baseline_frames: int64  # non-negative number of time bins used as baseline
         """
         return definition
@@ -672,12 +685,8 @@ class FastStaQualityTemplate(dj.Computed):
             null_peak = np.sqrt(2.0 * np.log(max(T * S, 2)))
             snr = peak_z / null_peak
         else:
-            peak_z = np.nan
-            snr = np.nan
-
-        # Argmax pixel kept only for reporting / downstream use.
-        abs_rf = np.abs(rf_flat)
-        best_pixel = int(np.argmax(abs_rf.max(axis=0)))
+            peak_z = None
+            snr = None
 
         self.insert1({
             **key,
@@ -687,7 +696,6 @@ class FastStaQualityTemplate(dj.Computed):
             'noise_std': noise_std,           # pooled across all S pixels
             'n_baseline_frames': n_baseline,
         })
-
 
     def plot1(self, key: dict | None = None, ax=None):
         """Plot the RF traces with the baseline window highlighted.
