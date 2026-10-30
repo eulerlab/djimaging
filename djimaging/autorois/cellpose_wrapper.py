@@ -125,11 +125,11 @@ class CellposeWrapper:
         eval_kwargs = self.eval_kwargs.copy()
 
         if 'min_size' in eval_kwargs:
-            eval_kwargs['min_size'] = int(eval_kwargs['min_size'] / np.mean(pixel_size_um[:2]))
+            eval_kwargs['min_size'] = round(eval_kwargs['min_size'] / np.mean(pixel_size_um[:2]))
             print(f"min_size: {eval_kwargs['min_size']} [px]")
 
         if 'diameter' in eval_kwargs:
-            eval_kwargs['diameter'] = int(eval_kwargs['diameter'] / np.mean(pixel_size_um[:2]))
+            eval_kwargs['diameter'] = round(eval_kwargs['diameter'] / np.mean(pixel_size_um[:2]))
             print(f"diameter: {eval_kwargs['diameter']} [px]")
 
         if len(pixel_size_um) > 2:

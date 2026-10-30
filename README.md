@@ -35,6 +35,21 @@ uv pip install -e ".[rf]"
 uv pip install -e ".[autorois,rf]"
 ```
 
+### AutoROIs models
+
+By default, `draw_roi_mask` / `load_default_autorois_models` offer the latest U-Net (plus the
+correlation-based model), which only need the `autorois` extra. Other models have to be requested explicitly:
+```python
+autorois_models = load_default_autorois_models(models=['UNet', 'Cellpose3_cyto3', 'MEDIAR'])  # also: 'Cellpose3_cyto2', 'UNet_v1', 'CorrRoiMask'
+```
+The finetuned Cellpose3 (`Cellpose3_cyto2`, `Cellpose3_cyto3`) and MEDIAR models are **not** part of the package
+dependencies, because their requirements conflict with the up-to-date core dependencies:
+`mediar` (fork `sarmueller/MEDIAR`) pins `monai==1.4.0`, which needs `numpy<2`, and `cellpose` 3.x needs
+`numpy<2.1` (older `numpy`/`numba` for everyone). Adding them breaks `uv sync`.
+If you need them, install them yourself, preferably in a separate environment, e.g.
+`uv pip install "cellpose>=3.1.1,<4"` or `uv pip install git+https://github.com/sarmueller/MEDIAR.git`
+(possibly with `monai>=1.5` and `--no-deps` to keep your `numpy`). The MEDIAR wrapper is untested with `monai>=1.5`.
+
 > ❗ To test if the package was successfully installed, e.g.
 > open a jupyter notebook in your container and call <code>import djimaging</code>.
 

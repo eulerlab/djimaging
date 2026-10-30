@@ -71,3 +71,5 @@ def test_server_file_fields_use_named_filepath_stores():
     )
     assert "stim_path=NULL       :<filepath@reference>" in core.StimulusTemplate().definition
     assert "classifier_file : <filepath@reference>" in classifier_v2.ClassifierV2Template().definition
+    assert "roi_mask_file   : <filepath@reference>" in core.RoiMaskTemplate().definition
+    assert "roi_mask_file   : <filepath@reference>" in core.RoiMaskTemplate.RoiMaskPresentation().definition
