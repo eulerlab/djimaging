@@ -1,8 +1,8 @@
 # %% [markdown]
 # # Clean up
 #
-# If you are done with the tutorial you can delete (=drop) your schema again and create a schema with a more
-# meaningful name than `ageuler_{username}_test`.
+# If you no longer need this schema you can delete (=drop) your schema again and create a schema with a more
+# meaningful name than `ageuler_{username}_<project>`.
 #
 # To not delete data by accident when using *Run all*, you have to set `DROP_SCHEMA = True` explicitly.
 

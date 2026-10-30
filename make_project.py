@@ -1,6 +1,8 @@
 import argparse
 import ast
+import keyword
 import os
+import re
 import shutil
 import sys
 
@@ -30,13 +32,14 @@ BLOCKS = {
 
 SCHEMA_MODULE_PLACEHOLDER = '__SCHEMA_MODULE__'
 BLOCKS_PLACEHOLDER = '__BLOCKS__'
-NOTEBOOK_TEMPLATE_NAME = 'tutorial_my_schema'  # Replaced by tutorial_<user>_schema
+PROJECT_PLACEHOLDER = '__PROJECT__'
+NOTEBOOK_TEMPLATE_NAME = 'populate_my_schema'  # Replaced by populate_<project>_schema
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description='Create a personal folder with a schema and a tutorial notebook from table blocks.')
-    parser.add_argument('user')
+        description='Create a project folder with a schema and a notebook from table blocks.')
+    parser.add_argument('project', help='Project name, used for the folder, schema module and schema name.')
     parser.add_argument(
         '--blocks', type=str, default=None,
         help=f'Comma-separated list of table blocks, e.g. "basic,rf_sta". Required blocks are added automatically. '
@@ -47,18 +50,23 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
-    user = args.user
-    assert len(user) > 0, 'Enter valid username'
+    project = args.project
+    validate_project_name(project)
 
     blocks = resolve_blocks(select_blocks(args))
     print(f"Selected blocks: {', '.join(blocks)}")
 
     djimaging_dir = os.path.split(os.path.abspath(__file__))[0]
-    user_dir = create_user_dir(djimaging_dir, user)
-    copy_notebooks(djimaging_dir, user_dir, user)
-    copy_table(djimaging_dir, user_dir)
-    copy_schema(djimaging_dir, user_dir, user, blocks)
-    copy_tutorial_notebook(djimaging_dir, user_dir, user, blocks)
+    project_dir = create_project_dir(djimaging_dir, project)
+    copy_notebooks(djimaging_dir, project_dir, project)
+    copy_table(djimaging_dir, project_dir)
+    copy_schema(djimaging_dir, project_dir, project, blocks)
+    copy_populate_notebook(djimaging_dir, project_dir, project, blocks)
+
+
+def validate_project_name(project):
+    """The project name is used in the import path djimaging.user.<project>, so it must be a valid python identifier."""
+    assert re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', project) and not keyword.iskeyword(project),         f"Invalid project name '{project}': use only letters, digits and underscores, and do not start with a digit "         f"(it is used in the python import path djimaging.user.<project>)."
 
 
 def select_blocks(args):
@@ -97,44 +105,44 @@ def resolve_blocks(blocks):
     return [b for b in BLOCKS if b in resolved]
 
 
-def create_user_dir(djimaging_dir, user):
+def create_project_dir(djimaging_dir, project):
     assert os.path.isdir(os.path.join(djimaging_dir, 'djimaging'))
     all_user_dir = os.path.join(djimaging_dir, 'djimaging', 'user')
     make_dir_if_new(all_user_dir)  # Make if not exists
     open(os.path.join(all_user_dir, '__init__.py'), 'a').close()
-    user_dir = os.path.join(all_user_dir, user)
-    make_dir_if_new(user_dir)
-    open(os.path.join(user_dir, '__init__.py'), 'a').close()
-    make_dir_if_new(os.path.join(user_dir, 'schemas'))
-    open(os.path.join(user_dir, 'schemas', '__init__.py'), 'a').close()
-    make_dir_if_new(os.path.join(user_dir, 'tables'))
-    open(os.path.join(user_dir, 'tables', '__init__.py'), 'a').close()
-    make_dir_if_new(os.path.join(user_dir, 'notebooks'))
+    project_dir = os.path.join(all_user_dir, project)
+    make_dir_if_new(project_dir)
+    open(os.path.join(project_dir, '__init__.py'), 'a').close()
+    make_dir_if_new(os.path.join(project_dir, 'schemas'))
+    open(os.path.join(project_dir, 'schemas', '__init__.py'), 'a').close()
+    make_dir_if_new(os.path.join(project_dir, 'tables'))
+    open(os.path.join(project_dir, 'tables', '__init__.py'), 'a').close()
+    make_dir_if_new(os.path.join(project_dir, 'notebooks'))
 
-    return user_dir
+    return project_dir
 
 
-def copy_notebooks(djimaging_dir, user_dir, username):
-    """Copy the static example notebooks. The tutorial notebook is generated from blocks, see below."""
+def copy_notebooks(djimaging_dir, project_dir, project):
+    """Copy the static example notebooks. The populate notebook is generated from blocks, see below."""
     files = os.listdir(os.path.join(djimaging_dir, 'djimaging/notebooks'))
     notebooks = [nb for nb in files
                  if os.path.isfile(os.path.join(djimaging_dir, 'djimaging/notebooks', nb)) and nb.endswith('.ipynb')
                  and nb != f'{NOTEBOOK_TEMPLATE_NAME}.ipynb']
     for nb in notebooks:
         src = os.path.join(djimaging_dir, 'djimaging/notebooks', nb)
-        dst = os.path.join(user_dir, 'notebooks', nb.replace('my_schema', f'{username}_schema'))
+        dst = os.path.join(project_dir, 'notebooks', nb.replace('my_schema', f'{project}_schema'))
 
         if not os.path.isfile(dst):
             shutil.copy(src, dst)
-            replace_schema_name(dst, username)
+            replace_schema_name(dst, project)
 
 
-def replace_schema_name(filepath, username):
+def replace_schema_name(filepath, project):
     with open(filepath, 'r') as file:
         filedata = file.read()
 
     filedata = filedata.replace('djimaging.schemas.tutorial_schema',
-                                f'djimaging.user.{username}.schemas.{username}_schema')
+                                f'djimaging.user.{project}.schemas.{project}_schema')
 
     with open(filepath, 'w') as file:
         file.write(filedata)
@@ -172,24 +180,24 @@ def build_schema_text(djimaging_dir, blocks):
     return "\n".join(imports) + "\n\n\n" + "\n\n\n".join(codes) + "\n"
 
 
-def build_notebook_text(djimaging_dir, blocks, schema_module):
+def build_notebook_text(djimaging_dir, blocks, schema_module, project):
     """Combine the notebook blocks in the order of the blocks, followed by the clean-up section."""
     parts = [read_block(djimaging_dir, 'notebooks', name).strip("\n") for name in blocks]
     parts.append(read_block(djimaging_dir, 'notebooks', 'cleanup').strip("\n"))
     text = "\n\n".join(parts) + "\n"
-    return text.replace(SCHEMA_MODULE_PLACEHOLDER, schema_module).replace(BLOCKS_PLACEHOLDER, ", ".join(blocks))
+    return text.replace(SCHEMA_MODULE_PLACEHOLDER, schema_module).replace(BLOCKS_PLACEHOLDER, ", ".join(blocks))         .replace(PROJECT_PLACEHOLDER, project)
 
 
-def copy_schema(djimaging_dir, user_dir, username, blocks):
-    dst = os.path.join(user_dir, f'schemas/{username}_schema.py')
+def copy_schema(djimaging_dir, project_dir, project, blocks):
+    dst = os.path.join(project_dir, f'schemas/{project}_schema.py')
 
     if os.path.isfile(dst):
         print(f"Schema {dst} already exists, skip.")
         return
 
     new_import = \
-        f"# Remove comments to import templates that listed in user/{username}/tables/__init__.py \n" + \
-        f"# from djimaging.user.{username} import tables as user_tables\n"
+        f"# Remove comments to import templates that listed in user/{project}/tables/__init__.py \n" + \
+        f"# from djimaging.user.{project} import tables as user_tables\n"
 
     new_table = \
         "\n\n" + \
@@ -198,21 +206,22 @@ def copy_schema(djimaging_dir, user_dir, username, blocks):
         "# class ExampleTable(ExampleTableTemplate):\n" + \
         "#     field_table = Field\n"
 
-    header = f"# Generated by make_user.py. Blocks: {', '.join(blocks)}\n"
+    header = f"# Generated by make_project.py. Blocks: {', '.join(blocks)}\n"
 
     with open(dst, 'w', encoding='utf8') as f:
         f.write(header + new_import + build_schema_text(djimaging_dir, blocks) + new_table)
 
 
-def copy_tutorial_notebook(djimaging_dir, user_dir, username, blocks):
-    dst = os.path.join(user_dir, 'notebooks', f'tutorial_{username}_schema.ipynb')
+def copy_populate_notebook(djimaging_dir, project_dir, project, blocks):
+    dst = os.path.join(project_dir, 'notebooks', f'populate_{project}_schema.ipynb')
 
     if os.path.isfile(dst):
         print(f"Notebook {dst} already exists, skip.")
         return
 
     text = build_notebook_text(
-        djimaging_dir, blocks, schema_module=f'djimaging.user.{username}.schemas.{username}_schema')
+        djimaging_dir, blocks, schema_module=f'djimaging.user.{project}.schemas.{project}_schema',
+        project=project)
 
     try:
         import jupytext
@@ -228,14 +237,14 @@ def copy_tutorial_notebook(djimaging_dir, user_dir, username, blocks):
     jupytext.write(nb, dst, fmt='ipynb')
 
 
-def copy_table(djimaging_dir, user_dir):
+def copy_table(djimaging_dir, project_dir):
     src = os.path.join(djimaging_dir, 'djimaging/tables/_new_table_example.py')
-    dst = os.path.join(user_dir, 'tables/my_table.py')
+    dst = os.path.join(project_dir, 'tables/my_table.py')
 
     if not os.path.isfile(dst):
         shutil.copy(src, dst)
 
-        with open(os.path.join(user_dir, 'tables/__init__.py'), "a") as f:
+        with open(os.path.join(project_dir, 'tables/__init__.py'), "a") as f:
             f.write("from .my_table import ExampleTableTemplate\n")
 
 
