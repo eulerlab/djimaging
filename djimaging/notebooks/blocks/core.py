@@ -237,6 +237,30 @@ plot_if_data(Presentation(), key=None)
 # - `Roi`: One entry per ROI, derived from the masks.
 #
 # Without ROI masks, all following sections stay empty.
+#
+# ## How ROI masks get into the database
+#
+# `RoiMask` is a manual table, and ROI masks are never computed inside the database. A mask always originates
+# from a **file**, and the table then reads that file in:
+#
+# 1. **Draw a mask** with `RoiMask().draw_roi_mask(...)`. It opens an interactive canvas (`start_gui()`) on the
+#    recording stacks of one field. You can start from an AutoROIs proposal (see below) or from an existing mask,
+#    clean it up by hand, and, if the field has several presentations, shift the mask to match each of them.
+# 2. **Save to a file.** Saving in the canvas writes one mask file per presentation, next to the recording file, in
+#    the sub-directory `roi_mask_dir` (here `AutoROIs`). The format is set by `_roi_file_format` of the table:
+#    `'numpy'` (`.npy`, recommended) or `'pickle'` (`.pkl`, for older masks). Nothing is written to the database yet.
+# 3. **Load the files into the database** with `RoiMask().rescan_filesystem(roi_mask_dir=...)`. For each new field,
+#    this reads the mask of every presentation, uses the mask of the preferred presentation (see `mask_alias` and
+#    `highres_alias` in `UserInfo`) as the field mask (`RoiMask`), and stores one entry per presentation in
+#    `RoiMask.RoiMaskPresentation`, together with how it relates to the field mask (`as_field_mask`: `same`,
+#    `shifted` by `shift_dx`/`shift_dy`, or `different`).
+#
+# Masks drawn in Igor are an alternative source: if `igor_roi_masks` in `RawDataParams` allows it, the mask is read
+# from the `.h5` recording file instead of a mask file.
+#
+# Each entry records where its mask came from in `roi_mask_file` (path relative to the `reference` store) and
+# `roi_mask_source` (`igor_h5`, `numpy`, `pickle` or `other`). Masks that are already in the database are not
+# overwritten by a rescan; `RoiMask().check_filesystem_consistency()` tells you if a file was changed afterwards.
 
 # %%
 # If you have saved some of your AutoROIs ROI masks you can load them here.
@@ -320,15 +344,16 @@ except ImportError:
     autorois_models = None
 
 # %%
-if len(missing_fields) > 0:
+if len(missing_fields) == 0:
+    # Just pick the first field
+    field_key = Field().keys()[0]
+else:
     field_key = missing_fields.pop()  # Pick one field
 
-    # Load ROI canvas, draw the ROI mask, clean it if you want, shift if you want.
-    # You can then save it to a file to be able to load it again later.
-    roi_canvas = RoiMask().draw_roi_mask(field_key=field_key, canvas_width=30, autorois_models=autorois_models, roi_mask_dir='AutoROIs')
-    roi_canvas.start_gui()
-else:
-    print("All fields have a ROI mask.")
+# Load ROI canvas, draw the ROI mask, clean it if you want, shift if you want.
+# You can then save it to a file to be able to load it again later.
+roi_canvas = RoiMask().draw_roi_mask(field_key=field_key, canvas_width=30, autorois_models=autorois_models, roi_mask_dir='AutoROIs')
+roi_canvas.start_gui()
 
 # %%
 # Fully automated:
