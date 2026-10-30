@@ -248,12 +248,68 @@ RoiMask()
 missing_fields = RoiMask().list_missing_field()
 print(f"{len(missing_fields)} fields without ROI mask")
 
+# %% [markdown]
+# ## AutoROIs models
+#
+# AutoROIs proposes a ROI mask for a field, which you can then clean and correct by hand in the ROI canvas.
+# Several models are available. They differ in how they work, what they need (extras of the `djimaging` package),
+# and how much memory they use. Select them by name in `load_default_autorois_models(models=[...])` or
+# `RoiMask().draw_roi_mask(autorois_models=[...])`.
+#
+# | Name | Type | Input | Extra | Memory |
+# |---|---|---|---|---|
+# | `CorrRoiMask` | classical (pixel correlations) | ch0 stack | - | low, CPU only, slow on large fields |
+# | `UNet_v1` | U-Net, first version (v0.1.0) | ch0 + ch1 averages | `autorois` | moderate |
+# | `UNet` | U-Net, retrained (v0.2.0), **default** | ch0 average | `autorois` | moderate |
+# | `Cellpose3_cyto2` | Cellpose 3 finetuned from `cyto2` | ch0 average | `autorois-cellpose` | moderate |
+# | `Cellpose3_cyto3` | Cellpose 3 finetuned from `cyto3` | ch0 average | `autorois-cellpose` | moderate |
+# | `MEDIAR` | MEDIAR (transformer), finetuned | ch0 average | `autorois-mediar` | high (about 0.5 GB of weights) |
+#
+# - **`CorrRoiMask`**: Needs no weights and no training data. It seeds ROIs at pixels whose time course is highly
+#   correlated with their neighbours and grows them while they stay correlated and below a maximum area. The
+#   parameters depend on the cell type (`kind='default_rgc'`, `'default_bc'`, `'default_ac'`), and it is the only
+#   model available for bipolar and amacrine cells.
+# - **`UNet`, `UNet_v1`**: Instance segmentation in the style of Panoptic-DeepLab. The network predicts foreground,
+#   offsets to the ROI centres and a centre heat map; pixels are assigned to the closest centre. `UNet` was retrained
+#   on a larger dataset and uses only ch0, `UNet_v1` uses ch0 and ch1. Use `UNet` unless you want to compare.
+# - **`Cellpose3_cyto2`, `Cellpose3_cyto3`**: [Cellpose](https://github.com/MouseLand/cellpose) predicts flow fields
+#   that point to cell centres. We finetuned two base models on human ROI masks. The expected ROI diameter is set in
+#   um and converted to pixels with the pixel size.
+# - **`MEDIAR`**: A transformer-based cell segmentation model (MiT-b5 encoder), finetuned on human ROI masks. The
+#   image is resized to 512x512 for the network. It is the largest and slowest model.
+#
+# By default only `UNet` and `CorrRoiMask` are loaded. All loaded models stay in memory (the neural networks
+# may also occupy GPU memory) for as long as they are referenced, and the ROI canvas keeps a reference to the models it
+# was given. To keep memory low, therefore:
+#
+# 1. Only load the models you want to use.
+# 2. When comparing several models, load them one at a time (see below), and release them before the next one.
+# 3. When you are done with AutoROIs, delete the canvas and the models and call `free_memory()`.
+
 # %%
-# Preload models so you only have to do it once
-# Can also be None for all-manual ROIs, check the code for available models
+import gc
+
+
+def free_memory():
+    """Release memory of objects that are no longer referenced, also on the GPU."""
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
+
+
+# %%
+# Preload models so you only have to do it once.
+# Can also be None for all-manual ROIs. Default: UNet and CorrRoiMask.
 try:
     from djimaging.tables.core.roi_mask import load_default_autorois_models
     autorois_models = load_default_autorois_models()
+    # Other selections (each loaded model needs memory):
+    # autorois_models = load_default_autorois_models(models=['UNet', 'Cellpose3_cyto3'])
+    # autorois_models = load_default_autorois_models(models=['UNet_v1', 'Cellpose3_cyto2', 'MEDIAR'])
 except ImportError:
     print("AutoROIs dependencies are not installed (extra 'autorois'), use manual ROIs only.")
     autorois_models = None
@@ -292,6 +348,26 @@ else:
 #     roi_canvas.exec_save_all_to_file()
 #
 #     clear_output()
+
+# %%
+# Compare models one at a time to keep memory low: load only one model, use it in the canvas, and release it
+# before loading the next one. Run this cell once per model (the canvas keeps a reference to its model, so it has to
+# be deleted too). Save the masks under different names if you want to keep several of them.
+
+# roi_canvas = RoiMask().draw_roi_mask(
+#     field_key=field_key, canvas_width=30, autorois_models=['Cellpose3_cyto3'], roi_mask_dir='AutoROIs')
+# roi_canvas.start_gui()
+
+# %%
+# Release the canvas and its model, then continue with the next model
+# roi_canvas = None
+# free_memory()
+
+# %%
+# Release the models when you are done with AutoROIs
+autorois_models = None
+roi_canvas = None
+free_memory()
 
 # %%
 # Load the just saved ROI mask
