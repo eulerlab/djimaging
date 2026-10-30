@@ -11,14 +11,6 @@ from sklearn.model_selection import KFold
 from djimaging.utils.receptive_fields.fit_rf_utils import split_data, build_design_matrix, get_rf_timing_params
 from djimaging.utils.receptive_fields.split_rf_utils import split_strf
 
-try:
-    import rfest
-    import jax
-
-    jax.config.update('jax_platform_name', 'cpu')
-except ImportError:
-    rfest = None
-    jax = None
 
 
 class ReceptiveFieldGLM:
@@ -220,6 +212,7 @@ class ReceptiveFieldGLM:
             self.df_ws = self.clip_dfs(np.sort(np.asarray(df_ws)), self.wdims)
         else:
             assert not df_ws
+            self.df_ws = None
 
     @classmethod
     def from_stim(cls, dt: float, stim: np.ndarray, trace: np.ndarray,
@@ -338,7 +331,8 @@ class ReceptiveFieldGLM:
         # Extract per-channel RFs.
         ws = {}
         for name in self.channel_names:
-            w_c = rfest.utils.uvec(model.w['opt'][name])
+            w_c = np.asarray(model.w['opt'][name])
+            w_c = w_c / np.linalg.norm(w_c)
             if w_c.shape[1] != 1:
                 raise NotImplementedError('Not implemented for more than one subunit')
             ws[name] = np.array(w_c.reshape(model.dims[name]))
@@ -353,8 +347,8 @@ class ReceptiveFieldGLM:
             df=model.df, dims=model.dims, shift=model.shift,
             alpha=model.alpha, beta=model.beta, metric=model.metric,
             output_nonlinearity=model.output_nonlinearity,
-            intercept={k: float(v) for k, v in model.get_intercept(model.p['opt']).items()},
-            R={k: float(v) for k, v in model.get_R(model.p['opt']).items()},
+            intercept={k: float(np.squeeze(v)) for k, v in model.get_intercept(model.p['opt']).items()},
+            R={k: float(np.squeeze(v)) for k, v in model.get_R(model.p['opt']).items()},
             return_model=model.return_model,
             metric_train=np.array(model.metric_train).astype(np.float32),
             cost_train=np.array(model.cost_train).astype(np.float32),
@@ -752,10 +746,13 @@ class ReceptiveFieldGLM:
         Returns
         -------
         object
-            Initialized rfest.GLM model.
+            Initialized GLM model (see `rfest_glm.GLM`).
         """
 
-        model = rfest.GLM(distr=self.distr, output_nonlinearity=self.output_nonlinearity)
+        # Imported here so that jax/rfest (optional, extra `rf`) are only needed when a GLM is fit.
+        from djimaging.utils.receptive_fields.rfest_glm import GLM
+
+        model = GLM(distr=self.distr, output_nonlinearity=self.output_nonlinearity)
         model.burn_in = self.burn_in
 
         for name in self.channel_names:

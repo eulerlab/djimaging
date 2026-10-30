@@ -50,6 +50,18 @@ class _Relation:
             raise NotImplementedError(restriction)
         return _Relation(rows, primary_key=self.primary_key)
 
+    def __mul__(self, other):
+        # Natural join on all shared attributes.
+        rows = [
+            {**row, **other_row} for row in self.rows for other_row in other.rows
+            if all(row[name] == other_row[name] for name in row.keys() & other_row.keys())
+        ]
+        return _Relation(rows, primary_key=self.primary_key + other.primary_key)
+
+    def proj(self):
+        return _Relation([{name: row[name] for name in self.primary_key} for row in self.rows],
+                         primary_key=self.primary_key)
+
     def fetch1(self, *attrs):
         if len(self.rows) != 1:
             raise RuntimeError(f"Expected one row, found {len(self.rows)}")
@@ -98,9 +110,9 @@ def test_custom_populate_calls_datajoint_v2(table_class, reserve_jobs, monkeypat
         dict(row, x_stimulus=np.ones((4, 2)), dt=0.1, rf_time=np.arange(2),
              burn_in=1, shift=0, fit_kind='trace', dims=(2,),
              fupsample_stim=1, fupsample_trace=1, lowpass_cutoff=0,
-             pre_blur_sigma_s=0, post_blur_sigma_s=0)
+             pre_blur_sigma_s=0, post_blur_sigma_s=0, whiten=False, whiten_reg=0.)
         for row in rows
-    ])
+    ], primary_key=('model_id', 'variant'))
     params_table.stimulus_table = _Relation([
         dict(row, stim_dict={'nframes_per_trigger': 2}) for row in rows
     ])
@@ -110,6 +122,8 @@ def test_custom_populate_calls_datajoint_v2(table_class, reserve_jobs, monkeypat
         'connection': SimpleNamespace(in_transaction=False),
         'classifier_table': _Relation(rows),
         'params_table': params_table,
+        'presentation_table': _Relation([{'presentation_id': 1}], primary_key=('presentation_id',)),
+        'traces_table': _Relation([{'presentation_id': 1}], primary_key=('presentation_id',)),
         '_populate_direct': worker,
         '_populate_distributed': worker,
     })()

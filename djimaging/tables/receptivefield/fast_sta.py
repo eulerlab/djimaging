@@ -128,7 +128,8 @@ class FastStaParamsTemplate(dj.Lookup):
             stim_key = key.copy()
             stim_key['stim_name'] = stim_name
 
-            if len(self & stim_key) > 0 and skip_duplicates:
+            # Restrict by primary key only; other attributes can be tuples or dicts, which cannot be used in SQL.
+            if skip_duplicates and len(self & {k: stim_key[k] for k in self.primary_key if k in stim_key}) > 0:
                 continue
 
             stim, stim_dict, ntrigger_rep, isrepeated, framerate = (self.stimulus_table() & stim_key).fetch1(
