@@ -13,13 +13,14 @@ class FastSta(receptivefield.FastStaTemplate):
     traces_table = PreprocessTraces
 """
 
+import hashlib
 import warnings
 from abc import abstractmethod
 
 import datajoint as dj
 from matplotlib import pyplot as plt
 import numpy as np
-from tqdm.auto import tqdm
+from threadpoolctl import threadpool_limits
 
 from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
@@ -29,6 +30,32 @@ from djimaging.utils.receptive_fields.plot_rf_utils import plot_rf_frames, plot_
 from djimaging.utils.receptive_fields.preprocess_rf_utils import preprocess_stimulus, finalize_stim, \
     preprocess_trace, finalize_trace
 from djimaging.utils.trace_utils import get_mean_dt, align_trace_to_stim
+
+# Default number of CPU cores used to compute the RFs of one presentation, see `FastStaTemplate.populate`.
+DEFAULT_N_JOBS = 30
+
+
+class _FetchedData(str):
+    """Data returned by `make_fetch`.
+
+    DataJoint hashes the fetched data to check that it did not change before the insert. This hash is very slow for
+    large arrays, so the object is a string of a digest of the fetched data, and carries the data as attribute.
+    Data passed as `unhashed` (e.g. the precomputed parameters) is attached without being part of the digest.
+    """
+
+    def __new__(cls, unhashed: dict | None = None, **data):
+        digest = hashlib.sha1()
+        for name, value in data.items():
+            digest.update(name.encode())
+            for v in (value if isinstance(value, (list, tuple)) else [value]):
+                if isinstance(v, np.ndarray) and v.dtype != object:
+                    digest.update(f"{v.dtype}{v.shape}".encode())
+                    digest.update(np.ascontiguousarray(v).tobytes())
+                else:
+                    digest.update(repr(v).encode())
+        obj = super().__new__(cls, digest.hexdigest())
+        obj.data = {**data, **(unhashed or dict())}
+        return obj
 
 
 class FastStaParamsTemplate(dj.Lookup):
@@ -332,8 +359,12 @@ class FastStaTemplate(dj.Computed):
             make_kwargs: dict | None = None,
             priority: int | None = None,
             refresh: bool | None = None,
+            n_jobs: int = DEFAULT_N_JOBS,
     ) -> dict:
         """Populate the table, precomputing STA parameters shared across all entries.
+
+        The RFs are computed outside of a database transaction (DataJoint's tripartite make), so long computations
+        do not cause lost connections.
 
         Parameters
         ----------
@@ -357,6 +388,9 @@ class FastStaTemplate(dj.Computed):
             Minimum job priority when using distributed population.
         refresh : bool or None, optional
             Whether to refresh the distributed job queue.
+        n_jobs : int, optional
+            Maximum number of CPU cores used to compute the RFs of one presentation, at most the number of available
+            cores. Each of the `processes` uses up to `n_jobs` cores. Default is 30.
 
         Returns
         -------
@@ -369,7 +403,9 @@ class FastStaTemplate(dj.Computed):
             If the restrictions do not select exactly one parameter set.
         """
         make_kwargs = dict(make_kwargs or {})
-        make_kwargs['sta_params'] = self.prepare_sta_params(*restrictions)
+        with threadpool_limits(limits=n_jobs):
+            make_kwargs['sta_params'] = self.prepare_sta_params(*restrictions)
+        make_kwargs['n_jobs'] = n_jobs
 
         return super().populate(
             *restrictions,
@@ -384,39 +420,105 @@ class FastStaTemplate(dj.Computed):
             refresh=refresh,
         )
 
-    def make_compute(self, key: dict, sta_params: dict | None = None) -> list | None:
-        """Compute receptive fields for all traces matching the given key.
+    # The make is split into make_fetch, make_compute and make_insert (DataJoint's tripartite make), so that the
+    # computation runs outside of the database transaction. A long transaction without queries can otherwise
+    # lose the connection to the database server.
+
+    def make_fetch(self, key: dict, sta_params: dict | None = None, n_jobs: int = DEFAULT_N_JOBS) -> tuple:
+        """Fetch the trigger times and traces of a presentation.
 
         Parameters
         ----------
         key : dict
             DataJoint primary key identifying the entry to compute.
         sta_params : dict or None, optional
-            Pre-computed STA parameters. Must be a dict. Default is None.
+            Pre-computed STA parameters, see `prepare_sta_params`. If None, they are computed in `make_compute`.
+        n_jobs : int, optional
+            Maximum number of CPU cores used to compute the RFs. Default is 30.
 
         Returns
         -------
-        list or None
-            List of dicts with computed RF entries, or None if no traces found.
-
-        Raises
-        ------
-        NotImplementedError
-            If sta_params is not a dict.
+        tuple
+            Single `_FetchedData` object passed on to `make_compute`.
         """
-        if isinstance(sta_params, dict):
-            x_stimulus = sta_params['x_stimulus']
-            fupsample_stim = sta_params['fupsample_stim']
-            nframes_per_trigger = sta_params['nframes_per_trigger']
-        else:
-            raise NotImplementedError("Only dict supported")
-
         triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
+        rf_keys, trace_t0s, trace_dts, traces = (self.traces_table() & key).to_arrays(
+            self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace',
+            include_key=True, order_by='KEY')
+
+        fetched = _FetchedData(
+            triggertimes=triggertimes, rf_keys=list(rf_keys), trace_t0s=trace_t0s, trace_dts=trace_dts,
+            traces=list(traces), unhashed=dict(sta_params=sta_params, n_jobs=n_jobs))
+        return fetched,
+
+    def make_compute(self, key: dict, fetched: _FetchedData) -> tuple:
+        """Compute receptive fields for all traces of a presentation.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        fetched : _FetchedData
+            Data from `make_fetch`.
+
+        Returns
+        -------
+        tuple
+            Single list of entries to insert, passed on to `make_insert`.
+        """
+        data = fetched.data
+        rf_keys, trace_t0s, trace_dts, traces = data['rf_keys'], data['trace_t0s'], data['trace_dts'], data['traces']
+        sta_params = data['sta_params'] if data['sta_params'] is not None else self.prepare_sta_params(key)
+
+        if len(rf_keys) == 0:
+            print(f"No traces found for {key}")
+            return [],
+
+        x_stimulus = sta_params['x_stimulus']
+        stimtime = self._get_stimtime(data['triggertimes'], sta_params, key)
+        tracetime_base = np.arange(traces[0].size) * trace_dts[0]
+
+        aligned_traces = [
+            self._prepare_trace(
+                tracetime_base + trace_t0, trace, stimtime, x_stimulus.shape[0],
+                sta_params['fupsample_trace'], sta_params['fit_kind'], sta_params['lowpass_cutoff'],
+                sta_params['pre_blur_sigma_s'], sta_params['post_blur_sigma_s'])
+            for trace, trace_t0 in zip(traces, trace_t0s)]
+
+        entries = self._compute_entries(aligned_traces, sta_params, n_jobs=data['n_jobs'])
+
+        rf_entries = []
+        for rf_key, trace, entry in zip(rf_keys, aligned_traces, entries):
+            if entry is None:
+                continue
+
+            if np.any(np.isnan(entry['rf'])):
+                print(f"Skipping {rf_key}, RF contains NaNs. "
+                      f"Aligned trace contained {np.sum(np.isnan(trace))} NaNs. "
+                      f"[{tracetime_base[0] + trace_t0s[0]=} ... {tracetime_base[-1] + trace_t0s[0]}] "
+                      f"and [{stimtime[0]=} ... {stimtime[-1]}]")
+            else:
+                rf_entries.append({**key, **rf_key, **entry})
+
+        if len(rf_entries) == 0:
+            print(f"All RFs contain NaNs for {key}, skipping.")
+
+        return rf_entries,
+
+    def make_insert(self, key: dict, rf_entries: list) -> None:
+        """Insert the entries computed in `make_compute`."""
+        if rf_entries:
+            self.insert(rf_entries)
+
+    @staticmethod
+    def _get_stimtime(triggertimes: np.ndarray, sta_params: dict, key: dict) -> np.ndarray:
+        """Timestamps of the stimulus frames, at the same resolution as the design matrix."""
+        x_stimulus = sta_params['x_stimulus']
 
         # Build stimtime at the same resolution as x_stimulus: each trigger
         # spans nframes_per_trigger stimulus frames, each further upsampled
         # by fupsample_stim. Total upsampling factor per trigger:
-        total_upsample = nframes_per_trigger * fupsample_stim
+        total_upsample = sta_params['nframes_per_trigger'] * sta_params['fupsample_stim']
 
         dt_triggertimes = np.median(np.diff(triggertimes))
         xidxs = np.arange(triggertimes.size + 1)
@@ -432,82 +534,44 @@ class FastStaTemplate(dj.Computed):
                 f"({x_stimulus.shape[0]}) for {key}. Using the overlapping part.")
             stimtime = stimtime[:x_stimulus.shape[0]]
 
-        rf_keys, trace_t0s, trace_dts, traces = (self.traces_table() & key).to_arrays(
-            self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace',
-            include_key=True)
+        return stimtime
 
-        if len(rf_keys) == 0:
-            print(f"No traces found for {key}")
-            return
+    def _compute_entries(self, traces: list, sta_params: dict, n_jobs: int) -> list:
+        """Compute the attributes to insert for all traces of a presentation.
 
-        tracetime_base = np.arange(traces[0].size) * trace_dts[0]
-
-        rf_entries = []
-        for trace, trace_t0, rf_key in tqdm(
-                zip(traces, trace_t0s, rf_keys), total=len(rf_keys), desc=str(key), leave=False):
-            tracetime = tracetime_base + trace_t0
-            entry = self._compute_entry(tracetime, trace, stimtime, sta_params)
-
-            if entry is None:
-                continue
-
-            rf = entry['rf']
-            if np.any(np.isnan(rf)):
-                print(f"Skipping {key}, RF contains NaNs. "
-                      f"x_stimulus contained {np.sum(np.isnan(x_stimulus))} NaNs. "
-                      f"trace contained {np.sum(np.isnan(trace))} NaNs. "
-                      f"tracetime contained {np.sum(np.isnan(tracetime))} NaNs. "
-                      f"[{tracetime[0]=} ... {tracetime[-1]}] and [{stimtime[0]=} ... {stimtime[-1]}]")
-            else:
-                rf_entries.append({**key, **rf_key, **entry})
-
-        if len(rf_entries) == 0 and len(traces) > 0:
-            print(f"All RFs contain NaNs for {key}, skipping.")
-
-        return rf_entries
-
-    def make(self, key: dict, sta_params: dict | None = None) -> None:
-        """Compute and insert receptive fields for all traces matching the given key.
-
-        Parameters
-        ----------
-        key : dict
-            DataJoint primary key identifying the entry to compute.
-        sta_params : dict or None, optional
-            Pre-computed STA parameters dictionary. Default is None.
-        """
-        rf_entries = self.make_compute(key=key, sta_params=sta_params)
-        if rf_entries:
-            self.insert(rf_entries)
-
-    def _compute_entry(self, tracetime: np.ndarray, trace: np.ndarray, stimtime: np.ndarray,
-                       sta_params: dict) -> dict | None:
-        """Compute the attributes to insert for a single trace.
-
+        The STAs of all traces are computed with a single matrix product, so the design matrix is read only once.
         Subclasses override this to store more than the STA.
 
         Parameters
         ----------
-        tracetime : np.ndarray
-            Timestamps corresponding to the trace samples.
-        trace : np.ndarray
-            1-D neural response trace.
-        stimtime : np.ndarray
-            Timestamps corresponding to the stimulus frames.
+        traces : list of np.ndarray
+            Preprocessed traces aligned to the stimulus, see `_prepare_trace`.
         sta_params : dict
             Parameters from `prepare_sta_params`.
+        n_jobs : int
+            Maximum number of CPU cores used.
 
         Returns
         -------
-        dict or None
-            Non-key attributes of the entry, must contain "rf". None skips the trace.
+        list of dict or None
+            Non-key attributes of each entry, must contain "rf". None skips the trace.
         """
-        rf = self._compute_rf(
-            tracetime, trace, stimtime, sta_params['x_stimulus'],
-            sta_params['dims'], sta_params['fupsample_trace'], sta_params['fit_kind'],
-            sta_params['lowpass_cutoff'], sta_params['pre_blur_sigma_s'], sta_params['post_blur_sigma_s'],
-            whitening_matrix=sta_params.get('whitening_matrix'))
-        return {"rf": rf}
+        x_stimulus = sta_params['x_stimulus']
+        whitening_matrix = sta_params.get('whitening_matrix')
+
+        # Zero-padding the traces to the same length does not change their STAs.
+        n_frames = max(trace.size for trace in traces)
+        y = np.zeros((n_frames, len(traces)), dtype=x_stimulus.dtype)
+        for i, trace in enumerate(traces):
+            assert trace.dtype == x_stimulus.dtype, (trace.dtype, x_stimulus.dtype)
+            y[:trace.size, i] = trace
+
+        with threadpool_limits(limits=n_jobs):
+            rfs = compute_rf_sta(x_stimulus[:n_frames], y)
+            if whitening_matrix is not None:
+                rfs = whitening_matrix @ rfs
+
+        return [{"rf": np.ascontiguousarray(rfs[:, i]).reshape(sta_params['dims'])} for i in range(len(traces))]
 
     @staticmethod
     def _prepare_trace(
@@ -554,57 +618,6 @@ class FastStaTemplate(dj.Computed):
 
         assert trace.size <= n_frames, f"stim-frames: {n_frames}, trace-shape: {trace.shape}"
         return trace
-
-    @classmethod
-    def _compute_rf(
-            cls,
-            tracetime: np.ndarray, trace: np.ndarray, stimtime: np.ndarray,
-            x_stimulus: np.ndarray, dims: tuple, fupsample_trace: int,
-            fit_kind: str, lowpass_cutoff: float, pre_blur_sigma_s: float,
-            post_blur_sigma_s: float, whitening_matrix: np.ndarray | None = None) -> np.ndarray:
-        """Compute the receptive field for a single trace.
-
-        Parameters
-        ----------
-        tracetime : np.ndarray
-            Timestamps corresponding to the trace samples.
-        trace : np.ndarray
-            1-D neural response trace.
-        stimtime : np.ndarray
-            Timestamps corresponding to the stimulus frames.
-        x_stimulus : np.ndarray
-            Stimulus design matrix of shape (n_frames, n_features).
-        dims : tuple
-            Target shape of the computed receptive field.
-        fupsample_trace : int
-            Upsampling factor for the trace.
-        fit_kind : str
-            Kind of fitting procedure (e.g. "gradient").
-        lowpass_cutoff : float
-            Cutoff frequency for the low-pass filter.
-        pre_blur_sigma_s : float
-            Gaussian blur sigma applied before STA (in seconds).
-        post_blur_sigma_s : float
-            Gaussian blur sigma applied after STA (in seconds).
-        whitening_matrix : np.ndarray or None, optional
-            Inverse stimulus covariance of shape (n_features, n_features). If given, the STA is whitened.
-
-        Returns
-        -------
-        np.ndarray
-            Receptive field array reshaped to `dims`.
-        """
-
-        trace = cls._prepare_trace(
-            tracetime, trace, stimtime, x_stimulus.shape[0],
-            fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s)
-        assert trace.dtype == x_stimulus.dtype, (trace.dtype, x_stimulus.dtype)
-        rf = compute_rf_sta(np.ascontiguousarray(x_stimulus[:trace.size]),
-                            np.ascontiguousarray(trace))
-        if whitening_matrix is not None:
-            rf = whitening_matrix @ rf
-
-        return rf.reshape(dims)
 
     def plot1(self, key: dict | None = None, kind: str = 'frames', **kwargs) -> None:
         """Plot the receptive field as frames.

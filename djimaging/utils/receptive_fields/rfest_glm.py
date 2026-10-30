@@ -7,12 +7,17 @@ The official `rfest.GLM` does not support
     - hyperparameter search over (alpha, beta) (`fit_hps`),
     - early stopping control and `best_dev_metric` model selection.
 These were previously provided by a custom RFEst fork; they are implemented here on top of the official package.
+
+For speed, the forward pass, cost and metrics are pure functions, and the optimizer runs several iterations per call
+of a compiled function (`_get_chunk_runner`) that is cached across models with the same configuration.
 """
 
+import functools
 import itertools
 import time
 import warnings
 from copy import deepcopy
+from typing import NamedTuple
 
 import numpy as np
 
@@ -20,7 +25,7 @@ try:
     import jax
     import jax.numpy as jnp
     import jax.random as random
-    from jax import jit, value_and_grad
+    from jax import jit, lax, value_and_grad
 
     try:
         from jax.example_libraries import optimizers
@@ -69,6 +74,110 @@ def apply_nonlinearity(x, kind):
         raise ValueError(f'Input filter nonlinearity `{kind}` is not supported.')
 
 
+# Number of optimizer iterations per call of the compiled function. Early stopping is checked after each chunk,
+# so up to `_CHUNK_SIZE - 1` iterations past the stopping point are computed and discarded.
+_CHUNK_SIZE = 25
+
+
+class _ModelConfig(NamedTuple):
+    """Static (hashable) model configuration, used as key for the compiled functions."""
+    filter_names: tuple
+    filter_nonlinearity: tuple  # pairs of (name, nonlinearity)
+    output_nonlinearity: str
+    distr: str
+    fit_intercept: bool
+    fit_R: bool
+    alpha: float
+    dtype: object
+
+
+def _forwardpass(p, inputs, fixed, cfg):
+    """Predicted response for the inputs (per filter: X @ S if a spline basis is used, else X)."""
+    intercept = p['intercept'] if cfg.fit_intercept else fixed['intercept']
+    R = p['R'] if cfg.fit_R else fixed['R']
+    filter_nonlinearity = dict(cfg.filter_nonlinearity)
+
+    filters_output = jnp.array([
+        apply_nonlinearity(jnp.squeeze(input_term @ p[name]) + intercept[name], kind=filter_nonlinearity[name])
+        for name, input_term in inputs.items()]).sum(0)
+
+    return R['global'] * apply_nonlinearity(
+        filters_output + intercept['global'], kind=cfg.output_nonlinearity).astype(cfg.dtype)
+
+
+def _cost(p, inputs, y, fixed, beta, cfg, penalize, precomputed=None):
+    """Cost function; the poisson likelihood is normalized by the number of samples."""
+    r = _forwardpass(p, inputs, fixed, cfg) if precomputed is None else precomputed
+
+    if cfg.distr == 'gaussian':
+        loss = loss_mse(y, r)
+    elif cfg.distr == 'poisson':
+        loss = loss_neglogli(y, r) / y.size
+    else:
+        raise NotImplementedError(cfg.distr)
+
+    if penalize:
+        loss += loss_penalty(jnp.hstack([p[name].flatten() for name in cfg.filter_names]), cfg.alpha, beta)
+
+    return jnp.squeeze(loss)
+
+
+_SCORE_METRICS = ('mse', 'corrcoef', 'r2')
+
+
+def _score(y, y_pred, metric):
+    """Same metrics as `rfest.GLM.compute_score`, but traceable by jax. See `_SCORE_METRICS`."""
+    if metric == 'mse':
+        return jnp.mean((y - y_pred) ** 2)
+    elif metric == 'corrcoef':
+        yc = y - y.mean()
+        pc = y_pred - y_pred.mean()
+        return (yc @ pc) / jnp.sqrt((yc @ yc) * (pc @ pc))
+    elif metric == 'r2':
+        return 1. - jnp.sum((y - y_pred) ** 2) / jnp.sum((y - y.mean()) ** 2)
+    else:
+        raise NotImplementedError(metric)
+
+
+@functools.lru_cache(maxsize=None)
+def _get_chunk_runner(cfg, step_size, metric, has_dev, penalize, chunk_size):
+    """Return Adam (init, run_chunk, get_params) for a model configuration.
+
+    `run_chunk` performs `chunk_size` Adam steps and returns per step: the train cost before the step,
+    and the dev cost and train/dev metrics and parameters after the step. Values that are not computed
+    (no dev set, unsupported metric) are returned as zeros, because rfest enables `jax_debug_nans`.
+    The function is compiled once per configuration and input shapes, and then reused across models.
+    """
+    opt_init, opt_update, get_params = optimizers.adam(step_size=step_size)
+    has_metric = metric in _SCORE_METRICS
+
+    def body(data, opt_state, i):
+        p = get_params(opt_state)
+        cost_train, grad = value_and_grad(_cost)(
+            p, data['inputs_train'], data['y_train'], data['fixed'], data['beta'], cfg, penalize)
+        opt_state = opt_update(i, grad, opt_state)
+        p = get_params(opt_state)
+
+        y_pred_train = _forwardpass(p, data['inputs_train'], data['fixed'], cfg)
+        metric_train = _score(data['y_train'], y_pred_train, metric) if has_metric else jnp.zeros(())
+
+        if has_dev:
+            y_pred_dev = _forwardpass(p, data['inputs_dev'], data['fixed'], cfg)
+            cost_dev = _cost(p, data['inputs_dev'], data['y_dev'], data['fixed'], data['beta'], cfg,
+                             penalize=False, precomputed=y_pred_dev)
+            metric_dev = _score(data['y_dev'], y_pred_dev, metric) if has_metric else jnp.zeros(())
+        else:
+            cost_dev = metric_dev = jnp.zeros(())
+
+        return opt_state, (cost_train, cost_dev, metric_train, metric_dev, p)
+
+    @jit
+    def run_chunk(opt_state, i0, data):
+        return lax.scan(functools.partial(body, data), opt_state, i0 + jnp.arange(chunk_size))
+
+    return opt_init, run_chunk, get_params
+
+
 class GLM(_RFEstGLM):
     """Official `rfest.GLM` plus pre-computed design matrices, fit_R/fit_intercept and hyperparameter search."""
 
@@ -85,8 +194,19 @@ class GLM(_RFEstGLM):
         return apply_nonlinearity(x, kind=kind)
 
     def add_design_matrix(self, X, dims=None, df=None, smooth=None, lag=True, is_design_matrix=False,
-                          filter_nonlinearity='none', kind='train', name='stimulus', shift=0, burn_in=None):
-        """Add a design matrix. If `is_design_matrix`, X is used as is (after burn-in) instead of building lags."""
+                          filter_nonlinearity='none', kind='train', name='stimulus', shift=0, burn_in=None,
+                          is_projected=False):
+        """Add a design matrix. If `is_design_matrix`, X is used as is (after burn-in) instead of building lags.
+
+        If `is_projected`, X is a design matrix already projected onto the spline basis (X @ S) of `df` and `smooth`,
+        which skips the projection. The unprojected design matrix is then not available (`self.X[kind][name]` is None).
+        """
+        if is_projected:
+            assert is_design_matrix, 'A projected design matrix must be a design matrix.'
+            return self._add_projected_design_matrix(
+                X, dims=dims, df=df, smooth=smooth, filter_nonlinearity=filter_nonlinearity, kind=kind, name=name,
+                shift=shift, burn_in=burn_in)
+
         if not is_design_matrix:
             return super().add_design_matrix(
                 X, dims=dims, df=df, smooth=smooth, lag=lag, filter_nonlinearity=filter_nonlinearity,
@@ -125,6 +245,34 @@ class GLM(_RFEstGLM):
             self.XS.setdefault(kind, {})[name] = self.X[kind][name] @ self.S[name]
             if kind == 'train':
                 self.n_features[name] = self.XS['train'][name].shape[1]
+
+    def _add_projected_design_matrix(self, XS, dims, df, smooth, filter_nonlinearity, kind, name, shift, burn_in):
+        """Add a design matrix that is already projected onto the spline basis, see `add_design_matrix`."""
+        if kind not in self.X:
+            self.X[kind] = {}
+
+        if kind == 'train':
+            if smooth is None:
+                raise ValueError('`smooth` is required to rebuild the spline basis of a projected design matrix.')
+            self.filter_nonlinearity[name] = filter_nonlinearity
+            self.filter_names.append(name)
+            dims = dims if type(dims) is not int else [dims, ]
+            self.dims[name] = dims
+            self.shift[name] = shift
+            self.df[name] = df if type(df) is not int else [df, ]
+            # The spline basis is still needed to map the fitted coefficients back to the filter: w = S @ b.
+            self.S[name] = build_spline_matrix(dims=dims, df=self.df[name], smooth=smooth, dtype=self.dtype)
+            self.n_features[name] = XS.shape[1]
+        elif name not in self.S:
+            raise ValueError(f'No spline basis for `{name}`, add the train design matrix first.')
+        else:
+            dims = self.dims[name]
+
+        if self.burn_in is None:
+            self.burn_in = dims[0] - 1 if burn_in is None else burn_in
+
+        self.X[kind][name] = None
+        self.XS.setdefault(kind, {})[name] = jnp.asarray(np.asarray(XS[self.burn_in:]).astype(self.dtype))
 
     def initialize(self, y=None, num_subunits=1, dt=1., method='random', compute_ci=True, random_seed=2046,
                    verbose=0, add_noise_to_mle=False, fit_R=False, fit_intercept=True):
@@ -264,37 +412,31 @@ class GLM(_RFEstGLM):
     def get_R(self, p=None):
         return p['R'] if self.fit_R else self.R[self.init_method]
 
+    def _model_config(self):
+        return _ModelConfig(
+            filter_names=tuple(self.filter_names),
+            filter_nonlinearity=tuple(self.filter_nonlinearity.items()),
+            output_nonlinearity=self.output_nonlinearity, distr=self.distr,
+            fit_intercept=bool(self.fit_intercept), fit_R=bool(self.fit_R), alpha=self.alpha, dtype=self.dtype)
+
+    def _inputs(self, kind):
+        """Per-filter inputs of the forward pass: the projected design matrix if a spline basis is used."""
+        return {name: self.XS[kind][name] if name in self.S else self.X[kind][name] for name in self.X[kind]}
+
+    def _fixed_params(self):
+        """Intercept and gain used if they are not fitted."""
+        return dict(intercept=self.intercept[self.init_method], R=self.R[self.init_method])
+
+    def _penalize(self):
+        return self.beta is not None and self.beta != 0
+
     def forwardpass(self, p, kind):
-        intercept = self.get_intercept(p)
-        R = self.get_R(p)
-
-        filters_output = []
-        for name in self.X[kind]:
-            input_term = self.XS[kind][name] if name in self.S else self.X[kind][name]
-            filters_output.append(self.fnl(
-                jnp.squeeze(input_term @ p[name]) + intercept[name], kind=self.filter_nonlinearity[name]))
-
-        filters_output = jnp.array(filters_output).sum(0)
-
-        return R['global'] * self.fnl(
-            filters_output + intercept['global'], kind=self.output_nonlinearity).astype(self.dtype)
+        return _forwardpass(p, self._inputs(kind), self._fixed_params(), self._model_config())
 
     def cost(self, p, kind='train', precomputed=None, penalize=True):
         """Cost function; the poisson likelihood is normalized by the number of samples."""
-        y = self.y[kind]
-        r = self.forwardpass(p, kind) if precomputed is None else precomputed
-
-        if self.distr == 'gaussian':
-            loss = loss_mse(y, r)
-        elif self.distr == 'poisson':
-            loss = loss_neglogli(y, r) / y.size
-        else:
-            raise NotImplementedError(self.distr)
-
-        if penalize and (self.beta is not None and self.beta != 0) and kind == 'train':
-            loss += loss_penalty(jnp.hstack([p[name].flatten() for name in self.filter_names]), self.alpha, self.beta)
-
-        return jnp.squeeze(loss)
+        return _cost(p, self._inputs(kind), self.y[kind], self._fixed_params(), self.beta, self._model_config(),
+                     penalize=penalize and self._penalize() and kind == 'train', precomputed=precomputed)
 
     def optimize(self, p0, num_iters, metric, step_size, tolerance, verbose, return_model, atol=1e-5, min_iters=300,
                  early_stopping=True):
@@ -304,62 +446,74 @@ class GLM(_RFEstGLM):
 
         assert ('dev' in self.y) or ('dev' not in return_model), 'Cannot use dev set if dev set is not given.'
 
-        @jit
-        def step(_i, _opt_state):
-            p = get_params(_opt_state)
-            loss, grad = value_and_grad(self.cost)(p)
-            return loss, opt_update(_i, grad, _opt_state)
+        has_dev = 'dev' in self.y
 
-        opt_init, opt_update, get_params = optimizers.adam(step_size=step_size)
+        opt_init, run_chunk, get_params = _get_chunk_runner(
+            self._model_config(), step_size, metric, has_dev, self._penalize(), _CHUNK_SIZE)
         opt_state = opt_init(p0)
 
-        cost_train = np.full(num_iters, np.nan)
-        cost_dev = np.full(num_iters, np.nan)
-        metric_train = np.full(num_iters, np.nan)
-        metric_dev = np.full(num_iters, np.nan)
-        params_list = []
+        data = dict(inputs_train=self._inputs('train'), y_train=jnp.asarray(self.y['train']),
+                    fixed=self._fixed_params(), beta=0. if self.beta is None else self.beta)
+        if has_dev:
+            data.update(inputs_dev=self._inputs('dev'), y_dev=jnp.asarray(self.y['dev']))
 
-        has_dev = 'dev' in self.y
+        n_chunks = int(np.ceil(num_iters / _CHUNK_SIZE))
+        cost_train = np.full(n_chunks * _CHUNK_SIZE, np.nan)
+        cost_dev = np.full(n_chunks * _CHUNK_SIZE, np.nan)
+        metric_train = np.full(n_chunks * _CHUNK_SIZE, np.nan)
+        metric_dev = np.full(n_chunks * _CHUNK_SIZE, np.nan)
+        params_chunks = []
 
         if verbose:
             self.print_progress_header(
                 c_train=True, c_dev=has_dev, m_train=metric is not None, m_dev=metric is not None and has_dev)
 
+        stop = None
         time_start = time.time()
-        for i in range(num_iters):
-            cost_train[i], opt_state = step(i, opt_state)
-
-            params = get_params(opt_state)
-            params_list.append(params)
-
-            y_pred_train = self.forwardpass(p=params, kind='train')
-            metric_train[i] = self.compute_score(self.y['train'], y_pred_train, metric)
-
+        for i_chunk in range(n_chunks):
+            i0 = i_chunk * _CHUNK_SIZE
+            opt_state, (c_train, c_dev, m_train, m_dev, params) = run_chunk(opt_state, i0, data)
+            params_chunks.append(params)
+            idx = slice(i0, i0 + _CHUNK_SIZE)
+            cost_train[idx] = np.asarray(c_train)
             if has_dev:
-                y_pred_dev = self.forwardpass(p=params, kind='dev')
-                cost_dev[i] = self.cost(p=params, kind='dev', precomputed=y_pred_dev, penalize=False)
-                metric_dev[i] = self.compute_score(self.y['dev'], y_pred_dev, metric)
-
+                cost_dev[idx] = np.asarray(c_dev)
+            if metric in _SCORE_METRICS:
+                metric_train[idx] = np.asarray(m_train)
+                if has_dev:
+                    metric_dev[idx] = np.asarray(m_dev)
             time_elapsed = time.time() - time_start
 
-            if verbose and i % int(verbose) == 0:
-                self.print_progress(
-                    i, time_elapsed, c_train=cost_train[i], c_dev=cost_dev[i],
-                    m_train=metric_train[i], m_dev=metric_dev[i])
+            # Apply the stopping criteria in the same order as for a step-by-step optimization.
+            for i in range(i0, min(i0 + _CHUNK_SIZE, num_iters)):
+                if verbose and i % int(verbose) == 0:
+                    self.print_progress(
+                        i, time_elapsed, c_train=cost_train[i], c_dev=cost_dev[i],
+                        m_train=metric_train[i], m_dev=metric_dev[i])
 
-            if tolerance and i > min_iters:  # tolerance = 0: no early stop.
-                total_time_elapsed = time.time() - time_start
+                if tolerance and i > min_iters:  # tolerance = 0: no early stop.
+                    if early_stopping and has_dev and np.all(np.diff(cost_dev[i - tolerance:i]) > 0):
+                        stop = 'dev_stop'
+                        break
 
-                if early_stopping and has_dev and np.all(np.diff(cost_dev[i - tolerance:i]) > 0):
-                    stop = 'dev_stop'
-                    break
-
-                if np.all(-np.diff(cost_train[i - tolerance:i]) < atol):
-                    stop = 'train_stop'
-                    break
+                    if np.all(-np.diff(cost_train[i - tolerance:i]) < atol):
+                        stop = 'train_stop'
+                        break
+            if stop is not None:
+                break
         else:
-            total_time_elapsed = time.time() - time_start
+            i = num_iters - 1
             stop = 'maxiter_stop'
+
+        total_time_elapsed = time.time() - time_start
+
+        def get_params_i(j):
+            return jax.tree_util.tree_map(lambda x: x[j % _CHUNK_SIZE], params_chunks[j // _CHUNK_SIZE])
+
+        params = get_params_i(i)
+        y_pred_train = self.forwardpass(p=params, kind='train')
+        if has_dev:
+            y_pred_dev = self.forwardpass(p=params, kind='dev')
 
         if verbose:
             self.print_progress(
@@ -393,13 +547,14 @@ class GLM(_RFEstGLM):
         self.metric_dev = metric_dev[:i + 1]
         self.metric_dev_opt = metric_dev[best]
         self.total_time_elapsed = total_time_elapsed
-        self.all_params = params_list[:i + 1]
+        # Parameters of all iterations, stacked per chunk of `_CHUNK_SIZE` iterations (may contain more than i + 1).
+        self.all_params = params_chunks
 
         self.y_pred['opt'].update({'train': y_pred_train})
         if has_dev:
             self.y_pred['opt'].update({'dev': y_pred_dev})
 
-        return params_list[best]
+        return get_params_i(best)
 
     def fit(self, y=None, num_iters=3, alpha=1, beta=0.01, metric='corrcoef', step_size=1e-3,
             tolerance=10, verbose=True, return_model=None, atol=1e-5, min_iters=300, early_stopping=False):
@@ -508,11 +663,12 @@ class GLM(_RFEstGLM):
             if 'dev' in self.y:
                 self._get_response_variance(w_type='opt', kind='dev')
 
-    def predict(self, X, w_type='opt', is_design_matrix=True):
+    def predict(self, X, w_type='opt', is_design_matrix=True, is_projected=False):
         """Predict the response for the test set.
 
         X : dict or array
             Per-filter design matrices (or raw stimuli if `is_design_matrix` is False).
+            If `is_projected`, the design matrices are already projected onto the spline basis (X @ S).
         """
         p = self.p[w_type]
 
@@ -524,7 +680,7 @@ class GLM(_RFEstGLM):
 
         for name in X:
             self.add_design_matrix(X[name], dims=self.dims[name], shift=self.shift[name], name=name, kind='test',
-                                   is_design_matrix=is_design_matrix)
+                                   is_design_matrix=is_design_matrix, is_projected=is_projected)
 
         if self.num_subunits != 1:
             for name in self.filter_names:

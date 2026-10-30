@@ -5,6 +5,9 @@ The tables follow the logic of the fast STA tables (see `fast_sta.py`): The stim
 parameter table and built once per stimulus. All traces of a presentation are then aligned to the stimulus and fit
 without any intermediate table. The tables subclass the fast STA templates and only replace the fitting step.
 
+For speed, the projections of the design matrix onto the spline bases are computed once per `populate`, and the traces
+of a presentation are fit in parallel processes. Use `populate(n_jobs=...)` to set the number of CPU cores.
+
 Example usage:
 
 from djimaging.tables import receptivefield
@@ -56,16 +59,23 @@ class FitDoG2DRfGlm(receptivefield.FitDoG2DRFTemplate):
     stimulus_table = Stimulus
 """
 
+import os
+import shutil
+import tempfile
+import weakref
 from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
+from joblib import Parallel, delayed
 from matplotlib import pyplot as plt
+from tqdm.auto import tqdm
 
 from djimaging.tables.receptivefield.fast_sta import FastStaParamsTemplate, FastStaTemplate
 from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.receptive_fields.glm_utils import ReceptiveFieldGLM, plot_rf_summary, quality_test
+from djimaging.utils.receptive_fields.glm_utils import ReceptiveFieldGLM, fit_receptive_field_glm, \
+    plot_rf_summary, quality_test
 
 
 def _rf_to_channels_first(rf: np.ndarray, model_dict: dict) -> np.ndarray:
@@ -73,6 +83,26 @@ def _rf_to_channels_first(rf: np.ndarray, model_dict: dict) -> np.ndarray:
     if model_dict.get('n_colors', 1) > 1:
         return np.moveaxis(rf, -1, 0)
     return rf
+
+
+class _MemmappedArrays(dict):
+    """Nested dict of read-only memory-mapped arrays, whose files are deleted when the dict is garbage collected.
+
+    Worker processes open memory-mapped arrays by file name instead of receiving a copy.
+    """
+
+    @classmethod
+    def from_arrays(cls, arrays: dict, prefix: str = 'djimaging_') -> '_MemmappedArrays':
+        folder = tempfile.mkdtemp(prefix=prefix)
+        obj = cls()
+        weakref.finalize(obj, shutil.rmtree, folder, True)
+        for i, (k1, arrays_k1) in enumerate(arrays.items()):
+            obj[k1] = dict()
+            for j, (k2, array) in enumerate(arrays_k1.items()):
+                file = os.path.join(folder, f'{i}_{j}.npy')
+                np.save(file, array)
+                obj[k1][k2] = np.load(file, mmap_mode='r')
+        return obj
 
 
 class RfGlmParamsTemplate(FastStaParamsTemplate):
@@ -201,56 +231,79 @@ class RfGlmTemplate(FastStaTemplate):
         Returns
         -------
         dict
-            STA parameters (see `FastStaTemplate.prepare_sta_params`) and the key "glm_params".
+            STA parameters (see `FastStaTemplate.prepare_sta_params`) and the keys "glm_params" and
+            "basis_projections" (the design matrix projected onto the spline bases, shared by all traces).
         """
         sta_params = super().prepare_sta_params(*restrictions)
         names = ('df_ts', 'df_ws', 'betas', 'kfold', 'metric', 'output_nonlinearity', 'other_params_dict')
         values = self._select_params(*restrictions).fetch1(*names)
         sta_params['glm_params'] = dict(zip(names, values))
+
+        projections = ReceptiveFieldGLM(
+            x_stimulus=sta_params['x_stimulus'], trace=None,
+            **self._get_glm_kwargs(sta_params)).compute_basis_projections()
+        sta_params['basis_projections'] = _MemmappedArrays.from_arrays(projections, prefix='djimaging_glm_')
         return sta_params
 
-    def _compute_entry(self, tracetime: np.ndarray, trace: np.ndarray, stimtime: np.ndarray,
-                       sta_params: dict) -> dict | None:
-        """Fit a GLM receptive field to a single trace.
-
-        Parameters
-        ----------
-        tracetime : np.ndarray
-            Timestamps corresponding to the trace samples.
-        trace : np.ndarray
-            1-D neural response trace.
-        stimtime : np.ndarray
-            Timestamps corresponding to the stimulus frames.
-        sta_params : dict
-            Parameters from `prepare_sta_params`.
-
-        Returns
-        -------
-        dict or None
-            Entry with "rf", "model_dict" and "quality_dict". None if the trace is not finite.
-        """
-        x_stimulus = sta_params['x_stimulus']
+    @staticmethod
+    def _get_glm_kwargs(sta_params: dict) -> dict:
+        """Arguments of `ReceptiveFieldGLM` except for the data."""
         glm_params = sta_params['glm_params']
-
-        trace = self._prepare_trace(
-            tracetime, trace, stimtime, x_stimulus.shape[0],
-            sta_params['fupsample_trace'], sta_params['fit_kind'], sta_params['lowpass_cutoff'],
-            sta_params['pre_blur_sigma_s'], sta_params['post_blur_sigma_s'])
-
-        if not np.all(np.isfinite(trace)):
-            print(f"Skipping trace with {np.sum(~np.isfinite(trace))} non-finite values after alignment.")
-            return None
-
-        model = ReceptiveFieldGLM(
-            dt=sta_params['dt'], x_stimulus=x_stimulus[:trace.size], trace=trace,
-            dims=tuple(sta_params['dims']), rf_time=sta_params['rf_time'],
+        return dict(
+            dt=sta_params['dt'], dims=tuple(sta_params['dims']), rf_time=sta_params['rf_time'],
             shift=sta_params['shift'], burn_in=sta_params['burn_in'],
             df_ts=glm_params['df_ts'], df_ws=glm_params['df_ws'], betas=glm_params['betas'],
             kfold=glm_params['kfold'], metric=glm_params['metric'],
             output_nonlinearity=glm_params['output_nonlinearity'], **glm_params['other_params_dict'])
 
-        rf, quality_dict, model_dict = model.compute_glm_receptive_field()
+    def _compute_entries(self, traces: list, sta_params: dict, n_jobs: int) -> list:
+        """Fit GLM receptive fields to all traces of a presentation, in parallel processes.
 
+        Parameters
+        ----------
+        traces : list of np.ndarray
+            Preprocessed traces aligned to the stimulus, see `_prepare_trace`.
+        sta_params : dict
+            Parameters from `prepare_sta_params`. Without "basis_projections", every fit projects the design matrix.
+        n_jobs : int
+            Maximum number of parallel processes, at most the number of available CPU cores.
+
+        Returns
+        -------
+        list of dict or None
+            Entries with "rf", "model_dict" and "quality_dict". None if the trace is not finite.
+        """
+        glm_kwargs = self._get_glm_kwargs(sta_params)
+        basis_projections = sta_params.get('basis_projections')
+
+        def get_fit_kwargs(trace):
+            if basis_projections is not None:
+                return dict(glm_kwargs=glm_kwargs, basis_projections=basis_projections)
+            return dict(glm_kwargs=glm_kwargs, x_stimulus=sta_params['x_stimulus'][:trace.size])
+
+        idxs = []
+        for i, trace in enumerate(traces):
+            if np.all(np.isfinite(trace)):
+                idxs.append(i)
+            else:
+                print(f"Skipping trace with {np.sum(~np.isfinite(trace))} non-finite values after alignment.")
+
+        n_jobs = max(1, min(n_jobs, len(idxs), os.cpu_count() or 1))
+        if n_jobs == 1:
+            results = (fit_receptive_field_glm(traces[i], **get_fit_kwargs(traces[i])) for i in idxs)
+        else:
+            results = Parallel(n_jobs=n_jobs, backend='loky', return_as='generator')(
+                delayed(fit_receptive_field_glm)(traces[i], single_threaded=True, **get_fit_kwargs(traces[i]))
+                for i in idxs)
+
+        entries = [None] * len(traces)
+        for i, result in zip(idxs, tqdm(results, total=len(idxs), desc='GLM fits', leave=False)):
+            entries[i] = self._to_entry(*result, sta_params=sta_params)
+        return entries
+
+    @staticmethod
+    def _to_entry(rf: np.ndarray, quality_dict: dict, model_dict: dict, sta_params: dict) -> dict:
+        """Entry of a single trace from the GLM fit."""
         # Same layout as the fast STA: (time, ..., color)
         if model_dict['n_colors'] > 1:
             rf = np.moveaxis(rf, 0, -1)

@@ -20,7 +20,8 @@ RfGlmParams().add_default(skip_duplicates=True)
 RfGlmParams()
 
 # %%
-RfGlm().populate(processes=20, display_progress=True)
+# The ROIs of each field are fit in parallel, `n_jobs` sets the number of CPU cores.
+RfGlm().populate(display_progress=True, n_jobs=30)
 RfGlm()
 
 # %%

@@ -19,7 +19,8 @@ FastStaParams().add_default(skip_duplicates=True)
 FastStaParams()
 
 # %%
-FastSta().populate(processes=20, display_progress=True)
+# The STAs of all ROIs of a field are computed at once, `n_jobs` sets the number of CPU cores.
+FastSta().populate(display_progress=True, n_jobs=30)
 FastSta()
 
 # %%

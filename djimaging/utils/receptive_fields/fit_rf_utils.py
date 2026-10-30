@@ -66,14 +66,15 @@ def compute_rf_sta(X: np.ndarray, y: np.ndarray) -> np.ndarray:
     X : np.ndarray
         Design matrix, shape (n_samples, n_features).
     y : np.ndarray
-        Neural response vector, shape (n_samples,).
+        Neural response vector, shape (n_samples,), or several responses, shape (n_samples, n_responses).
+        Computing several responses at once is much faster than one by one, because X is read only once.
 
     Returns
     -------
     np.ndarray
-        STA receptive field, shape (n_features,).
+        STA receptive field, shape (n_features,), or (n_features, n_responses) for several responses.
     """
-    w = (X.T @ y) / np.sum(y)
+    w = (X.T @ y) / np.sum(y, axis=0)
     return w
 
 
