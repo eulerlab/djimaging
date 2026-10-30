@@ -2,38 +2,60 @@ from djimaging.schemas.core_schema import *
 from djimaging.tables import receptivefield
 
 
+# Receptive fields: fast (optionally whitened) STA
 @schema
-class DNoiseTraceParams(receptivefield.DNoiseTraceParamsTemplate):
+class FastStaParams(receptivefield.FastStaParamsTemplate):
     stimulus_table = Stimulus
-
-
-@schema
-class DNoiseTrace(receptivefield.DNoiseTraceTemplate):
     presentation_table = Presentation
-    stimulus_table = Stimulus
-    traces_table = PreprocessTraces
-    params_table = DNoiseTraceParams
 
 
 @schema
-class RfGlmParams(receptivefield.glm.RfGlmParamsTemplate):
+class FastSta(receptivefield.FastStaTemplate):
+    params_table = FastStaParams
+    presentation_table = Presentation
+    traces_table = PreprocessTraces
+
+
+@schema
+class FastStaQuality(receptivefield.FastStaQualityTemplate):
+    sta_table = FastSta
+
+
+@schema
+class SplitRFParams(receptivefield.SplitRFParamsTemplate):
     pass
 
 
 @schema
-class RfGlm(receptivefield.RfGlmTemplate):
-    noise_traces_table = DNoiseTrace
-    params_table = RfGlmParams
-    preprocesstraces_table = PreprocessTraces
-    stimulus_table = Stimulus
-    presentation_table = Presentation
-    traces_table = Traces
+class SplitRF(receptivefield.SplitRFTemplate):
+    rf_table = FastSta
+    split_rf_params_table = SplitRFParams
 
 
 @schema
-class RfGlmSingleModel(receptivefield.RfGlmSingleModelTemplate):
-    noise_traces_table = DNoiseTrace
-    glm_table = RfGlm
+class FitGauss2DRF(receptivefield.FitGauss2DRFTemplate):
+    split_rf_table = SplitRF
+    stimulus_table = Stimulus
+
+
+@schema
+class FitDoG2DRF(receptivefield.FitDoG2DRFTemplate):
+    split_rf_table = SplitRF
+    stimulus_table = Stimulus
+
+
+# Receptive fields: GLM
+@schema
+class RfGlmParams(receptivefield.RfGlmParamsTemplate):
+    stimulus_table = Stimulus
+    presentation_table = Presentation
+
+
+@schema
+class RfGlm(receptivefield.RfGlmTemplate):
+    params_table = RfGlmParams
+    presentation_table = Presentation
+    traces_table = PreprocessTraces
 
 
 @schema
@@ -43,18 +65,17 @@ class RfGlmQualityParams(receptivefield.RfGlmQualityParamsTemplate):
 
 @schema
 class RfGlmQuality(receptivefield.RfGlmQualityTemplate):
-    glm_single_model_table = RfGlmSingleModel
     glm_table = RfGlm
     params_table = RfGlmQualityParams
 
 
 @schema
-class SplitRfGlmParams(receptivefield.split_strf.SplitRFParamsTemplate):
+class SplitRfGlmParams(receptivefield.SplitRFParamsTemplate):
     pass
 
 
 @schema
-class SplitRfGlm(receptivefield.split_strf.SplitRFTemplate):
+class SplitRfGlm(receptivefield.SplitRFTemplate):
     rf_table = RfGlm
     split_rf_params_table = SplitRfGlmParams
 

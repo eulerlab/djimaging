@@ -57,3 +57,15 @@ def test_definition_FastStaParamsTemplate():
 
 def test_definition_FastStaTemplate():
     _test_definition(receptivefield.FastStaTemplate)
+
+
+def test_definition_RfGlmParamsTemplate():
+    _test_definition(receptivefield.RfGlmParamsTemplate)
+
+
+def test_definition_RfGlmTemplate():
+    _test_definition(receptivefield.RfGlmTemplate)
+
+
+def test_definition_RfGlmQualityTemplate():
+    _test_definition(receptivefield.RfGlmQualityTemplate)

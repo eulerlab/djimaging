@@ -1,52 +1,37 @@
 """
 Receptive field estimation using GLMs.
 
+The tables follow the logic of the fast STA tables (see `fast_sta.py`): The stimulus design matrix is stored in the
+parameter table and built once per stimulus. All traces of a presentation are then aligned to the stimulus and fit
+without any intermediate table. The tables subclass the fast STA templates and only replace the fitting step.
+
+For speed, the projections of the design matrix onto the spline bases are computed once per `populate`, and the traces
+of a presentation are fit in parallel processes. Use `populate(n_jobs=...)` to set the number of CPU cores.
+
 Example usage:
 
-from djimaging.tables import receptivefield, rf_glm
+from djimaging.tables import receptivefield
 
 @schema
-class DNoiseTraceParams(receptivefield.DNoiseTraceParamsTemplate):
-    pass
-
-
-@schema
-class DNoiseTrace(receptivefield.DNoiseTraceTemplate):
-    presentation_table = Presentation
+class RfGlmParams(receptivefield.RfGlmParamsTemplate):
     stimulus_table = Stimulus
-    traces_table = PreprocessTraces
-    params_table = DNoiseTraceParams
+    presentation_table = Presentation
 
 
 @schema
-class RfGlmParams(rf_glm.RfGlmParamsTemplate):
-    pass
-
-
-@schema
-class RfGlm(rf_glm.RfGlmTemplate):
-    noise_traces_table = DNoiseTrace
+class RfGlm(receptivefield.RfGlmTemplate):
     params_table = RfGlmParams
-    preprocesstraces_table = PreprocessTraces
-    stimulus_table = Stimulus
     presentation_table = Presentation
-    traces_table = Traces
+    traces_table = PreprocessTraces
 
 
 @schema
-class RfGlmSingleModel(rf_glm.RfGlmSingleModelTemplate):
-    noise_traces_table = DNoiseTrace
-    glm_table = RfGlm
-
-
-@schema
-class RfGlmQualityParams(rf_glm.RfGlmQualityParamsTemplate):
+class RfGlmQualityParams(receptivefield.RfGlmQualityParamsTemplate):
     pass
 
 
 @schema
-class RfGlmQuality(rf_glm.RfGlmQualityTemplate):
-    glm_single_model_table = RfGlmSingleModel
+class RfGlmQuality(receptivefield.RfGlmQualityTemplate):
     glm_table = RfGlm
     params_table = RfGlmQualityParams
 
@@ -74,48 +59,61 @@ class FitDoG2DRfGlm(receptivefield.FitDoG2DRFTemplate):
     stimulus_table = Stimulus
 """
 
-import warnings
+import os
+import shutil
+import tempfile
+import weakref
 from abc import abstractmethod
-from copy import deepcopy
 
 import datajoint as dj
 import numpy as np
+from joblib import Parallel, delayed
 from matplotlib import pyplot as plt
+from tqdm.auto import tqdm
 
+from djimaging.tables.receptivefield.fast_sta import FastStaParamsTemplate, FastStaTemplate
 from djimaging.utils.dj_storage import load_array
-from djimaging.utils.receptive_fields.plot_rf_utils import plot_rf_frames, plot_rf_video
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.receptive_fields.glm_utils import ReceptiveFieldGLM, plot_rf_summary, quality_test
+from djimaging.utils.receptive_fields.glm_utils import ReceptiveFieldGLM, fit_receptive_field_glm, \
+    plot_rf_summary, quality_test
 
 
-def _get_shared_model_shift(model_dict: dict) -> int:
-    """Return the common temporal shift used by all stimulus channels."""
-    shifts = model_dict['shift']
-    if not isinstance(shifts, dict):
-        return int(shifts)
-
-    channel_names = model_dict.get('channel_names') or list(shifts)
-    channel_shifts = [int(shifts[name]) for name in channel_names]
-    if not channel_shifts:
-        raise ValueError("GLM model does not contain a stimulus-channel shift")
-    if len(set(channel_shifts)) != 1:
-        raise ValueError(f"GLM channels use different shifts: {dict(zip(channel_names, channel_shifts))}")
-    return channel_shifts[0]
+def _rf_to_channels_first(rf: np.ndarray, model_dict: dict) -> np.ndarray:
+    """Move the color axis of a stored RF (time, ..., color) to the front, as expected by `plot_rf_summary`."""
+    if model_dict.get('n_colors', 1) > 1:
+        return np.moveaxis(rf, -1, 0)
+    return rf
 
 
-class RfGlmParamsTemplate(dj.Lookup):
-    database = ""
+class _MemmappedArrays(dict):
+    """Nested dict of read-only memory-mapped arrays, whose files are deleted when the dict is garbage collected.
+
+    Worker processes open memory-mapped arrays by file name instead of receiving a copy.
+    """
+
+    @classmethod
+    def from_arrays(cls, arrays: dict, prefix: str = 'djimaging_') -> '_MemmappedArrays':
+        folder = tempfile.mkdtemp(prefix=prefix)
+        obj = cls()
+        weakref.finalize(obj, shutil.rmtree, folder, True)
+        for i, (k1, arrays_k1) in enumerate(arrays.items()):
+            obj[k1] = dict()
+            for j, (k2, array) in enumerate(arrays_k1.items()):
+                file = os.path.join(folder, f'{i}_{j}.npy')
+                np.save(file, array)
+                obj[k1][k2] = np.load(file, mmap_mode='r')
+        return obj
+
+
+class RfGlmParamsTemplate(FastStaParamsTemplate):
+    """GLM parameters. Adds the GLM hyperparameters to the stimulus and trace preprocessing of the fast STA."""
 
     @property
     def definition(self):
-        definition = """
-        rf_glm_params_id: int32 # unique param set id
-        ---
-        filter_dur_s_past : float32 # filter duration in seconds into the past
-        filter_dur_s_future : float32 # filter duration in seconds into the future
-        df_ts : <blob>
-        df_ws : <blob>
-        betas : <blob>
+        definition = super().definition + """
+        df_ts : <blob>  # candidate degrees of freedom of the temporal spline basis
+        df_ws : <blob>  # candidate degrees of freedom of the spatial spline basis
+        betas : <blob>  # candidate regularization strengths
         kfold : int32
         metric = "mse": enum('mse', 'corrcoef')
         output_nonlinearity = 'none' : varchar(63)
@@ -123,78 +121,92 @@ class RfGlmParamsTemplate(dj.Lookup):
         """
         return definition
 
-    def add_default(self, other_params_dict: dict | None = None, skip_duplicates: bool = False, **params) -> None:
+    @property
+    @abstractmethod
+    def stimulus_table(self):
+        pass
+
+    @property
+    @abstractmethod
+    def presentation_table(self):
+        pass
+
+    @staticmethod
+    def get_other_params_dict_default(other_params_dict: dict | None = None) -> dict:
+        """Return the default `other_params_dict`, updated with `other_params_dict`."""
+        params = dict(
+            min_iters=100, max_iters=2000, step_size=0.1, step_size_finetune=0.03, tolerance=5,
+            alphas=(1.,), verbose=100, n_perm=20, min_cc=0.2, seed=42,
+            fit_R=False, fit_intercept=True, init_method='random', atol=1e-5,
+            distr='gaussian', frac_test=0,
+        )
+        params.update(other_params_dict or dict())
+        return params
+
+    def add_default(
+            self, stim_names: list | None = None, dnoise_params_id: int = 1, fit_kind: str = "gradient",
+            fupsample_trace: int = 10, fupsample_stim: int = 4, lowpass_cutoff: float = 0,
+            pre_blur_sigma_s: float = 0, post_blur_sigma_s: float = 0,
+            filter_dur_s_past: float = 1.2, filter_dur_s_future: float = 0.2,
+            df_ts: tuple = (10,), df_ws: tuple = (9,), betas: tuple = (0.005,),
+            kfold: int = 0, metric: str = "mse", output_nonlinearity: str = "none",
+            other_params_dict: dict | None = None,
+            skip_duplicates: bool = False, verbose: bool = True) -> None:
         """Add default GLM parameter set to the table.
+
+        Stimulus and trace preprocessing parameters are described in `FastStaParamsTemplate.add_default`.
+        The defaults fit a single model to all data (no hyperparameter search, no test set), which is fast and
+        gives reasonable RFs.
 
         Parameters
         ----------
+        df_ts : tuple, optional
+            Candidate degrees of freedom of the temporal spline basis. Default is (10,).
+        df_ws : tuple, optional
+            Candidate degrees of freedom of the spatial spline basis, ignored for 1D stimuli. Default is (9,).
+        betas : tuple, optional
+            Candidate regularization strengths. Default is (0.005,).
+        kfold : int, optional
+            Number of cross-validation folds. 0 fits a single model without dev set, which requires a single
+            candidate for each of df_ts, df_ws and betas. Default is 0.
+        metric : str, optional
+            Optimization metric, 'mse' or 'corrcoef'. Default is 'mse'.
+        output_nonlinearity : str, optional
+            Output nonlinearity of the GLM. Default is 'none'.
         other_params_dict : dict or None, optional
-            Additional parameters for the GLM. If None, defaults are used. Default is None.
-        skip_duplicates : bool, optional
-            If True, skip duplicate entries. Default is False.
-        **params
-            Additional parameter overrides for the key.
+            Updates for the other GLM parameters, see `ReceptiveFieldGLM`. If None, defaults are used.
         """
-
-        assert "other_params_dict" not in params.keys()
-        other_params_dict = dict() if other_params_dict is None else other_params_dict
-
-        other_params_dict_default = dict(
-            min_iters=50, max_iters=1000, step_size=0.1, tolerance=5,
-            alphas=(1.,), verbose=0, n_perm=20, min_cc=0.2, seed=42,
-            fit_R=False, fit_intercept=True, init_method=None, atol=1e-3,
-            distr='gaussian'
-        )
-
-        other_params_dict_default.update(**other_params_dict)
-
-        key = dict(
-            rf_glm_params_id=1,
-            filter_dur_s_past=1.,
-            filter_dur_s_future=0.,
-            df_ts=(8,), df_ws=(9,),
-            betas=(0.001, 0.01, 0.1), kfold=1,
-            other_params_dict=other_params_dict_default,
-        )
-
-        key.update(**params)
-        self.insert1(key, skip_duplicates=skip_duplicates)
+        super().add_default(
+            stim_names=stim_names, dnoise_params_id=dnoise_params_id, fit_kind=fit_kind,
+            fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim, lowpass_cutoff=lowpass_cutoff,
+            pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s,
+            filter_dur_s_past=filter_dur_s_past, filter_dur_s_future=filter_dur_s_future,
+            skip_duplicates=skip_duplicates, verbose=verbose,
+            df_ts=tuple(df_ts), df_ws=tuple(df_ws), betas=tuple(betas), kfold=kfold, metric=metric,
+            output_nonlinearity=output_nonlinearity,
+            other_params_dict=self.get_other_params_dict_default(other_params_dict))
 
 
-class RfGlmTemplate(dj.Computed):
+class RfGlmTemplate(FastStaTemplate):
+    """GLM receptive fields.
+
+    Subclass of the fast STA template: the design matrix, trace preprocessing, alignment and population logic
+    are shared. Only the fit of a single trace is replaced by the GLM fit.
+    """
     database = ""
-    _def_sta = True  # If True, the definition includes rf_time
 
     @property
     def definition(self):
-        definition = '''
-        # Compute basic receptive fields
-        -> self.noise_traces_table
+        definition = """
+        # Spatio-temporal receptive fields estimated with a GLM
         -> self.params_table
+        -> self.traces_table
         ---
-        rf: <npy@processed>  # spatio-temporal receptive field
-        dt: float32
-        '''
-
-        if self._def_sta:
-            definition += '''
-            rf_time: <blob>
-            shift: int32
-            '''
-
-        definition += '''
+        rf: <npy@processed>  # spatio-temporal receptive field, same layout as the fast STA: (time, ..., color)
         model_dict: <blob@processed>
         quality_dict: <blob>
-        '''
-
+        """
         return definition
-
-    @property
-    def key_source(self):
-        try:
-            return self.noise_traces_table.proj() * self.params_table.proj()
-        except (AttributeError, TypeError):
-            pass
 
     @property
     @abstractmethod
@@ -203,118 +215,134 @@ class RfGlmTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def noise_traces_table(self):
+    def presentation_table(self):
         pass
 
-    def make(self, key: dict, suppress_outputs: bool = False, clear_outputs: bool = True) -> None:
-        """Fit a GLM receptive field and insert the result.
+    @property
+    @abstractmethod
+    def traces_table(self):
+        pass
 
-        Fetches noise trace and stimulus for the given key, fits a
-        ReceptiveFieldGLM model, and stores the resulting RF, quality metrics,
-        and model dictionary.
-
-        Parameters
-        ----------
-        key : dict
-            DataJoint primary key identifying the entry to compute.
-        suppress_outputs : bool, optional
-            If True, suppress verbose output during fitting. Default is False.
-        clear_outputs : bool, optional
-            If True, clear IPython cell output after fitting. Default is True.
-        """
-        params = (self.params_table() & key).fetch1()
-        noise_dt, noise_t0, trace, stim_idxs = (self.noise_traces_table() & key).fetch1(
-            'noise_dt', 'noise_t0', 'trace', 'stim_idxs')
-        trace, stim_idxs = load_array(trace), load_array(stim_idxs)
-        assert trace.size == stim_idxs.size, "Trace and stim_idxs must have the same size."
-        stim = load_array((self.noise_traces_table.stimulus_table() & key).fetch1("stim_trace"))
-        stim = stim[stim_idxs].astype(trace.dtype)
-
-        other_params_dict = params.pop('other_params_dict')
-        if suppress_outputs:
-            other_params_dict['verbose'] = 0
-
-        model = ReceptiveFieldGLM(
-            dt=noise_dt, trace=trace, stim=stim,
-            filter_dur_s_past=params['filter_dur_s_past'],
-            filter_dur_s_future=params['filter_dur_s_future'],
-            df_ts=params['df_ts'], df_ws=params['df_ws'],
-            betas=params['betas'], kfold=params['kfold'], metric=params['metric'],
-            output_nonlinearity=params['output_nonlinearity'], **other_params_dict)
-
-        rf, quality_dict, model_dict = model.compute_glm_receptive_field()
-
-        if clear_outputs or suppress_outputs:
-            from IPython.display import clear_output
-            clear_output(wait=True)
-
-        if not suppress_outputs:
-            plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
-                            title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
-            plt.show()
-
-        rf_key = deepcopy(key)
-        rf_key['rf'] = rf.astype(np.float32)
-        rf_key['dt'] = model_dict.pop('dt')
-
-        if self._def_sta:
-            rf_key['rf_time'] = model_dict.pop('rf_time')
-            rf_key['shift'] = _get_shared_model_shift(model_dict)
-
-        rf_key['model_dict'] = model_dict
-        rf_key['quality_dict'] = quality_dict
-
-        self.insert1(rf_key)
-
-    def plot1(self, key: dict | None = None) -> None:
-        """Plot summary of the GLM receptive field for a single entry.
+    def prepare_sta_params(self, *restrictions) -> dict:
+        """Fetch the STA parameters and add the GLM parameters.
 
         Parameters
         ----------
-        key : dict or None, optional
-            DataJoint key to restrict the table. Default is None.
-        """
-        key = get_primary_key(table=self, key=key)
-        rf, quality_dict, model_dict = (self & key).fetch1('rf', 'quality_dict', 'model_dict')
-        rf = load_array(rf)
-        plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
-                        title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
-        plt.show()
-
-    def plot1_frames(self, key: dict | None = None, downsample: int = 1) -> None:
-        """Plot the receptive field as individual frames.
-
-        Parameters
-        ----------
-        key : dict or None, optional
-            DataJoint key to restrict the table. Default is None.
-        downsample : int, optional
-            Downsampling factor for the frames. Default is 1.
-        """
-        key = get_primary_key(table=self, key=key)
-        rf, model_dict = (self & key).fetch1('rf', 'model_dict')
-        rf = load_array(rf)
-        plot_rf_frames(rf, model_dict['rf_time'], downsample=downsample)
-
-    def plot1_video(self, key: dict | None = None, fps: int = 10):
-        """Plot the receptive field as a video animation.
-
-        Parameters
-        ----------
-        key : dict or None, optional
-            DataJoint key to restrict the table. Default is None.
-        fps : int, optional
-            Frames per second for the animation. Default is 10.
+        *restrictions : dict
+            Optional DataJoint restrictions to select a unique parameter set.
 
         Returns
         -------
-        matplotlib.animation.Animation
-            Animation object of the RF video.
+        dict
+            STA parameters (see `FastStaTemplate.prepare_sta_params`) and the keys "glm_params" and
+            "basis_projections" (the design matrix projected onto the spline bases, shared by all traces).
         """
+        sta_params = super().prepare_sta_params(*restrictions)
+        names = ('df_ts', 'df_ws', 'betas', 'kfold', 'metric', 'output_nonlinearity', 'other_params_dict')
+        values = self._select_params(*restrictions).fetch1(*names)
+        sta_params['glm_params'] = dict(zip(names, values))
+
+        model = ReceptiveFieldGLM(
+            x_stimulus=sta_params['x_stimulus'], trace=None, **self._get_glm_kwargs(sta_params))
+        sta_params['basis_projections'] = _MemmappedArrays.from_arrays(
+            model.compute_basis_projections(), prefix='djimaging_glm_')
+
+        # Use the degrees of freedom clipped to the RF dimensions, so that the clipping warns only once here,
+        # and not again for every trace.
+        sta_params['glm_params'].update(
+            df_ts=tuple(int(df) for df in model.df_ts),
+            df_ws=() if model.df_ws is None else tuple(int(df) for df in model.df_ws))
+        return sta_params
+
+    @staticmethod
+    def _get_glm_kwargs(sta_params: dict) -> dict:
+        """Arguments of `ReceptiveFieldGLM` except for the data."""
+        glm_params = sta_params['glm_params']
+        return dict(
+            dt=sta_params['dt'], dims=tuple(sta_params['dims']), rf_time=sta_params['rf_time'],
+            shift=sta_params['shift'], burn_in=sta_params['burn_in'],
+            df_ts=glm_params['df_ts'], df_ws=glm_params['df_ws'], betas=glm_params['betas'],
+            kfold=glm_params['kfold'], metric=glm_params['metric'],
+            output_nonlinearity=glm_params['output_nonlinearity'], **glm_params['other_params_dict'])
+
+    def _compute_entries(self, traces: list, sta_params: dict, n_jobs: int) -> list:
+        """Fit GLM receptive fields to all traces of a presentation, in parallel processes.
+
+        Parameters
+        ----------
+        traces : list of np.ndarray
+            Preprocessed traces aligned to the stimulus, see `_prepare_trace`.
+        sta_params : dict
+            Parameters from `prepare_sta_params`. Without "basis_projections", every fit projects the design matrix.
+        n_jobs : int
+            Maximum number of parallel processes, at most the number of available CPU cores.
+
+        Returns
+        -------
+        list of dict or None
+            Entries with "rf", "model_dict" and "quality_dict". None if the trace is not finite.
+        """
+        glm_kwargs = self._get_glm_kwargs(sta_params)
+        basis_projections = sta_params.get('basis_projections')
+
+        def get_fit_kwargs(trace):
+            if basis_projections is not None:
+                return dict(glm_kwargs=glm_kwargs, basis_projections=basis_projections)
+            return dict(glm_kwargs=glm_kwargs, x_stimulus=sta_params['x_stimulus'][:trace.size])
+
+        idxs = []
+        for i, trace in enumerate(traces):
+            if np.all(np.isfinite(trace)):
+                idxs.append(i)
+            else:
+                print(f"Skipping trace with {np.sum(~np.isfinite(trace))} non-finite values after alignment.")
+
+        n_jobs = max(1, min(n_jobs, len(idxs), os.cpu_count() or 1))
+        if n_jobs == 1:
+            results = (fit_receptive_field_glm(traces[i], **get_fit_kwargs(traces[i])) for i in idxs)
+        else:
+            results = Parallel(n_jobs=n_jobs, backend='loky', return_as='generator')(
+                delayed(fit_receptive_field_glm)(traces[i], single_threaded=True, **get_fit_kwargs(traces[i]))
+                for i in idxs)
+
+        entries = [None] * len(traces)
+        for i, result in zip(idxs, tqdm(results, total=len(idxs), desc='GLM fits', leave=False)):
+            entries[i] = self._to_entry(*result, sta_params=sta_params)
+        return entries
+
+    @staticmethod
+    def _to_entry(rf: np.ndarray, quality_dict: dict, model_dict: dict, sta_params: dict) -> dict:
+        """Entry of a single trace from the GLM fit."""
+        # Same layout as the fast STA: (time, ..., color)
+        if model_dict['n_colors'] > 1:
+            rf = np.moveaxis(rf, 0, -1)
+        rf = rf.astype(np.float32)
+        assert rf.shape == tuple(sta_params['dims']), (rf.shape, sta_params['dims'])
+
+        return dict(rf=rf, model_dict=model_dict, quality_dict=quality_dict)
+
+    def plot1(self, key: dict | None = None, kind: str = 'summary', **kwargs) -> None:
+        """Plot the receptive field.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        kind : str, optional
+            'summary' (RF, training curves, quality and predictions), or any kind supported by the fast STA
+            ('frames', 'video', 'traces'). Default is 'summary'.
+        **kwargs
+            Additional keyword arguments passed to the specific plot function.
+        """
+        if kind != 'summary':
+            return super().plot1(key=key, kind=kind, **kwargs)
+
         key = get_primary_key(table=self, key=key)
-        rf, model_dict = (self & key).fetch1('rf', 'model_dict')
-        rf = load_array(rf)
-        return plot_rf_video(rf, model_dict['rf_time'], fps=fps)
+        rf, quality_dict, model_dict = (self & key).fetch1('rf', 'quality_dict', 'model_dict')
+        rf = _rf_to_channels_first(load_array(rf), model_dict)
+        plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
+                        title=' '.join(str(v) for v in key.values()))
+        plt.show()
 
 
 class RfGlmQualityDictTemplate(dj.Computed):
@@ -410,114 +438,14 @@ class RfGlmQualityParamsTemplate(dj.Lookup):
         self.insert1(key, skip_duplicates=skip_duplicates)
 
 
-class RfGlmSingleModelTemplate(dj.Computed):
-    database = ""
-    _default_metric = 'mse'
-
-    @property
-    def definition(self):
-        definition = '''
-        # Pick best model for all parameterizations
-        -> self.glm_table
-        ---
-        score_test : float32
-        '''
-        return definition
-
-    @property
-    def key_source(self):
-        try:
-            return self.glm_table.noise_traces_table.proj()
-        except (AttributeError, TypeError):
-            pass
-
-    @property
-    @abstractmethod
-    def glm_table(self):
-        pass
-
-    def make(self, key: dict) -> None:
-        """Select the best GLM parameterization by test score and insert.
-
-        Fetches all parameter sets for the given ROI, selects the one with the
-        best test score (lowest for MSE/GCV, highest for correlation), and
-        inserts the winner. If an entry already exists, it is deleted first.
-
-        Parameters
-        ----------
-        key : dict
-            DataJoint primary key identifying the ROI entry to process.
-        """
-        roi_key = key.copy()
-        quality_dicts, model_dicts, param_ids = (self.glm_table & roi_key).to_arrays(
-            'quality_dict', 'model_dict', 'rf_glm_params_id')
-
-        metrics = [model_dict['metric'] for model_dict in model_dicts]
-        if np.unique(metrics).size == 1:
-            metric = metrics[0]
-        else:
-            warnings.warn(f'Different metric were used. Fallback to {self._default_metric}')
-            metric = self._default_metric
-
-        scores_test = [quality_dict[f'{metric}_test'] for quality_dict in quality_dicts]
-
-        # Do some sanity check
-        if np.unique(metrics).size == 1:
-            for i, score_test in enumerate(scores_test):
-                assert np.isclose(quality_dicts[i]['score_test'], score_test)
-
-        # Get best model parameterization
-        if metric in ['mse', 'gcv']:
-            best_i = np.argmin(scores_test)
-        else:
-            best_i = np.argmax(scores_test)
-
-        score_test = scores_test[best_i]
-        param_id = param_ids[best_i]
-
-        if len(self & roi_key) > 1:
-            raise ValueError(f'Already more than one entry present for key={roi_key}. This should not happen.')
-        elif len(self & roi_key) == 1:
-            (self & roi_key).delete_quick()  # Delete for update, e.g. if new param_ids were added
-
-        key = key.copy()
-        key['rf_glm_params_id'] = param_id
-        key['score_test'] = score_test
-        self.insert1(key)
-
-    def plot(self) -> None:
-        """Plot histogram of selected GLM parameter IDs across all entries."""
-        rf_glm_params_ids = self.to_arrays('rf_glm_params_id')
-        plt.figure()
-        plt.hist(rf_glm_params_ids,
-                 bins=np.arange(np.min(rf_glm_params_ids) - 0.25, np.max(rf_glm_params_ids) + 0.5, 0.5))
-        plt.title('rf_glm_params_id')
-        plt.show()
-
-    def plot1(self, key: dict | None = None) -> None:
-        """Plot summary of the best GLM receptive field for a single entry.
-
-        Parameters
-        ----------
-        key : dict or None, optional
-            DataJoint key to restrict the table. Default is None.
-        """
-        key = get_primary_key(table=self, key=key)
-        rf, quality_dict, model_dict = (self.glm_table & key).fetch1('rf', 'quality_dict', 'model_dict')
-        rf = load_array(rf)
-        plot_rf_summary(rf=rf, quality_dict=quality_dict, model_dict=model_dict,
-                        title=f"{key['date']} {key['exp_num']} {key['field']} {key['roi_id']}")
-        plt.show()
-
-
 class RfGlmQualityTemplate(dj.Computed):
     database = ""
 
     @property
     def definition(self):
         definition = '''
-        # Compute basic receptive fields
-        -> self.glm_single_model_table
+        # Quality index of GLM receptive fields
+        -> self.glm_table
         -> self.params_table
         ---
         rf_glm_qidx : float32
@@ -527,14 +455,9 @@ class RfGlmQualityTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.glm_single_model_table().proj() * self.params_table().proj()
+            return self.glm_table().proj() * self.params_table().proj()
         except (AttributeError, TypeError):
             pass
-
-    @property
-    @abstractmethod
-    def glm_single_model_table(self):
-        pass
 
     @property
     @abstractmethod
@@ -564,7 +487,8 @@ class RfGlmQualityTemplate(dj.Computed):
         rf_glm_qidx_sum = 0.
         rf_glm_qidx_count = 0
 
-        if perm_alpha > 0:
+        # Without test data (frac_test=0), there is no permutation test and only the train (and dev) scores are used.
+        if perm_alpha > 0 and 'score_test' in quality_dict:
             p_value = quality_test(
                 score_trueX=quality_dict['score_test'],
                 score_permX=quality_dict['score_permX'],
@@ -578,17 +502,21 @@ class RfGlmQualityTemplate(dj.Computed):
             rf_glm_qidx_corrcoeff = \
                 (quality_dict['corrcoef_train'] >= min_corrcoef) & \
                 (quality_dict.get('corrcoef_dev', np.inf) >= min_corrcoef) & \
-                (quality_dict['corrcoef_test'] >= min_corrcoef)
+                (quality_dict.get('corrcoef_test', np.inf) >= min_corrcoef)
             rf_glm_qidx_sum += float(rf_glm_qidx_corrcoeff)
             rf_glm_qidx_count += 1
 
         if max_mse > 0:
             rf_glm_qidx_mse = \
                 (quality_dict['mse_train'] <= max_mse) & \
-                (quality_dict.get('mse_dev', np.NINF) <= max_mse) & \
-                (quality_dict['mse_test'] <= max_mse)
+                (quality_dict.get('mse_dev', -np.inf) <= max_mse) & \
+                (quality_dict.get('mse_test', -np.inf) <= max_mse)
             rf_glm_qidx_sum += float(rf_glm_qidx_mse)
             rf_glm_qidx_count += 1
+
+        if rf_glm_qidx_count == 0:
+            raise ValueError(f"No quality criterion applies to {key}: set min_corrcoef or max_mse > 0, "
+                             f"or perm_alpha > 0 for GLMs with test data.")
 
         rf_glm_qidx = rf_glm_qidx_sum / rf_glm_qidx_count
 

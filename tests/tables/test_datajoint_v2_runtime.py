@@ -11,7 +11,6 @@ from djimaging.tables.classifier_v2 import celltype_assignment_v2
 from djimaging.tables.core.stim_logs import PresentationLogTemplate
 from djimaging.tables.motion_correction.motion_detection import MotionDetectionTemplate
 from djimaging.tables.receptivefield.fast_sta import FastStaTemplate
-from djimaging.tables.receptivefield.glm import _get_shared_model_shift
 
 
 class _Relation:
@@ -50,6 +49,18 @@ class _Relation:
         else:
             raise NotImplementedError(restriction)
         return _Relation(rows, primary_key=self.primary_key)
+
+    def __mul__(self, other):
+        # Natural join on all shared attributes.
+        rows = [
+            {**row, **other_row} for row in self.rows for other_row in other.rows
+            if all(row[name] == other_row[name] for name in row.keys() & other_row.keys())
+        ]
+        return _Relation(rows, primary_key=self.primary_key + other.primary_key)
+
+    def proj(self):
+        return _Relation([{name: row[name] for name in self.primary_key} for row in self.rows],
+                         primary_key=self.primary_key)
 
     def fetch1(self, *attrs):
         if len(self.rows) != 1:
@@ -99,9 +110,9 @@ def test_custom_populate_calls_datajoint_v2(table_class, reserve_jobs, monkeypat
         dict(row, x_stimulus=np.ones((4, 2)), dt=0.1, rf_time=np.arange(2),
              burn_in=1, shift=0, fit_kind='trace', dims=(2,),
              fupsample_stim=1, fupsample_trace=1, lowpass_cutoff=0,
-             pre_blur_sigma_s=0, post_blur_sigma_s=0)
+             pre_blur_sigma_s=0, post_blur_sigma_s=0, whiten=False, whiten_reg=0.)
         for row in rows
-    ])
+    ], primary_key=('model_id', 'variant'))
     params_table.stimulus_table = _Relation([
         dict(row, stim_dict={'nframes_per_trigger': 2}) for row in rows
     ])
@@ -111,6 +122,8 @@ def test_custom_populate_calls_datajoint_v2(table_class, reserve_jobs, monkeypat
         'connection': SimpleNamespace(in_transaction=False),
         'classifier_table': _Relation(rows),
         'params_table': params_table,
+        'presentation_table': _Relation([{'presentation_id': 1}], primary_key=('presentation_id',)),
+        'traces_table': _Relation([{'presentation_id': 1}], primary_key=('presentation_id',)),
         '_populate_direct': worker,
         '_populate_distributed': worker,
     })()
@@ -143,21 +156,6 @@ def test_custom_populate_calls_datajoint_v2(table_class, reserve_jobs, monkeypat
         np.testing.assert_array_equal(sta_params['x_stimulus'], np.ones((4, 2)))
         assert sta_params['x_stimulus'].dtype == np.float32
     assert make_kwargs == {}
-
-
-def test_get_shared_model_shift_supports_multiple_channels():
-    assert _get_shared_model_shift({
-        'shift': {'ch0': -4, 'ch1': -4},
-        'channel_names': ['ch0', 'ch1'],
-    }) == -4
-
-
-def test_get_shared_model_shift_rejects_different_channel_shifts():
-    with pytest.raises(ValueError, match="different shifts"):
-        _get_shared_model_shift({
-            'shift': {'ch0': -4, 'ch1': -3},
-            'channel_names': ['ch0', 'ch1'],
-        })
 
 
 def test_presentation_log_uses_configured_scan_params_table():

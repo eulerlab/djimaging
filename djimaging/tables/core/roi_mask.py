@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import warnings
 from abc import abstractmethod
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
 
 from djimaging.utils.scanm import read_h5_utils, read_utils
 
+from djimaging.autorois import default_models
 from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 
 from djimaging.utils.filesystem_utils import as_pre_filepath
@@ -27,23 +29,28 @@ class RoiMaskTemplate(dj.Manual):
     database = ""
     _max_shift = 5
     _roi_file_format: str = 'numpy'
+    _filepath_store = "reference"
 
     @property
     def definition(self):
-        definition = """
+        definition = f"""
         # ROI mask
         -> self.field_table
         -> self.raw_params_table
         ---
         -> self.presentation_table
         roi_mask     : <blob>                   # ROI mask for recording field
+        roi_mask_file   : <filepath@{self._filepath_store}>  # file the ROI mask was loaded from (relative to store)
+        roi_mask_source : enum('igor_h5', 'numpy', 'pickle', 'other')  # format of roi_mask_file
         """
         return definition
 
     class RoiMaskPresentation(dj.Part):
+        _filepath_store = "reference"  # keep in sync with the master table
+
         @property
         def definition(self):
-            definition = """
+            definition = f"""
             # ROI Mask
             -> master
             -> self.presentation_table
@@ -52,6 +59,8 @@ class RoiMaskTemplate(dj.Manual):
             as_field_mask : enum('same', 'different', 'shifted')  # relationship to field mask
             shift_dx=0    : int32  # Shift in x
             shift_dy=0    : int32  # Shift in y
+            roi_mask_file   : <filepath@{self._filepath_store}>  # file the ROI mask was loaded from (relative to store)
+            roi_mask_source : enum('igor_h5', 'numpy', 'pickle', 'other')  # format of roi_mask_file
             """
             return definition
 
@@ -146,7 +155,7 @@ class RoiMaskTemplate(dj.Manual):
             field_key: dict | None = None,
             pres_key: dict | None = None,
             canvas_width: int = 20,
-            autorois_models: str = 'default_rgc',
+            autorois_models: str | list | dict = 'default_rgc',
             show_diagnostics: bool = True,
             load_high_res: bool = True,
             max_shift: int | None = None,
@@ -166,8 +175,10 @@ class RoiMaskTemplate(dj.Manual):
                 used. Takes precedence over field_key when both are given.
             canvas_width: Width of the canvas as a percentage of the screen
                 width (must be between 0 and 100 exclusive).
-            autorois_models: Either a dict of auto-ROI models or a string key
-                ('default_rgc', etc.) to load the default model set.
+            autorois_models: Either a dict of auto-ROI models, a string key
+                ('default_rgc', etc.) to load the default model set (latest UNet), or a list of model
+                names (e.g. ['UNet', 'Cellpose3_cyto3', 'MEDIAR']) to load specific models, see
+                ``load_default_autorois_models``.
             show_diagnostics: Whether to show diagnostic panels in the GUI.
             load_high_res: Whether to load high-resolution background stacks.
             max_shift: Maximum allowed pixel shift between presentations.
@@ -275,6 +286,8 @@ class RoiMaskTemplate(dj.Manual):
         # Load default AutoROIs models
         if isinstance(autorois_models, str):
             autorois_models = load_default_autorois_models(autorois_models)
+        elif isinstance(autorois_models, (list, tuple)):
+            autorois_models = load_default_autorois_models(models=list(autorois_models))
 
         # Load shifts if available
         shifts = self.init_shifts(field_key, pres_keys)
@@ -514,25 +527,18 @@ class RoiMaskTemplate(dj.Manual):
     def check_filesystem_consistency(
             self,
             restrictions: dict | None = None,
-            source = 'infer',  # 'infer' | 'igor' | 'autorois'
-            roi_mask_dir: str = 'ROIs',
-            old_prefix: str | None = None,
-            new_prefix: str | None = None,
             verbose: bool = True,
     ) -> list:
-        """Check whether database ROI masks are consistent with the filesystem.
+        """Check whether database ROI masks are consistent with the files they were loaded from.
 
         Iterates over every presentation already stored in RoiMaskPresentation
-        and compares it against the corresponding file on disk. Returns a list
-        of problem records so the caller can inspect or correct them.
+        and compares its mask against the file recorded in ``roi_mask_file``
+        (format given by ``roi_mask_source``). Returns a list of problem
+        records so the caller can inspect or correct them.
 
         Args:
             restrictions: Optional DataJoint restriction applied to
                 RoiMaskPresentation before iterating (e.g. a field key dict).
-            source: Source of ROI masks to check for. Can be 'infer' (to automatically infer from parameters), 'igor' (to only check Igor files) or 'autorois' (to only check AutoROIs files).
-            roi_mask_dir: Sub-directory name containing ROI mask files.
-            old_prefix: Path prefix to replace when resolving file paths.
-            new_prefix: Replacement path prefix.
             verbose: If True, print progress and a summary at the end.
 
         Returns:
@@ -542,17 +548,16 @@ class RoiMaskTemplate(dj.Manual):
             - ``'issue'``: one of
 
               * ``'mismatch'`` — file exists but its content differs from DB
-              * ``'missing_on_filesystem'`` — DB has a mask but the pickle
-                file is gone
+              * ``'missing_on_filesystem'`` — DB has a mask but the file
+                is gone
               * ``'igor_missing'`` — DB has a mask but the H5 file contains
                 no ROI mask
 
-            - ``'filesystem_file'``: expected file path (pickle or H5)
+            - ``'filesystem_file'``: the file recorded in the database
 
         Example::
 
-            problems = roi_mask_table.check_filesystem_consistency(
-                roi_mask_dir='ROIs')
+            problems = roi_mask_table.check_filesystem_consistency()
             for p in problems:
                 print(p['issue'], p['filesystem_file'])
                 print(p['key'])
@@ -567,27 +572,17 @@ class RoiMaskTemplate(dj.Manual):
             print(f'Checking filesystem consistency for {len(pres_keys)} presentation(s)...')
 
         for i, key in enumerate(pres_keys):
-            if source == 'infer':
-                igor_roi_masks = (self.raw_params_table & key).fetch1('igor_roi_masks')
-            elif source == 'igor':
-                igor_roi_masks = 'yes'
-            elif source == 'autorois':
-                igor_roi_masks = 'no'
-
-            input_file = local_file_path(
-                (self.presentation_table & key).fetch1('pres_data_file'),
-                self.presentation_table._filepath_store)
-            roimask_file = to_roi_mask_file(
-                input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
-                file_format=self._get_roi_file_format())
+            roi_mask_file, roi_mask_source, database_roi_mask = (self.RoiMaskPresentation & key).fetch1(
+                'roi_mask_file', 'roi_mask_source', 'roi_mask')
+            filesystem_file = local_file_path(roi_mask_file, self._filepath_store)
+            database_roi_mask = load_array(database_roi_mask)
 
             if verbose:
                 print(f'  [{i + 1}/{len(pres_keys)}] Checking key={key}')
 
-            if igor_roi_masks == 'yes':
-                filesystem_file = input_file
+            if roi_mask_source == 'igor_h5':
                 filesystem_roi_mask = read_h5_utils.load_roi_mask(
-                    filepath=input_file, ignore_not_found=True)
+                    filepath=filesystem_file, ignore_not_found=True)
                 if filesystem_roi_mask is None:
                     if verbose:
                         print(f'    -> PROBLEM: igor_missing  ({filesystem_file})')
@@ -595,17 +590,15 @@ class RoiMaskTemplate(dj.Manual):
                         {'key': key, 'issue': 'igor_missing', 'filesystem_file': filesystem_file})
                     continue
             else:
-                filesystem_file = roimask_file
-                if not os.path.isfile(roimask_file):
+                if not os.path.isfile(filesystem_file):
                     if verbose:
                         print(f'    -> PROBLEM: missing_on_filesystem  ({filesystem_file})')
                     problems.append(
                         {'key': key, 'issue': 'missing_on_filesystem', 'filesystem_file': filesystem_file})
                     continue
-                filesystem_roi_mask = load_roi_mask_file(roimask_file).astype(np.int32)
+                filesystem_roi_mask = load_roi_mask_file(str(filesystem_file)).astype(np.int32)
                 filesystem_roi_mask = to_igor_format(filesystem_roi_mask)
 
-            database_roi_mask = load_array((self.RoiMaskPresentation & key).fetch1('roi_mask'))
             if not np.all(filesystem_roi_mask == database_roi_mask):
                 if verbose:
                     print(f'    -> PROBLEM: mismatch  ({filesystem_file})')
@@ -674,16 +667,16 @@ class RoiMaskTemplate(dj.Manual):
                 print('pres_keys:', [k for k in pres_keys])
             return
 
-        roi_masks = [self._load_presentation_roi_mask(
+        loaded = [self._load_presentation_roi_mask(
             key, roi_mask_dir, source=source, old_prefix=old_prefix, new_prefix=new_prefix)
-                     for key in new_pres_keys]
+                  for key in new_pres_keys]
 
         if not auto_fill_pres_keys:
             # Filter out keys without ROI mask
-            data_pairs = [(pres_key, roi_mask) for pres_key, roi_mask in zip(new_pres_keys, roi_masks)
-                          if roi_mask is not None]
+            data_pairs = [(pres_key, mask_info) for pres_key, mask_info in zip(new_pres_keys, loaded)
+                          if mask_info[0] is not None]
         else:
-            data_pairs = list(zip(new_pres_keys, roi_masks))
+            data_pairs = list(zip(new_pres_keys, loaded))
 
         if len(data_pairs) == 0:
             if verboselvl > 1:
@@ -694,11 +687,11 @@ class RoiMaskTemplate(dj.Manual):
             # Find preferred file that should be used as main key.
             mask_alias, highres_alias = (self.userinfo_table & field_key).fetch1("mask_alias", "highres_alias")
             keys_masks_files = [
-                (pres_key, roi_mask, local_file_path(
+                (pres_key, mask_info, local_file_path(
                     (self.presentation_table & pres_key).fetch1('pres_data_file'),
                     self.presentation_table._filepath_store))
-                for pres_key, roi_mask in data_pairs
-                if roi_mask is not None]
+                for pres_key, mask_info in data_pairs
+                if mask_info[0] is not None]
 
             if len(keys_masks_files) == 0:
                 if verboselvl > 1:
@@ -712,28 +705,34 @@ class RoiMaskTemplate(dj.Manual):
                 files=[f for k, m, f in keys_masks_files],
                 mask_alias=mask_alias, highres_alias=highres_alias, as_index=True)
 
-            main_pres_key, main_roi_mask = keys_masks_files[sort_idxs[0]][:2]
+            main_pres_key, (main_roi_mask, main_file, main_source) = keys_masks_files[sort_idxs[0]][:2]
         else:
             main_pres_key = (self.RoiMaskPresentation().proj() & (self & field_key)).fetch1()
             main_roi_mask = load_array((self.RoiMaskPresentation & main_pres_key).fetch1('roi_mask'))
+            main_file, main_source = (self.RoiMaskPresentation & main_pres_key).fetch1(
+                'roi_mask_file', 'roi_mask_source')
 
         roi_mask_pres_keys = []
 
-        for pres_key, roi_mask in data_pairs:
+        for pres_key, (roi_mask, roi_mask_file, roi_mask_source) in data_pairs:
             if roi_mask is not None:
                 as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(
                     roi_mask, main_roi_mask, max_shift=self._max_shift if max_shift is None else max_shift)
                 roi_mask_pres_keys.append(
                     {**pres_key, "roi_mask": roi_mask, "as_field_mask": as_field_mask,
-                     "shift_dx": shift_dx, "shift_dy": shift_dy})
+                     "shift_dx": shift_dx, "shift_dy": shift_dy,
+                     "roi_mask_file": roi_mask_file, "roi_mask_source": roi_mask_source})
             elif auto_fill_pres_keys:
+                # No file of its own: reference the file of the main mask that was copied
                 roi_mask_pres_keys.append(
                     {**pres_key, "roi_mask": main_roi_mask, "as_field_mask": 'same',
-                     "shift_dx": 0, "shift_dy": 0})
+                     "shift_dx": 0, "shift_dy": 0,
+                     "roi_mask_file": main_file, "roi_mask_source": main_source})
             else:
                 raise ValueError(f'No ROI mask found for key={pres_key} but `auto_fill_pres_keys` is False')
 
-        main_key = {**field_key, **main_pres_key, "roi_mask": main_roi_mask}
+        main_key = {**field_key, **main_pres_key, "roi_mask": main_roi_mask,
+                    "roi_mask_file": main_file, "roi_mask_source": main_source}
 
         if add_primary_keys is not None:
             main_key = {**main_key, **add_primary_keys}
@@ -752,7 +751,7 @@ class RoiMaskTemplate(dj.Manual):
             source: str = 'infer',
             old_prefix: str | None = None,
             new_prefix: str | None = None,
-    ) -> np.ndarray | None:
+    ) -> tuple[np.ndarray | None, str | None, str | None]:
         """Load the ROI mask for a single presentation, reconciling filesystem and database state.
 
         Args:
@@ -762,7 +761,9 @@ class RoiMaskTemplate(dj.Manual):
             new_prefix: Replacement path prefix.
 
         Returns:
-            The ROI mask array, or None if no mask file was found.
+            A 3-tuple (roi_mask, roi_mask_file, roi_mask_source). roi_mask_file is the path of the file the mask
+            was read from, relative to the filepath store, and roi_mask_source is its format ('igor_h5', 'numpy',
+            'pickle' or 'other'). All three are None if no mask file was found.
 
         Raises:
             ValueError: If the filesystem mask differs from the database mask.
@@ -817,7 +818,15 @@ class RoiMaskTemplate(dj.Manual):
             else:
                 filesystem_roi_mask = database_roi_mask.copy()
 
-        return filesystem_roi_mask
+        if filesystem_roi_mask is None:
+            return None, None, None
+
+        if igor_roi_masks == 'yes':
+            src_file, src_format = input_file, 'igor_h5'
+        else:
+            src_file, src_format = roimask_file, _roi_mask_source_from_path(roimask_file)
+
+        return filesystem_roi_mask, relative_store_path(src_file, self._filepath_store), src_format
 
     def plot1(self, key: dict | None = None, gamma: float = 0.5) -> None:
         """Plot the stack average with the ROI mask overlay for one presentation.
@@ -875,6 +884,18 @@ class RoiMaskTemplate(dj.Manual):
         return bg_dict
 
 
+def _roi_mask_source_from_path(path: str | Path) -> str:
+    """Return the ``roi_mask_source`` enum value for a ROI mask file, inferred from its extension."""
+    suffix = Path(path).suffix.lower()
+    if suffix == '.npy':
+        return 'numpy'
+    if suffix in ('.pkl', '.pickle'):
+        return 'pickle'
+    if suffix in ('.h5', '.hdf5'):
+        return 'igor_h5'
+    return 'other'
+
+
 def load_stack_data(
         files: list,
         data_name: str,
@@ -917,42 +938,75 @@ def load_stack_data(
     return ch0_stacks, ch1_stacks, output_files
 
 
-def load_default_autorois_models(kind: str = 'default_rgc') -> dict | None:
-    """Load the default set of auto-ROI models for a given cell type.
+def load_default_autorois_models(kind: str = 'default_rgc', models: list[str] | None = None) -> dict | None:
+    """Load auto-ROI models for a given cell type.
+
+    By default only the latest UNet (and the correlation-based model) is loaded. Other models have to be
+    requested explicitly via ``models``, e.g. ``models=['UNet', 'Cellpose3_cyto3', 'MEDIAR']``.
 
     Args:
         kind: Model variant to load. Supported values are 'default_rgc',
             'default_bc', and 'default_ac'.
+        models: Names of the models to load. Available for 'default_rgc': 'UNet' (latest, v0.2.0),
+            'UNet_v1' (v0.1.0), 'Cellpose3_cyto2' and 'Cellpose3_cyto3' (finetuned), 'MEDIAR' (finetuned) and 'CorrRoiMask'.
+            If None, the default set is loaded and models that fail to load are skipped with a warning.
+            Explicitly requested models raise an error if they cannot be loaded.
 
     Returns:
         A dict mapping model names to model objects, or None if the dict is
         empty (e.g. if all models failed to load).
     """
     autorois_models = dict()
-    if kind == 'default_rgc':
-        _add_autorois_unet(autorois_models)
-    _add_autorois_corr(autorois_models, kind=kind)
+
+    if models is None:
+        if kind == 'default_rgc':
+            try:
+                _add_autorois_unet(autorois_models)
+            except Exception as e:
+                warnings.warn(f'Failed to load default AutoROIs model UNet because of error:\n{e}')
+        _add_autorois_corr(autorois_models, kind=kind)
+    else:
+        if isinstance(models, str):
+            models = [models]
+        loaders = {
+            'UNet': _add_autorois_unet,
+            'UNet_v1': _add_autorois_unet_v1,
+            'Cellpose3_cyto2': lambda d: _add_cellpose(d, base='cyto2'),
+            'Cellpose3_cyto3': lambda d: _add_cellpose(d, base='cyto3'),
+            'MEDIAR': _add_mediar,
+            'CorrRoiMask': lambda d: _add_autorois_corr(d, kind=kind),
+        }
+        unknown = [m for m in models if m not in loaders]
+        if unknown:
+            raise ValueError(f'Unknown AutoROIs models {unknown}. Available: {list(loaders)}')
+        if kind != 'default_rgc' and any(m not in ('CorrRoiMask',) for m in models):
+            raise NotImplementedError(f"Only 'CorrRoiMask' is available for {kind}.")
+        for m in models:
+            loaders[m](autorois_models)
+
     return autorois_models if len(autorois_models) > 0 else None
 
 
+def _models_dir() -> Path:
+    return file_store_path("Resources/AutoROIs/models", "reference")
+
+
+def _add_autorois_unet_v1(autorois_models: dict) -> None:
+    """Load the first UNet (v0.1.0, two input channels) and add it to the model dict.
+
+    Args:
+        autorois_models: Dict to add the loaded model to under the key 'UNet_v1'.
+    """
+    autorois_models['UNet_v1'] = default_models.load_unet_v1(_models_dir())
+
+
 def _add_autorois_unet(autorois_models: dict) -> None:
-    """Attempt to load a UNet auto-ROI model and add it to the model dict.
+    """Load the latest, retrained UNet (v0.2.0, one input channel) and add it to the model dict.
 
     Args:
         autorois_models: Dict to add the loaded model to under the key 'UNet'.
     """
-    try:
-        from djimaging.autorois.unet import UNet
-        config_path = file_store_path(
-            "Resources/AutoROIs/models/UNET_v0.1.0/sd_images.yaml", "reference")
-        checkpoint_path = file_store_path(
-            "Resources/AutoROIs/models/UNET_v0.1.0/dropout_and_aug_regul.ckpt", "reference")
-        unet_model = UNet.from_checkpoint(config_path, checkpoint_path)
-
-        autorois_models['UNet'] = unet_model
-
-    except Exception as e:
-        warnings.warn(f'Failed to load default AutoROIs models because of error:\n{e}')
+    autorois_models['UNet'] = default_models.load_unet(_models_dir())
 
 
 def _add_autorois_corr(autorois_models: dict, kind: str) -> None:
@@ -964,46 +1018,33 @@ def _add_autorois_corr(autorois_models: dict, kind: str) -> None:
         kind: Model variant controlling hyperparameters. Supported values are
             'default_rgc', 'default_bc', and 'default_ac'.
     """
-    from djimaging.autorois.corr_roi_mask_utils import CorrRoiMask
-
-    if kind == 'default_rgc':
-        kws = dict(cut_x=(0, 0), cut_z=(0, 0), min_area_um2=10, max_area_um2=400, n_pix_max=None, line_threshold_q=70,
-                   use_ch0_stack=True, grow_use_corr_map=False, grow_threshold=0.1,
-                   grow_only_local_thresh_pixels=True)
-    elif kind == 'default_bc' or kind == 'default_ac':
-        kws = dict(cut_x=(4, 2), cut_z=(8, 2), min_area_um2=0.5, max_area_um2=12.6, n_pix_max=None, line_threshold_q=70,
-                   use_ch0_stack=True, grow_use_corr_map=False, grow_threshold=None, line_threshold_min=0.1,
-                   grow_only_local_thresh_pixels=True)
-    else:
-        raise NotImplementedError(kind)
-
-    corr_model = CorrRoiMask(**kws)
-    autorois_models['CorrRoiMask'] = corr_model
+    autorois_models['CorrRoiMask'] = default_models.get_corr_roi_mask(kind=kind)
 
 
-def _add_cellpose(autorois_models: dict, kind: str = 'default_rgc') -> None:
-    """Load a Cellpose auto-ROI model and add it to the model dict.
+def _add_cellpose(autorois_models: dict, kind: str = 'default_rgc', base: str = 'cyto3') -> None:
+    """Load a finetuned Cellpose3 auto-ROI model and add it to the model dict.
+
+    Requires the ``cellpose`` package (not a djimaging dependency, see README).
 
     Args:
-        autorois_models: Dict to add the loaded model to under the key
-            'Cellpose'.
+        autorois_models: Dict to add the loaded model to under the key 'Cellpose3_<base>'.
+        kind: Model variant. Currently only 'default_rgc' is supported.
+        base: Cellpose model the weights were finetuned from, 'cyto2' or 'cyto3'.
+    """
+    if kind != 'default_rgc':
+        raise NotImplementedError(kind)
+    autorois_models[f'Cellpose3_{base}'] = default_models.load_cellpose3(_models_dir(), base=base)
+
+
+def _add_mediar(autorois_models: dict, kind: str = 'default_rgc') -> None:
+    """Load the finetuned MEDIAR auto-ROI model and add it to the model dict.
+
+    Requires the ``mediar`` package (not a djimaging dependency, see README).
+
+    Args:
+        autorois_models: Dict to add the loaded model to under the key 'MEDIAR'.
         kind: Model variant. Currently only 'default_rgc' is supported.
     """
-    from djimaging.autorois.cellpose_wrapper import CellposeWrapper
-
-    if kind == 'default_rgc':
-        init_params = dict(
-            model_type='cyto',
-            gpu=False,
-        )
-
-        eval_params = dict(
-            min_size=4,
-            diameter=15,
-            channels=[0, 0],
-        )
-    else:
+    if kind != 'default_rgc':
         raise NotImplementedError(kind)
-
-    model_cellpose = CellposeWrapper(init_kwargs=init_params, eval_kwargs=eval_params)
-    autorois_models['Cellpose'] = model_cellpose
+    autorois_models['MEDIAR'] = default_models.load_mediar(_models_dir(), device='cpu')

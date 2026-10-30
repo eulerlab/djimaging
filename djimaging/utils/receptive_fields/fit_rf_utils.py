@@ -66,15 +66,42 @@ def compute_rf_sta(X: np.ndarray, y: np.ndarray) -> np.ndarray:
     X : np.ndarray
         Design matrix, shape (n_samples, n_features).
     y : np.ndarray
-        Neural response vector, shape (n_samples,).
+        Neural response vector, shape (n_samples,), or several responses, shape (n_samples, n_responses).
+        Computing several responses at once is much faster than one by one, because X is read only once.
 
     Returns
     -------
     np.ndarray
-        STA receptive field, shape (n_features,).
+        STA receptive field, shape (n_features,), or (n_features, n_responses) for several responses.
     """
-    w = (X.T @ y) / np.sum(y)
+    w = (X.T @ y) / np.sum(y, axis=0)
     return w
+
+
+def compute_whitening_matrix(X: np.ndarray, reg: float = 1e-3) -> np.ndarray:
+    """Compute the ridge-regularized inverse stimulus covariance, used to whiten an STA.
+
+    The whitened STA is inv(C + lambda * I) @ STA with C = X.T @ X / n_samples
+    (Schwartz et al., 2006, J Vis). The regularization is relative to the mean eigenvalue of C,
+    i.e. lambda = reg * trace(C) / n_features, which makes it invariant to the stimulus scale.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Design matrix, shape (n_samples, n_features).
+    reg : float, optional
+        Ridge strength relative to the mean eigenvalue of the covariance. Default is 1e-3.
+
+    Returns
+    -------
+    np.ndarray
+        Whitening matrix, shape (n_features, n_features), same dtype as X.
+    """
+    n_samples, n_features = X.shape
+    cov = (X.T @ X).astype(np.float64) / n_samples
+    lam = reg * np.trace(cov) / n_features
+    cov[np.diag_indices(n_features)] += lam
+    return np.linalg.inv(cov).astype(X.dtype)
 
 
 def split_data(x: np.ndarray, y: np.ndarray,
@@ -165,7 +192,7 @@ def build_design_matrix(X: np.ndarray, n_lag: int, shift: int = 0,
         dtype = X.dtype
 
     n_frames = X.shape[0]
-    n_feature = np.prod(X.shape[1:])
+    n_feature = int(np.prod(X.shape[1:]))
 
     X_design = np.reshape(X.copy(), (n_frames, n_feature))
 

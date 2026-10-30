@@ -1,4 +1,6 @@
 import itertools
+import os
+import sys
 import time
 import warnings
 
@@ -11,19 +13,49 @@ from sklearn.model_selection import KFold
 from djimaging.utils.receptive_fields.fit_rf_utils import split_data, build_design_matrix, get_rf_timing_params
 from djimaging.utils.receptive_fields.split_rf_utils import split_strf
 
-try:
-    import rfest
-    import jax
 
-    jax.config.update('jax_platform_name', 'cpu')
-except ImportError:
-    rfest = None
-    jax = None
+def _as_slice(rows: np.ndarray):
+    """Convert consecutive row indices to a slice, so that indexing returns a view instead of a copy."""
+    rows = np.asarray(rows)
+    if rows.size > 0 and np.all(np.diff(rows) == 1):
+        return slice(int(rows[0]), int(rows[-1]) + 1)
+    return rows
+
+
+def fit_receptive_field_glm(trace: np.ndarray, glm_kwargs: dict, basis_projections: dict | None = None,
+                            x_stimulus: np.ndarray | None = None, single_threaded: bool = False) -> tuple:
+    """Fit a GLM receptive field to a single trace. Used to fit many traces in parallel processes.
+
+    Parameters
+    ----------
+    trace : np.ndarray
+        Neural response trace.
+    glm_kwargs : dict
+        Other arguments of `ReceptiveFieldGLM`.
+    basis_projections : dict, optional
+        Precomputed projections of the design matrix, see `ReceptiveFieldGLM.compute_basis_projections`.
+    x_stimulus : np.ndarray, optional
+        Design matrix with the same number of rows as the trace. Only needed without `basis_projections`.
+    single_threaded : bool, optional
+        If True, restrict jax to a single thread. Must be set before jax is imported in the process to take effect.
+        Use in worker processes to avoid oversubscribing the CPU. Default is False.
+
+    Returns
+    -------
+    tuple
+        (rf, quality_dict, model_dict), see `ReceptiveFieldGLM.compute_glm_receptive_field`.
+    """
+    if single_threaded and 'jax' not in sys.modules:
+        os.environ['XLA_FLAGS'] = (os.environ.get('XLA_FLAGS', '') +
+                                   ' --xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1').strip()
+
+    model = ReceptiveFieldGLM(trace=trace, x_stimulus=x_stimulus, basis_projections=basis_projections, **glm_kwargs)
+    return model.compute_glm_receptive_field()
 
 
 class ReceptiveFieldGLM:
-    def __init__(self, dt: float, stim: np.ndarray, trace: np.ndarray,
-                 filter_dur_s_past: float, filter_dur_s_future: float,
+    def __init__(self, dt: float, x_stimulus: np.ndarray | None, trace: np.ndarray | None,
+                 dims: tuple, rf_time: np.ndarray, shift: int, burn_in: int,
                  df_ts, df_ws, betas, metric: str,
                  output_nonlinearity: str = 'none', alphas: tuple = (1.,),
                  kfold: int = 1, tolerance: int = 5, atol: float = 1e-5,
@@ -34,7 +66,7 @@ class ReceptiveFieldGLM:
                  fit_R: bool = False, fit_intercept: bool = True,
                  num_subunits: int = 1, distr: str = 'gaussian',
                  frac_test: float = 0.2, t_burn_min: float = 0.,
-                 shift: int = None, channel_names=None):
+                 channel_names=None, basis_projections: dict | None = None):
         """Initialize a GLM-based receptive field estimator.
 
         Supports single-channel and multi-channel (e.g. two-color) stimuli.
@@ -42,22 +74,34 @@ class ReceptiveFieldGLM:
         contributions are summed before the output nonlinearity:
             y = nonlin( sum_c X_c @ w_c + intercept )
 
+        The design matrix is built once per stimulus (see `build_design_matrix`) and shared by all traces.
+        Use `ReceptiveFieldGLM.from_stim` to build it from a raw stimulus.
+        The GLMs are fit to the design matrix projected onto spline bases. This projection does not depend on the
+        trace, so to fit many traces, compute it once with `compute_basis_projections` and pass it as
+        `basis_projections` instead of the design matrix.
+
         Parameters
         ----------
         dt : float
             Time step in seconds.
-        stim : np.ndarray
-            Stimulus array. Accepted shapes:
-              - (n_frames,)                       1D flicker, single channel
-              - (n_frames, n_colors)              1D flicker, multi-channel
-              - (n_frames, n_y, n_x)              spatial, single channel
-              - (n_frames, n_y, n_x, n_colors)    spatial, multi-channel
-        trace : np.ndarray
-            Neural response trace, shape (n_frames,).
-        filter_dur_s_past : float
-            Duration of the filter extending into the past (seconds).
-        filter_dur_s_future : float
-            Duration of the filter extending into the future (seconds).
+        x_stimulus : np.ndarray or None
+            Design matrix of shape (n_frames, dim_t * n_features), as returned by `build_design_matrix`
+            (lag-major, features flattened in C-order with the channel axis last).
+            Can be None if `basis_projections` is given.
+        trace : np.ndarray or None
+            Neural response trace, shape (n_frames,). Can be None to only compute the basis projections.
+        dims : tuple
+            Dimensions of the full receptive field, (dim_t,) + stimulus.shape[1:]. Accepted shapes:
+              - (dim_t,)                       1D flicker, single channel
+              - (dim_t, n_colors)              1D flicker, multi-channel
+              - (dim_t, n_y, n_x)              spatial, single channel
+              - (dim_t, n_y, n_x, n_colors)    spatial, multi-channel
+        rf_time : np.ndarray
+            Time axis of the filter in seconds.
+        shift : int
+            Temporal shift used to build the design matrix.
+        burn_in : int
+            Number of initial frames to discard when scoring.
         df_ts : array-like
             Candidate degrees of freedom for temporal spline basis.
         df_ws : array-like
@@ -106,20 +150,23 @@ class ReceptiveFieldGLM:
             Fraction of data reserved for testing. Default is 0.2.
         t_burn_min : float, optional
             Minimum burn-in time in seconds. Default is 0.
-        shift : int, optional
-            Expected temporal shift; if provided, validated against computed value.
         channel_names : list of str, optional
             Names for each color/stimulus channel. If None, defaults to
             ['stimulus'] for single-channel or ['ch0', 'ch1', ...] for multi-channel.
+        basis_projections : dict, optional
+            Design matrix projected onto the spline bases, as returned by `compute_basis_projections` for the same
+            design matrix and parameters. May have more rows than the trace, only the first rows are used.
         """
+        if x_stimulus is None and basis_projections is None:
+            raise ValueError("Either `x_stimulus` or `basis_projections` must be given.")
+
         # Data
         self.dt = dt
-        self.stim = stim
+        self.x_stimulus = x_stimulus
         self.trace = trace
+        self._x_channels = None
 
         # Filter settings
-        self.filter_dur_s_past = filter_dur_s_past
-        self.filter_dur_s_future = filter_dur_s_future
         self.output_nonlinearity = output_nonlinearity
         assert num_subunits == 1
         self.num_subunits = num_subunits
@@ -150,112 +197,210 @@ class ReceptiveFieldGLM:
         self.min_cc = min_cc
 
         # Filter dims
-        self.rf_time, self.dim_t, self.shift, burn_in = get_rf_timing_params(
-            filter_dur_s_past, filter_dur_s_future, dt)
-
-        if shift is not None:
-            assert shift == self.shift
-
-        self.burn_in = np.maximum(int(np.ceil(t_burn_min / dt)), burn_in)
+        self.rf_time = np.asarray(rf_time)
+        self.shift = int(shift)
+        self.dim_t = int(dims[0])
+        self.burn_in = np.maximum(int(np.ceil(t_burn_min / dt)), int(burn_in))
+        self.stim_dims = tuple(int(d) for d in dims)
 
         # Detect stimulus shape: how many channels, and what spatial dims
-        # Shapes supported:
-        #   (T,)             -> 1D flicker, 1 channel
-        #   (T, C)           -> 1D flicker, C channels
-        #   (T, Y, X)        -> spatial, 1 channel
-        #   (T, Y, X, C)     -> spatial, C channels
-        if stim.ndim == 4:
-            self.n_colors = stim.shape[3]
-            self.hdims = stim.shape[1]
-            self.wdims = stim.shape[2]
+        # Shapes supported (per frame):
+        #   ()          -> 1D flicker, 1 channel
+        #   (C,)        -> 1D flicker, C channels
+        #   (Y, X)      -> spatial, 1 channel
+        #   (Y, X, C)   -> spatial, C channels
+        n_stim_dims = len(self.stim_dims) - 1
+        if n_stim_dims == 3:
+            self.n_colors = self.stim_dims[3]
+            self.hdims = self.stim_dims[1]
+            self.wdims = self.stim_dims[2]
             self.dims = (self.dim_t, self.hdims, self.wdims)
             self.is_spatial = True
-        elif stim.ndim == 3:
+        elif n_stim_dims == 2:
             self.n_colors = 1
-            self.hdims = stim.shape[1]
-            self.wdims = stim.shape[2]
+            self.hdims = self.stim_dims[1]
+            self.wdims = self.stim_dims[2]
             self.dims = (self.dim_t, self.hdims, self.wdims)
             self.is_spatial = True
-        elif stim.ndim == 2:
-            self.n_colors = stim.shape[1]
+        elif n_stim_dims == 1:
+            self.n_colors = self.stim_dims[1]
             self.hdims = None
             self.wdims = None
             self.dims = (self.dim_t,)
             self.is_spatial = False
-        elif stim.ndim == 1:
+        elif n_stim_dims == 0:
             self.n_colors = 1
             self.hdims = None
             self.wdims = None
             self.dims = (self.dim_t,)
             self.is_spatial = False
         else:
-            raise NotImplementedError(f"{stim.ndim=}")
+            raise NotImplementedError(f"{dims=}")
+
+        n_features = int(np.prod(self.stim_dims))
+        if x_stimulus is not None:
+            if x_stimulus.shape[1] != n_features:
+                raise ValueError(f"x_stimulus has {x_stimulus.shape[1]} features, "
+                                 f"but dims={self.stim_dims} require {n_features}")
+            if trace is not None and x_stimulus.shape[0] != np.shape(trace)[0]:
+                raise ValueError(
+                    f"x_stimulus and trace differ in length: {x_stimulus.shape[0]} != {np.shape(trace)[0]}")
 
         # Channel naming: keep 'stimulus' as the single-channel name for
         # backward compatibility with downstream code that reads model.w['opt']['stimulus'].
         if channel_names is None:
             if self.n_colors == 1:
-                self.channel_names = ['stimulus']
+                channel_names = ['stimulus']
             else:
-                self.channel_names = [f'ch{i}' for i in range(self.n_colors)]
+                channel_names = [f'ch{i}' for i in range(self.n_colors)]
         else:
             assert len(channel_names) == self.n_colors, \
                 f"channel_names has length {len(channel_names)} but stim has {self.n_colors} channels"
-            self.channel_names = list(channel_names)
+        self.channel_names = list(channel_names)
 
         self.df_ts = self.clip_dfs(np.sort(np.asarray(df_ts)), self.dim_t)
         if self.is_spatial:
             self.df_ws = self.clip_dfs(np.sort(np.asarray(df_ws)), self.wdims)
         else:
             assert not df_ws
+            self.df_ws = None
 
-    def _get_channel_stim(self, stim: np.ndarray, c: int) -> np.ndarray:
-        """Extract the c-th channel from a (possibly multi-channel) stimulus array.
+        self.basis_projections = None
+        if basis_projections is not None:
+            if set(basis_projections) != set(self._df_grid()):
+                raise ValueError(f"basis_projections were computed for dfs {sorted(basis_projections)}, "
+                                 f"but the parameters require {self._df_grid()}")
+            n_rows = None if trace is None else np.shape(trace)[0]
+            for xs_df in basis_projections.values():
+                for name in self.channel_names:
+                    if n_rows is not None and xs_df[name].shape[0] < n_rows:
+                        raise ValueError(f"basis_projections have fewer rows than the trace: "
+                                         f"{xs_df[name].shape[0]} < {n_rows}")
+            self.basis_projections = {
+                df: {name: xs_df[name][:n_rows] for name in self.channel_names}
+                for df, xs_df in basis_projections.items()}
+
+    @classmethod
+    def from_stim(cls, dt: float, stim: np.ndarray, trace: np.ndarray,
+                  filter_dur_s_past: float, filter_dur_s_future: float, **kwargs):
+        """Build the design matrix from a raw stimulus and create the estimator.
 
         Parameters
         ----------
+        dt : float
+            Time step in seconds.
         stim : np.ndarray
-            Stimulus array in any of the supported shapes.
-        c : int
-            Channel index.
-
-        Returns
-        -------
-        np.ndarray
-            Single-channel stimulus, shape (T,) or (T, Y, X).
+            Stimulus of shape (n_frames, ...), see `dims` in `__init__` for the supported shapes.
+        trace : np.ndarray
+            Neural response trace, shape (n_frames,).
+        filter_dur_s_past : float
+            Duration of the filter extending into the past (seconds).
+        filter_dur_s_future : float
+            Duration of the filter extending into the future (seconds).
+        **kwargs
+            Passed on to `__init__`.
         """
-        if self.n_colors == 1:
-            return stim
-        if self.is_spatial:
-            # (T, Y, X, C) -> (T, Y, X)
-            return stim[..., c]
-        else:
-            # (T, C) -> (T,)
-            return stim[:, c]
+        rf_time, dim_t, shift, burn_in = get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt)
+        x_stimulus = build_design_matrix(X=stim, n_lag=dim_t, shift=shift, dtype=np.float32)
+        return cls(dt=dt, x_stimulus=x_stimulus, trace=trace, dims=(dim_t,) + stim.shape[1:],
+                   rf_time=rf_time, shift=shift, burn_in=burn_in, **kwargs)
 
-    def _build_design_matrices(self, stim: np.ndarray) -> dict:
-        """Build a per-channel dict of design matrices.
+    def _split_channels(self, x: np.ndarray) -> dict:
+        """Split a design matrix into a per-channel dict of design matrices.
 
         Parameters
         ----------
-        stim : np.ndarray
-            Stimulus array (may include channel dim).
+        x : np.ndarray
+            Design matrix of shape (n_samples, dim_t * n_features), with the channel axis last in the features.
 
         Returns
         -------
         dict
-            Mapping channel_name -> design matrix (np.ndarray).
+            Mapping channel_name -> design matrix of shape (n_samples, dim_t * n_features_per_channel).
         """
-        Xs = {}
-        for c, name in enumerate(self.channel_names):
-            stim_c = self._get_channel_stim(stim, c)
-            Xs[name] = build_design_matrix(
-                X=stim_c, n_lag=self.dims[0], shift=self.shift, dtype=np.float32)
-        return Xs
+        if self.n_colors == 1:
+            return {self.channel_names[0]: x}
+
+        # Columns are ordered (lag, *spatial, color), so the color axis can be selected after reshaping.
+        x_split = x.reshape((x.shape[0],) + self.stim_dims)
+        return {name: np.ascontiguousarray(x_split[..., c].reshape(x.shape[0], -1))
+                for c, name in enumerate(self.channel_names)}
 
     def _slice_design_matrices(self, Xs: dict, idx) -> dict:
         """Slice every per-channel design matrix along axis 0 with the same index."""
         return {name: X[idx] for name, X in Xs.items()}
+
+    def _get_design_matrices(self, rows, df: tuple) -> tuple:
+        """Per-channel design matrices of the given rows for the spline basis `df`.
+
+        Returns
+        -------
+        tuple[dict, bool]
+            Mapping channel_name -> design matrix, and whether the design matrices are already projected onto the
+            spline basis (if `basis_projections` are available).
+        """
+        if self.basis_projections is not None:
+            return self._slice_design_matrices(self.basis_projections[df], rows), True
+
+        if self._x_channels is None:
+            self._x_channels = self._split_channels(self.x_stimulus)
+        return self._slice_design_matrices(self._x_channels, rows), False
+
+    def _finalize_df(self, df) -> tuple:
+        """Never use more degrees of freedom than dimensions."""
+        if len(self.dims) != len(df):
+            raise ValueError(f"size mismatch {len(self.dims)} != {len(df)}")
+
+        df = [int(dfi) for dfi in df]
+        for i, (dim, dfi) in enumerate(zip(self.dims, df)):
+            if dfi > dim:
+                warnings.warn(f' More degrees of freedom than necessary, dims={self.dims}, df={df}. Set to max.')
+                df[i] = int(dim)
+        return tuple(df)
+
+    def _df_grid(self) -> list:
+        """Candidate degrees of freedom of the spline basis."""
+        if self.is_spatial:
+            dfs = [(df_t, self.dfh_from_dfw(df_w), df_w)
+                   for df_t, df_w in list(itertools.product(self.df_ts, self.df_ws))]
+        else:
+            dfs = [(df_t,) for df_t in self.df_ts]
+        return [self._finalize_df(df) for df in dfs]
+
+    def compute_basis_projections(self, block_size: int = 4096) -> dict:
+        """Project the design matrix onto the spline bases of all candidate degrees of freedom.
+
+        The projection does not depend on the trace and is the most expensive step of creating a GLM.
+        Compute it once and pass it as `basis_projections` to fit many traces.
+
+        Parameters
+        ----------
+        block_size : int, optional
+            Number of rows projected at once, to limit the memory of the float64 computation. Default is 4096.
+
+        Returns
+        -------
+        dict
+            Mapping df -> channel_name -> projected design matrix of shape (n_frames, n_basis), float64.
+        """
+        # Imported here so that rfest (optional, extra `rf`) is only needed when a GLM is fit.
+        from rfest.splines import build_spline_matrix
+
+        if self.x_stimulus is None:
+            raise ValueError("The design matrix `x_stimulus` is required to compute the basis projections.")
+
+        x_channels = self._split_channels(self.x_stimulus)
+        projections = dict()
+        for df in self._df_grid():
+            # Same basis and precision as the projection in `rfest_glm.GLM.add_design_matrix`.
+            S = np.asarray(build_spline_matrix(dims=self.dims, df=df, smooth='cr', dtype=np.float64))
+            projections[df] = dict()
+            for name, x in x_channels.items():
+                xs = np.empty((x.shape[0], S.shape[1]), dtype=np.float64)
+                for i in range(0, x.shape[0], block_size):
+                    xs[i:i + block_size] = x[i:i + block_size].astype(np.float64) @ S
+                projections[df][name] = xs
+        return projections
 
     def compute_glm_receptive_field(self) -> tuple:
         """Estimate RF for given data. Return RF and quality.
@@ -272,40 +417,30 @@ class ReceptiveFieldGLM:
             model_dict : dict
                 Model metadata including training curves and hyperparameters.
         """
+        if self.trace is None:
+            raise ValueError("A trace is required to fit the GLM.")
+
         np.random.seed(self.seed)
         starttime = time.time()
 
-        stim_dict, trace_dict = split_data(
-            x=self.stim, y=self.trace, frac_train=1. - self.frac_test, frac_dev=0, as_dict=True)
+        # Split rows of the design matrix rather than the design matrix, see `_get_design_matrices`.
+        rows_dict, trace_dict = split_data(
+            x=np.arange(self.trace.shape[0]), y=self.trace, frac_train=1. - self.frac_test, frac_dev=0, as_dict=True)
+        rows_dict = {k: _as_slice(rows) for k, rows in rows_dict.items()}
 
-        model, metric_dev_opt_hp_sets = self.compute_best_rf_model(stim=stim_dict['train'], trace=trace_dict['train'])
+        model, metric_dev_opt_hp_sets = self.compute_best_rf_model(rows=rows_dict['train'], trace=trace_dict['train'])
 
         quality_dict = dict(metric=self.metric)
 
         if self.verbose > 0:
             print("############ Evaluate model performance ############")
 
-        # Build per-channel design matrices for test data (used by perm test + predict)
-        if self.frac_test > 0:
-            Xs_test = self._build_design_matrices(stim_dict['test'])
-        else:
-            Xs_test = None
-
         if (self.n_perm is not None) and (self.n_perm > 0) and (self.frac_test > 0):
             assert trace_dict['test'].size > 1, trace_dict['test']
-            # rfest.check.compute_permutation_test expects either a single stim array
-            # (single-channel case) or a dict of per-channel design matrices.
-            if self.n_colors == 1:
-                perm_input = stim_dict['test']
-                score_trueX, score_permX = rfest.check.compute_permutation_test(
-                    model, perm_input, trace_dict['test'],
-                    n_perm=self.n_perm, metric=self.metric, history=False)
-            else:
-                # Manual permutation test for multi-channel: jointly shuffle
-                # all channels in time so cross-channel correlations are preserved
-                # under the null but the stim<->trace mapping is broken.
-                score_trueX, score_permX = self._compute_permutation_test_multichannel(
-                    model, Xs_test, trace_dict['test'], n_perm=self.n_perm, metric=self.metric)
+            # Permute the trace rather than the stimulus, so that the stimulus design matrix is reused
+            # and cross-channel correlations are preserved under the null.
+            score_trueX, score_permX = self._compute_permutation_test(
+                model, rows_dict['test'], trace_dict['test'], n_perm=self.n_perm, metric=self.metric)
 
             p_value = quality_test(
                 score_trueX=score_trueX, score_permX=score_permX, metric=self.metric)
@@ -315,25 +450,23 @@ class ReceptiveFieldGLM:
         if self.kfold != 1:
             y_pred_train = model.forwardpass(kind='train', p=model.p['opt'])
         else:
-            # For prediction, build per-channel design matrices from training stim.
-            Xs_train_pred = self._build_design_matrices(stim_dict['train'])
-            y_pred_train = model.predict(Xs_train_pred)
+            y_pred_train = self._predict(model, rows_dict['train'])
+
+        y_test_pred = self._predict(model, rows_dict['test']) if self.frac_test > 0 else None
 
         for metric_ in ['corrcoef', 'mse']:
             quality_dict[f'{metric_}_train'] = model.compute_score(
                 y=trace_dict['train'][model.burn_in:], y_pred=y_pred_train, metric=metric_)
 
             if self.frac_test > 0:
-                y_test_pred = model.predict(Xs_test)
                 quality_dict[f'{metric_}_test'] = model.compute_score(
                     y=trace_dict['test'][model.burn_in:], y_pred=y_test_pred, metric=metric_)
-            else:
-                y_test_pred = None
 
         # Extract per-channel RFs.
         ws = {}
         for name in self.channel_names:
-            w_c = rfest.utils.uvec(model.w['opt'][name])
+            w_c = np.asarray(model.w['opt'][name])
+            w_c = w_c / np.linalg.norm(w_c)
             if w_c.shape[1] != 1:
                 raise NotImplementedError('Not implemented for more than one subunit')
             ws[name] = np.array(w_c.reshape(model.dims[name]))
@@ -348,8 +481,8 @@ class ReceptiveFieldGLM:
             df=model.df, dims=model.dims, shift=model.shift,
             alpha=model.alpha, beta=model.beta, metric=model.metric,
             output_nonlinearity=model.output_nonlinearity,
-            intercept={k: float(v) for k, v in model.get_intercept(model.p['opt']).items()},
-            R={k: float(v) for k, v in model.get_R(model.p['opt']).items()},
+            intercept={k: float(np.squeeze(v)) for k, v in model.get_intercept(model.p['opt']).items()},
+            R={k: float(np.squeeze(v)) for k, v in model.get_R(model.p['opt']).items()},
             return_model=model.return_model,
             metric_train=np.array(model.metric_train).astype(np.float32),
             cost_train=np.array(model.cost_train).astype(np.float32),
@@ -389,10 +522,16 @@ class ReceptiveFieldGLM:
 
         return w, quality_dict, model_dict
 
-    def _compute_permutation_test_multichannel(
-            self, model, Xs_test: dict, y_test: np.ndarray,
+    def _predict(self, model, rows):
+        """Predict the response of a fitted GLM for the given rows of the design matrix."""
+        df = tuple(int(dfi) for dfi in model.df[self.channel_names[0]])
+        Xs, is_projected = self._get_design_matrices(rows, df)
+        return model.predict(Xs, is_projected=is_projected)
+
+    def _compute_permutation_test(
+            self, model, rows_test, y_test: np.ndarray,
             n_perm: int, metric: str) -> tuple:
-        """Permutation test for multi-channel models.
+        """Permutation test for single- and multi-channel models.
 
         Permutes y_test (rather than the stimulus) so cross-channel correlation
         structure is preserved under the null. Equivalent to jointly shuffling
@@ -402,8 +541,8 @@ class ReceptiveFieldGLM:
         ----------
         model : object
             Fitted GLM.
-        Xs_test : dict
-            Per-channel test design matrices.
+        rows_test : slice or np.ndarray
+            Rows of the design matrix of the test data.
         y_test : np.ndarray
             Test response trace.
         n_perm : int
@@ -416,7 +555,7 @@ class ReceptiveFieldGLM:
         tuple
             (score_true, score_perm_array)
         """
-        y_pred = model.predict(Xs_test)
+        y_pred = self._predict(model, rows_test)
         y_true = y_test[model.burn_in:]
         score_true = float(model.compute_score(y=y_true, y_pred=y_pred, metric=metric))
 
@@ -442,15 +581,15 @@ class ReceptiveFieldGLM:
         """
         return np.minimum(int(np.round(df_w * self.hdims / self.wdims)), self.hdims)
 
-    def compute_best_rf_model(self, trace: np.ndarray, stim: np.ndarray) -> tuple:
+    def compute_best_rf_model(self, trace: np.ndarray, rows) -> tuple:
         """Compute the best RF model using K-Fold cross-validation.
 
         Parameters
         ----------
         trace : np.ndarray
-            Neural response trace.
-        stim : np.ndarray
-            Stimulus array (may include channel dim).
+            Neural response trace of the training data.
+        rows : slice or np.ndarray
+            Rows of the design matrix of the training data, same length as `trace`.
 
         Returns
         -------
@@ -468,67 +607,61 @@ class ReceptiveFieldGLM:
                   f" df_ts={self.df_ts} and df_ws={self.df_ws if self.is_spatial else None}")
 
         # Define HP grid
-        if self.is_spatial:
-            dfs = [(df_t, self.dfh_from_dfw(df_w), df_w)
-                   for df_t, df_w in list(itertools.product(self.df_ts, self.df_ws))]
-        else:
-            dfs = [(df_t,) for df_t in self.df_ts]
+        dfs = self._df_grid()
 
         metrics_dev_opt = np.zeros((np.maximum(self.kfold, 1), len(dfs), len(self.betas)))
 
-        # Prepare data: build a design matrix for every channel.
-        Xs = self._build_design_matrices(stim)
+        # Rows of the design matrix (shared by all channels).
+        rows = np.arange(self.trace.shape[0])[rows]
         y = trace.copy().astype(np.float32)
-
-        # Number of samples is the same across channels.
-        n_samples = next(iter(Xs.values())).shape[0]
+        assert rows.size == y.size, (rows.size, y.size)
+        n_samples = rows.size
 
         # Folds
         if self.kfold == 0:
-            splits = [(Xs, y, None, None)]
+            splits = [(rows, y, None, None)]
         elif self.kfold == 1:
             split_idx = int(y.size * 0.8)
-            splits = [(self._slice_design_matrices(Xs, slice(None, split_idx)),
-                       y[:split_idx],
-                       self._slice_design_matrices(Xs, slice(split_idx, None)),
-                       y[split_idx:])]
+            splits = [(rows[:split_idx], y[:split_idx], rows[split_idx:], y[split_idx:])]
         else:
             splits = []
             for train_idx, dev_idx in KFold(n_splits=self.kfold, shuffle=False).split(np.arange(n_samples), y):
                 train_idx = train_idx[(train_idx < np.min(dev_idx)) | (train_idx > np.max(dev_idx) + self.burn_in)]
-                splits += [(self._slice_design_matrices(Xs, train_idx),
-                            y[train_idx],
-                            self._slice_design_matrices(Xs, dev_idx),
-                            y[dev_idx])]
+                splits += [(rows[train_idx], y[train_idx], rows[dev_idx], y[dev_idx])]
+        splits = [(_as_slice(rows_train), y_train, None if rows_dev is None else _as_slice(rows_dev), y_dev)
+                  for rows_train, y_train, rows_dev, y_dev in splits]
 
         best_model = None
         for idx_dfs, df in enumerate(dfs):
             if self.verbose > 0:
                 print(f'############ Optimize for df={df} ############')
 
-            for idx_kf, (Xs_train_k, y_train_k, Xs_dev_k, y_dev_k) in enumerate(splits):
+            for idx_kf, (rows_train_k, y_train_k, rows_dev_k, y_dev_k) in enumerate(splits):
                 if self.verbose > 0 and self.kfold > 1:
                     print(f"###### Fold: {idx_kf + 1}/{self.kfold} ######")
 
-                best_model, metrics_dev_opt_i = self.create_and_fit_glm(
+                Xs_train_k, is_projected = self._get_design_matrices(rows_train_k, df)
+                Xs_dev_k = None if rows_dev_k is None else self._get_design_matrices(rows_dev_k, df)[0]
+
+                model, metrics_dev_opt_i = self.create_and_fit_glm(
                     df=df, Xs_train=Xs_train_k, y_train=y_train_k,
                     Xs_dev=Xs_dev_k, y_dev=y_dev_k,
-                    alphas=self.alphas, betas=self.betas)
+                    alphas=self.alphas, betas=self.betas, is_projected=is_projected)
 
                 metrics_dev_opt[idx_kf, idx_dfs, :] = metrics_dev_opt_i
+
+            if self.kfold > 1:
+                continue  # The model is refit with the best hyperparameters below.
+
+            # Without refitting, keep the model of the best df so far (the model keeps its best beta).
+            if self.kfold == 0 or self._select_best_hps(metrics_dev_opt[0, :idx_dfs + 1])[0] == idx_dfs:
+                best_model = model
 
         if self.kfold > 0:
             assert np.all(np.isfinite(metrics_dev_opt)), metrics_dev_opt
 
             # Get best model
-            mean_metrics_dev_opt = np.mean(metrics_dev_opt, axis=0)
-
-            if self.metric == 'corrcoef':
-                best_df_idx, best_beta_idx = \
-                    np.unravel_index(mean_metrics_dev_opt.argmax(), mean_metrics_dev_opt.shape)
-            else:
-                best_df_idx, best_beta_idx = \
-                    np.unravel_index(mean_metrics_dev_opt.argmin(), mean_metrics_dev_opt.shape)
+            best_df_idx, best_beta_idx = self._select_best_hps(np.mean(metrics_dev_opt, axis=0))
         else:
             assert metrics_dev_opt.size == 1
             best_df_idx = 0
@@ -537,14 +670,18 @@ class ReceptiveFieldGLM:
         best_df = dfs[best_df_idx]
         best_beta = self.betas[best_beta_idx]
 
+        if self.kfold == 1:
+            assert best_model.beta == best_beta, (best_model.beta, best_beta)
+
         if self.kfold > 1:
             if self.verbose > 0:
                 print(f'###### Optimize on all data with best HPs ######\n' +
                       f'\tdf={best_df} and beta={best_beta:.4g}')
 
+            Xs, is_projected = self._get_design_matrices(_as_slice(rows), best_df)
             best_model, _ = self.create_and_fit_glm(
                 df=best_df, Xs_train=Xs, y_train=y, Xs_dev=None, y_dev=None,
-                alphas=self.alphas, betas=[best_beta])
+                alphas=self.alphas, betas=[best_beta], is_projected=is_projected)
             best_model.metric_dev_opt = np.mean(metrics_dev_opt[:, best_df_idx, best_beta_idx])
 
             if self.verbose > 0:
@@ -554,6 +691,11 @@ class ReceptiveFieldGLM:
                     f'\t+-{np.std(metrics_dev_opt[:, best_df_idx, best_beta_idx]) / np.sqrt(self.kfold):.3f}\n')
 
         return best_model, metrics_dev_opt
+
+    def _select_best_hps(self, metrics_dev_opt: np.ndarray) -> tuple:
+        """Indexes (df, beta) of the best dev metric, of shape (n_dfs, n_betas). Ties select the first."""
+        idx = metrics_dev_opt.argmax() if self.metric == 'corrcoef' else metrics_dev_opt.argmin()
+        return np.unravel_index(idx, metrics_dev_opt.shape)
 
     @staticmethod
     def clip_dfs(dfs: np.ndarray, dims: int) -> np.ndarray:
@@ -574,16 +716,17 @@ class ReceptiveFieldGLM:
         if np.all(dfs <= dims):
             return dfs
         elif np.any(dfs <= dims):
-            warnings.warn(' No using df_ts larger than dims')
+            warnings.warn(f'Not using degrees of freedom {dfs[dfs > dims]} larger than the RF dimension {dims}.')
             return dfs[dfs <= dims]
         else:
-            warnings.warn(' All df_ts larger than dims, use only dims as df')
+            warnings.warn(f'All degrees of freedom {dfs} are larger than the RF dimension {dims}, using {dims}.')
             return np.array([dims])
 
     def create_and_fit_glm(self, df: tuple, Xs_train: dict, y_train: np.ndarray,
                            alphas, betas,
                            Xs_dev: dict = None,
-                           y_dev: np.ndarray = None) -> tuple:
+                           y_dev: np.ndarray = None,
+                           is_projected: bool = False) -> tuple:
         """Create and fit a GLM model for given hyperparameters.
 
         Parameters
@@ -602,6 +745,8 @@ class ReceptiveFieldGLM:
             Per-channel dev design matrices. Default is None.
         y_dev : np.ndarray, optional
             Development response. Default is None.
+        is_projected : bool, optional
+            If True, the design matrices are already projected onto the spline basis of `df`. Default is False.
 
         Returns
         -------
@@ -623,7 +768,7 @@ class ReceptiveFieldGLM:
                 assert Xs_train[name].shape[1:] == Xs_dev[name].shape[1:]
 
         model = self.create_glm(
-            df=df, Xs_train=Xs_train, y_train=y_train, Xs_dev=Xs_dev)
+            df=df, Xs_train=Xs_train, y_train=y_train, Xs_dev=Xs_dev, is_projected=is_projected)
 
         model, metric_dev_opt_hp_sets = self.fit_glm(
             model=model, y_train=y_train, y_dev=y_dev, alphas=alphas, betas=betas)
@@ -631,7 +776,7 @@ class ReceptiveFieldGLM:
         return model, metric_dev_opt_hp_sets
 
     def create_glm(self, df: tuple, Xs_train: dict,
-                   y_train: np.ndarray, Xs_dev: dict) -> object:
+                   y_train: np.ndarray, Xs_dev: dict, is_projected: bool = False) -> object:
         """Create and initialize a GLM model.
 
         Parameters
@@ -644,6 +789,8 @@ class ReceptiveFieldGLM:
             Training response.
         Xs_dev : dict
             Per-channel dev design matrices (or None).
+        is_projected : bool, optional
+            If True, the design matrices are already projected onto the spline basis of `df`. Default is False.
 
         Returns
         -------
@@ -655,19 +802,12 @@ class ReceptiveFieldGLM:
         ValueError
             If the size of df does not match self.dims.
         """
+        finalized_df = self._finalize_df(df)
+        if is_projected and finalized_df != tuple(df):
+            raise ValueError(f"Projected design matrices require a finalized df, got {df} instead of {finalized_df}")
 
-        if len(self.dims) != len(df):
-            raise ValueError(f"size mismatch {len(self.dims)} != {len(df)}")
-
-        # Never use more dfs than necessary:
-        df = np.asarray(df)
-        for i, (dim, dfi) in enumerate(zip(self.dims, df)):
-            if dfi > dim:
-                warnings.warn(f' More degrees of freedom than necessary, dims={self.dims}, df={df}. Set to max.')
-                df[i] = dim
-
-        df = tuple(df)
-        model = self.initialize_model(df=df, Xs_train=Xs_train, y_train=y_train, Xs_dev=Xs_dev)
+        model = self.initialize_model(
+            df=finalized_df, Xs_train=Xs_train, y_train=y_train, Xs_dev=Xs_dev, is_projected=is_projected)
         return model
 
     def fit_glm(self, model: object, alphas, betas,
@@ -726,7 +866,7 @@ class ReceptiveFieldGLM:
         return model, metric_dev_opt_hp_sets
 
     def initialize_model(self, df: tuple, Xs_train: dict,
-                         y_train: np.ndarray, Xs_dev: dict = None) -> object:
+                         y_train: np.ndarray, Xs_dev: dict = None, is_projected: bool = False) -> object:
         """Initialize model parameters for faster optimization.
 
         For multi-channel data, adds one design matrix per channel under
@@ -743,25 +883,30 @@ class ReceptiveFieldGLM:
             Training response.
         Xs_dev : dict, optional
             Per-channel dev design matrices. Default is None.
+        is_projected : bool, optional
+            If True, the design matrices are already projected onto the spline basis of `df`. Default is False.
 
         Returns
         -------
         object
-            Initialized rfest.GLM model.
+            Initialized GLM model (see `rfest_glm.GLM`).
         """
 
-        model = rfest.GLM(distr=self.distr, output_nonlinearity=self.output_nonlinearity)
+        # Imported here so that jax/rfest (optional, extra `rf`) are only needed when a GLM is fit.
+        from djimaging.utils.receptive_fields.rfest_glm import GLM
+
+        model = GLM(distr=self.distr, output_nonlinearity=self.output_nonlinearity)
         model.burn_in = self.burn_in
 
         for name in self.channel_names:
             model.add_design_matrix(
                 Xs_train[name], is_design_matrix=True, df=df, dims=self.dims, shift=self.shift,
-                smooth='cr', filter_nonlinearity='none', name=name)
+                smooth='cr', filter_nonlinearity='none', name=name, is_projected=is_projected)
 
             if Xs_dev is not None:
                 model.add_design_matrix(
                     Xs_dev[name], is_design_matrix=True, dims=self.dims, shift=self.shift,
-                    name=name, kind='dev')
+                    name=name, kind='dev', is_projected=is_projected)
 
         model.initialize(num_subunits=self.num_subunits, dt=self.dt,
                          method=self.init_method,
