@@ -37,8 +37,12 @@ autorois = [
 rf = [
     "rfest>=2.1.2",
 ]
+notebooks = [
+    "jupytext>=1.16.0",
+]
 dev = [
     "pytest>=9.0.3",
+    "jupytext>=1.16.0",
 ]
 
 [tool.setuptools.packages.find]
