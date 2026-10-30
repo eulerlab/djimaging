@@ -26,6 +26,8 @@ dependencies = [
     "numba>=0.60.0",
     "scanm-support>=0.0.1",
     "scikit-image>=0.25.2",
+    "ipykernel>=7.3.0",
+    "jupytext>=1.19.6",
 ]
 
 [project.optional-dependencies]
