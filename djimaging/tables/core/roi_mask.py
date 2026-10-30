@@ -170,7 +170,7 @@ class RoiMaskTemplate(dj.Manual):
                 width (must be between 0 and 100 exclusive).
             autorois_models: Either a dict of auto-ROI models, a string key
                 ('default_rgc', etc.) to load the default model set (latest UNet), or a list of model
-                names (e.g. ['UNet', 'Cellpose3', 'MEDIAR']) to load specific models, see
+                names (e.g. ['UNet', 'Cellpose3_cyto3', 'MEDIAR']) to load specific models, see
                 ``load_default_autorois_models``.
             show_diagnostics: Whether to show diagnostic panels in the GUI.
             load_high_res: Whether to load high-resolution background stacks.
@@ -927,13 +927,13 @@ def load_default_autorois_models(kind: str = 'default_rgc', models: list[str] | 
     """Load auto-ROI models for a given cell type.
 
     By default only the latest UNet (and the correlation-based model) is loaded. Other models have to be
-    requested explicitly via ``models``, e.g. ``models=['UNet', 'Cellpose3', 'MEDIAR']``.
+    requested explicitly via ``models``, e.g. ``models=['UNet', 'Cellpose3_cyto3', 'MEDIAR']``.
 
     Args:
         kind: Model variant to load. Supported values are 'default_rgc',
             'default_bc', and 'default_ac'.
         models: Names of the models to load. Available for 'default_rgc': 'UNet' (latest, v0.2.0),
-            'UNet_v1' (v0.1.0), 'Cellpose3' (finetuned), 'MEDIAR' (finetuned) and 'CorrRoiMask'.
+            'UNet_v1' (v0.1.0), 'Cellpose3_cyto2' and 'Cellpose3_cyto3' (finetuned), 'MEDIAR' (finetuned) and 'CorrRoiMask'.
             If None, the default set is loaded and models that fail to load are skipped with a warning.
             Explicitly requested models raise an error if they cannot be loaded.
 
@@ -956,7 +956,8 @@ def load_default_autorois_models(kind: str = 'default_rgc', models: list[str] | 
         loaders = {
             'UNet': _add_autorois_unet,
             'UNet_v1': _add_autorois_unet_v1,
-            'Cellpose3': _add_cellpose,
+            'Cellpose3_cyto2': lambda d: _add_cellpose(d, base='cyto2'),
+            'Cellpose3_cyto3': lambda d: _add_cellpose(d, base='cyto3'),
             'MEDIAR': _add_mediar,
             'CorrRoiMask': lambda d: _add_autorois_corr(d, kind=kind),
         }
@@ -1005,18 +1006,19 @@ def _add_autorois_corr(autorois_models: dict, kind: str) -> None:
     autorois_models['CorrRoiMask'] = default_models.get_corr_roi_mask(kind=kind)
 
 
-def _add_cellpose(autorois_models: dict, kind: str = 'default_rgc') -> None:
-    """Load the finetuned Cellpose3 auto-ROI model and add it to the model dict.
+def _add_cellpose(autorois_models: dict, kind: str = 'default_rgc', base: str = 'cyto3') -> None:
+    """Load a finetuned Cellpose3 auto-ROI model and add it to the model dict.
 
     Requires the ``autorois-cellpose`` extra.
 
     Args:
-        autorois_models: Dict to add the loaded model to under the key 'Cellpose3'.
+        autorois_models: Dict to add the loaded model to under the key 'Cellpose3_<base>'.
         kind: Model variant. Currently only 'default_rgc' is supported.
+        base: Cellpose model the weights were finetuned from, 'cyto2' or 'cyto3'.
     """
     if kind != 'default_rgc':
         raise NotImplementedError(kind)
-    autorois_models['Cellpose3'] = default_models.load_cellpose3(_models_dir())
+    autorois_models[f'Cellpose3_{base}'] = default_models.load_cellpose3(_models_dir(), base=base)
 
 
 def _add_mediar(autorois_models: dict, kind: str = 'default_rgc') -> None:

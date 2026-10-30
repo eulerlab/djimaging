@@ -42,7 +42,7 @@ correlation-based model). Other models have to be requested explicitly and need 
 uv pip install -e ".[autorois,autorois-cellpose,autorois-mediar]"
 ```
 ```python
-autorois_models = load_default_autorois_models(models=['UNet', 'Cellpose3', 'MEDIAR'])  # also: 'UNet_v1', 'CorrRoiMask'
+autorois_models = load_default_autorois_models(models=['UNet', 'Cellpose3_cyto3', 'MEDIAR'])  # also: 'Cellpose3_cyto2', 'UNet_v1', 'CorrRoiMask'
 ```
 
 > ❗ To test if the package was successfully installed, e.g.

@@ -5,14 +5,18 @@ These only need a local folder with the model weights (no DataJoint). The folder
 
     <models_dir>/UNET_v0.1.0/{sd_images.yaml, dropout_and_aug_regul.ckpt}
     <models_dir>/UNET_v0.2.0/{config_init.yaml, _epoch=199.ckpt}
-    <models_dir>/CELLPOSE3_v0.2.0/cellpose
+    <models_dir>/CELLPOSE3_cyto2_v0.2.0/cellpose
+    <models_dir>/CELLPOSE3_cyto3_v0.2.0/cellpose
     <models_dir>/MEDIAR_v0.2.0/mediar_best_finetuned_model.pth
 """
 from pathlib import Path
 
 UNET_V1_FILES = ("UNET_v0.1.0/sd_images.yaml", "UNET_v0.1.0/dropout_and_aug_regul.ckpt")
 UNET_FILES = ("UNET_v0.2.0/config_init.yaml", "UNET_v0.2.0/_epoch=199.ckpt")
-CELLPOSE3_FILE = "CELLPOSE3_v0.2.0/cellpose"
+CELLPOSE3_FILES = {
+    "cyto2": "CELLPOSE3_cyto2_v0.2.0/cellpose",
+    "cyto3": "CELLPOSE3_cyto3_v0.2.0/cellpose",
+}
 MEDIAR_FILE = "MEDIAR_v0.2.0/mediar_best_finetuned_model.pth"
 
 
@@ -30,13 +34,20 @@ def load_unet(models_dir: str | Path):
     return UNet.from_checkpoint(config_path, checkpoint_path)
 
 
-def load_cellpose3(models_dir: str | Path):
-    """Load the finetuned Cellpose3 model. Requires the ``autorois-cellpose`` extra."""
+def load_cellpose3(models_dir: str | Path, base: str = 'cyto3'):
+    """Load a finetuned Cellpose3 model. Requires the ``autorois-cellpose`` extra.
+
+    Args:
+        models_dir: Folder with the model weights.
+        base: Cellpose model the weights were finetuned from, 'cyto2' or 'cyto3'.
+    """
+    if base not in CELLPOSE3_FILES:
+        raise ValueError(f"Unknown Cellpose base model '{base}'. Available: {list(CELLPOSE3_FILES)}")
     from djimaging.autorois.cellpose_wrapper import CellposeWrapper
 
     # Diameter and min_size are given in um (and rescaled with the pixel size), the model was
     # trained on data with ~2 um pixels and a median ROI diameter of ~4.8 pixels.
-    init_params = dict(pretrained_model=str(Path(models_dir) / CELLPOSE3_FILE), gpu=False, nchan=2)
+    init_params = dict(pretrained_model=str(Path(models_dir) / CELLPOSE3_FILES[base]), gpu=False, nchan=2)
     eval_params = dict(min_size=4, diameter=10, channels=[0, 0], flow_threshold=0.4)
     return CellposeWrapper(init_kwargs=init_params, eval_kwargs=eval_params)
 

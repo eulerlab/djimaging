@@ -18,7 +18,8 @@ def calls(monkeypatch):
 
     monkeypatch.setattr(roi_mask, '_add_autorois_unet', fake('UNet'))
     monkeypatch.setattr(roi_mask, '_add_autorois_unet_v1', fake('UNet_v1'))
-    monkeypatch.setattr(roi_mask, '_add_cellpose', fake('Cellpose3'))
+    monkeypatch.setattr(roi_mask, '_add_cellpose',
+                        lambda d, kind='default_rgc', base='cyto3': fake(f'Cellpose3_{base}')(d))
     monkeypatch.setattr(roi_mask, '_add_mediar', fake('MEDIAR'))
     monkeypatch.setattr(roi_mask, '_add_autorois_corr', fake('CorrRoiMask'))
     return called
@@ -27,7 +28,7 @@ def calls(monkeypatch):
 def test_default_only_loads_latest_unet(calls):
     models = roi_mask.load_default_autorois_models()
     assert list(models) == ['UNet', 'CorrRoiMask']
-    assert 'MEDIAR' not in calls and 'Cellpose3' not in calls and 'UNet_v1' not in calls
+    assert 'MEDIAR' not in calls and 'Cellpose3_cyto3' not in calls and 'UNet_v1' not in calls
 
 
 def test_default_skips_failing_unet_with_warning(calls, monkeypatch):
@@ -41,8 +42,8 @@ def test_default_skips_failing_unet_with_warning(calls, monkeypatch):
 
 
 def test_explicit_models_are_loaded(calls):
-    models = roi_mask.load_default_autorois_models(models=['UNet', 'Cellpose3', 'MEDIAR'])
-    assert list(models) == ['UNet', 'Cellpose3', 'MEDIAR']
+    models = roi_mask.load_default_autorois_models(models=['UNet', 'Cellpose3_cyto2', 'Cellpose3_cyto3', 'MEDIAR'])
+    assert list(models) == ['UNet', 'Cellpose3_cyto2', 'Cellpose3_cyto3', 'MEDIAR']
 
 
 def test_explicit_model_failure_raises(calls, monkeypatch):

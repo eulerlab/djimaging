@@ -12,9 +12,9 @@ Related repos:
 - Checkpoints: the 200-epoch, `train80` models only.
 - Inference-only code is copied into djimaging; the public `autorois` package is not a dependency.
 - The default model set is only the latest UNet (plus `CorrRoiMask`). Other models must be requested explicitly:
-  `load_default_autorois_models(models=['UNet', 'Cellpose3', 'MEDIAR'])`, or a list of names passed to `draw_roi_mask(autorois_models=[...])`.
+  `load_default_autorois_models(models=['UNet', 'Cellpose3_cyto2', 'Cellpose3_cyto3', 'MEDIAR'])`, or a list of names passed to `draw_roi_mask(autorois_models=[...])`.
   Explicitly requested models raise if they cannot be loaded; the default UNet only warns.
-- Model names: `UNet` (latest, v0.2.0), `UNet_v1` (old v0.1.0), `Cellpose3`, `MEDIAR`, `CorrRoiMask`.
+- Model names: `UNet` (latest, v0.2.0), `UNet_v1` (old v0.1.0), `Cellpose3_cyto2`, `Cellpose3_cyto3`, `MEDIAR`, `CorrRoiMask`.
 
 ## What was implemented
 
@@ -33,7 +33,7 @@ Jonathan:
 - [ ] Copy the weights into the `reference` store (Claude has no write access to Y):
   - `Resources/AutoROIs/models/UNET_v0.2.0/config_init.yaml` and `_epoch=199.ckpt`
     (from `model_id-unet_200_epochs_pp_id-1_dataset_id-train80`; the checkpoints are in its `checkpoints/` folder)
-  - `Resources/AutoROIs/models/CELLPOSE3_v0.2.0/cellpose`
+  - `Resources/AutoROIs/models/CELLPOSE3_cyto2_v0.2.0/cellpose` and `.../CELLPOSE3_cyto3_v0.2.0/cellpose`
     (from `model_id-cyto3_200_epochs_pp_id-1_dataset_id-train80/models/`)
   - `Resources/AutoROIs/models/MEDIAR_v0.2.0/mediar_best_finetuned_model.pth`
     (from `model_id-mediar_200_epochs_pp_id-1_dataset_id-train80`)

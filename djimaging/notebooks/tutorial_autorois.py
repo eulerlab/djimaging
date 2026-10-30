@@ -114,7 +114,8 @@ print(f'Human ROIs: {len(np.unique(roi_mask_human)) - 1}')
 # | `CorrRoiMask` | classical | ch0 stack | - |
 # | `UNet_v1` | neural network | ch0 + ch1 averages | `autorois` |
 # | `UNet` | neural network | ch0 average | `autorois` |
-# | `Cellpose3` | neural network | ch0 average | `autorois-cellpose` |
+# | `Cellpose3_cyto2` | neural network | ch0 average | `autorois-cellpose` |
+# | `Cellpose3_cyto3` | neural network | ch0 average | `autorois-cellpose` |
 # | `MEDIAR` | neural network | ch0 average | `autorois-mediar` |
 
 # %%
@@ -209,16 +210,17 @@ run_model('UNet_v1', lambda: default_models.load_unet_v1(MODELS_DIR))
 run_model('UNet', lambda: default_models.load_unet(MODELS_DIR))
 
 # %% [markdown]
-# ## Cellpose3 (`Cellpose3`)
+# ## Cellpose3 (`Cellpose3_cyto2`, `Cellpose3_cyto3`)
 #
 # [Cellpose](https://github.com/MouseLand/cellpose) is a general-purpose cell segmentation model that predicts
 # flow fields, which point to the centre of each cell, and follows them to group pixels into cells.
-# We finetuned Cellpose 3 (`cyto3`) on our human ROI masks. It works on the average of ch0 and needs the
+# We finetuned Cellpose 3 (from the `cyto2` and `cyto3` base models) on our human ROI masks. It works on the average of ch0 and needs the
 # expected cell diameter, which is set in um and converted to pixels using the pixel size.
 # Requires the `autorois-cellpose` extra.
 
 # %%
-run_model('Cellpose3', lambda: default_models.load_cellpose3(MODELS_DIR))
+run_model('Cellpose3_cyto2', lambda: default_models.load_cellpose3(MODELS_DIR, base='cyto2'))
+run_model('Cellpose3_cyto3', lambda: default_models.load_cellpose3(MODELS_DIR, base='cyto3'))
 
 # %% [markdown]
 # ## MEDIAR (`MEDIAR`)
@@ -252,5 +254,5 @@ for name, mask in autorois_masks.items():
 # from djimaging.tables.core.roi_mask import load_default_autorois_models
 #
 # autorois_models = load_default_autorois_models()  # UNet and CorrRoiMask
-# autorois_models = load_default_autorois_models(models=['UNet', 'Cellpose3', 'MEDIAR'])
+# autorois_models = load_default_autorois_models(models=['UNet', 'Cellpose3_cyto3', 'MEDIAR'])
 # ```
