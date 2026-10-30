@@ -135,10 +135,10 @@ class RfGlmParamsTemplate(FastStaParamsTemplate):
     def get_other_params_dict_default(other_params_dict: dict | None = None) -> dict:
         """Return the default `other_params_dict`, updated with `other_params_dict`."""
         params = dict(
-            min_iters=50, max_iters=1000, step_size=0.1, tolerance=5,
-            alphas=(1.,), verbose=0, n_perm=20, min_cc=0.2, seed=42,
-            fit_R=False, fit_intercept=True, init_method=None, atol=1e-3,
-            distr='gaussian', frac_test=0.2,
+            min_iters=100, max_iters=2000, step_size=0.1, step_size_finetune=0.03, tolerance=5,
+            alphas=(1.,), verbose=100, n_perm=20, min_cc=0.2, seed=42,
+            fit_R=False, fit_intercept=True, init_method='random', atol=1e-5,
+            distr='gaussian', frac_test=0,
         )
         params.update(other_params_dict or dict())
         return params
@@ -147,25 +147,28 @@ class RfGlmParamsTemplate(FastStaParamsTemplate):
             self, stim_names: list | None = None, dnoise_params_id: int = 1, fit_kind: str = "trace",
             fupsample_trace: int = 1, fupsample_stim: int = 1, lowpass_cutoff: float = 0,
             pre_blur_sigma_s: float = 0, post_blur_sigma_s: float = 0,
-            filter_dur_s_past: float = 1., filter_dur_s_future: float = 0.,
-            df_ts: tuple = (8,), df_ws: tuple = (9,), betas: tuple = (0.001, 0.01, 0.1),
-            kfold: int = 1, metric: str = "mse", output_nonlinearity: str = "none",
+            filter_dur_s_past: float = 1.2, filter_dur_s_future: float = 0.2,
+            df_ts: tuple = (10,), df_ws: tuple = (9,), betas: tuple = (0.005,),
+            kfold: int = 0, metric: str = "mse", output_nonlinearity: str = "none",
             other_params_dict: dict | None = None,
             skip_duplicates: bool = False, verbose: bool = True) -> None:
         """Add default GLM parameter set to the table.
 
         Stimulus and trace preprocessing parameters are described in `FastStaParamsTemplate.add_default`.
+        The defaults fit a single model to all data (no hyperparameter search, no test set), which is fast and
+        gives reasonable RFs.
 
         Parameters
         ----------
         df_ts : tuple, optional
-            Candidate degrees of freedom of the temporal spline basis. Default is (8,).
+            Candidate degrees of freedom of the temporal spline basis. Default is (10,).
         df_ws : tuple, optional
             Candidate degrees of freedom of the spatial spline basis, ignored for 1D stimuli. Default is (9,).
         betas : tuple, optional
-            Candidate regularization strengths. Default is (0.001, 0.01, 0.1).
+            Candidate regularization strengths. Default is (0.005,).
         kfold : int, optional
-            Number of cross-validation folds. Default is 1.
+            Number of cross-validation folds. 0 fits a single model without dev set, which requires a single
+            candidate for each of df_ts, df_ws and betas. Default is 0.
         metric : str, optional
             Optimization metric, 'mse' or 'corrcoef'. Default is 'mse'.
         output_nonlinearity : str, optional
@@ -239,10 +242,16 @@ class RfGlmTemplate(FastStaTemplate):
         values = self._select_params(*restrictions).fetch1(*names)
         sta_params['glm_params'] = dict(zip(names, values))
 
-        projections = ReceptiveFieldGLM(
-            x_stimulus=sta_params['x_stimulus'], trace=None,
-            **self._get_glm_kwargs(sta_params)).compute_basis_projections()
-        sta_params['basis_projections'] = _MemmappedArrays.from_arrays(projections, prefix='djimaging_glm_')
+        model = ReceptiveFieldGLM(
+            x_stimulus=sta_params['x_stimulus'], trace=None, **self._get_glm_kwargs(sta_params))
+        sta_params['basis_projections'] = _MemmappedArrays.from_arrays(
+            model.compute_basis_projections(), prefix='djimaging_glm_')
+
+        # Use the degrees of freedom clipped to the RF dimensions, so that the clipping warns only once here,
+        # and not again for every trace.
+        sta_params['glm_params'].update(
+            df_ts=tuple(int(df) for df in model.df_ts),
+            df_ws=() if model.df_ws is None else tuple(int(df) for df in model.df_ws))
         return sta_params
 
     @staticmethod
@@ -478,7 +487,8 @@ class RfGlmQualityTemplate(dj.Computed):
         rf_glm_qidx_sum = 0.
         rf_glm_qidx_count = 0
 
-        if perm_alpha > 0:
+        # Without test data (frac_test=0), there is no permutation test and only the train (and dev) scores are used.
+        if perm_alpha > 0 and 'score_test' in quality_dict:
             p_value = quality_test(
                 score_trueX=quality_dict['score_test'],
                 score_permX=quality_dict['score_permX'],
@@ -492,7 +502,7 @@ class RfGlmQualityTemplate(dj.Computed):
             rf_glm_qidx_corrcoeff = \
                 (quality_dict['corrcoef_train'] >= min_corrcoef) & \
                 (quality_dict.get('corrcoef_dev', np.inf) >= min_corrcoef) & \
-                (quality_dict['corrcoef_test'] >= min_corrcoef)
+                (quality_dict.get('corrcoef_test', np.inf) >= min_corrcoef)
             rf_glm_qidx_sum += float(rf_glm_qidx_corrcoeff)
             rf_glm_qidx_count += 1
 
@@ -500,9 +510,13 @@ class RfGlmQualityTemplate(dj.Computed):
             rf_glm_qidx_mse = \
                 (quality_dict['mse_train'] <= max_mse) & \
                 (quality_dict.get('mse_dev', -np.inf) <= max_mse) & \
-                (quality_dict['mse_test'] <= max_mse)
+                (quality_dict.get('mse_test', -np.inf) <= max_mse)
             rf_glm_qidx_sum += float(rf_glm_qidx_mse)
             rf_glm_qidx_count += 1
+
+        if rf_glm_qidx_count == 0:
+            raise ValueError(f"No quality criterion applies to {key}: set min_corrcoef or max_mse > 0, "
+                             f"or perm_alpha > 0 for GLMs with test data.")
 
         rf_glm_qidx = rf_glm_qidx_sum / rf_glm_qidx_count
 

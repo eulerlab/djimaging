@@ -132,3 +132,20 @@ def test_best_df_model_is_returned_without_refit(metric, dev_metrics, monkeypatc
     assert metrics_dev_opt.shape == (1, 3, 2)
     assert model.df == ((3,) if metric == 'mse' else (4,))
     assert model.beta == 0.1
+
+
+def test_clipped_dfs_do_not_warn_again():
+    """`RfGlmTemplate.prepare_sta_params` passes the clipped dfs on, so that the clipping warns only once."""
+    import warnings
+
+    stim = np.random.default_rng(8).normal(size=(100, 6, 5)).astype(np.float32)
+    x_stimulus, glm_kwargs = _fit_kwargs(stim)
+    glm_kwargs.update(df_ts=(100,), df_ws=(3, 50))
+
+    with pytest.warns(UserWarning, match="degrees of freedom"):
+        glm = ReceptiveFieldGLM(x_stimulus=x_stimulus, trace=None, **glm_kwargs)
+
+    glm_kwargs.update(df_ts=tuple(glm.df_ts), df_ws=tuple(glm.df_ws))
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        ReceptiveFieldGLM(x_stimulus=x_stimulus, trace=np.zeros(100, dtype=np.float32), **glm_kwargs)

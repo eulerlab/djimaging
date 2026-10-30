@@ -716,10 +716,10 @@ class ReceptiveFieldGLM:
         if np.all(dfs <= dims):
             return dfs
         elif np.any(dfs <= dims):
-            warnings.warn(' No using df_ts larger than dims')
+            warnings.warn(f'Not using degrees of freedom {dfs[dfs > dims]} larger than the RF dimension {dims}.')
             return dfs[dfs <= dims]
         else:
-            warnings.warn(' All df_ts larger than dims, use only dims as df')
+            warnings.warn(f'All degrees of freedom {dfs} are larger than the RF dimension {dims}, using {dims}.')
             return np.array([dims])
 
     def create_and_fit_glm(self, df: tuple, Xs_train: dict, y_train: np.ndarray,
