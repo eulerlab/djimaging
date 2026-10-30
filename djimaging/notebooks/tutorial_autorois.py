@@ -26,6 +26,11 @@
 # uv pip install -e ".[autorois,autorois-cellpose,autorois-mediar]"
 # ```
 # Models whose dependencies or weights are missing are skipped with a message.
+#
+# Note: the extras `autorois-cellpose` and `autorois-mediar` currently conflict with the up-to-date core
+# dependencies (`mediar` pins `monai==1.4.0`, which needs `numpy<2`; `cellpose` 3.x needs `numpy<2.1`).
+# `uv sync --all-extras` fails, and the two models may only be installed with older packages or in a separate
+# environment, see the README. `UNet`, `UNet_v1` and `CorrRoiMask` only need the extra `autorois`.
 
 # %%
 # %load_ext autoreload

@@ -16,6 +16,18 @@ Related repos:
   Explicitly requested models raise if they cannot be loaded; the default UNet only warns.
 - Model names: `UNet` (latest, v0.2.0), `UNet_v1` (old v0.1.0), `Cellpose3_cyto2`, `Cellpose3_cyto3`, `MEDIAR`, `CorrRoiMask`.
 
+## Known issues (decided to leave as is)
+
+- `uv sync --all-extras` fails: `mediar` pins `monai==1.4.0` (needs `numpy<2`), djimaging needs `numpy>=2`.
+  Since the lock is universal, this also breaks `uv sync --extra <any>`.
+- `cellpose` 3.x needs `numpy<2.1`, so locking it downgrades `numpy` to 2.0.2 and `numba` to 0.60.0 for all installs.
+- Tried: `override-dependencies = ["monai>=1.5.0"]` in `[tool.uv]` makes `uv lock` succeed (monai 1.6.1, untested with
+  the MEDIAR wrapper) but with the numpy/numba downgrade above. Not applied, as up-to-date numpy is preferred.
+- Cleaner fixes for later: relax the monai pin in the `sarmueller/MEDIAR` fork, and move to Cellpose 4 (needs a
+  check against the finetuned weights).
+- Consequence: the default setup (`UNet`, `CorrRoiMask`, extra `autorois`) is the supported one; `uv.lock` was not
+  updated for the `autorois-cellpose` and `autorois-mediar` extras.
+
 ## What was implemented
 
 - `djimaging/autorois/unet.py`: supports 1-channel (ch0 only) and 2-channel models; `ch1_stack` optional; `multiple_stacks` concatenates in time.

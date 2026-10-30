@@ -278,6 +278,11 @@ print(f"{len(missing_fields)} fields without ROI mask")
 # - **`MEDIAR`**: A transformer-based cell segmentation model (MiT-b5 encoder), finetuned on human ROI masks. The
 #   image is resized to 512x512 for the network. It is the largest and slowest model.
 #
+# **Known limitation:** the extras `autorois-cellpose` and `autorois-mediar` currently conflict with the up-to-date
+# core dependencies: `mediar` pins `monai==1.4.0`, which needs `numpy<2`, and `cellpose` 3.x needs `numpy<2.1`.
+# `uv sync --all-extras` therefore fails, and `Cellpose3_*` and `MEDIAR` can only be used with older packages or in a
+# separate environment (see the README). `UNet`, `UNet_v1` and `CorrRoiMask` only need the extra `autorois`.
+#
 # By default only `UNet` and `CorrRoiMask` are loaded. All loaded models stay in memory (the neural networks
 # may also occupy GPU memory) for as long as they are referenced, and the ROI canvas keeps a reference to the models it
 # was given. To keep memory low, therefore:

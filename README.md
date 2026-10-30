@@ -45,6 +45,19 @@ uv pip install -e ".[autorois,autorois-cellpose,autorois-mediar]"
 autorois_models = load_default_autorois_models(models=['UNet', 'Cellpose3_cyto3', 'MEDIAR'])  # also: 'Cellpose3_cyto2', 'UNet_v1', 'CorrRoiMask'
 ```
 
+> ⚠️ **Known dependency conflicts of the optional Cellpose and MEDIAR models.** `uv.lock` has not been resolved
+> with these extras, and they currently conflict with the (up-to-date) core dependencies:
+> - `autorois-mediar`: the `mediar` fork pins `monai==1.4.0`, which requires `numpy<2`, but djimaging requires
+>   `numpy>=2`. `uv sync --all-extras` (and `uv sync --extra <any>`, as the lock is universal) fails with
+>   "No solution found ... mediar==0.0.1 depends on numpy>=1.24,<2.0".
+> - `autorois-cellpose`: `cellpose` 3.x requires `numpy<2.1`. Resolving it forces `numpy` 2.0.2 and `numba` 0.60.0
+>   for everyone, instead of the current versions.
+>
+> Therefore, use `uv sync` / `uv pip install -e ".[autorois]"` (UNet, `CorrRoiMask`) for the default setup.
+> Possible workarounds if you need these models: add `override-dependencies = ["monai>=1.5.0"]` under
+> `[tool.uv]` (resolves MEDIAR, untested with the MEDIAR wrapper) and accept the older `numpy`/`numba` for
+> Cellpose, or install them in a separate environment.
+
 > ❗ To test if the package was successfully installed, e.g.
 > open a jupyter notebook in your container and call <code>import djimaging</code>.
 
