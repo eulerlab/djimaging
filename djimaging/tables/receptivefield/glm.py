@@ -144,8 +144,8 @@ class RfGlmParamsTemplate(FastStaParamsTemplate):
         return params
 
     def add_default(
-            self, stim_names: list | None = None, dnoise_params_id: int = 1, fit_kind: str = "trace",
-            fupsample_trace: int = 1, fupsample_stim: int = 1, lowpass_cutoff: float = 0,
+            self, stim_names: list | None = None, dnoise_params_id: int = 1, fit_kind: str = "gradient",
+            fupsample_trace: int = 10, fupsample_stim: int = 4, lowpass_cutoff: float = 0,
             pre_blur_sigma_s: float = 0, post_blur_sigma_s: float = 0,
             filter_dur_s_past: float = 1.2, filter_dur_s_future: float = 0.2,
             df_ts: tuple = (10,), df_ws: tuple = (9,), betas: tuple = (0.005,),
