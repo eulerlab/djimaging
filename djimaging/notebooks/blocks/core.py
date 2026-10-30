@@ -261,9 +261,9 @@ print(f"{len(missing_fields)} fields without ROI mask")
 # | `CorrRoiMask` | classical (pixel correlations) | ch0 stack | - | low, CPU only, slow on large fields |
 # | `UNet_v1` | U-Net, first version (v0.1.0) | ch0 + ch1 averages | `autorois` | moderate |
 # | `UNet` | U-Net, retrained (v0.2.0), **default** | ch0 average | `autorois` | moderate |
-# | `Cellpose3_cyto2` | Cellpose 3 finetuned from `cyto2` | ch0 average | `autorois-cellpose` | moderate |
-# | `Cellpose3_cyto3` | Cellpose 3 finetuned from `cyto3` | ch0 average | `autorois-cellpose` | moderate |
-# | `MEDIAR` | MEDIAR (transformer), finetuned | ch0 average | `autorois-mediar` | high (about 0.5 GB of weights) |
+# | `Cellpose3_cyto2` | Cellpose 3 finetuned from `cyto2` | ch0 average | separate install, see README | moderate |
+# | `Cellpose3_cyto3` | Cellpose 3 finetuned from `cyto3` | ch0 average | separate install, see README | moderate |
+# | `MEDIAR` | MEDIAR (transformer), finetuned | ch0 average | separate install, see README | high (about 0.5 GB of weights) |
 #
 # - **`CorrRoiMask`**: Needs no weights and no training data. It seeds ROIs at pixels whose time course is highly
 #   correlated with their neighbours and grows them while they stay correlated and below a maximum area. The
@@ -278,10 +278,10 @@ print(f"{len(missing_fields)} fields without ROI mask")
 # - **`MEDIAR`**: A transformer-based cell segmentation model (MiT-b5 encoder), finetuned on human ROI masks. The
 #   image is resized to 512x512 for the network. It is the largest and slowest model.
 #
-# **Known limitation:** the extras `autorois-cellpose` and `autorois-mediar` currently conflict with the up-to-date
-# core dependencies: `mediar` pins `monai==1.4.0`, which needs `numpy<2`, and `cellpose` 3.x needs `numpy<2.1`.
-# `uv sync --all-extras` therefore fails, and `Cellpose3_*` and `MEDIAR` can only be used with older packages or in a
-# separate environment (see the README). `UNet`, `UNet_v1` and `CorrRoiMask` only need the extra `autorois`.
+# **Note:** `Cellpose3_*` and `MEDIAR` need packages (`cellpose`, `mediar`) that are not installed with djimaging,
+# because they conflict with the up-to-date `numpy` (`mediar` pins `monai==1.4.0` which needs `numpy<2`, and
+# `cellpose` 3.x needs `numpy<2.1`). You have to install them yourself, preferably in a separate environment
+# (see the README). `UNet`, `UNet_v1` and `CorrRoiMask` only need the extra `autorois`.
 #
 # By default only `UNet` and `CorrRoiMask` are loaded. All loaded models stay in memory (the neural networks
 # may also occupy GPU memory) for as long as they are referenced, and the ROI canvas keeps a reference to the models it

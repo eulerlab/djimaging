@@ -1009,7 +1009,7 @@ def _add_autorois_corr(autorois_models: dict, kind: str) -> None:
 def _add_cellpose(autorois_models: dict, kind: str = 'default_rgc', base: str = 'cyto3') -> None:
     """Load a finetuned Cellpose3 auto-ROI model and add it to the model dict.
 
-    Requires the ``autorois-cellpose`` extra.
+    Requires the ``cellpose`` package (not a djimaging dependency, see README).
 
     Args:
         autorois_models: Dict to add the loaded model to under the key 'Cellpose3_<base>'.
@@ -1024,7 +1024,7 @@ def _add_cellpose(autorois_models: dict, kind: str = 'default_rgc', base: str = 
 def _add_mediar(autorois_models: dict, kind: str = 'default_rgc') -> None:
     """Load the finetuned MEDIAR auto-ROI model and add it to the model dict.
 
-    Requires the ``autorois-mediar`` extra.
+    Requires the ``mediar`` package (not a djimaging dependency, see README).
 
     Args:
         autorois_models: Dict to add the loaded model to under the key 'MEDIAR'.

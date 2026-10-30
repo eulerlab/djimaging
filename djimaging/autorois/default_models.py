@@ -35,7 +35,7 @@ def load_unet(models_dir: str | Path):
 
 
 def load_cellpose3(models_dir: str | Path, base: str = 'cyto3'):
-    """Load a finetuned Cellpose3 model. Requires the ``autorois-cellpose`` extra.
+    """Load a finetuned Cellpose3 model. Requires the ``cellpose`` package (not a djimaging dependency, see README).
 
     Args:
         models_dir: Folder with the model weights.
@@ -53,7 +53,7 @@ def load_cellpose3(models_dir: str | Path, base: str = 'cyto3'):
 
 
 def load_mediar(models_dir: str | Path, device: str = 'cpu'):
-    """Load the finetuned MEDIAR model. Requires the ``autorois-mediar`` extra."""
+    """Load the finetuned MEDIAR model. Requires the ``mediar`` package (not a djimaging dependency, see README)."""
     from djimaging.autorois.mediar_wrapper import MediarWrapper
     return MediarWrapper(model_path=str(Path(models_dir) / MEDIAR_FILE), device=device)
 

@@ -18,7 +18,7 @@ DEFAULT_IMAGE_SIZE = (512, 512)
 class MediarWrapper:
     """Inference-only wrapper around a (finetuned) MEDIAR model for ROI mask creation.
 
-    Requires the ``mediar`` package (https://github.com/sarmueller/MEDIAR), see the ``autorois-mediar`` extra.
+    Requires the ``mediar`` package (https://github.com/sarmueller/MEDIAR), which is not a djimaging dependency (see README).
 
     Parameters
     ----------

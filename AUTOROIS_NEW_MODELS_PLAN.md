@@ -18,15 +18,11 @@ Related repos:
 
 ## Known issues (decided to leave as is)
 
-- `uv sync --all-extras` fails: `mediar` pins `monai==1.4.0` (needs `numpy<2`), djimaging needs `numpy>=2`.
-  Since the lock is universal, this also breaks `uv sync --extra <any>`.
-- `cellpose` 3.x needs `numpy<2.1`, so locking it downgrades `numpy` to 2.0.2 and `numba` to 0.60.0 for all installs.
-- Tried: `override-dependencies = ["monai>=1.5.0"]` in `[tool.uv]` makes `uv lock` succeed (monai 1.6.1, untested with
-  the MEDIAR wrapper) but with the numpy/numba downgrade above. Not applied, as up-to-date numpy is preferred.
-- Cleaner fixes for later: relax the monai pin in the `sarmueller/MEDIAR` fork, and move to Cellpose 4 (needs a
-  check against the finetuned weights).
-- Consequence: the default setup (`UNet`, `CorrRoiMask`, extra `autorois`) is the supported one; `uv.lock` was not
-  updated for the `autorois-cellpose` and `autorois-mediar` extras.
+- `cellpose` and `mediar` are deliberately NOT dependencies of djimaging (no extras), the models stay available if the
+  user installs the packages. `mediar` pins `monai==1.4.0` (needs `numpy<2`) and `cellpose` 3.x needs `numpy<2.1`
+  (locking it downgrades `numpy` to 2.0.2 and `numba` to 0.60.0), which breaks `uv sync` with up-to-date `numpy`.
+- Possible later fixes: relax the monai pin in the `sarmueller/MEDIAR` fork (`override-dependencies = ["monai>=1.5.0"]`
+  made `uv lock` succeed, untested with the MEDIAR wrapper), and move to Cellpose 4 (check against the finetuned weights).
 
 ## What was implemented
 
@@ -35,7 +31,6 @@ Related repos:
 - `djimaging/autorois/mediar_wrapper.py`: new, inference-only MEDIAR wrapper (resize to 512x512, predict, resize mask back, consecutive IDs).
 - `djimaging/tables/core/roi_mask.py`: loaders for all models, `models=` argument, list support in `draw_roi_mask`.
   Cellpose3 uses `diameter=10` um, `min_size=4`, `flow_threshold=0.4`, `nchan=2` (train80: median ROI area 18 px, about 4.8 px diameter at about 2 um per pixel).
-- `pyproject.toml`: extras `autorois-cellpose` (`cellpose>=3.1.1,<4`) and `autorois-mediar` (`mediar` from the `sarmueller/MEDIAR` fork).
 - Tests: `tests/autorois/test_new_models.py`, `tests/autorois/test_load_default_models.py` (12 pass, MEDIAR with a fake package).
 - Checked: the real `_epoch=199.ckpt` UNet loads and predicts on `field_0001` (129 predicted vs 138 ground-truth ROIs; not a test-set score).
 
@@ -49,11 +44,10 @@ Jonathan:
     (from `model_id-cyto3_200_epochs_pp_id-1_dataset_id-train80/models/`)
   - `Resources/AutoROIs/models/MEDIAR_v0.2.0/mediar_best_finetuned_model.pth`
     (from `model_id-mediar_200_epochs_pp_id-1_dataset_id-train80`)
-- [ ] Run `uv lock` to add the two new extras to `uv.lock`, and check that `autorois-mediar` resolves.
 - [ ] Recreate the broken project `.venv` (its base Python is missing), then run the full unit suite and flake8:
   `pytest -v tests --ignore=tests/integration`
-- [ ] Test Cellpose3 with the real weights (install `.[autorois,autorois-cellpose]`), e.g. in the tutorial notebook, and check the masks.
-- [ ] Test MEDIAR with the real weights (install `.[autorois,autorois-mediar]`). The wrapper mirrors the public repo's `Predictor` usage
+- [ ] Test Cellpose3 with the real weights (install `.[autorois]` and `cellpose>=3.1.1,<4` yourself), e.g. in the tutorial notebook, and check the masks.
+- [ ] Test MEDIAR with the real weights (install `.[autorois]` and `mediar` yourself). The wrapper mirrors the public repo's `Predictor` usage
   (`_inference`, `_post_process`) but was only tested against a fake package.
 - [ ] Check that the 1-channel UNet preprocessing matches training on a few real fields, and compare against the ground truth on a held-out (test split) field.
 - [ ] Check the Cellpose `min_size` handling: the wrapper divides `min_size` by the pixel size linearly, although it is an area in pixels.

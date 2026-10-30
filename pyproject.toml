@@ -34,16 +34,6 @@ autorois = [
     "ipywidgets>=8.0.0",
     "ipycanvas>=0.13.0",
 ]
-# Finetuned Cellpose3 AutoROIs model (needs `autorois` as well)
-# Known issue: cellpose 3.x needs numpy<2.1, which downgrades numpy and numba in the lock (see README).
-autorois-cellpose = [
-    "cellpose>=3.1.1,<4",
-]
-# Finetuned MEDIAR AutoROIs model (needs `autorois` as well)
-# Known issue: mediar pins monai==1.4.0 (numpy<2), which conflicts with numpy>=2, `uv sync` fails (see README).
-autorois-mediar = [
-    "mediar",
-]
 rf = [
     "rfest>=2.1.2",
 ]
@@ -75,5 +65,3 @@ constraint-dependencies = [
 
 [tool.uv.sources]
 scanm-support = { git = "https://github.com/eulerlab/ScanM_support.git" }
-# Fork of https://github.com/Lee-Gihun/MEDIAR that is installable as a package
-mediar = { git = "https://github.com/sarmueller/MEDIAR.git" }

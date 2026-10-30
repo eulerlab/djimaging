@@ -23,14 +23,15 @@
 #
 # Install the optional dependencies first:
 # ```bash
-# uv pip install -e ".[autorois,autorois-cellpose,autorois-mediar]"
+# uv pip install -e ".[autorois]"
+# uv pip install "cellpose>=3.1.1,<4"  # optional, for the Cellpose3 models
+# uv pip install git+https://github.com/sarmueller/MEDIAR.git  # optional, for MEDIAR
 # ```
 # Models whose dependencies or weights are missing are skipped with a message.
 #
-# Note: the extras `autorois-cellpose` and `autorois-mediar` currently conflict with the up-to-date core
-# dependencies (`mediar` pins `monai==1.4.0`, which needs `numpy<2`; `cellpose` 3.x needs `numpy<2.1`).
-# `uv sync --all-extras` fails, and the two models may only be installed with older packages or in a separate
-# environment, see the README. `UNet`, `UNet_v1` and `CorrRoiMask` only need the extra `autorois`.
+# Note: `cellpose` and `mediar` are not installed with djimaging because they conflict with the up-to-date `numpy`
+# (`mediar` pins `monai==1.4.0`, which needs `numpy<2`; `cellpose` 3.x needs `numpy<2.1`), see the README.
+# `UNet`, `UNet_v1` and `CorrRoiMask` only need the extra `autorois`.
 
 # %%
 # %load_ext autoreload
@@ -119,9 +120,9 @@ print(f'Human ROIs: {len(np.unique(roi_mask_human)) - 1}')
 # | `CorrRoiMask` | classical | ch0 stack | - |
 # | `UNet_v1` | neural network | ch0 + ch1 averages | `autorois` |
 # | `UNet` | neural network | ch0 average | `autorois` |
-# | `Cellpose3_cyto2` | neural network | ch0 average | `autorois-cellpose` |
-# | `Cellpose3_cyto3` | neural network | ch0 average | `autorois-cellpose` |
-# | `MEDIAR` | neural network | ch0 average | `autorois-mediar` |
+# | `Cellpose3_cyto2` | neural network | ch0 average | `cellpose` (separate) |
+# | `Cellpose3_cyto3` | neural network | ch0 average | `cellpose` (separate) |
+# | `MEDIAR` | neural network | ch0 average | `mediar` (separate) |
 
 # %%
 # Extent of the images, as in `plot_field`
@@ -221,7 +222,7 @@ run_model('UNet', lambda: default_models.load_unet(MODELS_DIR))
 # flow fields, which point to the centre of each cell, and follows them to group pixels into cells.
 # We finetuned Cellpose 3 (from the `cyto2` and `cyto3` base models) on our human ROI masks. It works on the average of ch0 and needs the
 # expected cell diameter, which is set in um and converted to pixels using the pixel size.
-# Requires the `autorois-cellpose` extra.
+# Requires `cellpose`, which has to be installed separately (see above).
 
 # %%
 run_model('Cellpose3_cyto2', lambda: default_models.load_cellpose3(MODELS_DIR, base='cyto2'))
@@ -234,7 +235,7 @@ run_model('Cellpose3_cyto3', lambda: default_models.load_cellpose3(MODELS_DIR, b
 # (MiT-b5) and a flow-based decoder; it was designed for the NeurIPS 2022 cell segmentation challenge.
 # We finetuned it on our human ROI masks. The average image of ch0 is resized to 512x512 for the network, and the
 # mask is resized back afterwards. It is the largest model (about 0.5 GB), so it is also the slowest and most memory
-# hungry. Requires the `autorois-mediar` extra.
+# hungry. Requires `mediar`, which has to be installed separately (see above).
 
 # %%
 run_model('MEDIAR', lambda: default_models.load_mediar(MODELS_DIR))
