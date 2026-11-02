@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from copy import deepcopy
 
@@ -16,15 +18,15 @@ class UserInfoTemplate(dj.Manual):
         # Info for decoding file names
         experimenter                    :varchar(16)  # name of the experimenter
         ---     
-        data_dir                        :varchar(191)   # path to header file, used for computed tables
-        field_loc                       :tinyint       # string location for field
-        stimulus_loc                    :tinyint       # string location for stimulus
-        animal_loc=NULL                 :tinyint       # string location for number of animal (e.g. M1)
-        datatype_loc=NULL               :tinyint       # string location for datatype (e.g. SMP)
-        region_loc=NULL                 :tinyint       # string location for region (e.g. LR or RR)
-        cond1_loc=NULL                  :tinyint       # string location for condition 1 (e.g. pharmacological)
-        cond2_loc=NULL                  :tinyint       # string location for condition 2 (e.g. pharmacological)
-        cond3_loc=NULL                  :tinyint       # string location for condition 3 (e.g. pharmacological)
+        data_dir                        :varchar(191)   # acquisition-tree root directory used for file discovery
+        field_loc                       :int32       # string location for field
+        stimulus_loc                    :int32       # string location for stimulus
+        animal_loc=NULL                 :int32       # string location for number of animal (e.g. M1)
+        datatype_loc=NULL               :int32       # string location for datatype (e.g. SMP)
+        region_loc=NULL                 :int32       # string location for region (e.g. LR or RR)
+        cond1_loc=NULL                  :int32       # string location for condition 1 (e.g. pharmacological)
+        cond2_loc=NULL                  :int32       # string location for condition 2 (e.g. pharmacological)
+        cond3_loc=NULL                  :int32       # string location for condition 3 (e.g. pharmacological)
         opticdisk_alias='od_opticdisk_opticdisc'  :varchar(191)  # alias(es) for optic disk (separated by _)
         outline_alias='outline_edge'    :varchar(191)  # alias(es) for retinal outline / edge (separated by _)
         highres_alias='hq_hr_highresolution_512' :varchar(191)  # alias(es) for high resolution stack
@@ -36,13 +38,32 @@ class UserInfoTemplate(dj.Manual):
         """
         return definition
 
-    def upload_users(self, userdicts: list):
-        """Upload multiple users"""
+    def upload_users(self, userdicts: list) -> None:
+        """Upload multiple users to the table.
+
+        Args:
+            userdicts: List of user info dicts, each passed to
+                ``upload_user``.
+        """
         for userdict in userdicts:
             self.upload_user(userdict)
 
-    def upload_user(self, userdict: dict, verbose=1):
-        """Upload one user"""
+    def upload_user(self, userdict: dict, verbose: int = 1) -> None:
+        """Upload a single user entry to the table.
+
+        If the experimenter already exists, the existing entry is preserved and
+        a message is printed when verbose > 0.
+
+        Args:
+            userdict: Dict containing at minimum 'experimenter' and 'data_dir'
+                keys, plus any optional columns defined in the table schema.
+            verbose: Verbosity level. If > 0, print a message when the entry
+                already exists. Default is 1.
+
+        Raises:
+            AssertionError: If 'experimenter' or 'data_dir' are missing, or if
+                the data_dir path does not exist on the filesystem.
+        """
         assert "experimenter" in userdict, 'Set username'
         assert "data_dir" in userdict, 'Set data_dir'
         assert os.path.isdir(userdict['data_dir']), f"data_dir={userdict['data_dir']} is not a directory"
@@ -56,7 +77,7 @@ class UserInfoTemplate(dj.Manual):
             if 'alias' in k:
                 userdict[k] = v.lower()
 
-        if userdict["experimenter"] not in self.fetch("experimenter"):
+        if userdict["experimenter"] not in self.to_arrays("experimenter"):
             self.insert([userdict])
         else:
             entry = (self & dict(experimenter=userdict["experimenter"])).fetch1()

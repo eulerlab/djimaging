@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import warnings
 from abc import abstractmethod
 from copy import deepcopy
@@ -6,6 +8,7 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 
+from djimaging.utils.dj_storage import load_array, local_path, relative_store_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm.recording import ScanMRecording
@@ -13,6 +16,7 @@ from djimaging.utils.scanm.recording import ScanMRecording
 
 class PresentationTemplate(dj.Computed):
     database = ""
+    _filepath_store = "reference"
     incl_region = True  # Include region as primary key?
     incl_cond1 = True  # Include condition 1 as primary key?
     incl_cond2 = False  # Include condition 2 as primary key?
@@ -36,24 +40,24 @@ class PresentationTemplate(dj.Computed):
         if self.incl_cond3 and not self.field_table.incl_cond3:
             definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
 
-        definition += """
+        definition += f"""
         ---
-        pres_data_file :varchar(191)        # path to file (e.g. h5 file)
-        triggertimes :longblob              # triggertimes in each presentation
-        trigger_valid :tinyint unsigned     # Are triggers as expected (1) or not (0)?
-        absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
-        absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
-        absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
-        scan_type: enum("xy", "xz", "xyz")  # Type of scan
-        npixartifact : int unsigned         # number of pixel with light artifact
-        nxpix: int unsigned                 # number of pixels in x
-        nypix: int unsigned                 # number of pixels in y
-        nzpix: int unsigned                 # number of pixels in z
-        nxpix_offset: int unsigned          # number of offset pixels in x
-        nxpix_retrace: int unsigned         # number of retrace pixels in x
-        pixel_size_um :float                # width of a pixel in um (also height if y is second dimension)
-        z_step_um = NULL :float             # z-step in um
-        nframes: int unsigned               # number of pixels in time
+        pres_data_file :<filepath@{self._filepath_store}>  # source acquisition file (e.g. HDF5)
+        triggertimes :<blob>              # triggertimes in each presentation
+        trigger_valid :bool     # Are triggers as expected (1) or not (0)?
+        absx: float32  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
+        absy: float32  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
+        absz: float32  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
+        scan_type: enum('xy', 'xz', 'xyz')  # Type of scan
+        npixartifact : int64         # number of pixel with light artifact
+        nxpix: int64                 # number of pixels in x
+        nypix: int64                 # number of pixels in y
+        nzpix: int64                 # number of pixels in z
+        nxpix_offset: int64          # number of offset pixels in x
+        nxpix_retrace: int64         # number of retrace pixels in x
+        pixel_size_um :float32                # width of a pixel in um (also height if y is second dimension)
+        z_step_um = NULL :float32             # z-step in um
+        nframes: int64               # number of pixels in time
         """
         return definition
 
@@ -73,31 +77,37 @@ class PresentationTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def raw_params_table(self):
+    def raw_params_table(self) -> dj.Table:
+        """Return the raw data parameters lookup table."""
         pass
 
     @property
     @abstractmethod
-    def field_table(self):
+    def field_table(self) -> dj.Table:
+        """Return the field table."""
         pass
 
     @property
     @abstractmethod
-    def stimulus_table(self):
+    def stimulus_table(self) -> dj.Table:
+        """Return the stimulus table."""
         pass
 
     @property
     @abstractmethod
-    def experiment_table(self):
+    def experiment_table(self) -> dj.Table:
+        """Return the experiment table."""
         pass
 
     @property
     @abstractmethod
-    def userinfo_table(self):
+    def userinfo_table(self) -> dj.Table:
+        """Return the user info table."""
         pass
 
     @property
     def key_source(self):
+        """Return the key source for this computed table."""
         try:
             return self.field_table.proj() * self.stimulus_table.proj() * self.raw_params_table.proj()
         except (AttributeError, TypeError):
@@ -111,7 +121,7 @@ class PresentationTemplate(dj.Computed):
             -> master
             ch_name : varchar(32)  # name of the channel
             ---
-            ch_average : longblob  # Stack median over time
+            ch_average : <blob>  # Stack median over time
             """
             return definition
 
@@ -122,18 +132,28 @@ class PresentationTemplate(dj.Computed):
             # Data read from wParamsNum and wParamsStr tables in h5 file
             -> master
             ---
-            scan_frequency=-1 :float             # Scanning frequency in Hz
-            scan_period=-1 :float                # Scanning duration per frame in seconds
-            line_duration=-1 :float              # Line duration from OS_Parameters
-            real_pixel_duration=-1 :float        # Duration of a pixel (un-cropped)
-            zoom :float                          # Zoom of objective, changes pixel size
-            angle_deg :float                     # Angle of objective, changes rotation of image
-            scan_params_dict :longblob           # Other ScanM parameters less frequently used
+            scan_frequency=-1 :float32             # Scanning frequency in Hz
+            scan_period=-1 :float32                # Scanning duration per frame in seconds
+            line_duration=-1 :float32              # Line duration from OS_Parameters
+            real_pixel_duration=-1 :float32        # Duration of a pixel (un-cropped)
+            zoom :float32                          # Zoom of objective, changes pixel size
+            angle_deg :float32                     # Angle of objective, changes rotation of image
+            scan_params_dict :<blob>           # Other ScanM parameters less frequently used
             """
             return definition
 
-    def load_field_stim_file_info_df(self, field_stim_key):
-        """Load file info for a given field into a dataframe."""
+    def load_field_stim_file_info_df(self, field_stim_key: dict):
+        """Load file info for a given field-stimulus key into a DataFrame.
+
+        Args:
+            field_stim_key: Primary key dict identifying a field and stimulus
+                combination.
+
+        Returns:
+            A pandas DataFrame with one row per matching response file,
+            including columns for filepath, stimulus name, and any condition
+            columns required by the presentation table's primary-key schema.
+        """
         file_info_df = self.field_table().load_exp_file_info_df(field_stim_key, filter_kind='response')
 
         for new_key in self.field_table().new_primary_keys:
@@ -168,21 +188,54 @@ class PresentationTemplate(dj.Computed):
 
         return file_info_df
 
-    def make(self, key, verboselvl: int = 0):
+    def make(self, key: dict, verboselvl: int = 0) -> None:
+        """Populate all presentation entries for the given key.
+
+        Args:
+            key: Primary key dict identifying a field-stimulus combination to
+                populate.
+            verboselvl: Verbosity level controlling diagnostic output.
+        """
         self._add_entries(key, only_new=False, verboselvl=verboselvl, suppress_errors=False)
 
-    def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False):
-        """Scan filesystem for new fields and add them to the database."""
+    def rescan_filesystem(
+            self,
+            restrictions: dict = None,
+            verboselvl: int = 0,
+            suppress_errors: bool = False,
+    ) -> None:
+        """Scan filesystem for new presentations and add them to the database.
+
+        Args:
+            restrictions: Optional restriction dict applied to the key source
+                before scanning. Defaults to no restriction.
+            verboselvl: Verbosity level controlling diagnostic output.
+            suppress_errors: If True, print errors instead of raising them.
+        """
         if restrictions is None:
             restrictions = dict()
 
         for key in (self.key_source & restrictions):
             self._add_entries(key, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def _add_entries(self, field_stim_key, only_new: bool, verboselvl: int, suppress_errors: bool):
-        """
-        Add entries for a given Field + Stimulus combination.
-        This can be multiple presentations due to different conditions.
+    def _add_entries(
+            self,
+            field_stim_key: dict,
+            only_new: bool,
+            verboselvl: int,
+            suppress_errors: bool,
+    ) -> None:
+        """Add entries for a given Field + Stimulus combination.
+
+        This can result in multiple presentations when different conditions
+        (e.g. region, cond1) are present in the file-info DataFrame.
+
+        Args:
+            field_stim_key: Primary key dict identifying a field-stimulus
+                combination.
+            only_new: If True, skip keys that already exist in the table.
+            verboselvl: Verbosity level controlling diagnostic output.
+            suppress_errors: If True, print errors instead of raising them.
         """
         if verboselvl > 2:
             print('\nProcessing key:', field_stim_key)
@@ -229,9 +282,15 @@ class PresentationTemplate(dj.Computed):
                 else:
                     raise e
 
-    def _add_entry(self, pres_key, filepath: str, verboselvl=0):
-        """
-        Add presentation for Field + Stimulus + Conditions combination.
+    def _add_entry(self, pres_key: dict, filepath: str, verboselvl: int = 0) -> None:
+        """Add a single presentation entry for a Field + Stimulus + Conditions combination.
+
+        Args:
+            pres_key: Primary key dict identifying this specific presentation,
+                including any condition columns.
+            filepath: Absolute path to the ScanM recording file for this
+                presentation.
+            verboselvl: Verbosity level controlling diagnostic output.
         """
 
         if verboselvl > 4:
@@ -296,11 +355,21 @@ class PresentationTemplate(dj.Computed):
         for avg_entry in avg_entries:
             self.StackAverages().insert1(avg_entry, allow_direct_insert=True)
 
-    @staticmethod
-    def _complete_keys(base_key, rec) -> (dict, dict, list):
+    def _complete_keys(self, base_key: dict, rec: "ScanMRecording") -> tuple[dict, dict, list]:
+        """Build the three entry dicts needed to insert a presentation record.
 
+        Args:
+            base_key: Primary key dict for the presentation.
+            rec: A fully-loaded ScanMRecording instance for this presentation.
+
+        Returns:
+            A 3-tuple of (pres_entry, scaninfo_entry, avg_entries) where
+            pres_entry is the main presentation row, scaninfo_entry is the
+            ScanInfo part-table row, and avg_entries is a list of StackAverages
+            part-table rows (one per channel).
+        """
         pres_entry = deepcopy(base_key)
-        pres_entry["pres_data_file"] = rec.filepath
+        pres_entry["pres_data_file"] = relative_store_path(rec.filepath, self._filepath_store)
 
         pres_entry["trigger_valid"] = int(rec.trigger_valid)
         pres_entry["triggertimes"] = rec.trigger_times.astype(np.float32)
@@ -340,30 +409,49 @@ class PresentationTemplate(dj.Computed):
 
         return pres_entry, scaninfo_entry, avg_entries
 
-    def plot1(self, key=None, gamma=0.7):
+    def plot1(self, key: dict = None, gamma: float = 0.7) -> None:
+        """Plot the main and alternative channel stack averages for one presentation.
+
+        Args:
+            key: Primary key identifying the presentation to plot. If None,
+                the first available key is used.
+            gamma: Gamma correction value for display. Default is 0.7.
+        """
         key = get_primary_key(table=self, key=key)
         npixartifact, scan_type = (self.field_table & key).fetch1('npixartifact', 'scan_type')
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        main_ch_average = load_array((self.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         try:
-            alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+            alt_ch_average = load_array(
+                (self.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average'))
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
         plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
                    title=key, npixartifact=npixartifact, figsize=(8, 4), gamma=gamma)
 
-    def plot1_triggers(self, key=None):
+    def plot1_triggers(self, key: dict = None) -> tuple:
+        """Plot the trigger trace and detected trigger times for one presentation.
+
+        Args:
+            key: Primary key identifying the presentation to plot. If None,
+                the first available key is used.
+
+        Returns:
+            A 3-tuple of (fig, ax, rec) where fig and ax are the matplotlib
+            Figure and Axes, and rec is the loaded ScanMRecording instance.
+        """
         key = get_primary_key(table=self, key=key)
         triggertimes, filepath = (self & key).fetch1('triggertimes', 'pres_data_file')
+        triggertimes = load_array(triggertimes)
 
         setupid = (self.experiment_table().ExpInfo & key).fetch1("setupid")
         isrepeated, ntrigger_rep = (self.stimulus_table & key).fetch1("isrepeated", "ntrigger_rep")
 
-        rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=key['date'],
-                             repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep)
-        rec.set_auto_trigger_threshold()
-
-        trigger_trace = rec.ch_stacks[rec.trigger_ch_name].T.flatten()
+        with local_path(filepath, self._filepath_store) as filepath_local:
+            rec = ScanMRecording(filepath=filepath_local, setup_id=setupid, date=key['date'],
+                                 repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep)
+            rec.set_auto_trigger_threshold()
+            trigger_trace = rec.ch_stacks[rec.trigger_ch_name].T.flatten()
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 4))
         ax.set_title(f"{len(triggertimes)} triggers detected")

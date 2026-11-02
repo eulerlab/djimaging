@@ -23,7 +23,7 @@ def test_normalize_amp_one():
     assert np.isclose(np.max(np.abs(obs)), 1.)
 
 
-def normalize_amp_std():
+def test_normalize_amp_std():
     x = np.array([1., 2. / 3., 7.5, np.pi])
     obs = math_utils.normalize_amp_std(x)
     assert np.isclose(np.std(obs), 1.)

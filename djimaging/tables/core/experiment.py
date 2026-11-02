@@ -20,9 +20,9 @@ class ExperimentTemplate(dj.Computed):
         # Header-File location, name and path
         -> self.userinfo_table
         date                        :date                     # date of recording
-        exp_num                     :tinyint unsigned         # experiment number in a day
+        exp_num                     :int32         # experiment number in a day
         ---
-        header_path                 :varchar(191)             # path to header file
+        header_path                 :varchar(191)             # experiment directory containing the header file
         header_name                 :varchar(63)              # name of header file
         """
         return definition
@@ -33,6 +33,16 @@ class ExperimentTemplate(dj.Computed):
         pass
 
     def make(self, key: dict) -> None:
+        """Populate experiment entries by scanning the filesystem for header files.
+
+        Fetches the data directories from the userinfo table and delegates to
+        `add_experiments` to locate and insert experiment records.
+
+        Parameters
+        ----------
+        key : dict
+            The primary key identifying the experimenter entry.
+        """
         data_dir, pre_data_dir, raw_data_dir = (self.userinfo_table() & key).fetch1(
             "data_dir", "pre_data_dir", "raw_data_dir")
         self.add_experiments(key=key, data_dir=data_dir, pre_data_dir=pre_data_dir, raw_data_dir=raw_data_dir,
@@ -48,16 +58,25 @@ class ExperimentTemplate(dj.Computed):
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 1, suppress_errors: bool = False,
                           restr_headers: Optional[list] = None) -> None:
         """Scan filesystem for new experiments and add them to the database.
-        :param restrictions: Restriction to users table, e.g. to scan only for specific user(s)
-        :param verboselvl: Print (0) no / (1) only new data / (2) all data information
-        :param suppress_errors: Stop on errors or only print?
-        :param restr_headers: List of headers to be included
+
+        Parameters
+        ----------
+        restrictions : dict, optional
+            Restriction to users table, e.g. to scan only for specific user(s).
+            Default is None (no restriction).
+        verboselvl : int, optional
+            Print (0) no / (1) only new data / (2) all data information.
+            Default is 1.
+        suppress_errors : bool, optional
+            Stop on errors (False) or only print them (True). Default is False.
+        restr_headers : list | None, optional
+            List of header paths to be included. Default is None (all headers).
         """
 
         if restrictions is None:
             restrictions = dict()
 
-        for key in (self.key_source & restrictions).fetch(as_dict=True):
+        for key in (self.key_source & restrictions).to_dicts():
             if verboselvl > 0:
                 print(f"Scanning for experimenter: {key['experimenter']}")
 
@@ -70,8 +89,41 @@ class ExperimentTemplate(dj.Computed):
                 only_new=True, restrictions=restrictions, restr_headers=restr_headers,
                 verboselvl=verboselvl, suppress_errors=suppress_errors)
 
-    def add_experiments(self, key, data_dir, pre_data_dir, raw_data_dir,
-                        only_new, restrictions, restr_headers=None, verboselvl=0, suppress_errors=False):
+    def add_experiments(
+            self,
+            key: dict,
+            data_dir: str,
+            pre_data_dir: str,
+            raw_data_dir: str,
+            only_new: bool,
+            restrictions: dict | None,
+            restr_headers: list | None = None,
+            verboselvl: int = 0,
+            suppress_errors: bool = False,
+    ) -> None:
+        """Find all experiment folders under `data_dir` and add them to the database.
+
+        Parameters
+        ----------
+        key : dict
+            Base primary key (e.g. experimenter).
+        data_dir : str
+            Root directory to search for `.ini` header files.
+        pre_data_dir : str
+            Sub-directory name for pre-processed data (relative to header_path).
+        raw_data_dir : str
+            Sub-directory name for raw data (relative to header_path).
+        only_new : bool
+            If True, skip experiments that are already in the database.
+        restrictions : dict | None
+            Restriction dict applied when checking for existing entries.
+        restr_headers : list | None, optional
+            If provided, only process header paths in this list. Default is None.
+        verboselvl : int, optional
+            Verbosity level (0 = silent). Default is 0.
+        suppress_errors : bool, optional
+            If True, print errors instead of raising. Default is False.
+        """
 
         header_paths = find_folders_with_file_of_type(data_dir, ending='.ini', ignore_hidden=True)
 
@@ -90,7 +142,39 @@ class ExperimentTemplate(dj.Computed):
                 else:
                     raise e
 
-    def add_experiment(self, key, header_path, pre_data_dir, raw_data_dir, only_new, restrictions, verboselvl):
+    def add_experiment(
+            self,
+            key: dict,
+            header_path: str,
+            pre_data_dir: str,
+            raw_data_dir: str,
+            only_new: bool,
+            restrictions: dict | None,
+            verboselvl: int,
+    ) -> None:
+        """Parse a single experiment folder and insert all related sub-table entries.
+
+        Reads the `.ini` header file, extracts metadata (date, experiment number,
+        preparation info, animal info, indicator info, pharmacology info) and
+        inserts them into the master and part tables.
+
+        Parameters
+        ----------
+        key : dict
+            Base primary key (e.g. experimenter).
+        header_path : str
+            Absolute path to the experiment folder containing the `.ini` file.
+        pre_data_dir : str
+            Sub-directory name for pre-processed data.
+        raw_data_dir : str
+            Sub-directory name for raw data.
+        only_new : bool
+            If True, skip if this experiment already exists in the database.
+        restrictions : dict | None
+            Restriction dict applied when checking for existing entries.
+        verboselvl : int
+            Verbosity level (0 = silent).
+        """
 
         if verboselvl > 0:
             print('\theader_path:', header_path)
@@ -152,7 +236,7 @@ class ExperimentTemplate(dj.Computed):
             info_entry["prep"] = "wholemount"
 
         eye = header_dict.get("eye", "unknown")
-        if 'eye' == '':
+        if eye == '':
             eye = 'unknown'
 
         if (
@@ -243,19 +327,19 @@ class ExperimentTemplate(dj.Computed):
                # General preparation details set by user in preprocessing
                -> master
                ---
-               eye                :enum("left", "right", "unknown") # left or right eye of the animal
+               eye                :enum('left', 'right', 'unknown') # left or right eye of the animal
                projname           :varchar(191)                     # name of experimental project
                setupid            :varchar(191)                     # setup 1-3
-               prep="wholemount"  :enum("wholemount", "slice")      # preparation type of the retina
+               prep="wholemount"  :enum('wholemount', 'slice')      # preparation type of the retina
                preprem            :varchar(191)                     # comments on the preparation
                darkadapt_hrs      :varchar(191)                     # time spent dark adapting animal before disection
                slicethickness_um  :varchar(191)                     # thickness of each slice in slice preparation
                bathtemp_degc      :varchar(191)                     # temperature of bath chamber
-               prepwmorient       :smallint         # retina orientation in chamber (0° = dorsal away from experimenter). Defaults to 0. Use -1, 111 or "unkown" to encode unknown.
-               odx                :float            # x location of optic disk as read in from .ini file
-               ody                :float            # y location of optic disk as read in from .ini file (if available)
-               odz                :float            # z location of optic disk as read in from .ini file (if available)
-               od_ini_flag        :tinyint unsigned # flag (0, 1) indicating whether (1) or whether not (0)
+               prepwmorient       :int32         # retina orientation in chamber (0° = dorsal away from experimenter). Defaults to 0. Use -1, 111 or "unkown" to encode unknown.
+               odx                :float32            # x location of optic disk as read in from .ini file
+               ody                :float32            # y location of optic disk as read in from .ini file (if available)
+               odz                :float32            # z location of optic disk as read in from .ini file (if available)
+               od_ini_flag        :bool # flag (0, 1) indicating whether (1) or whether not (0)
                                                     # the optic disk position was documented in .ini file and
                                                     # is valid to use
                """
@@ -309,7 +393,7 @@ class ExperimentTemplate(dj.Computed):
             # Pharmacology Info
             -> master
             ---
-            pharmaflag      :tinyint unsigned # 1 there was pharma, 0 no pharma
+            pharmaflag      :bool # 1 there was pharma, 0 no pharma
             drug            :varchar(191)     # which drug was applied
             pharmconc       :varchar(191)     # concentration used in micromolar
             preapptime      :varchar(191)     # preapplication time

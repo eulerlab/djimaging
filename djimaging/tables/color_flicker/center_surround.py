@@ -4,6 +4,7 @@ import numpy as np
 import datajoint as dj
 from matplotlib import pyplot as plt
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trf, prep_long_title
 from djimaging.utils.receptive_fields.temporal_rf_utils import compute_polarity_and_peak_idxs, \
@@ -16,10 +17,10 @@ class CenterSurroundParamsTemplate(dj.Lookup):
     @property
     def definition(self):
         definition = """
-        cs_params_id: int # unique param set id
+        cs_params_id: int32 # unique param set id
         ---
-        peak_nstd : float  # How many standard deviations does a peak need to be considered peak?
-        npeaks_max : int unsigned # Maximum number of peaks, ignored if zero
+        peak_nstd : float32  # How many standard deviations does a peak need to be considered peak?
+        npeaks_max : int64 # Maximum number of peaks, ignored if zero
         """
         return definition
 
@@ -44,14 +45,14 @@ class CenterSurroundTemplate(dj.Computed):
         -> self.color_rf_table
         -> self.cs_params_table
         ---
-        c_polarity_idx : float  # Polarity index of center RF
-        c_transience_idx : float  # Transience index of center RF
-        c_half_amp_width : float  # Half amplitude width of center RF
-        c_main_peak_lag : float  # Main peak lag of center RF
-        s_polarity_idx : float  # Polarity index of surround RF
-        s_transience_idx : float  # Transience index of surround RF
-        s_half_amp_width : float  # Half amplitude width of surround RF
-        s_main_peak_lag : float  # Main peak lag of surround RF
+        c_polarity_idx : float32  # Polarity index of center RF
+        c_transience_idx : float32  # Transience index of center RF
+        c_half_amp_width : float32  # Half amplitude width of center RF
+        c_main_peak_lag : float32  # Main peak lag of center RF
+        s_polarity_idx : float32  # Polarity index of surround RF
+        s_transience_idx : float32  # Transience index of surround RF
+        s_half_amp_width : float32  # Half amplitude width of surround RF
+        s_main_peak_lag : float32  # Main peak lag of surround RF
         """
         return definition
 
@@ -69,19 +70,47 @@ class CenterSurroundTemplate(dj.Computed):
 
     @property
     @abstractmethod
+    def color_rf_time_table(self):
+        pass
+
+    @property
+    @abstractmethod
     def cs_params_table(self):
         pass
 
-    def fetch1_rf_time(self, key):
-        try:
-            rf_time = (self.color_rf_table & key).fetch1('rf_time')
-        except dj.DataJointError:
-            rf_time = (self.color_rf_table & key).fetch1('model_dict')['rf_time']
-        return rf_time
+    def fetch1_rf_time(self, key: dict) -> np.ndarray:
+        """Fetch the RF time axis for the entry identified by *key*.
 
-    def make(self, key, plot=False):
+        Tries the ``'rf_time'`` column directly and falls back to extracting it from
+        the ``'model_dict'`` blob.
+
+        Args:
+            key: DataJoint primary key dict.
+
+        Returns:
+            1-D array of RF time values.
+        """
+        try:
+            rf_time = (self.color_rf_time_table & key).fetch1('rf_time')
+        except dj.DataJointError:
+            rf_time = (self.color_rf_time_table & key).fetch1('model_dict')['rf_time']
+        return load_array(rf_time)
+
+    def make(self, key: dict, plot: bool = False) -> None:
+        """Compute center/surround RF metrics and insert them into the table.
+
+        Args:
+            key: DataJoint primary key dict identifying a unique combination of
+                color RF and center-surround parameter entries.
+            plot: If True, pass ``plot=True`` to the peak-finding helpers for
+                interactive debugging.
+        """
         rf_time = self.fetch1_rf_time(key=key)
-        rf = (self.color_rf_table & key).fetch1('rf')
+        rf = load_array((self.color_rf_table & key).fetch1('rf')).squeeze()
+
+        if rf.ndim != 2:
+            raise ValueError(f"rf must be 2d (time x center/surround), but got shape {rf.shape}")
+
         peak_nstd, npeaks_max = (self.cs_params_table & key).fetch1('peak_nstd', 'npeaks_max')
 
         polarity_idxs = []
@@ -112,19 +141,32 @@ class CenterSurroundTemplate(dj.Computed):
 
         self.insert1(key)
 
-    def plot(self):
+    def plot(self) -> tuple:
+        """Plot histograms of transience index, half-amplitude width, and main peak lag.
+
+        Returns:
+            A tuple ``(fig, axs)`` with the matplotlib Figure and Axes array.
+        """
         fig, axs = plt.subplots(1, 3, figsize=(12, 3))
         for ax, name in zip(axs, ['transience_idx', 'half_amp_width', 'main_peak_lag']):
-            ax.hist(self.fetch(name))
+            ax.hist(self.to_arrays(name))
             ax.set_title(name)
         plt.tight_layout()
         return fig, axs
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict = None) -> tuple:
+        """Plot the center and surround RF kernels with annotated metrics for a single entry.
+
+        Args:
+            key: DataJoint primary key dict. If None, prompts for selection.
+
+        Returns:
+            A tuple ``(fig, axs)`` with the matplotlib Figure and Axes array.
+        """
         key = get_primary_key(table=self, key=key)
 
         rf_time = self.fetch1_rf_time(key=key)
-        rf = (self.color_rf_table & key).fetch1('rf')
+        rf = load_array((self.color_rf_table & key).fetch1('rf')).squeeze()
 
         peak_nstd, npeaks_max = (self.cs_params_table & key).fetch1('peak_nstd', 'npeaks_max')
 

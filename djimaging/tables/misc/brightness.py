@@ -19,21 +19,24 @@ import datajoint as dj
 import numpy as np
 
 from djimaging.utils import math_utils
+from djimaging.utils.dj_storage import load_array
 
 
 class RoiBrightnessTemplate(dj.Computed):
+    """DataJoint computed table template that stores per-ROI brightness values."""
+
     database = ""
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = """
         # ROI brightness, can be used to estimate how strongly a cell has be labeled
         # Computed as mean brightness in [0, 1] of ROI normalized to min and max of stack average
         -> self.presentation_table
         -> self.roi_table
         ---
-        brightness_ch_data  :float  # For data channel defined by user
-        brightness_ch_alt  :float   # For alternative channel defined by user
+        brightness_ch_data  :float32  # For data channel defined by user
+        brightness_ch_alt  :float32   # For alternative channel defined by user
         """
         return definition
 
@@ -64,14 +67,20 @@ class RoiBrightnessTemplate(dj.Computed):
     def roi_table(self):
         pass
 
-    def make(self, key):
-        roi_mask = (self.roimask_table & key).fetch1('roi_mask')
+    def make(self, key: dict) -> None:
+        """Compute and insert brightness values for both channels for a given ROI.
+
+        Args:
+            key: DataJoint primary key dict identifying the presentation and ROI entry.
+        """
+        roi_mask = load_array((self.roimask_table & key).fetch1('roi_mask'))
 
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        main_ch_average = load_array(
+            (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         try:
-            alt_ch_average = (self.presentation_table.StackAverages & key & f'ch_name="{alt_name}"').fetch1(
-                'ch_average')
+            alt_ch_average = load_array(
+                (self.presentation_table.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average'))
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
         main_ch_average = math_utils.normalize_zero_one(main_ch_average)

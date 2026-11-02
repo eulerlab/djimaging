@@ -2,18 +2,27 @@
   "database.host": "",
   "database.password": "",
   "database.user": "",
-  "database.port": 0,
+  "database.port": 3306,
   "database.reconnect": true,
   "connection.init_function": null,
-  "connection.charset": "",
+  "connection.charset": "utf8mb4",
   "loglevel": "INFO",
   "safemode": true,
-  "fetch_format": "array",
+  "download_path": "./.datajoint-downloads",
   "display.limit": 20,
   "display.width": 14,
   "display.show_tuple_count": true,
   "database.use_tls": null,
-  "enable_python_native_blobs": true,
-  "stores": null,
-  "schema_name": ""
+  "stores": {
+    "default": "processed",
+    "filepath_default": "reference",
+    "reference": {
+      "protocol": "file",
+      "location": "/gpfs01/euler/data"
+    },
+    "processed": {
+      "protocol": "file",
+      "location": "/path/to/processed"
+    }
+  }
 }

@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm.roi_utils import extract_roi_ids
@@ -16,40 +19,50 @@ class RoiTemplate(dj.Computed):
         definition = """
         # ROI information
         -> self.roi_mask_table
-        roi_id           :smallint           # integer id of each ROI
+        roi_id           :int32           # integer id of each ROI
         ---
-        roi_size         :int                # number of pixels in ROI
-        roi_size_um2     :float              # size of ROI in micrometers squared
-        roi_dia_um       :float              # diameter of ROI in micrometers, if it was a circle
-        artifact_flag    :tinyint unsigned   # flag if roi contains light artifact (1) or not (0)
+        roi_size         :int32                # number of pixels in ROI
+        roi_size_um2     :float32              # size of ROI in micrometers squared
+        roi_dia_um       :float32              # diameter of ROI in micrometers, if it was a circle
+        artifact_flag    :bool   # flag if roi contains light artifact (1) or not (0)
         """
         return definition
 
     @property
     @abstractmethod
-    def field_table(self):
+    def field_table(self) -> dj.Table:
+        """Return the field table."""
         pass
 
     @property
     @abstractmethod
-    def roi_mask_table(self):
+    def roi_mask_table(self) -> dj.Table:
+        """Return the ROI mask table."""
         pass
 
     @property
     @abstractmethod
-    def userinfo_table(self):
+    def userinfo_table(self) -> dj.Table:
+        """Return the user info table."""
         pass
 
     @property
     def key_source(self):
+        """Return the key source derived from the ROI mask table."""
         try:
             return self.roi_mask_table.proj()
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Extract ROI properties from the mask and insert one row per ROI.
+
+        Args:
+            key: Primary key dict identifying the field whose ROI mask should
+                be processed.
+        """
         # load roi_mask for insert roi for a specific experiment and field
-        roi_mask = (self.roi_mask_table & key).fetch1("roi_mask")
+        roi_mask = load_array((self.roi_mask_table & key).fetch1("roi_mask"))
 
         scan_type = (self.field_table & key).fetch1("scan_type")
         pixel_size_um = (self.field_table & key).fetch1("pixel_size_um")
@@ -82,15 +95,24 @@ class RoiTemplate(dj.Computed):
                 'roi_size_um2': roi_size_um2,
                 'roi_dia_um': roi_dia_um})
 
-    def plot1(self, key=None, gamma=0.7):
+    def plot1(self, key: dict = None, gamma: float = 0.7) -> None:
+        """Plot the field stack average with the ROI mask and highlighted ROI.
+
+        Args:
+            key: Primary key identifying the ROI entry to plot. If None, the
+                first available key is used.
+            gamma: Gamma correction value for display. Default is 0.7.
+        """
         key = get_primary_key(table=self, key=key)
 
         npixartifact, scan_type = (self.field_table & key).fetch1("npixartifact", "scan_type")
-        roi_mask = (self.roi_mask_table & key).fetch1("roi_mask")
+        roi_mask = load_array((self.roi_mask_table & key).fetch1("roi_mask"))
 
         data_name, alt_name = (self.userinfo_table() & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.field_table.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
-        alt_ch_average = (self.field_table.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+        main_ch_average = load_array(
+            (self.field_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
+        alt_ch_average = load_array(
+            (self.field_table.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average'))
 
         plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
                    roi_mask=roi_mask, roi_ch_average=main_ch_average,

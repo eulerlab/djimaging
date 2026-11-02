@@ -10,20 +10,58 @@ except ImportError:
 
 
 @lru_cache(2)
-def _get_neighbor_kernel(device: torch.device):
+def _get_neighbor_kernel(device: "torch.device") -> "torch.Tensor":
+    """Return a 4-connected neighbor kernel (cross-shaped) as a cached tensor.
+
+    Parameters
+    ----------
+    device : torch.device
+        The device on which the kernel tensor will be placed.
+
+    Returns
+    -------
+    torch.Tensor
+        A 4D tensor of shape (1, 1, 3, 3) with the 4-connected neighbor pattern.
+    """
     return torch.tensor([[[[0, 1, 0], [1, 0, 1], [0, 1, 0]]]],
                         dtype=torch.float32,
                         device=device)
 
 
 @lru_cache(2)
-def _get_diagonal_neighbor_kernel(device: torch.device):
+def _get_diagonal_neighbor_kernel(device: "torch.device") -> "torch.Tensor":
+    """Return an 8-connected neighbor kernel (full 3x3 except center) as a cached tensor.
+
+    Parameters
+    ----------
+    device : torch.device
+        The device on which the kernel tensor will be placed.
+
+    Returns
+    -------
+    torch.Tensor
+        A 4D tensor of shape (1, 1, 3, 3) with the 8-connected neighbor pattern.
+    """
     return torch.tensor([[[[1, 1, 1], [1, 0, 1], [1, 1, 1]]]],
                         dtype=torch.float32,
                         device=device)
 
 
-def _run_convolution(mask: torch.Tensor, kernel: torch.Tensor) -> torch.Tensor:
+def _run_convolution(mask: "torch.Tensor", kernel: "torch.Tensor") -> "torch.Tensor":
+    """Convolve a 2D boolean mask with the given kernel and return a boolean output.
+
+    Parameters
+    ----------
+    mask : torch.Tensor
+        2D boolean tensor to convolve.
+    kernel : torch.Tensor
+        4D convolution kernel of shape (1, 1, kH, kW).
+
+    Returns
+    -------
+    torch.Tensor
+        2D boolean tensor of the same shape as ``mask``.
+    """
     mask_float = mask.to(torch.float32)
     mask4d = mask_float.unsqueeze(dim=0).unsqueeze(dim=0)
     conv_out = torch.nn.functional.conv2d(mask4d, kernel, padding=1)[0, 0]
@@ -32,7 +70,26 @@ def _run_convolution(mask: torch.Tensor, kernel: torch.Tensor) -> torch.Tensor:
     return conv_out_bool
 
 
-def make_mask_ids_consecutive(mask: np.array) -> np.array:
+def make_mask_ids_consecutive(mask: np.ndarray) -> np.ndarray:
+    """Remap ROI mask values to a consecutive integer range starting at 0.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        Integer array where 0 is background and positive integers are ROI IDs.
+        Must contain 0 as the minimum value (cellpose format).
+
+    Returns
+    -------
+    np.ndarray
+        Mask with the same shape as ``mask`` but with IDs remapped to
+        ``{0, 1, 2, ..., n_rois}``.
+
+    Raises
+    ------
+    AssertionError
+        If the minimum value of ``mask`` is not 0.
+    """
     values = np.unique(mask)
     assert values.min() == 0, "Mask has to be in cellpose format"
     if (values.max() + 1) == values.shape[0]:
@@ -46,27 +103,44 @@ def make_mask_ids_consecutive(mask: np.array) -> np.array:
 
 
 def create_mask(
-        cell_probs: torch.Tensor,
-        offsets: torch.Tensor,
-        center_mask: torch.Tensor,
+        cell_probs: "torch.Tensor",
+        offsets: "torch.Tensor",
+        center_mask: "torch.Tensor",
         cell_prob_threshold: float = 0.5,
         kernel_size: int = 5,
         center_prob_threshold: float = 0.1,
         max_number_of_cells: int = 99999,
-) -> torch.Tensor:
-    """
-    Create a roi mask from the outputs of the instance unet model.
-    See https://github.com/bowenc0221/panoptic-deeplab/blob/master/segmentation/model/post_processing/instance_post_processing.py
-    for another implementation
+) -> "torch.Tensor":
+    """Create a ROI mask from the outputs of the instance UNet model.
 
-    Args:
-        cell_probs: probability that a pixel contains a cell, shape: [dim_x, dim_y]
-        offsets: offset to the cell center in x and y direction for each pixel, shape [2, dim_x, dim_y]
-        center_mask: 'probability' that a pixel is the center of the cell, shape: [dim_x, dim_y]
-        cell_prob_threshold: threshold that we consider a pixel to be a cell
-        kernel_size: mentioned parameter in section 3.2 of https://arxiv.org/pdf/1911.10194.pdf, changed to 5
-        center_prob_threshold: probability threshold that to determine whether a pixel is a center
-        max_number_of_cells: maximum number of cells per mask
+    See https://github.com/bowenc0221/panoptic-deeplab/blob/master/segmentation/model/post_processing/instance_post_processing.py
+    for another implementation.
+
+    Parameters
+    ----------
+    cell_probs : torch.Tensor
+        Probability that a pixel contains a cell, shape: (dim_x, dim_y).
+    offsets : torch.Tensor
+        Offset to the cell center in x and y direction for each pixel,
+        shape: (2, dim_x, dim_y).
+    center_mask : torch.Tensor
+        Probability that a pixel is the center of a cell, shape: (dim_x, dim_y).
+    cell_prob_threshold : float, optional
+        Threshold above which a pixel is considered a cell. Default is 0.5.
+    kernel_size : int, optional
+        Max-pooling kernel size used to find center peaks (Section 3.2 of
+        https://arxiv.org/pdf/1911.10194.pdf). Default is 5.
+    center_prob_threshold : float, optional
+        Probability threshold for a pixel to be considered a center.
+        Default is 0.1.
+    max_number_of_cells : int, optional
+        Maximum number of cells per mask. Default is 99999.
+
+    Returns
+    -------
+    torch.Tensor
+        Integer tensor of the same spatial shape as ``cell_probs`` where each
+        pixel is labelled with its instance ID (0 = background).
     """
     # determine pixels that are cells
     pixel_is_cell = cell_probs > cell_prob_threshold
@@ -123,11 +197,19 @@ def create_mask(
     return roi_mask_consecutive
 
 
-def clean_roi_mask(roi_mask: torch.Tensor) -> torch:
-    """"
-    (1) filter pixel of a cell that don't have a horizontal and vertical neighboring pixel
-    (2) throw out cells that have less than 3 pixels
-    Possible Todo: throw out pixels of a cell that are horizontal or vertical neighbors of another cell
+def clean_roi_mask(roi_mask: "torch.Tensor") -> None:
+    """Remove isolated pixels and small ROIs from a ROI mask in-place.
+
+    Steps applied:
+    (1) Remove pixels of a cell that have no horizontal or vertical neighbour
+        belonging to the same cell.
+    (2) Remove cells that have fewer than 3 pixels.
+
+    Parameters
+    ----------
+    roi_mask : torch.Tensor
+        Integer 2D tensor where 0 is background and positive integers are ROI
+        IDs. Modified in-place.
     """
     # Filter pixels that don't have any horizontal or vertical neighboring pixel
     kernel = _get_neighbor_kernel(roi_mask.device)

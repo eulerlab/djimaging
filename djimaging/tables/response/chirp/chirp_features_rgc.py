@@ -19,6 +19,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from scipy import signal
 
+from djimaging.tables.core.snippets import fetch_snippets_and_times
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_trace_and_trigger
 from djimaging.utils.trace_utils import get_mean_dt, find_closest
@@ -33,8 +34,8 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         # Computes an OnOff and a transience index based on the chirp step response
         -> self.snippets_table
         ---
-        on_off_index:       float   # index indicating light preference (-1 Off, 1 On)
-        transience_index:   float   # index indicating transience of response
+        on_off_index:       float32   # index indicating light preference (-1 Off, 1 On)
+        transience_index:   float32   # index indicating transience of response
         '''
         return definition
 
@@ -61,36 +62,35 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key):
-        try:
-            # Deprecated
-            snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-                "snippets", "snippets_times", "triggertimes_snippets")
-        except dj.DataJointError:
-            snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-                "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
+    def make(self, key: dict) -> None:
+        """Compute and insert On-Off and transience indices from chirp step response.
 
-            snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
-                              + snippets_t0)
+        Fetches snippet data, computes the on-off index and transience index from the
+        step response portion of the chirp stimulus, and inserts the result into the table.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to populate.
+        """
+        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, key)
 
         on_off_index = compute_on_off_index(snippets, snippets_times, triggertimes_snippets[0])
         transience_index = compute_transience_index(snippets, snippets_times, triggertimes_snippets[0])
 
         self.insert1(dict(key, on_off_index=on_off_index, transience_index=transience_index))
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict | None = None) -> None:
+        """Plot the chirp snippet trace with computed indices.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint primary key. If None, uses the first available key.
+        """
         key = get_primary_key(table=self, key=key)
 
-        try:
-            # Deprecated
-            snippets, snippets_times, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-                "snippets", "snippets_times", "triggertimes_snippets")
-        except dj.DataJointError:
-            snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self.snippets_table() & key).fetch1(
-                "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-
-            snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
-                              + snippets_t0)
+        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, key)
 
         on_off_index, transience_index = (self & key).fetch1('on_off_index', 'transience_index')
 
@@ -102,11 +102,18 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         plt.tight_layout()
         plt.show()
 
-    def plot(self, restriction=None):
+    def plot(self, restriction: dict | None = None) -> None:
+        """Plot histograms of on-off index and transience index.
+
+        Parameters
+        ----------
+        restriction : dict or None, optional
+            DataJoint restriction to apply. If None, all entries are used.
+        """
         if restriction is None:
             restriction = dict()
 
-        on_off_index, transience_index = (self & restriction).fetch('on_off_index', 'transience_index')
+        on_off_index, transience_index = (self & restriction).to_arrays('on_off_index', 'transience_index')
 
         fig, axs = plt.subplots(1, 2, figsize=(8, 3))
         ax = axs[0]
@@ -121,7 +128,33 @@ class ChirpFeaturesRgcTemplate(dj.Computed):
         plt.show()
 
 
-def compute_on_off_index(snippets, snippets_times, start_triggertimes, light_step_duration=1):
+def compute_on_off_index(
+        snippets: np.ndarray,
+        snippets_times: np.ndarray,
+        start_triggertimes: np.ndarray,
+        light_step_duration: float = 1,
+) -> float:
+    """Compute the on-off index from chirp step responses.
+
+    Computes the ratio (on - off) / (on + off) where on and off are the mean
+    clipped responses during the light increment and decrement periods.
+
+    Parameters
+    ----------
+    snippets : np.ndarray
+        2D array of response snippets with shape (time, trials).
+    snippets_times : np.ndarray
+        2D array of timestamps for each snippet with shape (time, trials).
+    start_triggertimes : np.ndarray
+        1D array of stimulus start trigger times for each trial.
+    light_step_duration : float, optional
+        Duration of the light step window in seconds. Default is 1.
+
+    Returns
+    -------
+    float
+        On-off index in [-1, 1]. Positive values indicate On preference.
+    """
     # TODO: Reimplement cleaner
     dts = [get_mean_dt(tracetime=snippets_times_i)[0] for snippets_times_i in snippets_times.T]
     fs = 1. / np.mean(dts)
@@ -164,7 +197,33 @@ def compute_on_off_index(snippets, snippets_times, start_triggertimes, light_ste
     return on_off_index
 
 
-def compute_transience_index(snippets, snippets_times, start_triggertimes, upsam_fre=500):
+def compute_transience_index(
+        snippets: np.ndarray,
+        snippets_times: np.ndarray,
+        start_triggertimes: np.ndarray,
+        upsam_fre: float = 500,
+) -> float:
+    """Compute the transience index from chirp step responses.
+
+    Upsamples the snippets and computes 1 - (response at peak + 0.4 s) / peak response
+    for each trial, then returns the mean across trials.
+
+    Parameters
+    ----------
+    snippets : np.ndarray
+        2D array of response snippets with shape (time, trials).
+    snippets_times : np.ndarray
+        2D array of timestamps for each snippet with shape (time, trials).
+    start_triggertimes : np.ndarray
+        1D array of stimulus start trigger times for each trial.
+    upsam_fre : float, optional
+        Target upsampling frequency in Hz. Default is 500.
+
+    Returns
+    -------
+    float
+        Mean transience index across trials.
+    """
     # TODO: Reimplement cleaner
     dts = [get_mean_dt(tracetime=snippets_times_i)[0] for snippets_times_i in snippets_times.T]
     fs = 1. / np.mean(dts)

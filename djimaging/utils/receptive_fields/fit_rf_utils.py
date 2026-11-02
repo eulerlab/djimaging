@@ -20,137 +20,34 @@ For details see: https://github.com/berenslab/RFEst
 
 import numpy as np
 from numba import jit
-from tqdm.notebook import tqdm
 
 
-def compute_linear_rf(dt, trace, stim, frac_train, frac_dev,
-                      filter_dur_s_past, filter_dur_s_future=0.,
-                      kind='sta', threshold_pred=False, dtype=np.float32,
-                      batch_size_n=6_000_000, verbose=False):
-    kind = kind.lower()
+def get_rf_timing_params(filter_dur_s_past: float,
+                         filter_dur_s_future: float,
+                         dt: float) -> tuple[np.ndarray, int, int, int]:
+    """Compute temporal parameters for the receptive field filter.
 
-    assert trace.size == stim.shape[0]
-    assert kind in ['sta', 'mle'], f"kind={kind}"
+    Parameters
+    ----------
+    filter_dur_s_past : float
+        Duration of the filter extending into the past (seconds).
+    filter_dur_s_future : float
+        Duration of the filter extending into the future (seconds).
+    dt : float
+        Time step in seconds.
 
-    rf_time, dim_t, shift, burn_in = get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt)
-    dims = (dim_t,) + stim.shape[1:]
-
-    x, y = split_data(x=stim, y=trace, frac_train=frac_train, frac_dev=frac_dev, as_dict=True)
-
-    rf, y_pred_train = compute_linear_rf_single_or_batch(
-        x_train=x['train'], y_train=y['train'], dim_t=dim_t, shift=shift, burn_in=burn_in, kind=kind,
-        threshold_pred=threshold_pred, batch_size_n=batch_size_n, stim_shape=stim.shape, dtype=dtype, verbose=verbose)
-
-    model_eval = dict()
-    model_eval['burn_in'] = burn_in
-    model_eval['y_pred_train'] = y_pred_train
-    model_eval['cc_train'] = np.corrcoef(y['train'][burn_in:], y_pred_train)[0, 1]
-    model_eval['mse_train'] = np.mean((y['train'][burn_in:] - y_pred_train) ** 2)
-
-    if 'test' in x:
-        x_test_dm = build_design_matrix(x['test'], n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
-        y_pred_test = predict_linear_rf_response(
-            rf=rf, stim_design_matrix=x_test_dm, threshold=threshold_pred, dtype=dtype)
-
-        model_eval['y_pred_test'] = y_pred_test
-        model_eval['cc_test'] = np.corrcoef(y['test'][burn_in:], y_pred_test)[0, 1]
-        model_eval['mse_test'] = np.mean((y['test'][burn_in:] - y_pred_test) ** 2)
-
-    rf = rf.reshape(dims)
-    return rf, rf_time, model_eval, x, y, shift
-
-
-def compute_linear_rf_single_or_batch(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred,
-                                      stim_shape, batch_size_n=6_000_000, is_design_matrix=False, dtype=np.float32,
-                                      verbose=False):
-    if np.product(stim_shape) <= batch_size_n:
-        rf, y_pred_train = _compute_linear_rf_single_batch(
-            x_train=x_train, y_train=y_train, kind=kind, dim_t=dim_t, shift=shift, burn_in=burn_in,
-            is_design_matrix=is_design_matrix, threshold_pred=threshold_pred, dtype=dtype)
-    else:
-        assert kind == 'sta', f"kind={kind} not supported for compute_per='feature'"
-        rf, y_pred_train = _compute_sta_batchwise(
-            x_train=x_train, y_train=y_train, kind=kind, dim_t=dim_t, shift=shift, burn_in=burn_in,
-            threshold_pred=threshold_pred, dtype=dtype,
-            is_design_matrix=is_design_matrix, batch_size=np.maximum(batch_size_n // stim_shape[0], 1), verbose=verbose)
-
-    return rf, y_pred_train
-
-
-def _compute_linear_rf_single_batch(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred,
-                                    is_design_matrix=False, dtype=np.float32):
-    if is_design_matrix:
-        x_train_dm = x_train[burn_in:].astype(dtype)
-    else:
-        x_train_dm = build_design_matrix(x_train, n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
-
-    y_train_dm = y_train[burn_in:].astype(dtype)
-
-    if kind == 'sta':
-        rf = compute_rf_sta(X=x_train_dm, y=y_train_dm)
-    elif kind == 'mle':
-        rf = compute_rf_mle(X=x_train_dm, y=y_train_dm)
-    else:
-        raise NotImplementedError(kind)
-
-    y_pred_train = predict_linear_rf_response(
-        rf=rf, stim_design_matrix=x_train_dm, threshold=threshold_pred, dtype=dtype)
-
-    return rf, y_pred_train
-
-
-def _compute_sta_batchwise(x_train, y_train, dim_t, shift, burn_in, kind, threshold_pred,
-                           batch_size=400, is_design_matrix=False, dtype=np.float32, verbose=False):
-    x_shape = x_train.shape
-    n_frames = x_shape[0]
-    n_features = np.product(x_shape[1:])
-
-    rf = np.zeros((dim_t, n_features), dtype=dtype)
-
-    x_train = x_train.reshape((n_frames, n_features))
-    y_train_dm = y_train[burn_in:].astype(dtype)
-
-    batches = np.array_split(np.arange(n_features), np.ceil(n_features / batch_size))
-    y_pred_train_per_batch = np.zeros((n_frames - burn_in, len(batches)), dtype=dtype)
-
-    bar = tqdm(batches, desc='STA batches', leave=False) if verbose else None
-
-    for i, batch in enumerate(batches):
-        if is_design_matrix:
-            x_train_dm_i = x_train[burn_in:, batch]
-        else:
-            x_train_dm_i = build_design_matrix(x_train[:, batch], n_lag=dim_t, shift=shift, dtype=dtype)[burn_in:]
-
-        if kind == 'sta':
-            rf_i = compute_rf_sta(X=x_train_dm_i, y=y_train_dm)
-        elif kind == 'mle':
-            rf_i = compute_rf_mle(X=x_train_dm_i, y=y_train_dm)
-        else:
-            raise NotImplementedError()
-
-        rf[:, batch] = rf_i.reshape(-1, len(batch))
-        y_pred_train_per_batch[:, i] = predict_linear_rf_response(
-            rf=rf_i, stim_design_matrix=x_train_dm_i, threshold=False, dtype=dtype)
-
-        if bar is not None:
-            bar.update(1)
-
-    if bar is not None:
-        bar.close()
-
-    # Reshape back. Is this necessary for x?
-    rf = rf.reshape((dim_t,) + x_shape[1:])
-    x_train.reshape(x_shape)
-
-    y_pred_train = np.sum(y_pred_train_per_batch, axis=1)
-
-    if threshold_pred:
-        y_pred_train = np.clip(y_pred_train, 0, None)
-
-    return rf, y_pred_train
-
-
-def get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt):
+    Returns
+    -------
+    tuple[np.ndarray, int, int, int]
+        rf_time : np.ndarray
+            Time axis of the filter (seconds), negative = past.
+        dim_t : int
+            Total number of temporal filter taps.
+        shift : int
+            Temporal shift (negative for future components).
+        burn_in : int
+            Number of initial frames to discard.
+    """
     n_t_past = int(np.ceil(filter_dur_s_past / dt))
     n_t_future = int(np.ceil(filter_dur_s_future / dt))
     shift = -n_t_future
@@ -161,33 +58,83 @@ def get_rf_timing_params(filter_dur_s_past, filter_dur_s_future, dt):
 
 
 @jit(nopython=True)
-def compute_rf_sta(X, y):
-    """From RFEst"""
-    w = (X.T @ y) / np.sum(y)
+def compute_rf_sta(X: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Compute spike-triggered average (STA) receptive field. From RFEst.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Design matrix, shape (n_samples, n_features).
+    y : np.ndarray
+        Neural response vector, shape (n_samples,), or several responses, shape (n_samples, n_responses).
+        Computing several responses at once is much faster than one by one, because X is read only once.
+
+    Returns
+    -------
+    np.ndarray
+        STA receptive field, shape (n_features,), or (n_features, n_responses) for several responses.
+    """
+    w = (X.T @ y) / np.sum(y, axis=0)
     return w
 
 
-@jit(nopython=True)
-def compute_rf_mle(X, y):
-    """From RFEst"""
-    XtY = X.T @ y
-    XtX = X.T @ X
-    w = np.linalg.lstsq(XtX, XtY)[0]
-    return w
+def compute_whitening_matrix(X: np.ndarray, reg: float = 1e-3) -> np.ndarray:
+    """Compute the ridge-regularized inverse stimulus covariance, used to whiten an STA.
+
+    The whitened STA is inv(C + lambda * I) @ STA with C = X.T @ X / n_samples
+    (Schwartz et al., 2006, J Vis). The regularization is relative to the mean eigenvalue of C,
+    i.e. lambda = reg * trace(C) / n_features, which makes it invariant to the stimulus scale.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Design matrix, shape (n_samples, n_features).
+    reg : float, optional
+        Ridge strength relative to the mean eigenvalue of the covariance. Default is 1e-3.
+
+    Returns
+    -------
+    np.ndarray
+        Whitening matrix, shape (n_features, n_features), same dtype as X.
+    """
+    n_samples, n_features = X.shape
+    cov = (X.T @ X).astype(np.float64) / n_samples
+    lam = reg * np.trace(cov) / n_features
+    cov[np.diag_indices(n_features)] += lam
+    return np.linalg.inv(cov).astype(X.dtype)
 
 
-def predict_linear_rf_response(rf, stim_design_matrix, threshold=False, dtype=np.float32):
-    y_pred = stim_design_matrix @ rf
+def split_data(x: np.ndarray, y: np.ndarray,
+               frac_train: float = 0.8, frac_dev: float = 0.1,
+               as_dict: bool = False):
+    """Split data into training, development and test set.
 
-    if threshold:
-        y_pred = np.clip(y_pred, 0, None)
+    Modified from RFEst.
 
-    return y_pred.astype(dtype)
+    Parameters
+    ----------
+    x : np.ndarray
+        Input data (e.g. stimulus), shape (n_samples, ...).
+    y : np.ndarray
+        Target data (e.g. response), shape (n_samples, ...).
+    frac_train : float, optional
+        Fraction of data for training. Default is 0.8.
+    frac_dev : float, optional
+        Fraction of data for development/validation. Default is 0.1.
+    as_dict : bool, optional
+        If True, return dicts keyed by split name. Default is False.
 
+    Returns
+    -------
+    tuple or tuple[dict, dict]
+        If as_dict is False: ((x_trn, y_trn), (x_dev, y_dev), (x_tst, y_tst)).
+        If as_dict is True: (x_dict, y_dict) with keys 'train', 'dev', 'test'.
 
-def split_data(x, y, frac_train=0.8, frac_dev=0.1, as_dict=False):
-    """ Split data into training, development and test set.
-     Modified from RFEst"""
+    Raises
+    ------
+    AssertionError
+        If x and y have different lengths or fractions exceed 1.
+    """
     assert x.shape[0] == y.shape[0], 'X and y must be of same length.'
     assert frac_train + frac_dev <= 1, '`frac_train` + `frac_dev` must be < 1.'
 
@@ -216,16 +163,36 @@ def split_data(x, y, frac_train=0.8, frac_dev=0.1, as_dict=False):
         return x_dict, y_dict
 
 
-def build_design_matrix(X, n_lag, shift=0, n_c=1, dtype=None):
-    """
-    Build design matrix.
-    Modified from RFEst.
+def build_design_matrix(X: np.ndarray, n_lag: int, shift: int = 0,
+                        dtype: type = None) -> np.ndarray:
+    """Build design matrix for linear RF estimation.
+
+    Modified from RFEst. Works for multi-color stimuli by flattening all
+    non-temporal dimensions (spatial and color) into a single feature axis.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Stimulus array, shape (n_frames, ...). For multi-color stimuli this
+        can be e.g. (n_frames, n_x, n_y, n_colors).
+    n_lag : int
+        Number of temporal lags to include.
+    shift : int, optional
+        Temporal shift applied to the design matrix (negative shifts into future). Default is 0.
+    dtype : type, optional
+        Output data type. If None, uses X.dtype.
+
+    Returns
+    -------
+    np.ndarray
+        Design matrix, shape (n_frames, n_lag * n_feature) where
+        n_feature = product of all non-temporal dimensions.
     """
     if dtype is None:
         dtype = X.dtype
 
     n_frames = X.shape[0]
-    n_feature = np.product(X.shape[1:])
+    n_feature = int(np.prod(X.shape[1:]))
 
     X_design = np.reshape(X.copy(), (n_frames, n_feature))
 
@@ -236,8 +203,5 @@ def build_design_matrix(X, n_lag, shift=0, n_c=1, dtype=None):
         X_design = np.vstack([X_design, np.zeros([-shift, n_feature])])
 
     X_design = np.hstack([X_design[i:n_frames + i] for i in range(n_lag)])
-
-    if n_c > 1:
-        X_design = np.reshape(X_design, (X_design.shape[0], -1, n_c))
 
     return X_design.astype(dtype)

@@ -18,9 +18,9 @@ class ExampleTableTemplate(dj.Computed):
         # Example table that inherits primary keys from field_table
         -> self.field_table
         ---
-        table_column_a : float  # Comment on number
-        table_column_b : longblob  # Comment on array
-        table_column_c : tinyint unsigned  # use this data type for True (1) or False (0)
+        table_column_a : float32  # Comment on number
+        table_column_b : <blob>  # Small analysis array; use <npy@processed> for large arrays
+        table_column_c : bool  # use this data type for True (1) or False (0)
         """
         return definition
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import warnings
 from abc import abstractmethod
 
@@ -5,13 +7,53 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.core.stimulus import reformat_numerical_trial_info
 from djimaging.utils import plot_utils
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.snippet_utils import split_trace_by_reps, split_trace_by_group_reps, compute_repeat_correlation
 
 
-def get_aligned_snippets_times(snippets_times, raise_error=True, tol=1e-4):
+def fetch_snippets_and_times(
+        snippets_table: dj.Table | type[dj.Table],
+        key: dict,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Fetch repeated snippets, absolute sample times, and trigger times as arrays.
+
+    This handles SnippetsTemplate rows with shape (time, repetitions), including
+    arrays stored externally. GroupSnippetsTemplate rows contain dictionaries
+    and must be handled separately.
+    """
+    snippets_t0, snippets_dt, snippets, triggertimes = (snippets_table & key).fetch1(
+        'snippets_t0', 'snippets_dt', 'snippets', 'triggertimes_snippets')
+    snippets, snippets_t0, triggertimes = (
+        load_array(snippets), load_array(snippets_t0), load_array(triggertimes))
+    snippets_times = (np.arange(snippets.shape[0]) * snippets_dt)[:, None] + snippets_t0
+    return snippets, snippets_times, triggertimes
+
+
+def get_aligned_snippets_times(
+        snippets_times: np.ndarray,
+        raise_error: bool = True,
+        tol: float = 1e-4,
+) -> np.ndarray:
+    """Align snippet time arrays across repetitions and return a single time vector.
+
+    Args:
+        snippets_times: 2-D array of shape (n_timepoints, n_reps) containing
+            the absolute time stamps for each snippet.
+        raise_error: If True, raise a ValueError when the across-repetition
+            standard deviation exceeds ``tol``. If False, issue a warning
+            instead.
+        tol: Maximum allowed standard deviation (in seconds) for the
+            snippet times to be considered consistent. Default is 1e-4.
+
+    Returns:
+        A 1-D array of shape (n_timepoints,) with the mean relative time for
+        each sample, aligned to the start of each repetition.
+
+    Raises:
+        ValueError: If ``raise_error`` is True and the times are inconsistent.
+    """
     snippets_times = snippets_times - snippets_times[0, :]
 
     is_inconsistent = np.any(np.std(snippets_times, axis=1) > tol)
@@ -28,18 +70,6 @@ def get_aligned_snippets_times(snippets_times, raise_error=True, tol=1e-4):
 class SnippetsTemplate(dj.Computed):
     database = ""
     _pad_trace = False  # If True, chose snippet times always contain the trigger times
-    _dt_base_line_dict = None  # dict of baseline time for each stimulus with stimulus based baseline correction
-
-    """
-    Examples for _dt_base_line_dict:
-    This is deprecated and should be replaced by the snippet_base_dt in the stimulus table.
-    
-    Baden 16 / Franke 17:
-    _dt_base_line_dict = {
-        'gChirp': 8*0.128,
-        'movingbar':  5*0.128,
-    }
-    """
 
     @property
     def definition(self):
@@ -47,47 +77,62 @@ class SnippetsTemplate(dj.Computed):
         # Snippets created from slicing traces using the triggertimes. 
         -> self.preprocesstraces_table
         ---
-        snippets               :longblob          # array of snippets (time x repetitions)
-        snippets_t0            :blob              # array of snippet start times (repetitions, ) 
-        snippets_dt            :float
-        triggertimes_snippets  :longblob          # snippeted triggertimes (ntrigger_rep x repetitions)
-        droppedlastrep_flag    :tinyint unsigned  # Was the last repetition incomplete and therefore dropped?
+        snippets               :<blob>          # array of snippets (time x repetitions)
+        snippets_t0            :<blob>              # array of snippet start times (repetitions, )
+        snippets_dt            :float32
+        triggertimes_snippets  :<blob>          # snippeted triggertimes (ntrigger_rep x repetitions)
+        droppedlastrep_flag    :bool  # Was the last repetition incomplete and therefore dropped?
         """
         return definition
 
     @property
     @abstractmethod
-    def preprocesstraces_table(self):
+    def preprocesstraces_table(self) -> dj.Table:
+        """Return the preprocessed traces table."""
         pass
 
     @property
     @abstractmethod
-    def stimulus_table(self):
+    def stimulus_table(self) -> dj.Table:
+        """Return the stimulus table."""
         pass
 
     @property
     @abstractmethod
-    def presentation_table(self):
+    def presentation_table(self) -> dj.Table:
+        """Return the presentation table."""
         pass
 
     @property
     @abstractmethod
-    def traces_table(self):
+    def traces_table(self) -> dj.Table:
+        """Return the raw traces table."""
         pass
 
     @property
     def key_source(self):
+        """Return the key source restricted to repeated stimuli."""
         try:
             return (self.preprocesstraces_table() & (self.stimulus_table() & "isrepeated=1")).proj()
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute and insert snippets for the given key.
+
+        Fetches the preprocessed trace and stimulus parameters, splits the
+        trace into per-repetition snippets, optionally applies baseline
+        correction, and inserts the result.
+
+        Args:
+            key: Primary key dict identifying the entry to populate.
+        """
         stim_name, stim_dict, ntrigger_rep = (self.stimulus_table() & key).fetch1(
             'stim_name', 'stim_dict', 'ntrigger_rep')
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
         pp_trace_t0, pp_trace_dt, pp_trace = (self.preprocesstraces_table() & key).fetch1(
             'pp_trace_t0', 'pp_trace_dt', 'pp_trace')
+        pp_trace = load_array(pp_trace)
 
         delay = stim_dict.get('trigger_delay', 0.) if stim_dict is not None else 0
 
@@ -111,34 +156,22 @@ class SnippetsTemplate(dj.Computed):
             droppedlastrep_flag=int(droppedlastrep_flag),
         ))
 
-    def get_snippet_base_dt(self, stim_name):
-        try:
-            dt_baseline = (self.stimulus_table & dict(stim_name=stim_name)).fetch1('snippet_base_dt')
-            if not np.isfinite(dt_baseline):
-                dt_baseline = None
-        except dj.DataJointError:
-            dt_baseline = None
+    def get_snippet_base_dt(self, stim_name: str) -> float | None:
+        """Return the stimulus's baseline duration, or None when unset."""
+        dt_baseline = (self.stimulus_table() & dict(stim_name=stim_name)).fetch1('snippet_base_dt')
+        return dt_baseline if dt_baseline is not None and np.isfinite(dt_baseline) else None
 
-        dt_baseline_alt = None if self._dt_base_line_dict is None else self._dt_base_line_dict.get(stim_name, None)
+    def plot1(self, key: dict = None, xlim: tuple = None, xlim_aligned: tuple = None) -> None:
+        """Plot the raw, repetition-aligned, and averaged snippets for one entry.
 
-        if dt_baseline is not None and dt_baseline_alt is not None:
-            if dt_baseline != dt_baseline_alt:
-                raise ValueError(
-                    f"dt_baseline[Stimulus]={dt_baseline} and dt_baseline[Snippets]={dt_baseline_alt} are not equal. "
-                    f"Please set only one of them, ideally in the stimulus table."
-                )
-        elif dt_baseline is None and dt_baseline_alt is not None:
-            dt_baseline = dt_baseline_alt
-
-        return dt_baseline
-
-    def plot1(self, key=None, xlim=None, xlim_aligned=None):
+        Args:
+            key: Primary key identifying the entry to plot. If None, the first
+                available key is used.
+            xlim: x-axis limits for the raw snippet panel.
+            xlim_aligned: x-axis limits for the aligned snippet panels.
+        """
         key = get_primary_key(table=self, key=key)
-        snippets_t0, snippets_dt, snippets, triggertimes_snippets = (self & key).fetch1(
-            "snippets_t0", "snippets_dt", "snippets", "triggertimes_snippets")
-
-        snippets_times = (np.tile(np.arange(snippets.shape[0]) * snippets_dt, (len(snippets_t0), 1)).T
-                          + snippets_t0)
+        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self, key)
 
         fig, axs = plt.subplots(3, 1, figsize=(10, 6))
 
@@ -205,51 +238,63 @@ class GroupSnippetsTemplate(dj.Computed):
         # Snippets created from slicing traces using the triggertimes. 
         -> self.preprocesstraces_table
         ---
-        snippets               :longblob          # dict of array of snippets (group: time [x repetitions])
-        snippets_t0           :blob              # dict of array of snippet start times (group: repetitions) 
-        snippets_dt            :float
-        triggertimes_snippets  :longblob          # dict of array of triggertimes (group: time [x repetitions])
-        droppedlastrep_flag    :tinyint unsigned  # Was the last repetition incomplete and therefore dropped?
+        snippets               :<blob>          # dict of array of snippets (group: time [x repetitions])
+        snippets_t0           :<blob>              # dict of array of snippet start times (group: repetitions)
+        snippets_dt            :float32
+        triggertimes_snippets  :<blob>          # dict of array of triggertimes (group: time [x repetitions])
+        droppedlastrep_flag    :bool  # Was the last repetition incomplete and therefore dropped?
         """
         return definition
 
     @property
     @abstractmethod
-    def preprocesstraces_table(self):
+    def preprocesstraces_table(self) -> dj.Table:
+        """Return the preprocessed traces table."""
         pass
 
     @property
     @abstractmethod
-    def stimulus_table(self):
+    def stimulus_table(self) -> dj.Table:
+        """Return the stimulus table."""
         pass
 
     @property
     @abstractmethod
-    def presentation_table(self):
+    def presentation_table(self) -> dj.Table:
+        """Return the presentation table."""
         pass
 
     @property
     @abstractmethod
-    def traces_table(self):
+    def traces_table(self) -> dj.Table:
+        """Return the raw traces table."""
         pass
 
     @property
     def key_source(self):
+        """Return the key source restricted to stimuli with trial_info defined."""
         try:
             return (self.preprocesstraces_table() & (self.stimulus_table() & "trial_info!='None'")).proj()
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key, allow_incomplete=True):
+    def make(self, key: dict, allow_incomplete: bool = True) -> None:
+        """Compute and insert group-level snippets for the given key.
+
+        Fetches the preprocessed trace and trial-info structure, splits the
+        trace by group and repetition, and inserts the result.
+
+        Args:
+            key: Primary key dict identifying the entry to populate.
+            allow_incomplete: If True, allow incomplete last repetitions.
+        """
         trial_info, stim_dict = (self.stimulus_table() & key).fetch1('trial_info', 'stim_dict')
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
         pp_trace_t0, pp_trace_dt, pp_trace = (self.preprocesstraces_table() & key).fetch1(
             'pp_trace_t0', 'pp_trace_dt', 'pp_trace')
+        pp_trace = load_array(pp_trace)
 
         pp_trace_times = np.arange(len(pp_trace)) * pp_trace_dt + pp_trace_t0
-
-        if not isinstance(trial_info[0], dict):
-            trial_info = reformat_numerical_trial_info(trial_info)
 
         delay = stim_dict.get('trigger_delay', 0.) if stim_dict is not None else 0
 
@@ -268,7 +313,20 @@ class GroupSnippetsTemplate(dj.Computed):
             droppedlastrep_flag=droppedlastrep_flag,
         ))
 
-    def plot1(self, key=None, xlim=None, fig_kws=None):
+    def plot1(self, key: dict = None, xlim: tuple = None, fig_kws: dict = None) -> tuple:
+        """Plot per-group snippet traces for one entry.
+
+        Args:
+            key: Primary key identifying the entry to plot. If None, the first
+                available key is used.
+            xlim: x-axis limits for the combined overview panel.
+            fig_kws: Additional keyword arguments forwarded to
+                ``plt.subplot_mosaic``.
+
+        Returns:
+            A 2-tuple of (fig, axs) where axs is the mosaic axes dict with
+            keys 'all' and one key per group name.
+        """
         fig_kws = {} if fig_kws is None else fig_kws
 
         key = get_primary_key(table=self, key=key)

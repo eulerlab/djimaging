@@ -20,7 +20,6 @@ class ChirpFeatures(response.ChirpFeaturesRgcTemplate):
 class OsDsIndexes(response.OsDsIndexesTemplate):
     _reduced_storage = True
     _n_shuffles = 1000
-    _version = 2
 
     stimulus_table = Stimulus
     snippets_table = Snippets
@@ -51,30 +50,23 @@ class CelltypeAssignmentV2(classifier_v2.CelltypeAssignmentV2Template):
 
 # Receptive fields
 @schema
-class DNoiseTraceParams(receptivefield.DNoiseTraceParamsTemplate):
+class FastStaParams(receptivefield.FastStaParamsTemplate):
     stimulus_table = Stimulus
-
-
-@schema
-class DNoiseTrace(receptivefield.DNoiseTraceTemplate):
     presentation_table = Presentation
-    stimulus_table = Stimulus
-    traces_table = PreprocessTraces
-    params_table = DNoiseTraceParams
 
 
 @schema
-class STAParams(receptivefield.STAParamsTemplate):
-    pass
+class FastSta(receptivefield.FastStaTemplate):
+    _traces_prefix = ''
+
+    params_table = FastStaParams
+    presentation_table = Presentation
+    traces_table = Traces
 
 
 @schema
-class STA(receptivefield.STATemplate):
-    noise_traces_table = DNoiseTrace
-    params_table = STAParams
-
-    class DataSet(receptivefield.STATemplate.DataSet):
-        pass
+class FastStaQuality(receptivefield.FastStaQualityTemplate):
+    sta_table = FastSta
 
 
 @schema
@@ -84,7 +76,7 @@ class SplitRFParams(receptivefield.SplitRFParamsTemplate):
 
 @schema
 class SplitRF(receptivefield.SplitRFTemplate):
-    rf_table = STA
+    rf_table = FastSta
     split_rf_params_table = SplitRFParams
 
 

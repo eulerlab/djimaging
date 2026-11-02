@@ -13,18 +13,49 @@ class FastSta(receptivefield.FastStaTemplate):
     traces_table = PreprocessTraces
 """
 
+import hashlib
+import warnings
 from abc import abstractmethod
 
 import datajoint as dj
+from matplotlib import pyplot as plt
 import numpy as np
-from tqdm.notebook import tqdm
+from threadpoolctl import threadpool_limits
 
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
-from djimaging.utils.receptive_fields.fit_rf_utils import build_design_matrix, get_rf_timing_params, compute_rf_sta
+from djimaging.utils.receptive_fields.fit_rf_utils import build_design_matrix, get_rf_timing_params, compute_rf_sta, \
+    compute_whitening_matrix
 from djimaging.utils.receptive_fields.plot_rf_utils import plot_rf_frames, plot_rf_video
 from djimaging.utils.receptive_fields.preprocess_rf_utils import preprocess_stimulus, finalize_stim, \
     preprocess_trace, finalize_trace
 from djimaging.utils.trace_utils import get_mean_dt, align_trace_to_stim
+
+# Default number of CPU cores used to compute the RFs of one presentation, see `FastStaTemplate.populate`.
+DEFAULT_N_JOBS = 30
+
+
+class _FetchedData(str):
+    """Data returned by `make_fetch`.
+
+    DataJoint hashes the fetched data to check that it did not change before the insert. This hash is very slow for
+    large arrays, so the object is a string of a digest of the fetched data, and carries the data as attribute.
+    Data passed as `unhashed` (e.g. the precomputed parameters) is attached without being part of the digest.
+    """
+
+    def __new__(cls, unhashed: dict | None = None, **data):
+        digest = hashlib.sha1()
+        for name, value in data.items():
+            digest.update(name.encode())
+            for v in (value if isinstance(value, (list, tuple)) else [value]):
+                if isinstance(v, np.ndarray) and v.dtype != object:
+                    digest.update(f"{v.dtype}{v.shape}".encode())
+                    digest.update(np.ascontiguousarray(v).tobytes())
+                else:
+                    digest.update(repr(v).encode())
+        obj = super().__new__(cls, digest.hexdigest())
+        obj.data = {**data, **(unhashed or dict())}
+        return obj
 
 
 class FastStaParamsTemplate(dj.Lookup):
@@ -34,22 +65,24 @@ class FastStaParamsTemplate(dj.Lookup):
     def definition(self):
         definition = """
         -> self.stimulus_table
-        dnoise_params_id: tinyint unsigned # unique param set id
+        dnoise_params_id: int32 # unique param set id
         ---
-        x_stimulus : longblob  # Stimulus design matrix
+        x_stimulus : <npy@processed>  # Stimulus design matrix
         fit_kind : varchar(191)
-        fupsample_trace : tinyint unsigned  # Multiplier of sampling frequency, using linear interpolation.
-        fupsample_stim = 0 : tinyint unsigned  # Multiplier of sampling stimulus, using repeat.
-        lowpass_cutoff = 0: float  # Cutoff frequency low pass filter, applied if larger 0.
-        pre_blur_sigma_s = 0: float  # Gaussian blur applied after low pass filter.
-        post_blur_sigma_s = 0: float  # Gaussian blur applied after all other steps.
-        filter_dur_s_past : float # filter duration in seconds into the past
-        filter_dur_s_future : float # filter duration in seconds into the future
-        rf_time: longblob #  time of RF, depends on dt and shift
-        dt: float  # Time step between frames
-        shift: int  # Shift of stimulus relative to trace. If negative, prediction looks into future.
-        dims: blob  # Dimensions of stimulus
-        burn_in: int  # Number of frames to burn in
+        fupsample_trace : int32  # Multiplier of sampling frequency, using linear interpolation.
+        fupsample_stim = 0 : int32  # Multiplier of sampling stimulus, using repeat.
+        lowpass_cutoff = 0: float32  # Cutoff frequency low pass filter, applied if larger 0.
+        pre_blur_sigma_s = 0: float32  # Gaussian blur applied after low pass filter.
+        post_blur_sigma_s = 0: float32  # Gaussian blur applied after all other steps.
+        whiten = 0 : int32  # If 1, whiten the STA with the ridge-regularized inverse stimulus covariance.
+        whiten_reg = 0.001 : float32  # Ridge strength relative to the mean eigenvalue of the covariance.
+        filter_dur_s_past : float32 # filter duration in seconds into the past
+        filter_dur_s_future : float32 # filter duration in seconds into the future
+        rf_time: <blob> #  time of RF, depends on dt and shift
+        dt: float32  # Time step between frames
+        shift: int32  # Shift of stimulus relative to trace. If negative, prediction looks into future.
+        dims: <blob>  # Dimensions of stimulus
+        burn_in: int32  # Number of frames to burn in
         """
         return definition
 
@@ -64,37 +97,76 @@ class FastStaParamsTemplate(dj.Lookup):
         pass
 
     def add_default(
-            self, stim_names=None, dnoise_params_id=1, fit_kind="gradient",
-            fupsample_trace=10, fupsample_stim=10, lowpass_cutoff=0,
-            pre_blur_sigma_s=0, post_blur_sigma_s=0,
-            filter_dur_s_past=1., filter_dur_s_future=0.,
-            skip_duplicates=False, verbose=True):
-        """Add default preprocess parameter to table"""
+            self, stim_names: list | None = None, dnoise_params_id: int = 1, fit_kind: str = "gradient",
+            fupsample_trace: int = 10, fupsample_stim: int = 4, lowpass_cutoff: float = 0,
+            pre_blur_sigma_s: float = 0, post_blur_sigma_s: float = 0,
+            whiten: bool = False, whiten_reg: float = 1e-3,
+            filter_dur_s_past: float = 1., filter_dur_s_future: float = 0.,
+            skip_duplicates: bool = False, verbose: bool = True, **extra_key) -> None:
+        """Add default preprocess parameter to table.
+
+        Parameters
+        ----------
+        stim_names : list or None, optional
+            Names of noise stimuli to add parameters for. If None, all noise stimuli are used.
+        dnoise_params_id : int, optional
+            Unique parameter set ID. Default is 1.
+        fit_kind : str, optional
+            Kind of fitting procedure. Default is "gradient".
+        fupsample_trace : int, optional
+            Multiplier of sampling frequency using linear interpolation. Default is 10.
+        fupsample_stim : int, optional
+            Multiplier of sampling stimulus using repeat. Default is 10.
+        lowpass_cutoff : float, optional
+            Cutoff frequency for low pass filter; applied if larger than 0. Default is 0.
+        pre_blur_sigma_s : float, optional
+            Gaussian blur sigma applied after low pass filter (in seconds). Default is 0.
+        post_blur_sigma_s : float, optional
+            Gaussian blur sigma applied after all other steps (in seconds). Default is 0.
+        whiten : bool, optional
+            If True, whiten the STA with the ridge-regularized inverse stimulus covariance. Default is False.
+        whiten_reg : float, optional
+            Ridge strength relative to the mean eigenvalue of the stimulus covariance. Default is 1e-3.
+        filter_dur_s_past : float, optional
+            Filter duration in seconds into the past. Default is 1.0.
+        filter_dur_s_future : float, optional
+            Filter duration in seconds into the future. Default is 0.0.
+        skip_duplicates : bool, optional
+            If True, skip duplicate entries. Default is False.
+        verbose : bool, optional
+            If True, print progress information. Default is True.
+        **extra_key
+            Additional attributes added to every inserted entry, e.g. by subclasses with more parameters.
+        """
 
         if stim_names is None:
-            stim_names = (self.stimulus_table() & "stim_family='noise'").fetch('stim_name')
+            stim_names = (self.stimulus_table() & "stim_family='noise'").to_arrays('stim_name')
 
         key = dict(dnoise_params_id=dnoise_params_id, fit_kind=fit_kind,
                    fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
                    lowpass_cutoff=lowpass_cutoff,
                    pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s,
-                   filter_dur_s_past=filter_dur_s_past, filter_dur_s_future=filter_dur_s_future)
+                   whiten=int(whiten), whiten_reg=whiten_reg,
+                   filter_dur_s_past=filter_dur_s_past, filter_dur_s_future=filter_dur_s_future,
+                   **extra_key)
 
         for stim_name in stim_names:
             """Add default preprocess parameter to table"""
             stim_key = key.copy()
             stim_key['stim_name'] = stim_name
 
-            if len(self & stim_key) > 0 and skip_duplicates:
+            # Restrict by primary key only; other attributes can be tuples or dicts, which cannot be used in SQL.
+            if skip_duplicates and len(self & {k: stim_key[k] for k in self.primary_key if k in stim_key}) > 0:
                 continue
 
             stim, stim_dict, ntrigger_rep, isrepeated, framerate = (self.stimulus_table() & stim_key).fetch1(
                 "stim_trace", "stim_dict", "ntrigger_rep", "isrepeated", "framerate")
+            stim = load_array(stim)
 
-            if framerate > 0:
+            if framerate > 0:  # This is actually the triggerrate!
                 dt_trigger = 1 / framerate
             else:
-                triggertimes = (self.presentation_table() & stim_key).fetch('triggertimes')
+                triggertimes = (self.presentation_table() & stim_key).to_arrays('triggertimes')
                 dt_trigger = np.median([np.median(np.diff(tti)) for tti in triggertimes])
 
             if "ntrigger_tot" in stim_dict:
@@ -102,18 +174,25 @@ class FastStaParamsTemplate(dj.Lookup):
             elif (not isrepeated) and (ntrigger_rep > 1):
                 n_trigger = ntrigger_rep
             else:  # Infer from triggertimes
-                triggertimes = (self.presentation_table() & stim_key).fetch('triggertimes')
+                triggertimes = (self.presentation_table() & stim_key).to_arrays('triggertimes')
                 n_trigger = int(np.percentile([tti.size for tti in triggertimes], q=98))
 
             stimtime = np.arange(n_trigger) * dt_trigger
 
             if verbose:
                 print(f"Preparing design matrix for stimulus: {stim_name}: "
-                      f"n_trigger: {n_trigger}, dt_trigger: {dt_trigger}")
+                      f"{n_trigger=}, {dt_trigger=}, {len(stimtime)=}")
 
             x_stimulus, rf_time, dims, burn_in, shift, dt, t0 = self.prepare_stimulus(
-                stim, stimtime, stim_dict.get('ntrigger_per_frame', 1), fupsample_stim,
-                filter_dur_s_past, filter_dur_s_future)
+                stim=stim, triggertimes=stimtime,
+                nframes_per_trigger=stim_dict.get('nframes_per_trigger', 1),
+                fupsample_stim=fupsample_stim,
+                filter_dur_s_past=filter_dur_s_past,
+                filter_dur_s_future=filter_dur_s_future,
+            )
+
+            if verbose:
+                print(f"Stimulus design matrix has shape: {x_stimulus.shape=} with {dt=}")
 
             new_key = stim_key.copy()
             new_key['x_stimulus'] = x_stimulus
@@ -126,9 +205,39 @@ class FastStaParamsTemplate(dj.Lookup):
             self.insert1(new_key, skip_duplicates=skip_duplicates)
 
     @staticmethod
-    def prepare_stimulus(stim, triggertimes, ntrigger_per_frame, fupsample_stim, filter_dur_s_past,
-                         filter_dur_s_future):
-        stimtime, stim = preprocess_stimulus(stim, triggertimes, ntrigger_per_frame, fupsample_stim)
+    def prepare_stimulus(
+            stim: np.ndarray,
+            triggertimes: np.ndarray,
+            nframes_per_trigger: int,
+            fupsample_stim: int,
+            filter_dur_s_past: float,
+            filter_dur_s_future: float) -> tuple:
+        """Preprocess stimulus and build the design matrix.
+
+        Parameters
+        ----------
+        stim : np.ndarray
+            Raw stimulus array.
+        triggertimes : np.ndarray
+            Array of trigger timestamps.
+        nframes_per_trigger : int
+            Number of frames per trigger
+        fupsample_stim : int
+            Upsampling factor for the stimulus.
+        filter_dur_s_past : float
+            Filter duration in seconds into the past.
+        filter_dur_s_future : float
+            Filter duration in seconds into the future.
+
+        Returns
+        -------
+        tuple
+            Tuple of (x_stimulus, rf_time, dims, burn_in, shift, dt, t0).
+        """
+        stimtime, stim = preprocess_stimulus(
+            stim, triggertimes,
+            nframes_per_trigger=nframes_per_trigger,
+            fupsample_stim=fupsample_stim)
         dt, dt_rel_error = get_mean_dt(stimtime, rtol_error=np.inf, rtol_warning=0.5)
         t0 = stimtime[0]
 
@@ -148,11 +257,11 @@ class FastStaTemplate(dj.Computed):
     @property
     def definition(self):
         definition = '''
-        # Preprocess traces for receptive field estimation
+        # Spatio-temporal receptive fields estimated with fast STA
         -> self.params_table
         -> self.traces_table
         ---
-        rf: longblob  # spatio-temporal receptive field
+        rf: <npy@processed>  # spatio-temporal receptive field
         '''
         return definition
 
@@ -178,24 +287,62 @@ class FastStaTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def prepare_sta_params(self, *restrictions):
-        restrictions = [{}] if len(restrictions) == 0 else restrictions
-        if len(self.params_table() & [*restrictions]) != 1:
+    def _select_params(self, *restrictions):
+        """Return the params table restricted to the single parameter set that `restrictions` select.
+
+        Restrictions are applied to the key source, so they may also restrict presentations or traces
+        (e.g. by field), as long as they leave exactly one parameter set.
+        """
+        params_table = self.params_table() & (self.key_source & dj.AndList(restrictions))
+        if len(params_table) != 1:
             raise NotImplementedError("Only one parameter set supported. Provide `restrictions` that selects one.")
+        return params_table
 
-        (x_stimulus, dt, rf_time, burn_in, shift, kind, dims, fupsample_stim, fupsample_trace,
-         fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s) = (
-                self.params_table & [*restrictions]).fetch1(
-            'x_stimulus', 'dt', 'rf_time', 'burn_in', 'shift', 'fit_kind', 'dims', 'fupsample_stim',
-            "fupsample_trace", "fit_kind", "lowpass_cutoff", "pre_blur_sigma_s", "post_blur_sigma_s")
+    def prepare_sta_params(self, *restrictions) -> dict:
+        """Fetch and prepare STA parameters from the params table.
 
-        x_stimulus = np.ascontiguousarray(x_stimulus.astype(np.float32))
+        Parameters
+        ----------
+        *restrictions : dict
+            Optional DataJoint restrictions to select a unique parameter set.
+
+        Returns
+        -------
+        dict
+            Dictionary containing all STA parameters needed for computation.
+
+        Raises
+        ------
+        NotImplementedError
+            If the restrictions do not select exactly one parameter set.
+        """
+        params_table = self._select_params(*restrictions)
+
+        (x_stimulus, dt, rf_time, burn_in, shift, dims, fupsample_stim, fupsample_trace,
+         fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s, whiten, whiten_reg) = params_table.fetch1(
+            'x_stimulus', 'dt', 'rf_time', 'burn_in', 'shift', 'dims', 'fupsample_stim',
+            "fupsample_trace", "fit_kind", "lowpass_cutoff", "pre_blur_sigma_s", "post_blur_sigma_s",
+            "whiten", "whiten_reg")
+
+        x_stimulus = np.ascontiguousarray(load_array(x_stimulus).astype(np.float32))
+        rf_time = load_array(rf_time)
+
+        # Shared by all traces, so computed once per parameter set.
+        whitening_matrix = compute_whitening_matrix(x_stimulus, reg=whiten_reg) if whiten else None
+
+        # Fetch nframes_per_trigger from the stimulus table so that stimtime
+        # reconstructed in make_compute matches the design matrix built in
+        # prepare_stimulus.
+        stim_dict = (self.params_table.stimulus_table & params_table).fetch1('stim_dict')
+        nframes_per_trigger = int(stim_dict.get('nframes_per_trigger', 1))
 
         sta_params = dict(
-            x_stimulus=x_stimulus, rf_time=rf_time, burn_in=burn_in, shift=shift, kind=kind, dims=dims,
+            x_stimulus=x_stimulus, rf_time=rf_time, burn_in=burn_in, shift=shift, dims=dims,
             dt=dt, fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
+            nframes_per_trigger=nframes_per_trigger,
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
             pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s,
+            whitening_matrix=whitening_matrix,
         )
 
         return sta_params
@@ -203,112 +350,511 @@ class FastStaTemplate(dj.Computed):
     def populate(
             self,
             *restrictions,
-            suppress_errors=False,
-            return_exception_objects=False,
-            reserve_jobs=False,
-            order="original",
-            limit=None,
-            max_calls=None,
-            display_progress=False,
-            processes=1,
-            make_kwargs=None,
-    ):
-        restrictions = [{}] if len(restrictions) == 0 else restrictions
-        if len(self.params_table() & [*restrictions]) != 1:
-            raise NotImplementedError("Only one parameter set supported. Provide `restrictions` that selects one.")
+            suppress_errors: bool = False,
+            return_exception_objects: bool = False,
+            reserve_jobs: bool = False,
+            max_calls: int | None = None,
+            display_progress: bool = False,
+            processes: int = 1,
+            make_kwargs: dict | None = None,
+            priority: int | None = None,
+            refresh: bool | None = None,
+            n_jobs: int = DEFAULT_N_JOBS,
+    ) -> dict:
+        """Populate the table, precomputing STA parameters shared across all entries.
 
-        if make_kwargs is None:
-            make_kwargs = dict()
-        make_kwargs['sta_params'] = self.prepare_sta_params(*restrictions)
+        The RFs are computed outside of a database transaction (DataJoint's tripartite make), so long computations
+        do not cause lost connections.
 
-        super().populate(
+        Parameters
+        ----------
+        *restrictions : dict
+            Optional DataJoint restrictions. Must select exactly one parameter set.
+        suppress_errors : bool, optional
+            If True, suppress errors during population. Default is False.
+        return_exception_objects : bool, optional
+            If True, return exception objects instead of raising them. Default is False.
+        reserve_jobs : bool, optional
+            If True, use DataJoint job reservation. Default is False.
+        max_calls : int or None, optional
+            Maximum number of make() calls. Default is None.
+        display_progress : bool, optional
+            If True, show a progress bar. Default is False.
+        processes : int, optional
+            Number of parallel processes. Default is 1.
+        make_kwargs : dict or None, optional
+            Additional keyword arguments passed to make(). Default is None.
+        priority : int or None, optional
+            Minimum job priority when using distributed population.
+        refresh : bool or None, optional
+            Whether to refresh the distributed job queue.
+        n_jobs : int, optional
+            Maximum number of CPU cores used to compute the RFs of one presentation, at most the number of available
+            cores. Each of the `processes` uses up to `n_jobs` cores. Default is 30.
+
+        Returns
+        -------
+        dict
+            DataJoint population summary with ``success_count`` and ``error_list``.
+
+        Raises
+        ------
+        NotImplementedError
+            If the restrictions do not select exactly one parameter set.
+        """
+        make_kwargs = dict(make_kwargs or {})
+        with threadpool_limits(limits=n_jobs):
+            make_kwargs['sta_params'] = self.prepare_sta_params(*restrictions)
+        make_kwargs['n_jobs'] = n_jobs
+
+        return super().populate(
             *restrictions,
             suppress_errors=suppress_errors,
             return_exception_objects=return_exception_objects,
             reserve_jobs=reserve_jobs,
-            order=order,
-            limit=limit,
             max_calls=max_calls,
             display_progress=display_progress,
             processes=processes,
             make_kwargs=make_kwargs,
+            priority=priority,
+            refresh=refresh,
         )
 
-    def make_compute(self, key, sta_params=None):
-        if isinstance(sta_params, dict):
-            x_stimulus = sta_params['x_stimulus']
-            dims = sta_params['dims']
-            fupsample_trace = sta_params['fupsample_trace']
-            fupsample_stim = sta_params['fupsample_stim']
-            fit_kind = sta_params['fit_kind']
-            lowpass_cutoff = sta_params['lowpass_cutoff']
-            pre_blur_sigma_s = sta_params['pre_blur_sigma_s']
-            post_blur_sigma_s = sta_params['post_blur_sigma_s']
-        else:
-            raise NotImplementedError("Only dict supported")
+    # The make is split into make_fetch, make_compute and make_insert (DataJoint's tripartite make), so that the
+    # computation runs outside of the database transaction. A long transaction without queries can otherwise
+    # lose the connection to the database server.
 
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+    def make_fetch(self, key: dict, sta_params: dict | None = None, n_jobs: int = DEFAULT_N_JOBS) -> tuple:
+        """Fetch the trigger times and traces of a presentation.
 
-        dt_triggertimes = np.median(np.diff(triggertimes))
-        xidxs = np.arange(triggertimes.size + 1)
-        xidxs_stim = np.repeat(xidxs, fupsample_stim) + np.tile(
-            np.arange(fupsample_stim) * 1 / fupsample_stim, xidxs.size)
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        sta_params : dict or None, optional
+            Pre-computed STA parameters, see `prepare_sta_params`. If None, they are computed in `make_compute`.
+        n_jobs : int, optional
+            Maximum number of CPU cores used to compute the RFs. Default is 30.
 
-        stimtime = np.interp(
-            xidxs_stim, xidxs, np.append(triggertimes, triggertimes[-1] + dt_triggertimes))[:-fupsample_stim]
+        Returns
+        -------
+        tuple
+            Single `_FetchedData` object passed on to `make_compute`.
+        """
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
+        rf_keys, trace_t0s, trace_dts, traces = (self.traces_table() & key).to_arrays(
+            self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace',
+            include_key=True, order_by='KEY')
 
-        trace_t0s, trace_dts, traces, rf_keys = (self.traces_table() & key).fetch(
-            self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace', 'KEY')
+        fetched = _FetchedData(
+            triggertimes=triggertimes, rf_keys=list(rf_keys), trace_t0s=trace_t0s, trace_dts=trace_dts,
+            traces=list(traces), unhashed=dict(sta_params=sta_params, n_jobs=n_jobs))
+        return fetched,
+
+    def make_compute(self, key: dict, fetched: _FetchedData) -> tuple:
+        """Compute receptive fields for all traces of a presentation.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        fetched : _FetchedData
+            Data from `make_fetch`.
+
+        Returns
+        -------
+        tuple
+            Single list of entries to insert, passed on to `make_insert`.
+        """
+        data = fetched.data
+        rf_keys, trace_t0s, trace_dts, traces = data['rf_keys'], data['trace_t0s'], data['trace_dts'], data['traces']
+        sta_params = data['sta_params'] if data['sta_params'] is not None else self.prepare_sta_params(key)
 
         if len(rf_keys) == 0:
             print(f"No traces found for {key}")
-            return
+            return [],
 
+        x_stimulus = sta_params['x_stimulus']
+        stimtime = self._get_stimtime(data['triggertimes'], sta_params, key)
         tracetime_base = np.arange(traces[0].size) * trace_dts[0]
 
+        aligned_traces = [
+            self._prepare_trace(
+                tracetime_base + trace_t0, trace, stimtime, x_stimulus.shape[0],
+                sta_params['fupsample_trace'], sta_params['fit_kind'], sta_params['lowpass_cutoff'],
+                sta_params['pre_blur_sigma_s'], sta_params['post_blur_sigma_s'])
+            for trace, trace_t0 in zip(traces, trace_t0s)]
+
+        entries = self._compute_entries(aligned_traces, sta_params, n_jobs=data['n_jobs'])
+
         rf_entries = []
-        for trace, trace_t0, rf_key in tqdm(
-                zip(traces, trace_t0s, rf_keys), total=len(rf_keys), desc=str(key), leave=False):
-            rf = self._compute_rf(
-                tracetime_base + trace_t0, trace, stimtime, x_stimulus,
-                dims, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s)
-            rf_entries.append({**key, **rf_key, "rf": rf})
+        for rf_key, trace, entry in zip(rf_keys, aligned_traces, entries):
+            if entry is None:
+                continue
 
-        return rf_entries
+            if np.any(np.isnan(entry['rf'])):
+                print(f"Skipping {rf_key}, RF contains NaNs. "
+                      f"Aligned trace contained {np.sum(np.isnan(trace))} NaNs. "
+                      f"[{tracetime_base[0] + trace_t0s[0]=} ... {tracetime_base[-1] + trace_t0s[0]}] "
+                      f"and [{stimtime[0]=} ... {stimtime[-1]}]")
+            else:
+                rf_entries.append({**key, **rf_key, **entry})
 
-    def make(self, key, sta_params=None):
-        rf_entries = self.make_compute(key=key, sta_params=sta_params)
-        self.insert(rf_entries)
+        if len(rf_entries) == 0:
+            print(f"All RFs contain NaNs for {key}, skipping.")
+
+        return rf_entries,
+
+    def make_insert(self, key: dict, rf_entries: list) -> None:
+        """Insert the entries computed in `make_compute`."""
+        if rf_entries:
+            self.insert(rf_entries)
 
     @staticmethod
-    def _compute_rf(tracetime, trace, stimtime, x_stimulus,
-                    dims, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s,
-                    post_blur_sigma_s):
+    def _get_stimtime(triggertimes: np.ndarray, sta_params: dict, key: dict) -> np.ndarray:
+        """Timestamps of the stimulus frames, at the same resolution as the design matrix."""
+        x_stimulus = sta_params['x_stimulus']
 
+        # Build stimtime at the same resolution as x_stimulus: each trigger
+        # spans nframes_per_trigger stimulus frames, each further upsampled
+        # by fupsample_stim. Total upsampling factor per trigger:
+        total_upsample = sta_params['nframes_per_trigger'] * sta_params['fupsample_stim']
+
+        dt_triggertimes = np.median(np.diff(triggertimes))
+        xidxs = np.arange(triggertimes.size + 1)
+        xidxs_stim = np.repeat(xidxs, total_upsample) + np.tile(
+            np.arange(total_upsample) * 1 / total_upsample, xidxs.size)
+
+        stimtime = np.interp(
+            xidxs_stim, xidxs, np.append(triggertimes, triggertimes[-1] + dt_triggertimes))[:-total_upsample]
+
+        if stimtime.size != x_stimulus.shape[0]:
+            warnings.warn(
+                f"Number of stimulus frames from triggertimes ({stimtime.size}) differs from the design matrix "
+                f"({x_stimulus.shape[0]}) for {key}. Using the overlapping part.")
+            stimtime = stimtime[:x_stimulus.shape[0]]
+
+        return stimtime
+
+    def _compute_entries(self, traces: list, sta_params: dict, n_jobs: int) -> list:
+        """Compute the attributes to insert for all traces of a presentation.
+
+        The STAs of all traces are computed with a single matrix product, so the design matrix is read only once.
+        Subclasses override this to store more than the STA.
+
+        Parameters
+        ----------
+        traces : list of np.ndarray
+            Preprocessed traces aligned to the stimulus, see `_prepare_trace`.
+        sta_params : dict
+            Parameters from `prepare_sta_params`.
+        n_jobs : int
+            Maximum number of CPU cores used.
+
+        Returns
+        -------
+        list of dict or None
+            Non-key attributes of each entry, must contain "rf". None skips the trace.
+        """
+        x_stimulus = sta_params['x_stimulus']
+        whitening_matrix = sta_params.get('whitening_matrix')
+
+        # Zero-padding the traces to the same length does not change their STAs.
+        n_frames = max(trace.size for trace in traces)
+        y = np.zeros((n_frames, len(traces)), dtype=x_stimulus.dtype)
+        for i, trace in enumerate(traces):
+            assert trace.dtype == x_stimulus.dtype, (trace.dtype, x_stimulus.dtype)
+            y[:trace.size, i] = trace
+
+        with threadpool_limits(limits=n_jobs):
+            rfs = compute_rf_sta(x_stimulus[:n_frames], y)
+            if whitening_matrix is not None:
+                rfs = whitening_matrix @ rfs
+
+        return [{"rf": np.ascontiguousarray(rfs[:, i]).reshape(sta_params['dims'])} for i in range(len(traces))]
+
+    @staticmethod
+    def _prepare_trace(
+            tracetime: np.ndarray, trace: np.ndarray, stimtime: np.ndarray, n_frames: int,
+            fupsample_trace: int, fit_kind: str, lowpass_cutoff: float, pre_blur_sigma_s: float,
+            post_blur_sigma_s: float) -> np.ndarray:
+        """Preprocess a trace and align it to the stimulus frames.
+
+        Parameters
+        ----------
+        tracetime : np.ndarray
+            Timestamps corresponding to the trace samples.
+        trace : np.ndarray
+            1-D neural response trace.
+        stimtime : np.ndarray
+            Timestamps corresponding to the stimulus frames.
+        n_frames : int
+            Number of rows of the stimulus design matrix.
+        fupsample_trace : int
+            Upsampling factor for the trace.
+        fit_kind : str
+            Kind of fitting procedure (e.g. "gradient").
+        lowpass_cutoff : float
+            Cutoff frequency for the low-pass filter.
+        pre_blur_sigma_s : float
+            Gaussian blur sigma applied before alignment (in seconds).
+        post_blur_sigma_s : float
+            Gaussian blur sigma applied after alignment (in seconds).
+
+        Returns
+        -------
+        np.ndarray
+            Float32 trace on the stimulus time grid.
+        """
         tracetime, trace = preprocess_trace(
             tracetime, trace, fupsample_trace, fit_kind, lowpass_cutoff, pre_blur_sigma_s)
         trace, dt, t0, dt_rel_error = align_trace_to_stim(
             stimtime=stimtime, trace=trace, tracetime=tracetime)
         trace = finalize_trace(trace, dt, post_blur_sigma_s).astype(np.float32)
 
-        assert trace.size <= x_stimulus.shape[0], f"stim-shape: {x_stimulus.shape}, trace-shape: {trace.shape}"
-        assert trace.dtype == x_stimulus.dtype, (trace.dtype, x_stimulus.dtype)
-        rf = compute_rf_sta(np.ascontiguousarray(x_stimulus[:trace.size]),
-                            np.ascontiguousarray(trace)).reshape(dims)
+        if trace.size < n_frames * 1 / 3:
+            print(f"WARNING: Trace doesn't cover much of the stimulus duration."
+                  f"trace-size: {trace.size}, stim-size: {n_frames}")
 
-        return rf
+        assert trace.size <= n_frames, f"stim-frames: {n_frames}, trace-shape: {trace.shape}"
+        return trace
 
-    def plot1(self, key=None, downsample=1):
-        self.plot1_frames(key=key, downsample=downsample)
+    def plot1(self, key: dict | None = None, kind: str = 'frames', **kwargs) -> None:
+        """Plot the receptive field as frames.
 
-    def plot1_frames(self, key=None, downsample=1):
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        kind : str, optional
+            Kind of plot to show. Currently only 'frames' is supported. Default is 'frames'.
+        **kwargs
+            Additional keyword arguments passed to the specific plot function.
+        """
+        if kind == 'frames':
+            self.plot1_frames(key=key, **kwargs)
+        elif kind == 'video':
+            self.plot1_video(key=key, **kwargs)
+        elif kind == 'traces':
+            self.plot1_traces(key=key, **kwargs)
+        else:
+            raise NotImplementedError(f"kind {kind} is not supported.")
+
+    def plot1_frames(self, key: dict | None = None, downsample: int = 1) -> None:
+        """Plot the receptive field as individual frames.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        downsample : int, optional
+            Downsampling factor for the frames. Default is 1.
+        """
         key = get_primary_key(table=self, key=key)
-        rf_time = (self.params_table & key).fetch1('rf_time')
-        rf = (self & key).fetch1('rf')
+        rf_time = load_array((self.params_table & key).fetch1('rf_time'))
+        rf = load_array((self & key).fetch1('rf'))
         plot_rf_frames(rf, rf_time, downsample=downsample)
 
-    def plot1_video(self, key=None, fps=10):
+    def plot1_video(self, key: dict | None = None, fps: int = 10):
+        """Plot the receptive field as a video animation.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        fps : int, optional
+            Frames per second for the animation. Default is 10.
+
+        Returns
+        -------
+        matplotlib.animation.Animation
+            Animation object of the RF video.
+        """
         key = get_primary_key(table=self, key=key)
-        rf_time = (self.params_table & key).fetch1('rf_time')
-        rf = (self & key).fetch1('rf')
+        rf_time = load_array((self.params_table & key).fetch1('rf_time'))
+        rf = load_array((self & key).fetch1('rf'))
         return plot_rf_video(rf, rf_time, fps=fps)
+
+    def plot1_traces(self, key: dict | None = None, ax=None, cmap: str = 'viridis'):
+        """Plot the spatial components of the RF as lines vs. lag.
+
+        Useful for few-pixel stimuli where the spatial structure is low-dimensional
+        (e.g. 1D bar noise or small 2D grids). Each spatial pixel is plotted as a
+        line over rf_time, color-coded by its position along the flattened spatial
+        axis.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        ax : matplotlib.axes.Axes or None, optional
+            Axes to plot into. If None, a new figure and axes are created.
+        cmap : str, optional
+            Matplotlib colormap name used to color pixels by spatial position.
+            Default is 'viridis'.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes containing the plot.
+        """
+        key = get_primary_key(table=self, key=key)
+        rf_time = load_array((self.params_table & key).fetch1('rf_time'))
+        rf = load_array((self & key).fetch1('rf'))
+
+        # Reshape to (n_lags, n_pixels), handling both 2D and 3D+ RFs.
+        n_lags = rf.shape[0]
+        rf_flat = rf.reshape(n_lags, -1)
+        n_pixels = rf_flat.shape[1]
+
+        if ax is None:
+            _, ax = plt.subplots(1, 1, figsize=(6, 4))
+
+        colors = plt.get_cmap(cmap)(np.linspace(0, 1, n_pixels))
+        for i in range(n_pixels):
+            ax.plot(rf_time, rf_flat[:, i], color=colors[i], lw=1)
+
+        ax.axhline(0, color='k', lw=0.5, alpha=0.5)
+        ax.axvline(0, color='k', lw=0.5, alpha=0.5)
+        ax.set_xlabel('Lag (s)')
+        ax.set_ylabel('RF amplitude')
+        ax.set_title(f"RF traces ({n_pixels} pixels)")
+
+        return ax
+
+
+class FastStaQualityTemplate(dj.Computed):
+    database = ""
+    # Duration (in seconds) at the acausal end of rf_time used as the noise/baseline region.
+    # For shift <= 0 (filter into the past), this is the most-future portion of rf_time,
+    # which should contain no stimulus-driven signal.
+    _baseline_dur_s = 0.1
+
+    @property
+    def definition(self):
+        definition = """
+        # Signal-to-noise ratio for STA receptive fields (peak-to-baseline, pooled over all pixels).
+        -> self.sta_table
+        ---
+        snr = NULL : float32       # peak_z / expected max|z| under pure noise (size-invariant)
+        peak_amplitude = NULL: float32   # max(|rf|) over all space and time
+        peak_z = NULL : float32    # peak_amplitude / noise_std
+        noise_std : float32        # std of rf pooled over all pixels within the baseline window
+        n_baseline_frames: int64  # non-negative number of time bins used as baseline
+        """
+        return definition
+
+    @property
+    @abstractmethod
+    def sta_table(self):
+        pass
+
+    def make(self, key: dict) -> None:
+        rf = load_array((self.sta_table & key).fetch1('rf'))
+        rf_time = load_array((self.sta_table.params_table & key).fetch1('rf_time'))
+
+        # Flatten spatial/feature dims so rf becomes (T, S) regardless of input shape.
+        T = rf.shape[0]
+        rf_flat = rf.reshape(T, -1)  # (T, S); S == 1 if rf was 1D
+        S = rf_flat.shape[1]
+
+        # Determine baseline region: acausal end of rf_time.
+        # rf_time is ordered from past to future, so the most-future bins are at the end.
+        dt = np.median(np.diff(rf_time))
+        n_baseline = max(1, int(round(self._baseline_dur_s / dt)))
+        n_baseline = min(n_baseline, T - 1)  # leave at least one signal frame
+
+        # Pooled noise estimate across ALL spatial locations in the acausal tail.
+        # This decouples noise estimation from pixel selection and makes the
+        # estimate stable and (asymptotically) invariant to adding noise-only
+        # pixels via spatial padding outside the RF.
+        baseline = rf_flat[-n_baseline:, :]  # (n_baseline, S)
+        noise_std = float(np.std(baseline))
+
+        # Raw peak across all space and time.
+        peak = float(np.max(np.abs(rf_flat)))
+
+        # Extreme-value correction. With S pixels and T lags of approximately
+        # independent Gaussian noise, E[max |z|] ~ sqrt(2 * log(T * S)). Dividing
+        # the raw peak-z by this expected null peak yields a statistic whose null
+        # distribution is roughly centered at 1 regardless of S (and T), so
+        # padding the stimulus with noise-only pixels no longer inflates SNR.
+        if noise_std > 0:
+            peak_z = peak / noise_std
+            null_peak = np.sqrt(2.0 * np.log(max(T * S, 2)))
+            snr = peak_z / null_peak
+        else:
+            peak_z = None
+            snr = None
+
+        self.insert1({
+            **key,
+            'snr': snr,                       # size-invariant: peak_z / E[max|z|] under null
+            'peak_amplitude': peak,           # raw peak (same units as rf)
+            'peak_z': peak_z,                 # peak in units of pooled noise std
+            'noise_std': noise_std,           # pooled across all S pixels
+            'n_baseline_frames': n_baseline,
+        })
+
+    def plot1(self, key: dict | None = None, ax=None):
+        """Plot the RF traces with the baseline window highlighted.
+
+        Shows all spatial components as lines over rf_time, shades the baseline
+        region used for noise estimation, and marks the peak amplitude. The
+        computed SNR is shown in the title.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        ax : matplotlib.axes.Axes or None, optional
+            Axes to plot into. If None, a new figure and axes are created.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes containing the plot.
+        """
+        from matplotlib import pyplot as plt
+
+        key = get_primary_key(table=self, key=key)
+
+        snr, peak_amplitude, noise_std, n_baseline = (self & key).fetch1(
+            'snr', 'peak_amplitude', 'noise_std', 'n_baseline_frames')
+        rf = load_array((self.sta_table & key).fetch1('rf'))
+        rf_time = load_array((self.sta_table.params_table & key).fetch1('rf_time'))
+
+        # Flatten spatial dims to (n_lags, n_pixels)
+        n_lags = rf.shape[0]
+        rf_flat = rf.reshape(n_lags, -1)
+        n_pixels = rf_flat.shape[1]
+
+        if ax is None:
+            _, ax = plt.subplots(1, 1, figsize=(6, 4))
+
+        colors = plt.get_cmap('viridis')(np.linspace(0, 1, n_pixels))
+        for i in range(n_pixels):
+            ax.plot(rf_time, rf_flat[:, i], color=colors[i], lw=1)
+
+        # Shade baseline region (last n_baseline frames, matching the make() logic)
+        ax.axvspan(rf_time[-n_baseline], rf_time[-1], color='gray', alpha=0.2,
+                   label=f'baseline ({n_baseline} frames)')
+
+        # Mark peak amplitude as horizontal reference lines
+        ax.axhline(peak_amplitude, color='red', lw=0.5, ls='--', alpha=0.7)
+        ax.axhline(-peak_amplitude, color='red', lw=0.5, ls='--', alpha=0.7,
+                   label=f'±peak = {peak_amplitude:.3g}')
+
+        # Noise band
+        ax.axhline(noise_std, color='k', lw=0.5, ls=':', alpha=0.5)
+        ax.axhline(-noise_std, color='k', lw=0.5, ls=':', alpha=0.5,
+                   label=f'±noise std = {noise_std:.3g}')
+
+        ax.axhline(0, color='k', lw=0.5, alpha=0.5)
+        ax.axvline(0, color='k', lw=0.5, alpha=0.5)
+        ax.set_xlabel('Lag (s)')
+        ax.set_ylabel('RF amplitude')
+        ax.set_title(f"SNR = {snr:.2f}")
+        ax.legend(loc='best', fontsize=8)
+
+        return ax

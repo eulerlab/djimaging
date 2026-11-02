@@ -1,13 +1,12 @@
 from .chirp.chirp_qi import ChirpQITemplate
 from .chirp.chirp_features_rgc import ChirpFeaturesRgcTemplate
 from .chirp.chirp_features_bc import ChirpFeaturesBcTemplate
-from .chirp.chirp_surround import ChirpSurroundTemplate
-from .chirp.chirp_surround_v2 import ChirpSurroundTemplate as ChirpSurroundTemplateV2
+from .chirp.chirp_surround_v2 import ChirpSurroundTemplateV2
 
 from .sinespot.sinespot_qi import SineSpotQITemplate
 from .sinespot.sinespot_features import SineSpotFeaturesTemplate
 
-from .movingbar.orientation import OsDsIndexesTemplate, OsDsIndexesTemplateV1, OsDsIndexesTemplateV2
+from .movingbar.orientation import OsDsIndexesTemplate
 from .csl.csl import CslMetricsTemplate
 from .response_quality import RepeatQITemplate
 from .presentation_quality import RepeatQIPresentationTemplate

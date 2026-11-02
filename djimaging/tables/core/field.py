@@ -8,6 +8,7 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 
+from djimaging.utils.dj_storage import load_array, relative_store_path
 from djimaging.utils.filesystem_utils import get_file_info_df
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
@@ -16,6 +17,7 @@ from djimaging.utils.scanm.recording import ScanMRecording
 
 class FieldTemplate(dj.Computed):
     database = ""
+    _filepath_store = "reference"
     incl_region = True  # Include region as primary key?
     incl_cond1 = False  # Include condition 1 as primary key?
     incl_cond2 = False  # Include condition 2 as primary key?
@@ -39,26 +41,33 @@ class FieldTemplate(dj.Computed):
         if self.incl_cond3:
             definition += "    cond3    :varchar(16)    # condition (pharmacological or other)\n"
 
-        definition += """
+        definition += f"""
         ---
-        field_data_file: varchar(191)  # info extracted from which file?
-        absx: float  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
-        absy: float  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
-        absz: float  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
-        scan_type: enum("xy", "xz", "xyz")  # Type of scan
-        npixartifact : int unsigned         # Number of pixel with light artifact
-        nxpix: int unsigned                 # number of pixels in x
-        nypix: int unsigned                 # number of pixels in y
-        nzpix: int unsigned                 # number of pixels in z
-        nxpix_offset: int unsigned          # number of offset pixels in x
-        nxpix_retrace: int unsigned         # number of retrace pixels in x
-        pixel_size_um :float                # width of a pixel in um (also height if y is second dimension)
-        z_step_um = NULL :float             # z-step in um
+        field_data_file: <filepath@{self._filepath_store}>  # source acquisition file
+        absx: float32  # absolute position of the center (of the cropped field) in the x axis as recorded by ScanM
+        absy: float32  # absolute position of the center (of the cropped field) in the y axis as recorded by ScanM
+        absz: float32  # absolute position of the center (of the cropped field) in the z axis as recorded by ScanM
+        scan_type: enum('xy', 'xz', 'xyz')  # Type of scan
+        npixartifact : int64         # Number of pixel with light artifact
+        nxpix: int64                 # number of pixels in x
+        nypix: int64                 # number of pixels in y
+        nzpix: int64                 # number of pixels in z
+        nxpix_offset: int64          # number of offset pixels in x
+        nxpix_retrace: int64         # number of retrace pixels in x
+        pixel_size_um :float32                # width of a pixel in um (also height if y is second dimension)
+        z_step_um = NULL :float32             # z-step in um
         """
         return definition
 
     @property
-    def new_primary_keys(self):
+    def new_primary_keys(self) -> list:
+        """Return the list of primary key names added by this table beyond the experiment table.
+
+        Returns
+        -------
+        list
+            List of primary key column names (e.g. ['field', 'region']).
+        """
         new_primary_keys = ['field']
         if self.incl_region:
             new_primary_keys.append('region')
@@ -100,12 +109,37 @@ class FieldTemplate(dj.Computed):
             -> master
             ch_name : varchar(32)  # name of the channel
             ---
-            ch_average :longblob  # Stack median over time
+            ch_average :<blob>  # Stack median over time
             """
             return definition
 
-    def load_exp_file_info_df(self, exp_key, filter_kind='response', with_field_only=True, from_raw_data=None):
-        """Load file info dataframe for a given experiment key."""
+    def load_exp_file_info_df(
+            self,
+            exp_key: dict,
+            filter_kind: str | list | None = 'response',
+            with_field_only: bool = True,
+            from_raw_data: bool | None = None,
+    ) -> pd.DataFrame:
+        """Load file info dataframe for a given experiment key.
+
+        Parameters
+        ----------
+        exp_key : dict
+            Primary key identifying the experiment.
+        filter_kind : str or list or None, optional
+            File kind(s) to keep (e.g. 'response', 'hr'). Default is 'response'.
+        with_field_only : bool, optional
+            If True, drop rows without a field identifier. Default is True.
+        from_raw_data : bool | None, optional
+            Whether to load from raw data directory. If None, read from
+            `raw_params_table`. Default is None.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with one row per file, containing columns such as
+            'filepath', 'field', 'kind', 'stimulus', 'region', etc.
+        """
         if from_raw_data is None:
             from_raw_data = (self.raw_params_table & exp_key).fetch1('from_raw_data')
         header_path = (self.experiment_table & exp_key).fetch1('header_path')
@@ -127,7 +161,7 @@ class FieldTemplate(dj.Computed):
                     filter_kind = [filter_kind]
                 file_info_df = file_info_df[file_info_df['kind'].isin(filter_kind)]
 
-            file_info_df.sort_values('mask_order', inplace=True, ascending=True)
+            file_info_df = file_info_df.sort_values('mask_order', ascending=True)
 
             # Set defaults
             if self.incl_cond1:
@@ -141,14 +175,41 @@ class FieldTemplate(dj.Computed):
 
         return file_info_df
 
-    def make(self, key, verboselvl=0):
+    def make(self, key: dict, verboselvl: int = 0) -> None:
+        """Populate field entries for the given experiment key.
+
+        Scans for data files on the filesystem and inserts field records
+        along with associated stack averages.
+
+        Parameters
+        ----------
+        key : dict
+            The primary key identifying the experiment to process.
+        verboselvl : int, optional
+            Verbosity level (0 = silent). Default is 0.
+        """
         self._add_entries(
             key, only_new=False, verboselvl=verboselvl, suppress_errors=False, restr_headers=None,
             allow_user_input=False)
 
     def rescan_filesystem(self, restrictions: dict = None, verboselvl: int = 0, suppress_errors: bool = False,
-                          allow_user_input: bool = True, restr_headers: Optional[list] = None):
-        """Scan filesystem for new fields and add them to the database."""
+                          allow_user_input: bool = True, restr_headers: Optional[list] = None) -> None:
+        """Scan filesystem for new fields and add them to the database.
+
+        Parameters
+        ----------
+        restrictions : dict, optional
+            Restriction applied to the key source before scanning.
+            Default is None (no restriction).
+        verboselvl : int, optional
+            Verbosity level (0 = silent). Default is 0.
+        suppress_errors : bool, optional
+            If True, print errors instead of raising. Default is False.
+        allow_user_input : bool, optional
+            If True, prompt user when a file fails to load. Default is True.
+        restr_headers : list | None, optional
+            If provided, only process header paths in this list. Default is None.
+        """
         if restrictions is None:
             restrictions = dict()
 
@@ -157,9 +218,31 @@ class FieldTemplate(dj.Computed):
                 key, restr_headers=restr_headers, only_new=True, verboselvl=verboselvl, suppress_errors=suppress_errors)
 
     def _add_entries(
-            self, exp_key, only_new: bool, verboselvl: int, suppress_errors: bool, allow_user_input: bool = False,
-            restr_headers: Optional[list] = None):
-        """Add all fields for a given Experiment"""
+            self,
+            exp_key: dict,
+            only_new: bool,
+            verboselvl: int,
+            suppress_errors: bool,
+            allow_user_input: bool = False,
+            restr_headers: Optional[list] = None,
+    ) -> None:
+        """Add all fields for a given Experiment.
+
+        Parameters
+        ----------
+        exp_key : dict
+            Primary key of the experiment to process.
+        only_new : bool
+            If True, skip fields that already exist in the database.
+        verboselvl : int
+            Verbosity level (0 = silent).
+        suppress_errors : bool
+            If True, print errors instead of raising.
+        allow_user_input : bool, optional
+            If True, prompt user when a file fails to load. Default is False.
+        restr_headers : list | None, optional
+            If provided, only process header paths in this list. Default is None.
+        """
         if verboselvl > 5:
             print(f"add_experiment_fields for key =\n{exp_key}")
 
@@ -214,8 +297,29 @@ class FieldTemplate(dj.Computed):
                 else:
                     raise e
 
-    def _add_entry(self, field_key, filepaths, verboselvl=0, allow_user_input=False):
-        """Adds a field"""
+    def _add_entry(
+            self,
+            field_key: dict,
+            filepaths: np.ndarray,
+            verboselvl: int = 0,
+            allow_user_input: bool = False,
+    ) -> None:
+        """Add a single field entry to the database.
+
+        Loads the first readable file from `filepaths`, extracts scan
+        metadata, and inserts the field and stack-average records.
+
+        Parameters
+        ----------
+        field_key : dict
+            Primary key for the field entry.
+        filepaths : np.ndarray
+            Ordered list/array of candidate file paths to try loading.
+        verboselvl : int, optional
+            Verbosity level (0 = silent). Default is 0.
+        allow_user_input : bool, optional
+            If True, prompt user when a file fails to load. Default is False.
+        """
         if verboselvl > 4:
             print('\t\tAdd field with files:', filepaths)
 
@@ -230,8 +334,35 @@ class FieldTemplate(dj.Computed):
             self.StackAverages().insert1(avg_entry, allow_direct_insert=True)
 
     @staticmethod
-    def _load_first_file_wo_error(filepaths, setupid, date, allow_user_input=False):
-        """Load first file from filepaths and return recording and filepath. Skip all files causing errors."""
+    def _load_first_file_wo_error(
+            filepaths: np.ndarray,
+            setupid: str,
+            date,
+            allow_user_input: bool = False,
+    ) -> ScanMRecording:
+        """Load the first file from `filepaths` that can be read without error.
+
+        Parameters
+        ----------
+        filepaths : np.ndarray
+            Ordered list/array of candidate file paths to try.
+        setupid : str
+            Setup identifier forwarded to `ScanMRecording`.
+        date : datetime.date
+            Recording date forwarded to `ScanMRecording`.
+        allow_user_input : bool, optional
+            If True, prompt user to continue after a load failure. Default is False.
+
+        Returns
+        -------
+        ScanMRecording
+            Successfully loaded recording object.
+
+        Raises
+        ------
+        OSError
+            If all files fail to load.
+        """
         for i, filepath in enumerate(filepaths):
             try:
                 rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=date)
@@ -250,11 +381,27 @@ class FieldTemplate(dj.Computed):
 
         return rec
 
-    @staticmethod
-    def complete_keys(base_key, rec) -> (dict, list):
+    def complete_keys(self, base_key: dict, rec: ScanMRecording) -> tuple[dict, list]:
+        """Build the field entry dict and stack-average entry dicts from a recording.
+
+        Parameters
+        ----------
+        base_key : dict
+            Primary key dict to extend with scan metadata.
+        rec : ScanMRecording
+            Loaded recording object providing scan parameters and channel stacks.
+
+        Returns
+        -------
+        tuple[dict, list]
+            field_entry : dict
+                Complete entry dict ready for insertion into the Field table.
+            avg_entries : list of dict
+                List of entry dicts for insertion into the StackAverages part table.
+        """
         field_entry = deepcopy(base_key)
 
-        field_entry["field_data_file"] = rec.filepath
+        field_entry["field_data_file"] = relative_store_path(rec.filepath, self._filepath_store)
         field_entry["absx"] = rec.pos_x_um
         field_entry["absy"] = rec.pos_y_um
         field_entry["absz"] = rec.pos_z_um
@@ -278,12 +425,23 @@ class FieldTemplate(dj.Computed):
 
         return field_entry, avg_entries
 
-    def plot1(self, key=None, gamma=0.7):
+    def plot1(self, key: dict | None = None, gamma: float = 0.7) -> None:
+        """Plot main and alternative channel stack averages for a single field.
+
+        Parameters
+        ----------
+        key : dict | None, optional
+            Primary key identifying the field to plot. If None, the first
+            available key is used.
+        gamma : float, optional
+            Gamma correction exponent applied to the image. Default is 0.7.
+        """
         key = get_primary_key(table=self, key=key)
         data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        main_ch_average = load_array((self.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         try:
-            alt_ch_average = (self.StackAverages & key & f'ch_name="{alt_name}"').fetch1('ch_average')
+            alt_ch_average = load_array(
+                (self.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average'))
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
 

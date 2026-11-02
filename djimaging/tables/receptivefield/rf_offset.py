@@ -26,9 +26,9 @@ from abc import abstractmethod
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
-from sympy.physics.vector.tests.test_printing import alpha
 
 from djimaging.tables.receptivefield import FitGauss2DRFTemplate, FitDoG2DRFTemplate, RfContoursTemplate
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.receptive_fields.srf_contour_utils import compute_cntr_center
 
 
@@ -41,9 +41,9 @@ class RfOffsetTemplate(dj.Computed):
         # Computes distance to center of stimulus
         -> self.rf_fit_tab
         ---
-        rf_dx_um: float  # Offset in x direction in microns (x as in the field coordinates)
-        rf_dy_um: float  # Offset in x direction in microns (y as in the field coordinates)
-        rf_d_um: float  # Euclidean distance to the center in microns
+        rf_dx_um: float32  # Offset in x direction in microns (x as in the field coordinates)
+        rf_dy_um: float32  # Offset in x direction in microns (y as in the field coordinates)
+        rf_d_um: float32  # Euclidean distance to the center in microns
         """
         return definition
 
@@ -69,11 +69,30 @@ class RfOffsetTemplate(dj.Computed):
     def rf_fit_tab(self):
         pass
 
-    def fetch_and_compute(self, key):
-        """Compute offset w.r.t. stimulus center in microns"""
+    def fetch_and_compute(self, key: dict) -> tuple:
+        """Compute RF offset with respect to stimulus center in microns.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+
+        Returns
+        -------
+        tuple
+            Tuple of (rf_dx_um, rf_dy_um) representing the x and y offsets
+            from the stimulus center in microns.
+
+        Raises
+        ------
+        ValueError
+            If pixel size is not found in the stimulus dictionary.
+        NotImplementedError
+            If the rf_fit_tab type is not supported.
+        """
         stim_dict = (self.stimulus_tab & key).fetch1('stim_dict')
 
-        if ('pix_scale_x_um' not in stim_dict) or ('pix_scale_x_um' not in stim_dict):
+        if ('pix_scale_x_um' not in stim_dict) or ('pix_scale_y_um' not in stim_dict):
             raise ValueError("Pixel size not found in stimulus dict")
 
         pix_scale_x_um, pix_scale_y_um = stim_dict['pix_scale_x_um'], stim_dict['pix_scale_y_um']
@@ -89,7 +108,7 @@ class RfOffsetTemplate(dj.Computed):
                 rf_dx_um, rf_dy_um = compute_cntr_center(srf_contours[levels[0]][0])
 
         elif isinstance(self.rf_fit_tab(), (FitDoG2DRFTemplate, FitGauss2DRFTemplate)):
-            srf = (self.rf_split_tab & key).fetch1('srf')
+            srf = load_array((self.rf_split_tab & key).fetch1('srf'))
             if isinstance(self.rf_fit_tab(), FitDoG2DRFTemplate):
                 srf_params = (self.rf_fit_tab & key).fetch1('srf_eff_center_params')
             else:
@@ -111,7 +130,14 @@ class RfOffsetTemplate(dj.Computed):
 
         return rf_dx_um, rf_dy_um
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute RF offset and Euclidean distance to stimulus center, then insert.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        """
         # Position of sRF center in stimulus coordinates
         rf_dx_um, rf_dy_um = self.fetch_and_compute(key)
 
@@ -121,8 +147,20 @@ class RfOffsetTemplate(dj.Computed):
         rf_d_um = (rf_dx_um ** 2 + rf_dy_um ** 2) ** 0.5
         self.insert1(dict(**key, rf_dx_um=rf_dx_um, rf_dy_um=rf_dy_um, rf_d_um=rf_d_um))
 
-    def plot(self, exp_key):
-        rf_dx_um, rf_dy_um = (self & exp_key).fetch('rf_dx_um', 'rf_dy_um')
+    def plot(self, exp_key: dict) -> tuple:
+        """Plot RF offset vectors from the stimulus center for a given experiment.
+
+        Parameters
+        ----------
+        exp_key : dict
+            DataJoint restriction key for the experiment.
+
+        Returns
+        -------
+        tuple
+            Tuple of (fig, ax) matplotlib objects.
+        """
+        rf_dx_um, rf_dy_um = (self & exp_key).to_arrays('rf_dx_um', 'rf_dy_um')
 
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
 
@@ -141,8 +179,8 @@ class RfRoiOffsetTemplate(dj.Computed):
         -> self.rf_offset_tab
         -> self.roi_pos_wrt_field_tab
         ---
-        relx_rf_roi_um: float
-        rely_rf_roi_um: float
+        relx_rf_roi_um: float32
+        rely_rf_roi_um: float32
         """
         return definition
 
@@ -193,7 +231,23 @@ class RfRoiOffsetTemplate(dj.Computed):
     def rf_fit_tab(self):
         pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Compute the RF-to-ROI relative offset and insert.
+
+        Combines the RF offset from the stimulus center with the ROI position
+        within the field to compute the relative displacement between the RF
+        center and the ROI position.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+
+        Raises
+        ------
+        NotImplementedError
+            If the setup ID is not 1 or 3.
+        """
         rf_dx_um, rf_dy_um = (self.rf_offset_tab & key).fetch1('rf_dx_um', 'rf_dy_um')
         relx_wrt_field, rely_wrt_field = (self.roi_pos_wrt_field_tab & key).fetch1(
             'relx_wrt_field', 'rely_wrt_field')
@@ -219,14 +273,26 @@ class RfRoiOffsetTemplate(dj.Computed):
 
         self.insert1(dict(**key, relx_rf_roi_um=relx_rf_roi_um, rely_rf_roi_um=rely_rf_roi_um))
 
-    def plot(self, restriction=None):
+    def plot(self, restriction: dict | None = None) -> tuple:
+        """Plot RF-to-ROI offsets and regression lines.
+
+        Parameters
+        ----------
+        restriction : dict or None, optional
+            DataJoint restriction to apply. Default is None (no restriction).
+
+        Returns
+        -------
+        tuple
+            Tuple of (fig, ax) matplotlib objects.
+        """
         import seaborn as sns
 
         if restriction is None:
             restriction = {}
 
         df = (self * self.roi_pos_wrt_field_tab() & restriction).proj(
-            'relx_wrt_field', 'rely_wrt_field', 'relx_rf_roi_um', 'rely_rf_roi_um').fetch(format='frame')
+            'relx_wrt_field', 'rely_wrt_field', 'relx_rf_roi_um', 'rely_rf_roi_um').to_pandas()
         df['relx_rf_wrt_field'] = df['relx_rf_roi_um'] + df['relx_wrt_field']
         df['rely_rf_wrt_field'] = df['rely_rf_roi_um'] + df['rely_wrt_field']
 
@@ -269,17 +335,38 @@ class RfRoiOffsetTemplate(dj.Computed):
 
         return fig, ax
 
-    def plot_field(self, key, rf_qidx_thresh=0.45, n_std=1, gamma=0.7,
-                   adjust_rfs=(0, 0), plot_offset=True, plot_outline=True):
+    def plot_field(self, key: dict, rf_qidx_thresh: float = 0.45, n_std: float = 1,
+                   gamma: float = 0.7, adjust_rfs: tuple = (0, 0),
+                   plot_offset: bool = True, plot_outline: bool = True) -> None:
+        """Plot the field image with RF ellipses and ROI-to-RF offset vectors.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint restriction key for the field.
+        rf_qidx_thresh : float, optional
+            Minimum RF quality index to include an ROI. Default is 0.45.
+        n_std : float, optional
+            Number of standard deviations for the ellipse radius. Default is 1.
+        gamma : float, optional
+            Gamma correction applied to the field image. Default is 0.7.
+        adjust_rfs : tuple, optional
+            (dx, dy) adjustment added to all RF center positions. Default is (0, 0).
+        plot_offset : bool, optional
+            If True, draw line from ROI to RF center. Default is True.
+        plot_outline : bool, optional
+            If True, draw Gaussian ellipse around RF center. Default is True.
+        """
         from matplotlib.patches import Ellipse
         import seaborn as sns
 
-        roi_mask = (self.roimask_tab & key).fetch1("roi_mask")
-        pixel_size_um, npixartifact, scan_type = (self.pres_tab & key).fetch(
+        roi_mask = load_array((self.roimask_tab & key).fetch1("roi_mask"))
+        pixel_size_um, npixartifact, scan_type = (self.pres_tab & key).to_arrays(
             'pixel_size_um', 'npixartifact', 'scan_type')
 
         data_name, alt_name = (self.userinfo_tab & key).fetch1('data_stack_name', 'alt_stack_name')
-        main_ch_average = (self.pres_tab.StackAverages & key & f'ch_name="{data_name}"').fetch1('ch_average')
+        main_ch_average = load_array(
+            (self.pres_tab.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         stim_dict = (self.stimulus_tab & key).fetch1('stim_dict')
         pix_scale_x_um, pix_scale_y_um = stim_dict['pix_scale_x_um'], stim_dict['pix_scale_y_um']
 
@@ -304,7 +391,7 @@ class RfRoiOffsetTemplate(dj.Computed):
         _rois[_rois < 0] = -1
         ax.contour(-_rois.T, cmap='Reds', origin='lower', extent=extent, levels=[0.99], vmin=0, vmax=1)
 
-        roi_keys = (self.rf_fit_tab & f"rf_qidx>{rf_qidx_thresh}" & key).fetch('KEY')
+        roi_keys = (self.rf_fit_tab & f"rf_qidx>{rf_qidx_thresh}" & key).keys()
         colors = sns.color_palette('Spectral', len(roi_keys))
 
         for i, roi_key in enumerate(roi_keys):

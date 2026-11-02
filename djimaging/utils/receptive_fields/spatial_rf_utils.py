@@ -40,7 +40,7 @@ def fit_rf_model(srf, kind='gaussian', polarity=None, center=None):
     qi = -1.
 
     for polarity_i in polarities:
-        if kind == 'gauss':
+        if kind == 'gauss' or kind == 'gaussian':
             model_i = srf_gauss_model(srf, polarity=polarity_i, center=center)
         elif kind == 'dog':
             model_i = srf_dog_model(srf, polarity=polarity_i, center=center)
@@ -58,7 +58,7 @@ def fit_rf_model(srf, kind='gaussian', polarity=None, center=None):
         if qi_i > qi:
             model, model_fit, model_params, qi = model_i, model_i_fit, model_i_params, qi_i
 
-    if kind == 'gauss':
+    if kind == 'gauss' or kind == 'gaussian':
         return model_fit, model_params, qi
     elif kind == 'dog':
         model_c_fit = model[0](xx, yy)

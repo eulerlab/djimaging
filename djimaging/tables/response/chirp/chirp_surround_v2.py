@@ -1,7 +1,7 @@
 """
 Example usage:
 @schema
-class ChirpSurround(response.ChirpSurroundTemplate):
+class ChirpSurroundV2(response.ChirpSurroundTemplateV2):
     _l_name = 'lChirp'
     _g_name = 'gChirp'
 
@@ -20,11 +20,12 @@ import numpy as np
 
 from matplotlib import pyplot as plt
 
-from djimaging.utils.dj_utils import get_primary_key, get_secondary_keys
+from djimaging.tables.core.snippets import fetch_snippets_and_times
+from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.trace_utils import get_mean_dt
 
 
-class ChirpSurroundTemplate(dj.Computed):
+class ChirpSurroundTemplateV2(dj.Computed):
     database = ""
 
     _l_name = 'lChirp'
@@ -42,9 +43,9 @@ class ChirpSurroundTemplate(dj.Computed):
         -> self.snippets_table.proj({self._l_name}='stim_name')
         -> self.snippets_table.proj({self._g_name}='stim_name')
         ---
-        chirp_surround_index = NULL : float
-        l_response_mus : blob  # (repetitions,) local response means
-        g_response_mus : blob  # (repetitions,) global response means 
+        chirp_surround_index = NULL : float32
+        l_response_mus : <blob>  # (repetitions,) local response means
+        g_response_mus : <blob>  # (repetitions,) global response means
         """
         return definition
 
@@ -70,21 +71,30 @@ class ChirpSurroundTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def compute_entry(self, key, plot=False):
+    def compute_entry(self, key: dict, plot: bool = False) -> tuple:
+        """Compute surround index and per-repetition response means for lChirp and gChirp.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        plot : bool, optional
+            If True, create diagnostic plots. Default is False.
+
+        Returns
+        -------
+        tuple
+            Tuple of (surround_index, l_response_mus, g_response_mus) where
+            surround_index is a scalar float and the response arrays have shape
+            (n_repetitions,).
+        """
         l_key = {**key, 'stim_name': self._l_name}
         g_key = {**key, 'stim_name': self._g_name}
 
         polarity_index = (self.chirp_features_table & l_key).fetch1('polarity_index')
 
-        l_snippets_t0, l_snippets_dt, l_snippets, l_triggertimes_snippets = (self.snippets_table() & l_key).fetch1(
-            "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-        g_snippets_t0, g_snippets_dt, g_snippets, g_triggertimes_snippets = (self.snippets_table() & g_key).fetch1(
-            "snippets_t0", "snippets_dt", 'snippets', 'triggertimes_snippets')
-
-        l_snippets_times = (np.tile(np.arange(l_snippets.shape[0]) * l_snippets_dt, (len(l_snippets_t0), 1)).T
-                            + l_snippets_t0)
-        g_snippets_times = (np.tile(np.arange(g_snippets.shape[0]) * g_snippets_dt, (len(g_snippets_t0), 1)).T
-                            + g_snippets_t0)
+        l_snippets, l_snippets_times, l_triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, l_key)
+        g_snippets, g_snippets_times, g_triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, g_key)
 
         dt = get_mean_dt(l_snippets_times.T)[0]
         dt_g = get_mean_dt(g_snippets_times.T)[0]
@@ -184,7 +194,19 @@ class ChirpSurroundTemplate(dj.Computed):
 
         return surround_index, l_response_mus, g_response_mus
 
-    def make(self, key, plot=False):
+    def make(self, key: dict, plot: bool = False) -> None:
+        """Compute and insert chirp surround index into the table.
+
+        Fetches lChirp and gChirp snippet data, computes per-repetition response
+        means and the surround index, and inserts the result into the table.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to populate.
+        plot : bool, optional
+            If True, create diagnostic plots during computation. Default is False.
+        """
         surround_index, l_response_mus, g_response_mus = self.compute_entry(key, plot=plot)
 
         self.insert1(dict(
@@ -194,6 +216,13 @@ class ChirpSurroundTemplate(dj.Computed):
             g_response_mus=g_response_mus,
         ))
 
-    def plot1(self, key=None):
+    def plot1(self, key: dict | None = None) -> None:
+        """Plot diagnostic figures for the given key.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint primary key. If None, uses the first available key.
+        """
         key = get_primary_key(table=self, key=key)
         self.compute_entry(key, plot=True)

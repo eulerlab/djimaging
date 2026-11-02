@@ -21,8 +21,22 @@ import numpy as np
 
 # The following functions are copied from cellpose (https://github.com/MouseLand/cellpose)
 
-def intersection_over_union(masks_true, masks_pred):
+def intersection_over_union(masks_true: np.ndarray, masks_pred: np.ndarray) -> np.ndarray:
     """Calculate intersection over union between masks.
+
+    Parameters
+    ----------
+    masks_true : np.ndarray
+        2-D integer array of ground-truth mask labels.
+    masks_pred : np.ndarray
+        2-D integer array of predicted mask labels, same shape as `masks_true`.
+
+    Returns
+    -------
+    np.ndarray
+        2-D IoU matrix of shape ``(n_true_labels + 1, n_pred_labels + 1)``
+        where entry ``[i, j]`` is the IoU between true label ``i`` and
+        predicted label ``j``. NaN values are set to 0.
     """
     overlap = label_overlap(masks_true, masks_pred)
     n_pixels_pred = np.sum(overlap, axis=0, keepdims=True)
@@ -32,8 +46,22 @@ def intersection_over_union(masks_true, masks_pred):
     return iou
 
 
-def label_overlap(x, y):
+def label_overlap(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     """Count overlapped pixels between labels.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Integer label array (any shape, will be ravelled).
+    y : np.ndarray
+        Integer label array of the same total size as `x`.
+
+    Returns
+    -------
+    np.ndarray
+        2-D overlap matrix of shape ``(x.max() + 1, y.max() + 1)`` where
+        entry ``[i, j]`` counts pixels that have label ``i`` in `x` and
+        label ``j`` in `y`.
     """
     x = x.ravel()
     y = y.ravel()

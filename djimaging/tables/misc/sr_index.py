@@ -25,17 +25,20 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.utils import mask_format_utils
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.scanm import read_utils
 from djimaging.utils.dj_utils import get_primary_key
 
 
 class SrIndexTemplate(dj.Computed):
+    """DataJoint computed table template for the SR (Sulforhodamine) index per ROI."""
+
     database = ""
 
     _stim_name = 'gChirp'  # Must have a light artifact, developed for global chirp
 
     @property
-    def definition(self):
+    def definition(self) -> str:
         definition = """
         # SR index, can be used to estimate how strongly a cell has be labeled by SR101
         # Defaults to NaN for ROIs with no pixels on the stack
@@ -43,7 +46,7 @@ class SrIndexTemplate(dj.Computed):
         -> self.roimask_table
         -> self.roi_table
         ---
-        sr_idx = NULL  : float  # SR index >= 0 of ROI normalized to min of stack average and light_artifact = 1.
+        sr_idx = NULL  : float32  # SR index >= 0 of ROI normalized to min of stack average and light_artifact = 1.
         """
         return definition
 
@@ -80,13 +83,24 @@ class SrIndexTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def fetch_and_compute(self, key, plot=False, plot_sr_threshold=0.5):
-        """Make without inserting. Use for plot / dev."""
-        roi_mask = (self.roimask_table & key).fetch1('roi_mask')
+    def fetch_and_compute(self, key: dict, plot: bool = False, plot_sr_threshold: float = 0.5) -> tuple:
+        """Compute SR indices without inserting. Use for plotting or development.
+
+        Args:
+            key: DataJoint primary key dict identifying the presentation and ROI mask.
+            plot: If ``True``, generate diagnostic plots.
+            plot_sr_threshold: SR index threshold used to colour SR-positive cells
+                in the stack plot. Only relevant when ``plot=True``.
+
+        Returns:
+            A 2-tuple ``(roi_ids, sr_idxs)`` where ``roi_ids`` is an array of ROI
+            identifiers and ``sr_idxs`` is the corresponding array of SR index values.
+        """
+        roi_mask = load_array((self.roimask_table & key).fetch1('roi_mask'))
 
         try:
-            triggertimes = (self.presentation_table & key).fetch1('triggertimes')
-            fs = (self.presentation_table.ScanInfo & key).fetch('scan_frequency')
+            triggertimes = load_array((self.presentation_table & key).fetch1('triggertimes'))
+            fs = (self.presentation_table.ScanInfo & key).to_arrays('scan_frequency')
             ntrigger_rep = (self.stimulus_table & key).fetch1('ntrigger_rep')
 
             # Find stim onset and offset for faster computations
@@ -108,7 +122,7 @@ class SrIndexTemplate(dj.Computed):
 
         ch1_stack = ch_stacks['wDataCh1'][:, :, stim_onset_idx:stim_offset_idx]
 
-        roi_ids = (self.roi_table & key).fetch('roi_id')
+        roi_ids = (self.roi_table & key).to_arrays('roi_id')
 
         sr_idxs, roi_avgs, roi_avgs_means, lb, ub = compute_sr_idxs(
             ch1_stack, roi_ids, roi_mask, npixartifact=npixartifact)
@@ -121,18 +135,52 @@ class SrIndexTemplate(dj.Computed):
 
         return roi_ids, sr_idxs
 
-    def make(self, key, plot=False, plot_sr_threshold=0.5):
+    def make(self, key: dict, plot: bool = False, plot_sr_threshold: float = 0.5) -> None:
+        """Compute and insert SR index values for all ROIs in a given presentation.
+
+        Args:
+            key: DataJoint primary key dict identifying the presentation and ROI mask.
+            plot: If ``True``, generate diagnostic plots during computation.
+            plot_sr_threshold: SR index threshold used to colour SR-positive cells.
+                Only relevant when ``plot=True``.
+        """
         roi_idxs, sr_idxs = self.fetch_and_compute(key, plot=plot, plot_sr_threshold=plot_sr_threshold)
         for roi_idx, sr_idx in zip(roi_idxs, sr_idxs):
             self.insert1(dict(key, roi_id=roi_idx, sr_idx=sr_idx))
 
-    def plot1(self, key=None, sr_threshold=0.5):
+    def plot1(self, key: dict = None, sr_threshold: float = 0.5) -> None:
         key = get_primary_key(table=self.key_source, key=key)
         self.fetch_and_compute(key, plot=True, plot_sr_threshold=sr_threshold)
 
 
-def compute_sr_idxs(ch1_stack, roi_ids, roi_mask, npixartifact):
-    """Compute SR index for each ROI in roi_ids. SR index is defined as """
+def compute_sr_idxs(
+        ch1_stack: np.ndarray,
+        roi_ids: np.ndarray,
+        roi_mask: np.ndarray,
+        npixartifact: int,
+) -> tuple:
+    """Compute the SR index for each ROI.
+
+    SR index is defined as ``(roi_avg - lb) / (ub - lb)`` where ``lb`` is
+    the minimum pixel value outside the light-artifact rows and ``ub`` is
+    the 99th percentile of the median light-artifact trace.
+
+    Args:
+        ch1_stack: 3-D array of shape ``(x, y, t)`` containing the channel-1
+            (SR101) fluorescence stack.
+        roi_ids: 1-D array of ROI identifiers to compute indices for.
+        roi_mask: 2-D integer mask array where each ROI is identified by its
+            positive integer id.
+        npixartifact: Number of leading pixel rows that contain the light artifact.
+
+    Returns:
+        A 5-tuple ``(sr_idxs, roi_avgs, roi_avgs_means, lb, ub)`` where
+        ``sr_idxs`` is an array of SR index values per ROI,
+        ``roi_avgs`` is a list of per-ROI pixel value arrays,
+        ``roi_avgs_means`` is the mean of each per-ROI array,
+        ``lb`` is the lower bound (background), and ``ub`` is the upper bound
+        (light artifact intensity).
+    """
     roi_mask = mask_format_utils.as_python_format(roi_mask)
 
     ch1_avg = np.mean(ch1_stack, axis=2)
@@ -152,8 +200,24 @@ def compute_sr_idxs(ch1_stack, roi_ids, roi_mask, npixartifact):
     return sr_idxs, roi_avgs, roi_avgs_means, lb, ub
 
 
-def plot_stack_sr_idxs(ch0_avg, ch1_avg, roi_mask, roi_ids, sr_idxs, sr_threshold=0.5):
-    """Plot SR idxs on top of stack averages."""
+def plot_stack_sr_idxs(
+        ch0_avg: np.ndarray,
+        ch1_avg: np.ndarray,
+        roi_mask: np.ndarray,
+        roi_ids: np.ndarray,
+        sr_idxs: np.ndarray,
+        sr_threshold: float = 0.5,
+) -> None:
+    """Plot SR indices on top of stack averages.
+
+    Args:
+        ch0_avg: 2-D array containing the channel-0 time-averaged image.
+        ch1_avg: 2-D array containing the channel-1 time-averaged image.
+        roi_mask: 2-D integer mask where each ROI is identified by its positive id.
+        roi_ids: 1-D array of ROI identifiers.
+        sr_idxs: 1-D array of SR index values corresponding to ``roi_ids``.
+        sr_threshold: SR index threshold above which an ROI is considered SR-positive.
+    """
     roi_mask = mask_format_utils.as_python_format(roi_mask)
 
     binary_sr_mask = np.isin(roi_mask, roi_ids[sr_idxs >= sr_threshold])
@@ -200,8 +264,22 @@ def plot_stack_sr_idxs(ch0_avg, ch1_avg, roi_mask, roi_ids, sr_idxs, sr_threshol
     plt.show()
 
 
-def plot_roi_sr_idxs(roi_ids, roi_avgs, sr_idxs, lb, ub):
-    """Plot boxplot of pixel means for each ROI and overlay SR idxs."""
+def plot_roi_sr_idxs(
+        roi_ids: np.ndarray,
+        roi_avgs: list,
+        sr_idxs: np.ndarray,
+        lb: float,
+        ub: float,
+) -> None:
+    """Plot boxplot of pixel means for each ROI and overlay SR indices.
+
+    Args:
+        roi_ids: 1-D array of ROI identifiers used as x-axis positions.
+        roi_avgs: List of per-ROI pixel value arrays used to draw the boxplots.
+        sr_idxs: 1-D array of SR index values corresponding to ``roi_ids``.
+        lb: Lower bound (background) value shown as a green horizontal line.
+        ub: Upper bound (light artifact) value shown as a red horizontal line.
+    """
     fig, ax = plt.subplots(1, 1, figsize=(25, 3))
 
     ax.boxplot(roi_avgs, positions=roi_ids)

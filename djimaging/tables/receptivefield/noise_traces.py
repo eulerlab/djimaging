@@ -8,6 +8,7 @@ import datajoint as dj
 import numpy as np
 
 from djimaging.utils.receptive_fields.preprocess_rf_utils import prepare_noise_data
+from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 
 
@@ -18,14 +19,14 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
     def definition(self):
         definition = """
         -> self.stimulus_table
-        dnoise_params_id: tinyint unsigned # unique param set id
+        dnoise_params_id: int32 # unique param set id
         ---
         fit_kind : varchar(191)
-        fupsample_trace : tinyint unsigned  # Multiplier of sampling frequency, using linear interpolation.
-        fupsample_stim = 0 : tinyint unsigned  # Multiplier of sampling stimulus, using repeat.
-        lowpass_cutoff = 0: float  # Cutoff frequency low pass filter, applied if larger 0.
-        pre_blur_sigma_s = 0: float  # Gaussian blur applied after low pass filter.
-        post_blur_sigma_s = 0: float  # Gaussian blur applied after all other steps.
+        fupsample_trace : int32  # Multiplier of sampling frequency, using linear interpolation.
+        fupsample_stim = 0 : int32  # Multiplier of sampling stimulus, using repeat.
+        lowpass_cutoff = 0: float32  # Cutoff frequency low pass filter, applied if larger 0.
+        pre_blur_sigma_s = 0: float32  # Gaussian blur applied after low pass filter.
+        post_blur_sigma_s = 0: float32  # Gaussian blur applied after all other steps.
         ref_time ='trace' : enum('trace', 'stim')  # Which time to use as reference.
         """
         return definition
@@ -36,13 +37,39 @@ class DNoiseTraceParamsTemplate(dj.Lookup):
         pass
 
     def add_default(
-            self, stim_names=None, dnoise_params_id=1, fit_kind="gradient", ref_time='stim',
-            fupsample_trace=10, fupsample_stim=10, lowpass_cutoff=0,
-            pre_blur_sigma_s=0, post_blur_sigma_s=0, skip_duplicates=False):
-        """Add default preprocess parameter to table"""
+            self, stim_names: list | None = None, dnoise_params_id: int = 1,
+            fit_kind: str = "gradient", ref_time: str = 'stim',
+            fupsample_trace: int = 10, fupsample_stim: int = 10, lowpass_cutoff: float = 0,
+            pre_blur_sigma_s: float = 0, post_blur_sigma_s: float = 0,
+            skip_duplicates: bool = False) -> None:
+        """Add default preprocess parameter to table.
+
+        Parameters
+        ----------
+        stim_names : list or None, optional
+            Names of noise stimuli to add parameters for. If None, all noise stimuli are used.
+        dnoise_params_id : int, optional
+            Unique parameter set ID. Default is 1.
+        fit_kind : str, optional
+            Kind of fitting procedure. Default is "gradient".
+        ref_time : str, optional
+            Reference time axis: "trace" or "stim". Default is "stim".
+        fupsample_trace : int, optional
+            Multiplier of sampling frequency using linear interpolation. Default is 10.
+        fupsample_stim : int, optional
+            Multiplier of sampling stimulus using repeat. Default is 10.
+        lowpass_cutoff : float, optional
+            Cutoff frequency for low pass filter; applied if larger than 0. Default is 0.
+        pre_blur_sigma_s : float, optional
+            Gaussian blur sigma applied after low pass filter (in seconds). Default is 0.
+        post_blur_sigma_s : float, optional
+            Gaussian blur sigma applied after all other steps (in seconds). Default is 0.
+        skip_duplicates : bool, optional
+            If True, skip duplicate entries. Default is False.
+        """
 
         if stim_names is None:
-            stim_names = (self.stimulus_table() & 'stim_family = "noise"').fetch('stim_name')
+            stim_names = (self.stimulus_table() & "stim_family = 'noise'").to_arrays('stim_name')
 
         key = dict(dnoise_params_id=dnoise_params_id, fit_kind=fit_kind,
                    fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim,
@@ -67,11 +94,11 @@ class DNoiseTraceTemplate(dj.Computed):
         -> self.traces_table
         -> self.params_table
         ---
-        trace : longblob   # Trace to fit
-        stim_idxs : longblob  # Stimulus frame indexes
-        noise_dt : float  # Time-step of time component
-        noise_t0 : float  # Time of first sample
-        dt_rel_error : float  # Maximum relative error of dts, if too large, can have unwanted effects
+        trace : <blob>   # Trace to fit
+        stim_idxs : <blob>  # Stimulus frame indexes
+        noise_dt : float32  # Time-step of time component
+        noise_t0 : float32  # Time of first sample
+        dt_rel_error : float32  # Maximum relative error of dts, if too large, can have unwanted effects
         '''
         return definition
 
@@ -103,11 +130,24 @@ class DNoiseTraceTemplate(dj.Computed):
         except (AttributeError, TypeError):
             pass
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """Preprocess a noise trace and align it to the stimulus, then insert.
+
+        Fetches the raw trace, stimulus, and trigger times, applies upsampling,
+        optional low-pass filtering, and Gaussian blur, and aligns the trace to
+        the stimulus time axis.
+
+        Parameters
+        ----------
+        key : dict
+            DataJoint primary key identifying the entry to compute.
+        """
         stim, stim_dict = (self.stimulus_table() & key).fetch1("stim_trace", "stim_dict")
-        triggertimes = (self.presentation_table() & key).fetch1('triggertimes')
+        stim = load_array(stim)
+        triggertimes = load_array((self.presentation_table() & key).fetch1('triggertimes'))
         trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1(
             self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace')
+        trace = load_array(trace)
         fupsample_trace, fupsample_stim, fit_kind, lowpass_cutoff, pre_blur_sigma_s, post_blur_sigma_s, ref_time = (
                 self.params_table() & key).fetch1(
             "fupsample_trace", "fupsample_stim", "fit_kind", "lowpass_cutoff",
@@ -118,7 +158,7 @@ class DNoiseTraceTemplate(dj.Computed):
 
         stim_idxs, trace, dt, t0, dt_rel_error = prepare_noise_data(
             trace=trace, tracetime=tracetime, stim=stim_idxs, triggertimes=triggertimes,
-            ntrigger_per_frame=stim_dict.get('ntrigger_per_frame', 1) if stim_dict else 1,
+            nframes_per_trigger=stim_dict.get('nframes_per_trigger', 1),
             fupsample_trace=fupsample_trace, fupsample_stim=fupsample_stim, ref_time=ref_time,
             fit_kind=fit_kind, lowpass_cutoff=lowpass_cutoff,
             pre_blur_sigma_s=pre_blur_sigma_s, post_blur_sigma_s=post_blur_sigma_s)
@@ -131,20 +171,31 @@ class DNoiseTraceTemplate(dj.Computed):
         data_key['dt_rel_error'] = dt_rel_error
         self.insert1(data_key)
 
-    def plot1(self, key=None, xlim=None):
+    def plot1(self, key: dict | None = None, xlim: tuple | None = None) -> None:
+        """Plot the preprocessed noise trace alongside the raw trace and stimulus changes.
+
+        Parameters
+        ----------
+        key : dict or None, optional
+            DataJoint key to restrict the table. Default is None.
+        xlim : tuple or None, optional
+            x-axis limits as (xmin, xmax). Default is None.
+        """
         key = get_primary_key(table=self, key=key)
 
         from matplotlib import pyplot as plt
 
         raw_trace_t0, raw_trace_dt, raw_trace = (self.traces_table() & key).fetch1(
             self._traces_prefix + 'trace_t0', self._traces_prefix + 'trace_dt', self._traces_prefix + 'trace')
+        raw_trace = load_array(raw_trace)
 
         raw_tracetime = np.arange(raw_trace.size) * raw_trace_dt + raw_trace_t0
 
         noise_t0, noise_dt, trace, stim_idxs = (self & key).fetch1('noise_t0', 'noise_dt', 'trace', 'stim_idxs')
+        trace, stim_idxs = load_array(trace), load_array(stim_idxs)
         assert trace.shape[0] == stim_idxs.shape[0], "Trace and stim have different lengths"
 
-        stim = (self.stimulus_table() & key).fetch1("stim_trace")
+        stim = load_array((self.stimulus_table() & key).fetch1("stim_trace"))
         stim = stim[stim_idxs]
 
         tracetime = np.arange(trace.size) * noise_dt + noise_t0
