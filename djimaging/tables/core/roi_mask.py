@@ -683,6 +683,12 @@ class RoiMaskTemplate(dj.Manual):
                 print('pres_keys:', [k for k in pres_keys])
             return
 
+        if source == 'infer' and (self.raw_params_table & field_key).fetch1('igor_roi_masks') == 'either':
+            source = self._resolve_field_source(
+                field_key, pres_keys, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            if verboselvl > 1:
+                print(f"igor_roi_masks='either': using source={source!r} for field:", field_key)
+
         loaded = [self._load_presentation_roi_mask(
             key, roi_mask_dir, source=source, old_prefix=old_prefix, new_prefix=new_prefix)
                   for key in new_pres_keys]
@@ -760,6 +766,32 @@ class RoiMaskTemplate(dj.Manual):
 
             self.RoiMaskPresentation().insert1(roi_mask_pres_key, skip_duplicates=True)
 
+    def _resolve_field_source(
+            self,
+            field_key: dict,
+            pres_keys: list,
+            roi_mask_dir: str = 'ROIs',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+    ) -> str:
+        """Choose one mask source ('igor' or 'autorois') for a whole field, for ``igor_roi_masks='either'``.
+
+        If the field already has a mask in the database, its source is kept. Otherwise a mask file
+        (``roi_mask_dir``) of any presentation is preferred over an Igor mask.
+        """
+        if len(self & field_key) > 0:
+            return 'igor' if (self & field_key).fetch1('roi_mask_source') == 'igor_h5' else 'autorois'
+
+        for pres_key in pres_keys:
+            input_file = local_file_path(
+                (self.presentation_table & pres_key).fetch1("pres_data_file"), self.presentation_table._filepath_store)
+            roimask_file = to_roi_mask_file(
+                input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+                file_format=self._get_roi_file_format())
+            if os.path.isfile(roimask_file):
+                return 'autorois'
+        return 'igor'
+
     def _load_presentation_roi_mask(
             self,
             key: dict,
@@ -789,11 +821,15 @@ class RoiMaskTemplate(dj.Manual):
             self.presentation_table._filepath_store)
 
         if source == 'infer':
-            igor_roi_masks, from_raw_data = (self.raw_params_table & key).fetch1('igor_roi_masks', 'from_raw_data')
+            igor_roi_masks = (self.raw_params_table & key).fetch1('igor_roi_masks')
+            if igor_roi_masks == 'either':
+                raise ValueError("igor_roi_masks='either' has to be resolved per field, see `_resolve_field_source`.")
         elif source == 'igor':
-            igor_roi_masks, from_raw_data = 'yes', False
+            igor_roi_masks = 'yes'
         elif source == 'autorois':
-            igor_roi_masks, from_raw_data = 'no', True
+            igor_roi_masks = 'no'
+        else:
+            raise ValueError(f"source={source!r} must be 'infer', 'igor' or 'autorois'")
 
         file_format = self._get_roi_file_format()
         roimask_file = to_roi_mask_file(
@@ -801,8 +837,11 @@ class RoiMaskTemplate(dj.Manual):
             file_format=file_format)
 
         if igor_roi_masks == 'yes':
-            assert not from_raw_data, 'Inconsistent parameters'
-            filesystem_roi_mask = read_h5_utils.load_roi_mask(filepath=input_file, ignore_not_found=True)
+            # Igor masks are stored in the h5 file, also if the presentation was loaded from the raw file.
+            userinfo = (self.userinfo_table & key).fetch1()
+            igor_file = as_pre_filepath(
+                input_file, raw_data_dir=userinfo['raw_data_dir'], pre_data_dir=userinfo['pre_data_dir'])
+            filesystem_roi_mask = read_h5_utils.load_roi_mask(filepath=igor_file, ignore_not_found=True)
         else:
             if os.path.isfile(roimask_file):
                 filesystem_roi_mask = load_roi_mask_file(roimask_file).astype(np.int32)
@@ -838,7 +877,7 @@ class RoiMaskTemplate(dj.Manual):
             return None, None, None
 
         if igor_roi_masks == 'yes':
-            src_file, src_format = input_file, 'igor_h5'
+            src_file, src_format = igor_file, 'igor_h5'
         else:
             src_file, src_format = roimask_file, _roi_mask_source_from_path(roimask_file)
 

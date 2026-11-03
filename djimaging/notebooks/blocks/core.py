@@ -256,7 +256,9 @@ plot_if_data(Presentation(), key=None)
 #    `shifted` by `shift_dx`/`shift_dy`, or `different`).
 #
 # Masks drawn in Igor are an alternative source: if `igor_roi_masks` in `RawDataParams` allows it, the mask is read
-# from the `.h5` recording file instead of a mask file.
+# from the `.h5` recording file instead of a mask file. With `igor_roi_masks='either'` this is decided per field: a mask
+# file is used if one exists, otherwise the Igor mask. (Tables created before `'either'` existed need
+# `RawDataParams().alter()` before they accept this value.)
 #
 # Each entry records where its mask came from in `roi_mask_file` (path relative to the `reference` store) and
 # `roi_mask_source` (`igor_h5`, `numpy`, `pickle` or `other`). Masks that are already in the database are not
