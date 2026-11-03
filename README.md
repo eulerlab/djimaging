@@ -152,6 +152,14 @@ tables that depend on it (`PreprocessTraces`, `Snippets`, `Averages`, response f
 separately per channel. `data_stack_name` in `UserInfo` is ignored in this mode, and traces must be computed from the
 stack (`compute_from_stack=True` in `RawDataParams`).
 
+**ROI canvas:** `RoiMask.channel_table = Channel` makes `draw_roi_mask` load all channels. Every channel is available
+as background (`stack: <name>[mean]` / `[std]`). One channel is the *target* for ROI detection (cc tool, diagnostics,
+auto shift and AutoROIs); it is preselected by `roi_default` in `Channel`
+(`Channel().add_channels(..., roi_channel='wDataCh1')`, default: the first channel), can be overridden with
+`draw_roi_mask(roi_channel=...)` and changed in the canvas ("Target"). AutoROIs only use the target channel (plus one
+other channel for the two-channel U-Net v0.1.0); multi-color AutoROIs are not supported. The ROI mask is shared by
+all channels.
+
 Notes:
 
 - Single-channel schemas are not affected: nothing changes unless `_use_channels` is enabled.

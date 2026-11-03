@@ -106,6 +106,30 @@ class RoiMaskTemplate(dj.Manual):
         """Return the high-resolution stack table."""
         pass
 
+    @property
+    def channel_table(self) -> dj.Table | None:
+        """Return the channel table (a ChannelTemplate) for multi-channel recordings, None for two-channel default.
+
+        If set, all channels of the table are loaded into the ROI canvas and the channel flagged as `roi_default`
+        is the preselected target for ROI detection. Otherwise `data_stack_name` (target) and `alt_stack_name`
+        of the user info are loaded.
+        """
+        return None
+
+    def _get_stack_names(self, field_key: dict, roi_channel: str | None = None) -> tuple[list[str], str]:
+        """Names of the stacks that are loaded into the ROI canvas and name of the target channel (listed first)."""
+        if self.channel_table is not None:
+            ch_names = self.channel_table().get_ch_names()
+            roi_channel = ch_names[0] if roi_channel is None else roi_channel
+        else:
+            data_name, alt_name = (self.userinfo_table & field_key).fetch1('data_stack_name', 'alt_stack_name')
+            ch_names = list(dict.fromkeys([data_name, alt_name]))
+            roi_channel = data_name if roi_channel is None else roi_channel
+
+        if roi_channel not in ch_names:
+            raise ValueError(f"roi_channel={roi_channel!r} is not one of the channels {ch_names}")
+        return [roi_channel] + [ch_name for ch_name in ch_names if ch_name != roi_channel], roi_channel
+
     def _get_roi_file_format(self) -> str:
         """Return the configured ROI file format, or raise a descriptive error if unset."""
         if self._roi_file_format is None:
@@ -164,6 +188,7 @@ class RoiMaskTemplate(dj.Manual):
             new_prefix: str | None = None,
             use_stim_onset: bool = True,
             verbose: bool = True,
+            roi_channel: str | None = None,
             **kwargs,
     ):
         """Launch the interactive ROI-drawing GUI for a field.
@@ -189,6 +214,10 @@ class RoiMaskTemplate(dj.Manual):
             new_prefix: Replacement path prefix.
             use_stim_onset: If True, trim stacks to start at stimulus onset.
             verbose: If True, print status messages.
+            roi_channel: Name of the channel (e.g. 'wDataCh1') that is the initial target for ROI detection
+                (cc tool, diagnostics, auto shift, AutoROIs). Can be changed in the GUI. Defaults to the channel
+                flagged `roi_default` in the channel table, or to `data_stack_name` without channel table.
+                All channels are shown as background.
             **kwargs: Additional keyword arguments forwarded to
                 ``InteractiveRoiCanvas``.
 
@@ -231,17 +260,16 @@ class RoiMaskTemplate(dj.Manual):
                       for pres_key in pres_keys]
 
         # Load stack data
-        data_name, alt_name = (self.userinfo_table & field_key).fetch1('data_stack_name', 'alt_stack_name')
-        ch0_stacks, ch1_stacks, output_files = load_stack_data(
-            files=filepaths, data_name=data_name, alt_name=alt_name, from_raw_data=from_raw_data,
+        ch_names, roi_channel = self._get_stack_names(field_key, roi_channel=roi_channel)
+        stacks, output_files = load_stack_data(
+            files=filepaths, ch_names=ch_names, from_raw_data=from_raw_data,
             roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
             file_format=self._get_roi_file_format())
 
         # Some sanity checks
         assert len(pres_names) == len(pres_keys)
         assert len(filepaths) == len(pres_keys)
-        assert len(ch0_stacks) == len(pres_keys)
-        assert len(ch1_stacks) == len(pres_keys)
+        assert all(len(ch_stacks) == len(pres_keys) for ch_stacks in stacks.values())
         assert len(output_files) == len(pres_keys)
 
         # Load pixel size and scan type
@@ -267,12 +295,12 @@ class RoiMaskTemplate(dj.Manual):
 
             stim_onset_idxs = [int(np.floor(tt[0] * fs)) if len(tt) > 0 else 0
                                for tt, fs in zip(triggertimes, scan_frequencies)]
-            ch0_stacks = [stack[:, :, stim_onset_idx:] for stack, stim_onset_idx in zip(ch0_stacks, stim_onset_idxs)]
-            ch1_stacks = [stack[:, :, stim_onset_idx:] for stack, stim_onset_idx in zip(ch1_stacks, stim_onset_idxs)]
+            stacks = {ch_name: [stack[:, :, stim_onset_idx:] for stack, stim_onset_idx in zip(ch_stacks, stim_onset_idxs)]
+                      for ch_name, ch_stacks in stacks.items()}
 
         # Load high resolution data is possible
         high_res_bg_dict = self.load_high_res_bg_dict(
-            field_key, ch_names=[data_name, alt_name], verbose=verbose) if load_high_res else dict()
+            field_key, ch_names=ch_names, verbose=verbose) if load_high_res else dict()
 
         # Load initial ROI masks
         igor_roi_masks = (self.raw_params_table & field_key).fetch1('igor_roi_masks')
@@ -294,7 +322,7 @@ class RoiMaskTemplate(dj.Manual):
 
         roi_canvas = InteractiveRoiCanvas(
             pres_names=pres_names,
-            ch0_stacks=ch0_stacks, ch1_stacks=ch1_stacks, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
+            stacks=stacks, primary_channel=roi_channel, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
             main_stim_idx=0, initial_roi_mask=initial_roi_mask, shifts=shifts,
             canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
             pixel_size_um=pixel_size_d1_d2, show_diagnostics=show_diagnostics,
@@ -898,20 +926,19 @@ def _roi_mask_source_from_path(path: str | Path) -> str:
 
 def load_stack_data(
         files: list,
-        data_name: str,
-        alt_name: str,
+        ch_names: list[str],
         from_raw_data: bool,
         roi_mask_dir: str = 'ROIs',
         old_prefix: str | None = None,
         new_prefix: str | None = None,
         file_format: str | None = None,
-) -> tuple[list, list, list]:
+) -> tuple[dict[str, list], list]:
     """Load image stacks for a list of presentation files.
 
     Args:
         files: List of file paths to load stacks from.
-        data_name: Name of the primary data channel (e.g. 'wDataCh0').
-        alt_name: Name of the alternative channel (e.g. 'wDataCh1').
+        ch_names: Names of the channels to load, e.g. ['wDataCh0', 'wDataCh1']. The first channel is the
+            primary channel, which has to be loadable from raw files (other channels may be replaced by zeros).
         from_raw_data: If True, read from raw ScanM files instead of h5.
         roi_mask_dir: Sub-directory name for ROI mask output files.
         old_prefix: Path prefix to replace in output file paths.
@@ -920,22 +947,21 @@ def load_stack_data(
             output file paths passed to the GUI for saving.
 
     Returns:
-        A 3-tuple of (ch0_stacks, ch1_stacks, output_files) where each is a
-        list aligned with ``files``. ch0_stacks and ch1_stacks contain 3-D
-        np.ndarray stacks; output_files contains the corresponding ROI mask
-        output file paths.
+        A 2-tuple of (stacks, output_files). stacks maps each channel name to a list of 3-D np.ndarray stacks,
+        aligned with ``files``. output_files contains the corresponding ROI mask output file paths.
     """
-    ch0_stacks, ch1_stacks, output_files = [], [], []
+    stacks = {ch_name: [] for ch_name in ch_names}
+    output_files = []
     for data_file in files:
         ch_stacks, wparams = read_utils.load_stacks(
-            data_file, from_raw_data=from_raw_data, ch_names=(data_name, alt_name))
-        ch0_stacks.append(ch_stacks[data_name])
-        ch1_stacks.append(ch_stacks[alt_name])
+            data_file, from_raw_data=from_raw_data, ch_names=tuple(ch_names))
+        for ch_name in ch_names:
+            stacks[ch_name].append(ch_stacks[ch_name])
         output_files.append(to_roi_mask_file(
             data_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
             file_format=file_format))
 
-    return ch0_stacks, ch1_stacks, output_files
+    return stacks, output_files
 
 
 def load_default_autorois_models(kind: str = 'default_rgc', models: list[str] | None = None) -> dict | None:

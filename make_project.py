@@ -36,6 +36,7 @@ PROJECT_PLACEHOLDER = '__PROJECT__'
 NOTEBOOK_TEMPLATE_NAME = 'populate_my_schema'  # Replaced by populate_<project>_schema
 
 # Anchors in the core blocks that are extended when the recordings have more than one functional channel.
+ROI_MASK_CLASS_HEADER = "@schema\nclass RoiMask(core.RoiMaskTemplate):\n"
 TRACES_CLASS_HEADER = "@schema\nclass Traces(core.TracesTemplate):\n"
 NOTEBOOK_RAW_PARAMS_CELL = "RawDataParams().add_default()\nRawDataParams()\n"
 
@@ -124,14 +125,21 @@ def channels_name_id(n_channels):
 
 
 def add_channels_to_schema(code, n_channels):
-    """For multi-channel recordings, add the Channel table and let Traces extract all channels."""
+    """For multi-channel recordings, add the Channel table, show all channels in the ROI canvas and let Traces
+    extract all channels."""
     if validate_n_channels(n_channels) == 1:
         return code
+    assert ROI_MASK_CLASS_HEADER in code, "RoiMask table not found in the schema blocks."
     assert TRACES_CLASS_HEADER in code, "Traces table not found in the schema blocks."
+    code = code.replace(
+        ROI_MASK_CLASS_HEADER,
+        "@schema\nclass Channel(core.ChannelTemplate):\n    pass\n\n\n"
+        + ROI_MASK_CLASS_HEADER
+        + "    channel_table = Channel  # All channels are shown in the ROI canvas, see Channel.roi_default\n",
+        1)
     return code.replace(
         TRACES_CLASS_HEADER,
-        "@schema\nclass Channel(core.ChannelTemplate):\n    pass\n\n\n"
-        + TRACES_CLASS_HEADER
+        TRACES_CLASS_HEADER
         + "    _use_channels = True  # Extract traces for every channel in Channel, adds ch_id to the primary key\n"
         + "    channel_table = Channel\n",
         1)
@@ -148,9 +156,12 @@ def add_channels_to_notebook(text, n_channels):
         + f"# ## Imaging channels\n#\n# This schema extracts traces from {n_channels} functional channels. "
         + "`ch_id` is part of the primary key of `Traces` and the tables that depend on it.\n"
         + "# `data_stack_name` in `UserInfo` is ignored, the stack names below are used instead.\n"
-        + "# Edit the names (the name of the data stack in the recording file) if yours differ.\n\n"
+        + "# Edit the names (the name of the data stack in the recording file) if yours differ.\n#\n"
+        + "# All channels can be shown as background in the ROI canvas. `roi_channel` is the default target for ROI "
+        + "detection there (cc tool, diagnostics, AutoROIs); it can be changed in the canvas.\n"
+        + "# AutoROIs only use one (or two) channels, multi-color AutoROIs are not supported.\n\n"
         + "# %%\n"
-        + f"Channel().add_channels({channels_name_id(n_channels)!r}, skip_duplicates=True)\n"
+        + f"Channel().add_channels({channels_name_id(n_channels)!r}, roi_channel='wDataCh0', skip_duplicates=True)\n"
         + "Channel()\n")
     return text.replace(NOTEBOOK_RAW_PARAMS_CELL, cell, 1)
 

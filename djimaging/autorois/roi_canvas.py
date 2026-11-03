@@ -26,12 +26,33 @@ except ImportError as exc:
     _canvas_import_error = exc
 
 
+def _resolve_stacks(ch0_stacks, ch1_stacks, stacks) -> Dict[str, list]:
+    """Get the stacks as dict (channel name -> list of stacks, one per presentation).
+
+    Either pass `stacks`, or the legacy `ch0_stacks` and `ch1_stacks`, which are named 'ch0' and 'ch1'.
+    """
+    if stacks is not None:
+        if ch0_stacks is not None or ch1_stacks is not None:
+            raise ValueError('Pass either stacks or ch0_stacks/ch1_stacks, not both')
+        stacks = {str(name): list(ch_stacks) for name, ch_stacks in stacks.items()}
+    else:
+        if ch0_stacks is None:
+            raise ValueError('Either stacks or ch0_stacks must be provided')
+        stacks = {'ch0': list(ch0_stacks)}
+        if ch1_stacks is not None:
+            stacks['ch1'] = list(ch1_stacks)
+
+    if len(stacks) == 0:
+        raise ValueError('No stacks provided')
+    return stacks
+
+
 class RoiCanvas:
 
     def __init__(
             self,
-            ch0_stacks,
-            ch1_stacks,
+            ch0_stacks=None,
+            ch1_stacks=None,
             pres_names=None,
             bg_dict=None,
             shifts=None,
@@ -42,35 +63,63 @@ class RoiCanvas:
             autorois_models: Optional[Dict] = None,
             output_files=None,
             pixel_size_um=(1., 1.),
+            stacks: Optional[Dict[str, list]] = None,
+            primary_channel: Optional[str] = None,
     ):
-        """ROI canvas to draw ROIs"""
-        for ch0_stack, ch1_stack in zip(ch0_stacks, ch1_stacks):
-            if (ch0_stack.shape[:2] != ch0_stacks[0].shape[:2]) or (ch1_stack.shape[:2] != ch0_stacks[0].shape[:2]):
+        """ROI canvas to draw ROIs
+
+        Parameters
+        ----------
+        ch0_stacks, ch1_stacks : list of np.ndarray, optional
+            Stacks (x, y, t) of the first and second channel, one per presentation. Shortcut for
+            ``stacks={'ch0': ch0_stacks, 'ch1': ch1_stacks}``.
+        stacks : dict, optional
+            Channel name -> list of stacks (x, y, t), one per presentation. Any number of channels.
+            All channels are available as background.
+        primary_channel : str, optional
+            Name of the channel that is the target of ROI detection: it is used by the cc tool, the diagnostics,
+            auto shift and as the first input of the AutoROIs models. Defaults to the first channel.
+            The first other channel is passed as second input to the AutoROIs models. Multi-color AutoROIs are
+            not supported.
+        """
+        self.stacks = _resolve_stacks(ch0_stacks, ch1_stacks, stacks)
+        self.ch_names = list(self.stacks)
+
+        if primary_channel is None:
+            primary_channel = self.ch_names[0]
+        if primary_channel not in self.stacks:
+            raise ValueError(f'primary_channel={primary_channel!r} not in channels {self.ch_names}')
+        self.primary_channel = primary_channel
+
+        n_stacks = len(self.stacks[self.primary_channel])
+        shape_xy = self.stacks[self.primary_channel][0].shape[:2]
+        for ch_name, ch_stacks in self.stacks.items():
+            if len(ch_stacks) != n_stacks:
+                raise ValueError(f'Incompatible number of stacks in channel {ch_name}')
+            if any(stack.shape[:2] != shape_xy for stack in ch_stacks):
                 raise ValueError('Incompatible shapes between stacks')
 
-        if initial_roi_mask is not None and initial_roi_mask.shape != ch0_stacks[0].shape[:2]:
-            raise ValueError('Incompatible shapes between ch0_stack and provided roi_mask')
+        if initial_roi_mask is not None and initial_roi_mask.shape != shape_xy:
+            raise ValueError('Incompatible shapes between stacks and provided roi_mask')
 
-        self.ch0_stacks = ch0_stacks
-        self.ch1_stacks = ch1_stacks
         self.other_bgs_dict = bg_dict if bg_dict is not None else dict()
 
         if shifts is None:
-            shifts = np.array([np.array([0, 0], dtype=int) for _ in ch0_stacks])
+            shifts = np.array([np.array([0, 0], dtype=int) for _ in range(n_stacks)])
         self.shifts = np.asarray(shifts)
 
-        if self.shifts.shape[0] != len(self.ch0_stacks):
+        if self.shifts.shape[0] != n_stacks:
             raise ValueError('Incompatible shapes between shifts and stacks')
 
         if pres_names is None:
-            pres_names = [f"stim{i + 1}" for i in range(len(self.ch0_stacks))]
+            pres_names = [f"stim{i + 1}" for i in range(n_stacks)]
         self.pres_names = pres_names
         self.main_stim_idx = main_stim_idx
         self.output_files = output_files
 
         self.n_artifact = n_artifact
-        self.nx = ch0_stacks[0].shape[0]
-        self.ny = ch0_stacks[0].shape[1]
+        self.nx = shape_xy[0]
+        self.ny = shape_xy[1]
 
         self.upscale = upscale
         self.rescale = self.upscale if self.upscale > 0 else 1 / abs(self.upscale)
@@ -101,7 +150,7 @@ class RoiCanvas:
 
         # Selection
         self._selected_stim_idx = 0
-        self._selected_bg = 'stack: ch0[mean]'
+        self._selected_bg = f'stack: {self.primary_channel}[mean]'
         self._selected_cmap = 'gray'
         self._selected_gamma = 0.33
         self._selected_roi = 1
@@ -132,6 +181,29 @@ class RoiCanvas:
     def __repr__(self):
         return f"RoiCanvas({self.nx}x{self.ny})"
 
+    @property
+    def secondary_channel(self) -> Optional[str]:
+        """First channel that is not the primary channel, passed as second input to AutoROIs models."""
+        others = [ch_name for ch_name in self.ch_names if ch_name != self.primary_channel]
+        return others[0] if len(others) > 0 else None
+
+    @property
+    def ch0_stacks(self):
+        """Stacks of the primary channel, the target of ROI detection."""
+        return self.stacks[self.primary_channel]
+
+    @property
+    def ch1_stacks(self):
+        """Stacks of the secondary channel, or None for single-channel data."""
+        return self.stacks[self.secondary_channel] if self.secondary_channel is not None else None
+
+    def set_primary_channel(self, ch_name):
+        """Set the target channel for ROI detection."""
+        if ch_name not in self.stacks:
+            raise ValueError(f'Unknown channel {ch_name!r}, choose from {self.ch_names}')
+        self.primary_channel = ch_name
+        self.ref_corr_map = None  # Computed from the primary channel
+
     def compute_bg(self, stack, shift, proj_fun):
         background = proj_fun(stack, axis=2).astype(np.float32)
         background = mask_utils.shift_array(background, shift, n_artifact=self.n_artifact, cval=np.nan)
@@ -141,13 +213,11 @@ class RoiCanvas:
         stim_idx = self._selected_stim_idx
         shift = self.shifts[stim_idx]
 
-        backgrounds = {
-            'stack: ch0[mean]': self.compute_bg(self.ch0_stacks[stim_idx], shift, proj_fun=np.mean),
-            'stack: ch0[std]': self.compute_bg(self.ch0_stacks[stim_idx], shift, proj_fun=np.std),
-            'stack: ch1[mean]': self.compute_bg(self.ch1_stacks[stim_idx], shift, proj_fun=np.mean),
-            'stack: ch1[std]': self.compute_bg(self.ch1_stacks[stim_idx], shift, proj_fun=np.std),
-            'other: none': np.full((self.nx, self.ny), 255)
-        }
+        backgrounds = dict()
+        for ch_name, ch_stacks in self.stacks.items():
+            backgrounds[f'stack: {ch_name}[mean]'] = self.compute_bg(ch_stacks[stim_idx], shift, proj_fun=np.mean)
+            backgrounds[f'stack: {ch_name}[std]'] = self.compute_bg(ch_stacks[stim_idx], shift, proj_fun=np.std)
+        backgrounds['other: none'] = np.full((self.nx, self.ny), 255)
 
         if self.other_bgs_dict is not None:
             for key, bg in self.other_bgs_dict.items():
@@ -379,8 +449,8 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def __init__(
             self,
-            ch0_stacks,
-            ch1_stacks,
+            ch0_stacks=None,
+            ch1_stacks=None,
             pres_names=None,
             bg_dict=None,
             main_stim_idx=0,
@@ -395,7 +465,14 @@ class InteractiveRoiCanvas(RoiCanvas):
             max_shift=5,
             show_diagnostics=False,
             swap_channels=False,
+            stacks: Optional[Dict[str, list]] = None,
+            primary_channel: Optional[str] = None,
     ):
+        """Interactive ROI canvas, see `RoiCanvas` for the stacks and the primary (target) channel.
+
+        The primary channel can be changed in the GUI. `swap_channels=True` is a shortcut for choosing the
+        second channel as primary channel.
+        """
         if _widgets_import_error is not None:
             raise ImportError('InteractiveRoiCanvas requires ipywidgets; install djimaging[autorois].') \
                 from _widgets_import_error
@@ -403,8 +480,13 @@ class InteractiveRoiCanvas(RoiCanvas):
             raise ImportError('InteractiveRoiCanvas requires ipycanvas; install djimaging[autorois].') \
                 from _canvas_import_error
 
-        super().__init__(ch0_stacks=ch0_stacks if not swap_channels else ch1_stacks,
-                         ch1_stacks=ch1_stacks if not swap_channels else ch0_stacks,
+        stacks = _resolve_stacks(ch0_stacks, ch1_stacks, stacks)
+        if swap_channels and primary_channel is None:
+            if len(stacks) < 2:
+                raise ValueError('swap_channels requires at least two channels')
+            primary_channel = list(stacks)[1]
+
+        super().__init__(stacks=stacks, primary_channel=primary_channel,
                          pres_names=pres_names, bg_dict=bg_dict, n_artifact=n_artifact,
                          initial_roi_mask=initial_roi_mask, shifts=shifts, main_stim_idx=main_stim_idx,
                          upscale=upscale, autorois_models=autorois_models,
@@ -435,6 +517,7 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         self.widget_pause_draw = self.create_widget_pause_draw()
 
+        self.widget_primary_channel = self.create_widget_primary_channel()
         self.widget_bg = self.create_widget_bg()
         self.widget_cmap = self.create_widget_cmap()
 
@@ -536,7 +619,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             HBox((self.widget_save_and_new, self.widget_save, self.widget_undo, self.widget_kill_roi)),
             HBox((self.widget_tool, self.widget_size, self.widget_thresh)),
             HBox((self.widget_view, self.widget_alpha_bg, self.widget_alpha_hl, self.widget_alpha_ft)),
-            HBox((self.widget_bg, self.widget_gamma, self.widget_cmap)),
+            HBox((self.widget_primary_channel, self.widget_bg, self.widget_gamma, self.widget_cmap)),
             HBox((self.widget_auto_shift, self.widget_shift_dx, self.widget_shift_dy)),
             self.widget_progress,
         ), layout=Layout(width=f'{100 - self.canvas_width}%'))
@@ -565,6 +648,29 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         def change(value):
             self.set_selected_cmap(value['new'])
+
+        widget.observe(change, names='value')
+        return widget
+
+    def set_primary_channel(self, ch_name):
+        """Set the target channel for ROI detection (cc tool, diagnostics, auto shift, AutoROIs) and show it."""
+        self.log(f'Setting primary channel: {ch_name}')
+        super().set_primary_channel(ch_name)
+
+        if self.widget_primary_channel.value != ch_name:
+            self.widget_primary_channel.value = ch_name  # Triggers this method again with the widget in sync
+            return
+
+        self.update_info()
+        self.set_selected_bg(f'stack: {ch_name}[mean]')
+
+    def create_widget_primary_channel(self):
+        """Create and return dropdown for the target channel of ROI detection"""
+        widget = Dropdown(options=self.ch_names, value=self.primary_channel, description='Target:',
+                          disabled=len(self.ch_names) < 2, layout=Layout(width='200px'))
+
+        def change(value):
+            self.set_primary_channel(value['new'])
 
         widget.observe(change, names='value')
         return widget
