@@ -111,7 +111,8 @@ def test_single_channel_is_default_and_unchanged():
     assert make_project.build_schema_text(ROOT, blocks) == make_project.build_schema_text(ROOT, blocks, n_channels=1)
     namespace = exec_schema(make_project.build_schema_text(ROOT, blocks))
     assert 'Channel' not in namespace and not namespace['Traces']._use_channels
-    assert isinstance(namespace['RoiMask'].channel_table, property)  # Template default (None), not overridden
+    assert not namespace['UserInfo']._use_channels
+    assert 'data_stack_name' in namespace['UserInfo']().definition
     text = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester')
     assert 'Channel' not in text
 
@@ -122,7 +123,9 @@ def test_multi_channel_schema_and_notebook(blocks):
     namespace = exec_schema(make_project.build_schema_text(ROOT, blocks, n_channels=2))
     assert namespace['Traces']._use_channels and namespace['Traces'].channel_table is namespace['Channel']
     assert '-> self.channel_table' in namespace['Traces']().definition
-    assert namespace['RoiMask'].channel_table is namespace['Channel']
+    assert namespace['UserInfo']._use_channels and namespace['UserInfo'].channel_table is namespace['Channel']
+    assert 'data_stack_name' not in namespace['UserInfo']().definition
+    assert 'alt_stack_name' not in namespace['UserInfo']().definition
 
     text = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester', n_channels=2)
     ast.parse(text)

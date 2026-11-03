@@ -143,16 +143,19 @@ python3 make_project.py your_project_name --blocks basic --n-channels 2
 Without `--n-channels`, the script asks interactively (default 1; 1 when there is no terminal).
 With more than one channel, the generated schema contains
 
-- a `Channel` table (`ch_id`, `ch_name`) that lists the channels, filled by an extra notebook cell with
-  `wDataCh0`, `wDataCh1`, ... (edit the names if your data stacks are named differently), and
+- a `Channel` table (`ch_id`, `ch_name`, `roi_default`) that lists the channels, filled by an extra notebook cell with
+  `wDataCh0`, `wDataCh1`, ... (edit the names if your data stacks are named differently),
+- `UserInfo` with `_use_channels = True` and `channel_table = Channel`: the channels replace the columns
+  `data_stack_name` and `alt_stack_name`, which are then not part of `UserInfo`, and
 - `Traces` with `_use_channels = True` and `channel_table = Channel`.
 
 Traces are then extracted for every channel, and `ch_id` becomes part of the primary key of `Traces` and of all
 tables that depend on it (`PreprocessTraces`, `Snippets`, `Averages`, response features, ...), so these are computed
-separately per channel. `data_stack_name` in `UserInfo` is ignored in this mode, and traces must be computed from the
-stack (`compute_from_stack=True` in `RawDataParams`).
+separately per channel. Traces must be computed from the stack (`compute_from_stack=True` in `RawDataParams`).
+Tables that need a main and an alternative stack (field plots, `Roi`, `Brightness`, ...) use the `roi_default` channel
+and the first other channel (`UserInfo().get_stack_names(key)`).
 
-**ROI canvas:** `RoiMask.channel_table = Channel` makes `draw_roi_mask` load all channels. Every channel is available
+**ROI canvas:** `draw_roi_mask` loads all channels of `Channel`. Every channel is available
 as background (`stack: <name>[mean]` / `[std]`). One channel is the *target* for ROI detection (cc tool, diagnostics,
 auto shift and AutoROIs); it is preselected by `roi_default` in `Channel`
 (`Channel().add_channels(..., roi_channel='wDataCh1')`, default: the first channel), can be overridden with

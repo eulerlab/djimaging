@@ -437,7 +437,7 @@ class FieldTemplate(dj.Computed):
             Gamma correction exponent applied to the image. Default is 0.7.
         """
         key = get_primary_key(table=self, key=key)
-        data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
+        data_name, alt_name = self.userinfo_table().get_stack_names(key)
         main_ch_average = load_array((self.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         try:
             alt_ch_average = load_array(

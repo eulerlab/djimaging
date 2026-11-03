@@ -36,7 +36,7 @@ PROJECT_PLACEHOLDER = '__PROJECT__'
 NOTEBOOK_TEMPLATE_NAME = 'populate_my_schema'  # Replaced by populate_<project>_schema
 
 # Anchors in the core blocks that are extended when the recordings have more than one functional channel.
-ROI_MASK_CLASS_HEADER = "@schema\nclass RoiMask(core.RoiMaskTemplate):\n"
+USER_INFO_CLASS_HEADER = "@schema\nclass UserInfo(core.UserInfoTemplate):\n"
 TRACES_CLASS_HEADER = "@schema\nclass Traces(core.TracesTemplate):\n"
 NOTEBOOK_RAW_PARAMS_CELL = "RawDataParams().add_default()\nRawDataParams()\n"
 
@@ -125,17 +125,18 @@ def channels_name_id(n_channels):
 
 
 def add_channels_to_schema(code, n_channels):
-    """For multi-channel recordings, add the Channel table, show all channels in the ROI canvas and let Traces
-    extract all channels."""
+    """For multi-channel recordings, add the Channel table, which defines the stacks instead of the UserInfo,
+    and let Traces extract all channels."""
     if validate_n_channels(n_channels) == 1:
         return code
-    assert ROI_MASK_CLASS_HEADER in code, "RoiMask table not found in the schema blocks."
+    assert USER_INFO_CLASS_HEADER in code, "UserInfo table not found in the schema blocks."
     assert TRACES_CLASS_HEADER in code, "Traces table not found in the schema blocks."
     code = code.replace(
-        ROI_MASK_CLASS_HEADER,
+        USER_INFO_CLASS_HEADER,
         "@schema\nclass Channel(core.ChannelTemplate):\n    pass\n\n\n"
-        + ROI_MASK_CLASS_HEADER
-        + "    channel_table = Channel  # All channels are shown in the ROI canvas, see Channel.roi_default\n",
+        + USER_INFO_CLASS_HEADER
+        + "    _use_channels = True  # Stacks are defined by Channel, not by data_stack_name and alt_stack_name\n"
+        + "    channel_table = Channel\n",
         1)
     return code.replace(
         TRACES_CLASS_HEADER,
@@ -155,7 +156,7 @@ def add_channels_to_notebook(text, n_channels):
         + "\n# %% [markdown]\n"
         + f"# ## Imaging channels\n#\n# This schema extracts traces from {n_channels} functional channels. "
         + "`ch_id` is part of the primary key of `Traces` and the tables that depend on it.\n"
-        + "# `data_stack_name` in `UserInfo` is ignored, the stack names below are used instead.\n"
+        + "# The channels replace `data_stack_name` and `alt_stack_name`, which are not part of `UserInfo` here.\n"
         + "# Edit the names (the name of the data stack in the recording file) if yours differ.\n#\n"
         + "# All channels can be shown as background in the ROI canvas. `roi_channel` is the default target for ROI "
         + "detection there (cc tool, diagnostics, AutoROIs); it can be changed in the canvas.\n"

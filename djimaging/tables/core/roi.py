@@ -108,11 +108,14 @@ class RoiTemplate(dj.Computed):
         npixartifact, scan_type = (self.field_table & key).fetch1("npixartifact", "scan_type")
         roi_mask = load_array((self.roi_mask_table & key).fetch1("roi_mask"))
 
-        data_name, alt_name = (self.userinfo_table() & key).fetch1('data_stack_name', 'alt_stack_name')
+        data_name, alt_name = self.userinfo_table().get_stack_names(key)
         main_ch_average = load_array(
             (self.field_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
-        alt_ch_average = load_array(
-            (self.field_table.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average'))
+        if alt_name is not None:
+            alt_ch_average = load_array(
+                (self.field_table.StackAverages & key & dict(ch_name=alt_name)).fetch1('ch_average'))
+        else:
+            alt_ch_average = np.full_like(main_ch_average, np.nan)
 
         plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
                    roi_mask=roi_mask, roi_ch_average=main_ch_average,

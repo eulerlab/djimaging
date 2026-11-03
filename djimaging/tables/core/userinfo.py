@@ -12,8 +12,25 @@ from djimaging.utils.filesystem_utils import print_tree
 class UserInfoTemplate(dj.Manual):
     database = ""
 
+    # Multi-channel recordings. If True, the stacks (channels) are defined by `channel_table` instead of
+    # `data_stack_name` and `alt_stack_name`, which are then not part of this table.
+    # Changes the table definition, so it requires a new/repopulated table.
+    _use_channels = False
+
+    @property
+    def channel_table(self) -> dj.Table:
+        """Return the channel table. Required when `_use_channels` is True."""
+        raise NotImplementedError("Set `channel_table` (a ChannelTemplate) when using `_use_channels=True`")
+
     @property
     def definition(self):
+        if self._use_channels:
+            stack_names = ""
+        else:
+            stack_names = """
+        data_stack_name='wDataCh0'      :varchar(32)  # main data channel, e.g. OGB-1
+        alt_stack_name='wDataCh1'       :varchar(32)  # alternative data channel, e.g. SR101"""
+
         definition = f"""
         # Info for decoding file names
         experimenter                    :varchar(16)  # name of the experimenter
@@ -32,11 +49,32 @@ class UserInfoTemplate(dj.Manual):
         highres_alias='hq_hr_highresolution_512' :varchar(191)  # alias(es) for high resolution stack
         mask_alias='chirp_mb_movingbar' :varchar(191)  # Ordered alias(es) for field roi mask (separated by _)
         pre_data_dir='Pre'              :varchar(32)  # directory for h5 data files
-        raw_data_dir='Raw'              :varchar(32)  # directory for smp and smh data files
-        data_stack_name='wDataCh0'      :varchar(32)  # main data channel, e.g. OGB-1
-        alt_stack_name='wDataCh1'       :varchar(32)  # alternative data channel, e.g. SR101
+        raw_data_dir='Raw'              :varchar(32)  # directory for smp and smh data files{stack_names}
         """
         return definition
+
+    def get_ch_names(self, key: dict | None = None) -> list[str]:
+        """Names of the data stacks (channels). The first is the main channel, e.g. the target of ROI detection.
+
+        With `_use_channels`, the channels of `channel_table` (starting with its `roi_default` channel),
+        otherwise `data_stack_name` and `alt_stack_name` of the user in `key`.
+        """
+        if self._use_channels:
+            return self.channel_table().get_ch_names()
+
+        data_name, alt_name = (self & key).fetch1('data_stack_name', 'alt_stack_name')
+        return list(dict.fromkeys([data_name, alt_name]))
+
+    def get_stack_names(self, key: dict | None = None) -> tuple[str, str | None]:
+        """Names of the main and the alternative data stack. The alternative is None if there is only one channel.
+
+        With several channels, the alternative is the first channel that is not the main channel.
+        """
+        if self._use_channels:
+            ch_names = self.get_ch_names(key)
+            return ch_names[0], ch_names[1] if len(ch_names) > 1 else None
+
+        return (self & key).fetch1('data_stack_name', 'alt_stack_name')
 
     def upload_users(self, userdicts: list) -> None:
         """Upload multiple users to the table.

@@ -80,8 +80,10 @@ class LightArtifactTemplate(dj.Computed):
         """
         filepath_ref = (self.presentation_table & key).fetch1('pres_data_file')
         from_raw_data = (self.raw_params_table & key).fetch1('from_raw_data')
-        data_name = (self.userinfo_table & key).fetch1('data_stack_name'
-                                                       if self._use_main_channel else 'alt_stack_name')
+        main_name, alt_name = self.userinfo_table().get_stack_names(key)
+        data_name = main_name if self._use_main_channel else alt_name
+        if data_name is None:
+            raise ValueError('There is no alternative channel, set _use_main_channel=True')
 
         with local_path(filepath_ref, self.presentation_table._filepath_store) as filepath:
             stack = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_name,))[0][data_name]

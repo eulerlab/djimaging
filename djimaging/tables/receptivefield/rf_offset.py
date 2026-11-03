@@ -364,7 +364,7 @@ class RfRoiOffsetTemplate(dj.Computed):
         pixel_size_um, npixartifact, scan_type = (self.pres_tab & key).to_arrays(
             'pixel_size_um', 'npixartifact', 'scan_type')
 
-        data_name, alt_name = (self.userinfo_tab & key).fetch1('data_stack_name', 'alt_stack_name')
+        data_name, alt_name = self.userinfo_tab().get_stack_names(key)
         main_ch_average = load_array(
             (self.pres_tab.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         stim_dict = (self.stimulus_tab & key).fetch1('stim_dict')

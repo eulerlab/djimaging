@@ -135,7 +135,7 @@ class TracesTemplate(dj.Computed):
             if len(channels_name_id) == 0:
                 raise ValueError("channel_table is empty")
         else:
-            data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
+            data_stack_name, _ = self.userinfo_table().get_stack_names(key)
             channels_name_id = [(data_stack_name, None)]
 
         with local_path(filepath_ref, self.presentation_table._filepath_store) as filepath:

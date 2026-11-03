@@ -106,25 +106,13 @@ class RoiMaskTemplate(dj.Manual):
         """Return the high-resolution stack table."""
         pass
 
-    @property
-    def channel_table(self) -> dj.Table | None:
-        """Return the channel table (a ChannelTemplate) for multi-channel recordings, None for two-channel default.
-
-        If set, all channels of the table are loaded into the ROI canvas and the channel flagged as `roi_default`
-        is the preselected target for ROI detection. Otherwise `data_stack_name` (target) and `alt_stack_name`
-        of the user info are loaded.
-        """
-        return None
-
     def _get_stack_names(self, field_key: dict, roi_channel: str | None = None) -> tuple[list[str], str]:
-        """Names of the stacks that are loaded into the ROI canvas and name of the target channel (listed first)."""
-        if self.channel_table is not None:
-            ch_names = self.channel_table().get_ch_names()
-            roi_channel = ch_names[0] if roi_channel is None else roi_channel
-        else:
-            data_name, alt_name = (self.userinfo_table & field_key).fetch1('data_stack_name', 'alt_stack_name')
-            ch_names = list(dict.fromkeys([data_name, alt_name]))
-            roi_channel = data_name if roi_channel is None else roi_channel
+        """Names of the stacks that are loaded into the ROI canvas and name of the target channel (listed first).
+
+        The stacks are defined by the user info, see `UserInfoTemplate.get_ch_names`.
+        """
+        ch_names = self.userinfo_table().get_ch_names(field_key)
+        roi_channel = ch_names[0] if roi_channel is None else roi_channel
 
         if roi_channel not in ch_names:
             raise ValueError(f"roi_channel={roi_channel!r} is not one of the channels {ch_names}")
@@ -216,7 +204,7 @@ class RoiMaskTemplate(dj.Manual):
             verbose: If True, print status messages.
             roi_channel: Name of the channel (e.g. 'wDataCh1') that is the initial target for ROI detection
                 (cc tool, diagnostics, auto shift, AutoROIs). Can be changed in the GUI. Defaults to the channel
-                flagged `roi_default` in the channel table, or to `data_stack_name` without channel table.
+                flagged `roi_default` in the channel table (`data_stack_name` of the user info without channel table).
                 All channels are shown as background.
             **kwargs: Additional keyword arguments forwarded to
                 ``InteractiveRoiCanvas``.
@@ -866,7 +854,7 @@ class RoiMaskTemplate(dj.Manual):
         """
         key = get_primary_key(table=self.proj() * self.presentation_table.proj(), key=key)
         npixartifact, scan_type = (self.field_table & key).fetch1('npixartifact', 'scan_type')
-        data_name, alt_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
+        data_name, alt_name = self.userinfo_table().get_stack_names(key)
         main_ch_average = load_array(
             (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         try:

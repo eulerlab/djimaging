@@ -40,6 +40,15 @@ class Relation:
         self.rows.append(row)
 
 
+class FakeUserInfo:
+    def __call__(self):
+        return self
+
+    @staticmethod
+    def get_stack_names(key):
+        return 'wDataCh0', 'wDataCh1'
+
+
 @pytest.mark.parametrize('channels', [None, [('wDataCh0', 0), ('wDataCh1', 1)]])
 def test_channel_extraction_uses_live_staged_path(channels, monkeypatch, tmp_path):
     staged = tmp_path / 'recording.h5'
@@ -71,7 +80,7 @@ def test_channel_extraction_uses_live_staged_path(channels, monkeypatch, tmp_pat
         raw_params_table=Relation([dict(include_artifacts=False, compute_from_stack=True,
                                        trace_precision='line', from_raw_data=False)]),
         presentation_table=presentation, roi_table=Relation([{'roi_id': 1}]),
-        userinfo_table=Relation([{'data_stack_name': 'wDataCh0'}]),
+        userinfo_table=FakeUserInfo(),
         _compute_roi2trace_from_stack=compute, insert1=inserted.append,
     )
     traces.TracesTemplate.make(table, {'presentation_id': 1})
