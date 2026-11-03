@@ -103,7 +103,7 @@ class CorrMapTemplate(dj.Computed):
         """
         filepath_ref = (self.presentation_table & key).fetch1('pres_data_file')
         from_raw_data = (self.raw_params_table & key).fetch1('from_raw_data')
-        data_name = (self.userinfo_table & key).fetch1('data_stack_name')
+        data_name, _ = self.userinfo_table().get_stack_names(key)
 
         triggertimes = load_array((self.presentation_table & key).fetch1('triggertimes'))
         fs = (self.presentation_table.ScanInfo & key).fetch1('scan_frequency')
@@ -134,7 +134,7 @@ class CorrMapTemplate(dj.Computed):
     def plot1(self, key: dict = None, gamma: float = 0.7) -> None:
         key = get_primary_key(self, key=key)
 
-        data_name = (self.userinfo_table & key).fetch1('data_stack_name')
+        data_name, _ = self.userinfo_table().get_stack_names(key)
         main_ch_average = load_array(
             (self.presentation_table.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
 

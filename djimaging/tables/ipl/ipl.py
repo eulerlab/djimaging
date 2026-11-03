@@ -87,15 +87,18 @@ class IplBordersTemplate(dj.Manual):
         Returns:
             A tuple ``(ch0_avg, ch1_avg)`` of normalised 2-D arrays.
         """
-        data_stack_name, alt_stack_name = (self.userinfo_table & key).fetch1('data_stack_name', 'alt_stack_name')
+        data_stack_name, alt_stack_name = self.userinfo_table().get_stack_names(key)
 
         ch0_avg = load_array(
             (self.field_or_pres_table.StackAverages & key & dict(ch_name=data_stack_name)).fetch1('ch_average'))
         ch0_avg = normalize_soft_zero_one(ch0_avg, dq=q_clip0)
 
-        ch1_avg = load_array(
-            (self.field_or_pres_table.StackAverages & key & dict(ch_name=alt_stack_name)).fetch1('ch_average'))
-        ch1_avg = normalize_soft_zero_one(ch1_avg, dq=q_clip1)
+        if alt_stack_name is not None:
+            ch1_avg = load_array(
+                (self.field_or_pres_table.StackAverages & key & dict(ch_name=alt_stack_name)).fetch1('ch_average'))
+            ch1_avg = normalize_soft_zero_one(ch1_avg, dq=q_clip1)
+        else:
+            ch1_avg = np.zeros_like(ch0_avg)
 
         return ch0_avg, ch1_avg
 

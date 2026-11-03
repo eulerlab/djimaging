@@ -118,6 +118,8 @@ djconfig/
 !djimaging/djconfig/README.md
 !djimaging/djconfig/djconf_template.json
 
+test_data/
+
 # Exclude user stuff
 user/
 !user/README.md

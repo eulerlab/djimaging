@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 
 from djimaging.utils import plot_utils
 from djimaging.utils.dj_storage import load_array
-from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.dj_utils import get_primary_key, get_ch_ids
 from djimaging.utils.snippet_utils import split_trace_by_reps, split_trace_by_group_reps, compute_repeat_correlation
 
 
@@ -171,21 +171,30 @@ class SnippetsTemplate(dj.Computed):
             xlim_aligned: x-axis limits for the aligned snippet panels.
         """
         key = get_primary_key(table=self, key=key)
-        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self, key)
+        key.pop('ch_id', None)  # Plot all channels, one column each
+        ch_ids = get_ch_ids(self, key)
 
-        fig, axs = plt.subplots(3, 1, figsize=(10, 6))
+        fig, axs = plt.subplots(3, len(ch_ids), figsize=(10, 6), squeeze=False)
 
-        plot_utils.plot_trace_and_trigger(
-            ax=axs[0], time=snippets_times, trace=snippets, triggertimes=triggertimes_snippets, title=str(key))
-        axs[0].set(xlim=xlim)
+        for i, ch_id in enumerate(ch_ids):
+            ch_key = key if ch_id is None else {**key, 'ch_id': ch_id}
+            snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self, ch_key)
 
-        axs[1].plot(snippets_times - triggertimes_snippets[0], snippets, alpha=0.5)
-        axs[1].set(ylabel='trace', xlabel='rel. to trigger', xlim=xlim_aligned)
+            plot_utils.plot_trace_and_trigger(
+                ax=axs[0, i], time=snippets_times, trace=snippets, triggertimes=triggertimes_snippets,
+                title=str(key) if ch_id is None else f'[{ch_id=}]')
+            axs[0, i].set(xlim=xlim)
 
-        aligned_times = get_aligned_snippets_times(snippets_times=snippets_times)
-        plot_utils.plot_traces(
-            ax=axs[2], time=aligned_times, traces=snippets.T)
-        axs[2].set(ylabel='trace', xlabel='aligned time', xlim=xlim_aligned)
+            axs[1, i].plot(snippets_times - triggertimes_snippets[0], snippets, alpha=0.5)
+            axs[1, i].set(ylabel='trace', xlabel='rel. to trigger', xlim=xlim_aligned)
+
+            aligned_times = get_aligned_snippets_times(snippets_times=snippets_times)
+            plot_utils.plot_traces(
+                ax=axs[2, i], time=aligned_times, traces=snippets.T)
+            axs[2, i].set(ylabel='trace', xlabel='aligned time', xlim=xlim_aligned)
+
+        if ch_ids[0] is not None:
+            plot_utils.set_long_title(fig=fig, title=str(key), fontsize=8)
 
         plt.tight_layout()
 

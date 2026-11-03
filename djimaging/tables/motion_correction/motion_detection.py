@@ -173,7 +173,7 @@ class MotionDetectionTemplate(dj.Computed):
         pres_data_file, triggertimes, pixel_size_um, npixartifact = (self.presentation_table & key).fetch1(
             'pres_data_file', 'triggertimes', 'pixel_size_um', 'npixartifact')
         triggertimes = load_array(triggertimes)
-        data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
+        data_stack_name, _ = self.userinfo_table().get_stack_names(key)
         from_raw_data = (self.presentation_table.raw_params_table & key).fetch1('from_raw_data')
 
         with local_path(pres_data_file, self.presentation_table._filepath_store) as filepath:
@@ -211,7 +211,7 @@ class MotionDetectionTemplate(dj.Computed):
         key = get_primary_key(table=self, key=key)
 
         pres_data_file, npixartifact = (self.presentation_table & key).fetch1('pres_data_file', 'npixartifact')
-        data_stack_name = (self.userinfo_table() & key).fetch1("data_stack_name")
+        data_stack_name, _ = self.userinfo_table().get_stack_names(key)
         fs = (self.presentation_table.ScanInfo() & key).fetch1('scan_frequency')
         from_raw_data = (self.presentation_table.raw_params_table & key).fetch1('from_raw_data')
 

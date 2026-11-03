@@ -254,34 +254,73 @@ class PreprocessTracesTemplate(dj.Computed):
         """
         key = get_primary_key(self, key)
 
-        pp_trace_t0, pp_trace_dt, pp_trace, smoothed_trace = (self & key).fetch1(
-            "pp_trace_t0", "pp_trace_dt", "pp_trace", "smoothed_trace")
-        trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1("trace_t0", "trace_dt", "trace")
-        pp_trace, smoothed_trace = load_array(pp_trace), load_array(smoothed_trace)
-        trace = load_array(trace)
-        triggertimes = load_array((self.presentation_table() & key).fetch1("triggertimes"))
+        # --- channel logic (taken from first plot1) ---
+        key.pop('ch_id', None)
+        ch_ids = self.traces_table()._get_ch_ids(key) if self.traces_table._use_channels else [None]
 
-        trace_times = np.arange(trace.size) * trace_dt + pp_trace_t0
-        pp_trace_times = np.arange(pp_trace.size) * pp_trace_dt + pp_trace_t0
+        n_chs = len(ch_ids)
 
-        fig, axs = plt.subplots(3, 1, figsize=(10, 6), sharex='all')
+        fig, axs = plt.subplots(
+            3, n_chs,
+            figsize=(10, 6),
+            sharex=True,
+            squeeze=False
+        )
 
-        ax = axs[0]
-        plot_trace_and_trigger(time=trace_times, trace=trace - np.mean(smoothed_trace),
-                               triggertimes=triggertimes, ax=ax, title=str(key))
-        ax.set(ylabel='mean subtracted\nraw trace')
+        plot_utils.set_long_title(fig=fig, title=str(key), fontsize=8)
 
-        ax = axs[1]
-        plot_trace_and_trigger(time=trace_times, trace=smoothed_trace - np.mean(smoothed_trace),
-                               triggertimes=triggertimes, ax=ax)
-        ax.set(ylabel='mean subtracted\ntrend')
+        # --- per-channel plotting ---
+        for i, ch_id in enumerate(ch_ids):
+            if ch_id is not None:
+                key['ch_id'] = ch_id
 
-        ax = axs[2]
-        plot_trace_and_trigger(time=pp_trace_times, trace=pp_trace, triggertimes=triggertimes, ax=ax)
-        ax.set(ylabel='preprocessed\ntrace')
+            pp_trace_t0, pp_trace_dt, pp_trace, smoothed_trace = (self & key).fetch1(
+                "pp_trace_t0", "pp_trace_dt", "pp_trace", "smoothed_trace"
+            )
+            trace_t0, trace_dt, trace = (self.traces_table() & key).fetch1(
+                "trace_t0", "trace_dt", "trace"
+            )
+            pp_trace, smoothed_trace = load_array(pp_trace), load_array(smoothed_trace)
+            trace = load_array(trace)
+            triggertimes = load_array((self.presentation_table() & key).fetch1("triggertimes"))
 
-        ax.set(xlim=xlim, ylim=ylim)
+            trace_times = np.arange(trace.size) * trace_dt + trace_t0
+            pp_trace_times = np.arange(pp_trace.size) * pp_trace_dt + pp_trace_t0
 
+            # --- raw trace ---
+            ax = axs[0, i]
+            plot_trace_and_trigger(
+                time=trace_times,
+                trace=trace - np.mean(smoothed_trace),
+                triggertimes=triggertimes,
+                ax=ax,
+                title=f'raw trace [{ch_id=}]' if ch_id is not None else 'raw trace'
+            )
+            ax.set(ylabel='mean subtracted\nraw trace')
+
+            # --- smoothed trace ---
+            ax = axs[1, i]
+            plot_trace_and_trigger(
+                time=trace_times,
+                trace=smoothed_trace - np.mean(smoothed_trace),
+                triggertimes=triggertimes,
+                ax=ax
+            )
+            ax.set(ylabel='mean subtracted\ntrend')
+
+            # --- preprocessed trace ---
+            ax = axs[2, i]
+            plot_trace_and_trigger(
+                time=pp_trace_times,
+                trace=pp_trace,
+                triggertimes=triggertimes,
+                ax=ax
+            )
+            ax.set(ylabel='preprocessed\ntrace')
+
+            ax.set(xlim=xlim, ylim=ylim)
+
+        plt.tight_layout()
         plt.show()
 
     def plot(self, restriction: dict | None = None, sort: bool = True) -> None:

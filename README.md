@@ -131,6 +131,55 @@ If `jupytext` is not installed (<code>pip install jupytext</code>), the notebook
 <code>.py</code> file instead of an <code>.ipynb</code>; it can be converted later with
 <code>jupytext --to ipynb</code>.
 
+#### Imaging channels (functional and background)
+
+The imaging channels are defined in a `Channel` table (`ch_id`, `ch_name`, `is_functional`, `roi_default`), which every
+generated schema contains. The standard recording has one functional channel (Ch0) and one background channel (Ch1,
+e.g. SR-101 as marker for blood vessels):
+
+```bash
+python3 make_project.py your_project_name --blocks basic                                   # 1 functional, 1 background
+python3 make_project.py your_project_name --n-functional 2 --n-background 0                # two-color imaging
+python3 make_project.py your_project_name --legacy-userinfo-stacks                         # old design, see below
+```
+
+Without `--n-functional` and `--n-background`, the script asks interactively (default 1 and 1; the defaults are also
+used when there is no terminal). The channels are named `wDataCh0`, `wDataCh1`, ... (functional channels first); the
+generated notebook fills `Channel` in an extra cell, where you can edit the names and the `functional` list.
+
+- **Functional channels** (`is_functional`): traces are only extracted for these. **Background channels** have no
+  traces, but they are loaded in the ROI canvas and the field plots.
+- With **one functional channel**, keys, tables and plots are the same as in older schemas. With **several functional
+  channels**, the generated schema sets `Traces._use_channels = True`, and `ch_id` becomes part of the primary key of
+  `Traces` and of all tables that depend on it (`PreprocessTraces`, `Snippets`, `Averages`, response features, ...),
+  so these are computed separately per channel. This changes primary keys, so the number of functional channels
+  cannot be changed in a populated schema; create a new schema and repopulate.
+- Traces must be computed from the stack (`compute_from_stack=True` in `RawDataParams`) with several functional channels.
+- `UserInfo` has `_use_channels = True` and `channel_table = Channel`: the channels replace the columns
+  `data_stack_name` and `alt_stack_name`, which are then not part of `UserInfo`.
+  Tables that need a main and an alternative stack (field plots, `Roi`, `Brightness`, ...) use the `roi_default`
+  channel and the first other channel (`UserInfo().get_stack_names(key)`).
+
+**ROI canvas:** `draw_roi_mask` loads all channels of `Channel`. Every channel is available
+as background (`stack: <name>[mean]` / `[std]`). One channel is the *target* for ROI detection (cc tool, diagnostics,
+auto shift and AutoROIs); it is preselected by `roi_default` in `Channel`
+(`Channel().add_channels(..., roi_channel='wDataCh1')`, default: the first functional channel), can be overridden with
+`draw_roi_mask(roi_channel=...)` and changed in the canvas ("Target"). AutoROIs only use the target channel (plus one
+other channel for the two-channel U-Net v0.1.0); multi-color AutoROIs are not supported. The ROI mask is shared by
+all channels.
+
+**Old schemas** keep working, because the templates default to the old behavior: `UserInfoTemplate._use_channels` and
+`TracesTemplate._use_channels` are `False`, so the stacks are defined by `data_stack_name` (functional channel) and
+`alt_stack_name` in `UserInfo`. To generate a new schema like this, use `--legacy-userinfo-stacks`.
+To use the `Channel` table in a hand-written schema, define `class Channel(core.ChannelTemplate)` and set
+`_use_channels = True` and `channel_table = Channel` on `UserInfo` (and on `Traces` for several functional channels,
+and `FeaturesTemplate` for clustering features per channel). The `Channel` table and `UserInfo` must be created
+together, so this requires a new schema.
+
+Notes:
+
+- Tables that aggregate over ROIs and are not listed above should be checked before use with several functional channels.
+
 #### How blocks work
 
 Every block has two matching parts:

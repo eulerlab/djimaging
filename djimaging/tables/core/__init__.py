@@ -9,5 +9,6 @@ from .presentation import PresentationTemplate
 from .field import FieldTemplate
 from .roi_mask import RoiMaskTemplate
 from .roi import RoiTemplate
+from .channel import ChannelTemplate
 from .traces import TracesTemplate
 from .stim_logs import QdsPyLogFileTemplate, QdsPyLogTemplate, PresentationLogTemplate

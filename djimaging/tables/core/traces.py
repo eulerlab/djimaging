@@ -18,6 +18,13 @@ from djimaging.utils.plot_utils import plot_trace_and_trigger
 
 class TracesTemplate(dj.Computed):
     database = ""
+
+    # Multiple functional channels. If True, traces are extracted for every functional channel in `channel_table`
+    # and `ch_id` becomes part of the primary key. Changes the key structure, so it requires a new/repopulated table.
+    # If False, there has to be exactly one functional channel (see `UserInfoTemplate.get_functional_ch_names`).
+    _use_channels = False
+
+    # Motion correction parameters
     _include_motion_correction = False
     _mc_fupsample = 10
     _mc_f_cutoff = 3
@@ -34,7 +41,10 @@ class TracesTemplate(dj.Computed):
             definition += """
         -> self.motion_detection_table
         """
-
+        if self._use_channels:
+            definition += """
+        -> self.channel_table
+        """
         definition += """
         ---
         trace          :<blob>              # array of raw trace
@@ -76,6 +86,11 @@ class TracesTemplate(dj.Computed):
         pass
 
     @property
+    def channel_table(self) -> dj.Table:
+        """Return the channel table. Required when `_use_channels` is True."""
+        raise NotImplementedError("Set `channel_table` (a ChannelTemplate) when using `_use_channels=True`")
+
+    @property
     def motion_detection_table(self) -> None:
         """Return the motion detection table, or None if not used."""
         return None
@@ -109,40 +124,58 @@ class TracesTemplate(dj.Computed):
             raise ValueError("Motion correction only supported for compute_from_stack")
         if from_raw_data and not compute_from_stack:
             raise ValueError("from_raw_data=True only supported for compute_from_stack=True")
+        if self._use_channels and not compute_from_stack:
+            raise ValueError("Multiple channels only supported for compute_from_stack=True")
 
         filepath_ref = (self.presentation_table & key).fetch1("pres_data_file")
         triggertimes = load_array((self.presentation_table & key).fetch1("triggertimes"))
         roi_ids = (self.roi_table & key).to_arrays("roi_id")
 
+        if self._use_channels:
+            channels_name_id = self.channel_table().get_functional_channels()
+        else:
+            data_stack_names = self.userinfo_table().get_functional_ch_names(key)
+            if len(data_stack_names) != 1:
+                raise ValueError(f"Expected exactly one functional channel, found {data_stack_names}. "
+                                 f"Set `_use_channels = True` to extract traces from several channels.")
+            channels_name_id = [(data_stack_names[0], None)]
+
         with local_path(filepath_ref, self.presentation_table._filepath_store) as filepath:
-            if compute_from_stack:
-                roi2trace, frame_dt = self._compute_roi2trace_from_stack(
-                    key, filepath, roi_ids, trace_precision, from_raw_data, verboselvl=verboselvl)
-            else:
-                roi2trace, frame_dt = load_roi2trace(filepath, roi_ids)
-
-        for roi_id, roi_data in roi2trace.items():
-            if not include_artifacts and roi_data.get('incl_artifact', False):
-                continue
-
-            assert roi_id in roi_ids, f"ROI ID {roi_id} not found in ROI IDs for key {key}"
-
-            try:
-                trace_key = key.copy()
-                trace_key['roi_id'] = roi_id
-                trace_key['trace'] = roi_data['trace']
-                trace_key['trace_t0'] = roi_data['trace_times'][0]
-                trace_key['trace_dt'] = frame_dt
-                trace_key['trace_valid'] = roi_data['trace_valid']
-                trace_key['trigger_valid'] = check_valid_triggers_rel_to_tracetime(
-                    trace_valid=roi_data['trace_valid'], trace_times=roi_data['trace_times'], triggertimes=triggertimes)
-
-                self.insert1(trace_key)
-            except Exception as e:
-                if roi_data['trace_valid']:
-                    raise e
+            for ch_name, ch_id in channels_name_id:
+                if compute_from_stack:
+                    roi2trace, frame_dt = self._compute_roi2trace_from_stack(
+                        key, filepath, roi_ids, trace_precision, from_raw_data,
+                        data_stack_name=ch_name,
+                        verboselvl=verboselvl)
                 else:
-                    warnings.warn(f"Skipping invalid trace for {key} and roi_id={roi_id}")
+                    roi2trace, frame_dt = load_roi2trace(filepath, roi_ids)
+
+                for roi_id, roi_data in roi2trace.items():
+                    if not include_artifacts and roi_data.get('incl_artifact', False):
+                        continue
+
+                    assert roi_id in roi_ids, f"ROI ID {roi_id} not found in ROI IDs for key {key}"
+
+                    try:
+                        trace_key = key.copy()
+                        trace_key['roi_id'] = roi_id
+                        trace_key['trace'] = roi_data['trace']
+                        trace_key['trace_t0'] = roi_data['trace_times'][0]
+                        trace_key['trace_dt'] = frame_dt
+                        trace_key['trace_valid'] = roi_data['trace_valid']
+                        trace_key['trigger_valid'] = check_valid_triggers_rel_to_tracetime(
+                            trace_valid=roi_data['trace_valid'], trace_times=roi_data['trace_times'],
+                            triggertimes=triggertimes)
+
+                        if ch_id is not None:
+                            trace_key['ch_id'] = ch_id
+
+                        self.insert1(trace_key)
+                    except Exception as e:
+                        if roi_data['trace_valid']:
+                            raise e
+                        else:
+                            warnings.warn(f"Skipping invalid trace for {key} and roi_id={roi_id}")
 
     def _compute_roi2trace_from_stack(
             self,
@@ -151,6 +184,7 @@ class TracesTemplate(dj.Computed):
             roi_ids: np.ndarray,
             trace_precision: str,
             from_raw_data: bool,
+            data_stack_name: str,
             verboselvl: int = 0,
     ) -> tuple[dict, float]:
         """Compute ROI traces from the imaging stack for one presentation.
@@ -161,6 +195,7 @@ class TracesTemplate(dj.Computed):
             roi_ids: Array of ROI integer IDs to extract traces for.
             trace_precision: Precision mode, either 'line' or 'pixel'.
             from_raw_data: If True, read from raw ScanM files instead of h5.
+            data_stack_name: Imaging channel stack to extract traces from.
             verboselvl: Verbosity level controlling diagnostic output.
 
         Returns:
@@ -168,7 +203,6 @@ class TracesTemplate(dj.Computed):
             mapping roi_id to a dict of trace data, and frame_dt is the
             inter-frame interval in seconds.
         """
-        data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
         roi_mask, as_field_mask = (self.roi_mask_table.RoiMaskPresentation & key).fetch1("roi_mask", "as_field_mask")
         roi_mask = load_array(roi_mask)
         n_artifact = (self.presentation_table & key).fetch1("npixartifact")
@@ -243,6 +277,15 @@ class TracesTemplate(dj.Computed):
                      trace_valid=valid_trace, trigger_valid=valid_trigger)
         self.update1(entry)
 
+    def _get_ch_ids(self, restriction: dict | None = None) -> list:
+        """Channel ids present for the restriction; [None] for single-channel tables."""
+        if not self._use_channels:
+            return [None]
+        ch_ids = [int(ch_id) for ch_id in np.unique((self & restriction).to_arrays('ch_id'))]
+        if len(ch_ids) == 0:
+            raise ValueError(f"No traces found for {restriction}")
+        return ch_ids
+
     def plot1(self, key: dict = None, xlim: tuple = None, ylim: tuple = None) -> None:
         """Plot the raw trace with trigger times for one ROI presentation.
 
@@ -253,14 +296,29 @@ class TracesTemplate(dj.Computed):
             ylim: y-axis limits.
         """
         key = get_primary_key(table=self, key=key)
-        trace_t0, trace_dt, trace = (self & key).fetch1("trace_t0", "trace_dt", "trace")
-        trace = load_array(trace)
-        triggertimes = load_array((self.presentation_table() & key).fetch1("triggertimes"))
-        trace_times = np.arange(len(trace)) * trace_dt + trace_t0
 
-        ax = plot_trace_and_trigger(
-            time=trace_times, trace=trace, triggertimes=triggertimes, title=str(key))
-        ax.set(xlim=xlim, ylim=ylim)
+        key.pop('ch_id', None)
+        ch_ids = self._get_ch_ids(key)
+        n_chs = len(ch_ids)
+
+        fig, axs = plt.subplots(n_chs, 1, figsize=(10, 2 * n_chs), squeeze=False, sharex=True)
+
+        plot_utils.set_long_title(fig=fig, title=str(key), fontsize=8)
+
+        for i, ch_id in enumerate(ch_ids):
+            ax = axs.flat[i]
+            if ch_id is not None:
+                key['ch_id'] = ch_id
+            trace_t0, trace_dt, trace = (self & key).fetch1("trace_t0", "trace_dt", "trace")
+            trace = load_array(trace)
+            triggertimes = load_array((self.presentation_table() & key).fetch1("triggertimes"))
+            trace_times = np.arange(len(trace)) * trace_dt + trace_t0
+
+            ax = plot_trace_and_trigger(
+                ax=ax, time=trace_times, trace=trace, triggertimes=triggertimes)
+
+            ax.set(xlim=xlim, ylim=ylim, title=f'trace[{ch_id=}]' if ch_id is not None else 'trace')
+        plt.tight_layout()
 
     def plot(self, restriction: dict = None, sort: bool = True) -> None:
         """Plot a heatmap of all raw traces matching the restriction.
@@ -273,17 +331,33 @@ class TracesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        traces = (self & restriction).to_arrays("trace")
+        ch_ids = self._get_ch_ids(restriction)
+        n_chs = len(ch_ids)
 
-        traces = math_utils.padded_vstack(traces, cval=np.nan)
-        n = traces.shape[0]
+        # Align channels on the remaining primary key, so that row i is the same ROI in every channel.
+        pk = [k for k in self.primary_key if k != 'ch_id']
+        ch_rows = {}
+        for ch_id in ch_ids:
+            rows = (self & restriction & ({} if ch_id is None else dict(ch_id=ch_id))).to_dicts()
+            ch_rows[ch_id] = {tuple(row[k] for k in pk): row['trace'] for row in rows}
 
-        fig, ax = plt.subplots(1, 1, figsize=(10, 1 + np.minimum(n * 0.1, 10)))
+        common_keys = [k for k in ch_rows[ch_ids[0]] if all(k in ch_rows[ch_id] for ch_id in ch_ids)]
+        if len(common_keys) < max(len(rows) for rows in ch_rows.values()):
+            warnings.warn("Not all ROIs have traces in all channels. Only plotting ROIs with traces in all channels.")
+
+        traces = {ch_id: math_utils.padded_vstack([load_array(ch_rows[ch_id][k]) for k in common_keys], cval=np.nan)
+                  for ch_id in ch_ids}
+
+        n = len(common_keys)
+        sort_idxs = trace_utils.argsort_traces(traces[ch_ids[0]], ignore_nan=True) if sort else np.arange(n)
+
+        fig, axs = plt.subplots(1, n_chs, figsize=(10, 1 + np.minimum(n * 0.1, 10)),
+                                squeeze=False, sharey=True)
         if len(restriction) > 0:
             plot_utils.set_long_title(fig=fig, title=restriction)
 
-        sort_idxs = trace_utils.argsort_traces(traces, ignore_nan=True) if sort else np.arange(n)
-
-        ax.set_title('traces')
-        plot_utils.plot_signals_heatmap(ax=ax, signals=traces[sort_idxs, :], symmetric=False)
+        for i, ax in enumerate(axs.flat):
+            ch_id = ch_ids[i]
+            ax.set_title(f'traces[{ch_id=}]' if ch_id is not None else 'traces')
+            plot_utils.plot_signals_heatmap(ax=ax, signals=traces[ch_id][sort_idxs, :], symmetric=False)
         plt.show()
