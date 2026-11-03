@@ -62,9 +62,23 @@ def get_corr_roi_mask(kind: str = 'default_rgc'):
     """Create the correlation-based ROI mask model with the default parameters for a cell type.
 
     Args:
-        kind: 'default_rgc', 'default_bc' or 'default_ac'.
+        kind: 'default_rgc', 'default_bc', 'default_ac', 'default_pr' or 'default_pr_watershed'.
+            The photoreceptor variants use a multi-scale correlation map with adaptive seeding and either grow
+            the ROIs from the seeds ('default_pr') or use a watershed ('default_pr_watershed').
     """
     from djimaging.autorois.corr_roi_mask_utils import CorrRoiMask
+
+    if kind in ('default_pr', 'default_pr_watershed'):
+        from djimaging.autorois.corr_roi_mask_multiscale import CorrRoiMaskMultiscale
+
+        if kind == 'default_pr':
+            return CorrRoiMaskMultiscale(
+                cut_x=(1, 1), cut_z=(1, 1), min_area_um2=0.5, max_area_um2=20,
+                seed_window=15, seed_std_factor=1.0, seed_min_distance=3, grow_percentile=65)
+        return CorrRoiMaskMultiscale(
+            cut_x=(1, 1), cut_z=(1, 1), n_pix_min=6, max_area_um2=20, clip_corr_map=True,
+            seed_window=15, seed_std_factor=0.9, seed_min_distance=3, seed_global_percentile=85,
+            seed_min_absolute=0.05, use_watershed=True, merge_distance=3)
 
     if kind == 'default_rgc':
         kws = dict(cut_x=(0, 0), cut_z=(0, 0), min_area_um2=10, max_area_um2=400, n_pix_max=None, line_threshold_q=70,

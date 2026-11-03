@@ -960,7 +960,8 @@ def load_default_autorois_models(kind: str = 'default_rgc', models: list[str] | 
 
     Args:
         kind: Model variant to load. Supported values are 'default_rgc',
-            'default_bc', and 'default_ac'.
+            'default_bc', 'default_ac', 'default_pr' (photoreceptors) and 'default_pr_watershed'
+            (photoreceptors, watershed instead of region growing).
         models: Names of the models to load. Available for 'default_rgc': 'UNet' (latest, v0.2.0),
             'UNet_v1' (v0.1.0), 'Cellpose3_cyto2' and 'Cellpose3_cyto3' (finetuned), 'MEDIAR' (finetuned) and 'CorrRoiMask'.
             If None, the default set is loaded and models that fail to load are skipped with a warning.
@@ -1030,7 +1031,7 @@ def _add_autorois_corr(autorois_models: dict, kind: str) -> None:
         autorois_models: Dict to add the loaded model to under the key
             'CorrRoiMask'.
         kind: Model variant controlling hyperparameters. Supported values are
-            'default_rgc', 'default_bc', and 'default_ac'.
+            'default_rgc', 'default_bc', 'default_ac', 'default_pr' and 'default_pr_watershed'.
     """
     autorois_models['CorrRoiMask'] = default_models.get_corr_roi_mask(kind=kind)
 
