@@ -167,8 +167,9 @@ Notes:
 
 - Single-channel schemas are not affected: nothing changes unless `_use_channels` is enabled.
 - Enabling it changes primary keys, so it cannot be added to a populated schema; create a new schema and repopulate.
-- The same switch exists on the templates, see `TracesTemplate._use_channels` and `ChannelTemplate`
-  (`djimaging/tables/core/`), and `FeaturesTemplate._use_channels` for clustering features per channel.
+- The same switch exists on the templates, see `UserInfoTemplate._use_channels`, `TracesTemplate._use_channels` and
+  `ChannelTemplate` (`djimaging/tables/core/`), and `FeaturesTemplate._use_channels` for clustering features per
+  channel. Set it on `UserInfo` and `Traces` together (as `make_project` does).
 - Tables that aggregate over ROIs and are not listed above should be checked before use with several channels.
 
 #### How blocks work
