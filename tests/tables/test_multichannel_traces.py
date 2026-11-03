@@ -108,3 +108,30 @@ def test_features_channels_off_by_default_and_per_channel_when_on():
     assert 'channel_table' not in table.definition
     table = type('F', (FeaturesTemplate,), {'_use_channels': True})()
     assert '-> self.channel_table' in table.definition
+
+
+def test_averages_plot_splits_channels_without_recursing(monkeypatch):
+    import matplotlib
+    matplotlib.use('Agg')
+    from djimaging.tables.core import averages
+
+    class Avgs:
+        primary_key = ['roi_id', 'ch_id']
+
+        def __init__(self, rows):
+            self.rows = rows
+
+        def __and__(self, restriction):
+            return Avgs([r for r in self.rows if all(r[k] == v for k, v in restriction.items() if k in r)])
+
+        def to_arrays(self, attr):
+            return np.array([r[attr] for r in self.rows])
+
+        _plot_heatmaps = averages.ResampledAveragesTemplate._plot_heatmaps
+
+    rows = [dict(roi_id=i, ch_id=c, average=np.arange(5.) + i, average_norm=np.arange(5.) + i)
+            for i in range(3) for c in (0, 1)]
+    plotted = []
+    monkeypatch.setattr(averages.plt, 'show', lambda: plotted.append(1))
+    averages.ResampledAveragesTemplate.plot(Avgs(rows), {'roi_id': 1})
+    assert len(plotted) == 2  # one figure per channel

@@ -96,10 +96,13 @@ class ResampledAveragesTemplate(dj.Computed):
         if 'ch_id' in self.primary_key:
             # Multi-channel: one figure per channel, so that channels are not mixed in one heatmap.
             for ch_id in np.unique((self & restriction).to_arrays('ch_id')):
-                self.plot({**restriction, 'ch_id': int(ch_id)} if isinstance(restriction, dict)
-                          else dj.AndList([restriction, dict(ch_id=int(ch_id))]), sort=sort)
-            return
+                self._plot_heatmaps({**restriction, 'ch_id': int(ch_id)} if isinstance(restriction, dict)
+                                    else dj.AndList([restriction, dict(ch_id=int(ch_id))]), sort=sort)
+        else:
+            self._plot_heatmaps(restriction, sort=sort)
 
+    def _plot_heatmaps(self, restriction, sort: bool = True) -> None:
+        """Plot heatmaps of all averages matching the restriction in one figure."""
         averages = (self & restriction).to_arrays('average')
         averages_norm = (self & restriction).to_arrays('average_norm')
 
