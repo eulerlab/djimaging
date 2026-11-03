@@ -6,6 +6,8 @@ import pytest
 from sklearn.dummy import DummyClassifier
 
 from djimaging.tables.classifier_v2.rgc_classifier_v2 import save_classifier_to_file
+from djimaging.utils import mask_utils
+from djimaging.utils.dj_storage import local_file_path
 from tests.fixtures.random_utils import numpy_seed
 
 
@@ -161,3 +163,22 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
     assert len(assignments) == 2
     for row in assignments:
         np.testing.assert_allclose(row["probs_per_cluster"], np.full(75, 1 / 75))
+
+    # Deploying a modified ROI mask replaces the entry, cascades the delete and only repopulates Roi.
+    mask_files = (tutorial_schema.RoiMask.RoiMaskPresentation() & experiment_key).to_arrays("roi_mask_file")
+    for mask_file in mask_files:
+        path = str(local_file_path(mask_file, "reference"))
+        mask = mask_utils.load_roi_mask_file(path)
+        mask[mask == np.unique(mask[mask != 0])[-1]] = 0
+        mask_utils.save_roi_mask_file(path, mask, mask_utils._infer_roi_file_format(path))
+
+    tutorial_schema.RoiMask().deploy_roi_mask(
+        (tutorial_schema.Field() & experiment_key).proj().fetch1(),
+        roi_table=tutorial_schema.Roi(), roi_mask_dir="AutoROIs", verbose=False)
+
+    assert len(tutorial_schema.RoiMask() & experiment_key) == 1
+    assert len(tutorial_schema.RoiMask.RoiMaskPresentation() & experiment_key) == 3
+    assert len(tutorial_schema.Roi() & experiment_key) == 1
+    for table in (tutorial_schema.Traces(), tutorial_schema.Snippets(), tutorial_schema.ChirpQI(),
+                  tutorial_schema.CelltypeAssignmentV2()):
+        assert len(table & experiment_key) == 0, table.full_table_name

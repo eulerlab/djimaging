@@ -177,6 +177,7 @@ class RoiMaskTemplate(dj.Manual):
             use_stim_onset: bool = True,
             verbose: bool = True,
             roi_channel: str | None = None,
+            roi_table: dj.Table | None = None,
             **kwargs,
     ):
         """Launch the interactive ROI-drawing GUI for a field.
@@ -206,6 +207,9 @@ class RoiMaskTemplate(dj.Manual):
                 (cc tool, diagnostics, auto shift, AutoROIs). Can be changed in the GUI. Defaults to the channel
                 flagged `roi_default` in the channel table (`data_stack_name` of the user info without channel table).
                 All channels are shown as background.
+            roi_table: The ROI table (``RoiTemplate``). If the field already has an ROI mask in the database, the GUI
+                can replace it ('Deploy to database', only in the dangerzone), see ``deploy_roi_mask``. The ROI table is
+                then repopulated for the field. Without it the GUI cannot deploy.
             **kwargs: Additional keyword arguments forwarded to
                 ``InteractiveRoiCanvas``.
 
@@ -315,6 +319,9 @@ class RoiMaskTemplate(dj.Manual):
             canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
             pixel_size_um=pixel_size_d1_d2, show_diagnostics=show_diagnostics,
             max_shift=self._max_shift if max_shift is None else max_shift,
+            deploy_callback=None if roi_table is None else (lambda: self.deploy_roi_mask(
+                field_key, roi_table=roi_table, roi_mask_dir=roi_mask_dir,
+                old_prefix=old_prefix, new_prefix=new_prefix, max_shift=max_shift, verbose=verbose)),
             **kwargs,
         )
         if verbose:
@@ -539,6 +546,69 @@ class RoiMaskTemplate(dj.Manual):
                     raise e
 
         return err_list
+
+    def deploy_roi_mask(
+            self,
+            field_key: dict,
+            roi_table: dj.Table | None = None,
+            roi_mask_dir: str = 'ROIs',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+            max_shift: int | None = None,
+            verbose: bool = True,
+    ) -> None:
+        """Replace the ROI mask of a field in the database by the mask files in ``roi_mask_dir``.
+
+        The existing entry is deleted, which cascades to ALL downstream tables (ROI, traces, ...). The mask files
+        of all presentations of the field (e.g. written by the ROI canvas, 'Save all to file') are then inserted as
+        for ``rescan_filesystem(source='autorois')``. Delete and insert are one transaction, so the old entry is kept
+        if anything fails. Afterwards only ``roi_table`` is repopulated for the field; further downstream tables
+        have to be populated by the caller.
+
+        Args:
+            field_key: Primary key dict identifying the field.
+            roi_table: ROI table (``RoiTemplate``) that is populated for the field afterwards. If None, nothing is
+                populated.
+            roi_mask_dir: Sub-directory name containing ROI mask files.
+            old_prefix: Path prefix to replace when resolving file paths.
+            new_prefix: Replacement path prefix.
+            max_shift: Maximum allowed pixel shift between presentations. Defaults to the table-level value.
+            verbose: If True, print a summary.
+
+        Raises:
+            FileNotFoundError: If a presentation of the field has no mask file. Nothing is deleted then.
+        """
+        field_key = (self.field_table & field_key).proj().fetch1()
+        pres_keys = (self.presentation_table & field_key).proj().to_dicts()
+
+        missing_files = []
+        for pres_key in pres_keys:
+            input_file = local_file_path(
+                (self.presentation_table & pres_key).fetch1("pres_data_file"), self.presentation_table._filepath_store)
+            roimask_file = to_roi_mask_file(
+                input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+                file_format=self._get_roi_file_format())
+            if not os.path.isfile(roimask_file):
+                missing_files.append(roimask_file)
+        if len(missing_files) > 0:
+            raise FileNotFoundError(f'Missing ROI mask files, nothing was changed:\n{missing_files}')
+
+        with self.connection.transaction:
+            (self & field_key).delete(prompt=False)
+            self._add_field_roi_masks(
+                field_key, source='autorois', roi_mask_dir=roi_mask_dir,
+                old_prefix=old_prefix, new_prefix=new_prefix, max_shift=max_shift)
+            n_new = len(self.RoiMaskPresentation & field_key)
+            if len(self & field_key) != 1 or n_new != len(pres_keys):
+                raise ValueError(f'Expected 1 ROI mask for {len(pres_keys)} presentations, '
+                                 f'got {len(self & field_key)} for {n_new}; rolled back.')
+
+        if roi_table is not None:
+            roi_table.populate(field_key)
+
+        if verbose:
+            print(f'Deployed ROI mask for field_key=\n{field_key}\n'
+                  f'({n_new} presentations; populated ROI table: {roi_table is not None})')
 
     def check_filesystem_consistency(
             self,
