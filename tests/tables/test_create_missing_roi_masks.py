@@ -23,6 +23,7 @@ class _FakeModel:
 class _FakeRoiMask:
     _roi_file_format = 'numpy'
     _get_roi_file_format = RoiMaskTemplate._get_roi_file_format
+    _save_roi_mask_files = RoiMaskTemplate._save_roi_mask_files
 
     def __init__(self, tmp_path, n_pres=3, two_channels=False):
         rng = np.random.default_rng(0)

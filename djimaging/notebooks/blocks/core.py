@@ -397,6 +397,68 @@ for failed_key, error in result['errors']:
 RoiMask().rescan_filesystem(verboselvl=2, roi_mask_dir='AutoROIs')
 
 # %% [markdown]
+# ### Correct existing ROI masks
+#
+# Masks in the database, e.g. drawn in Igor, may miss cells that are inactive or contain artifacts.
+# `RoiMask().correct_roi_masks(...)` proposes corrections without a GUI. For each field with a mask it
+#
+# 1. cleans the mask (removes the light artifact rows, splits disconnected ROIs, removes tiny ROIs),
+# 2. lets an AutoROIs model propose a mask and adds the ROIs of the model that are **missing** in the mask. Added ROIs
+#    never overlap or touch existing ROIs, and existing ROIs are never changed, and
+# 3. if the mask changed, saves the corrected mask to one file per presentation in `roi_mask_dir`.
+#
+# The database is **not** changed by this step. Review the corrections with `plot_roi_mask_correction` and replace
+# the entry of a field you accept with `deploy_roi_mask`. This deletes everything downstream of the ROI mask of that
+# field (traces, snippets, analyses, ...) and only repopulates `Roi`. With `deploy=True` all corrected fields are
+# replaced right away, so only use it if you do not want to review them.
+#
+# The parameters `model`, `kind`, `autorois_models`, `restrictions`, `old_prefix`, `new_prefix`, `roi_channel`,
+# `use_stim_onset`, `clean`, `min_size`, `connectivity`, `overwrite_files`, `suppress_errors` and `verbose` are
+# the same as above. In addition:
+#
+# | Parameter | Meaning |
+# |---|---|
+# | `roi_mask_dir` | Sub-directory for the corrected files. Use another one than `AutoROIs`, so the originals are kept. |
+# | `add_missing` | `True`: add the ROIs that the model finds but the mask misses. `False`: only clean the masks (no model is loaded). |
+# | `iou_threshold` | A ROI of the model counts as missing if its overlap (intersection over union) with every existing ROI is below this value. Lower values add fewer ROIs. |
+# | `deploy` | `True`: replace the database entries of the corrected fields right away. Requires `roi_table`. **Deletes the downstream tables of these fields.** |
+# | `roi_table` | The ROI table, populated for the deployed fields. |
+#
+# Fields whose presentations have different (not just shifted) masks are skipped.
+
+# %%
+# Only writes files and does not touch the database
+correction = RoiMask().correct_roi_masks(
+    model='UNet',
+    kind='default_rgc',
+    autorois_models=None,
+    restrictions=None,
+    roi_mask_dir='CorrectedROIs',
+    old_prefix=None,
+    new_prefix=None,
+    roi_channel=None,
+    use_stim_onset=True,
+    clean=True,
+    min_size=3,
+    connectivity=2,
+    add_missing=True,
+    iou_threshold=0.1,
+    overwrite_files=False,
+    deploy=False,
+    roi_table=None,
+    suppress_errors=True,
+    verbose=True,
+)
+
+# %%
+# Review a correction (red: added, blue: removed)
+# RoiMask().plot_roi_mask_correction(field_key=correction['corrected'][0]['field_key'], roi_mask_dir='CorrectedROIs')
+
+# %%
+# Replace the database entry of an accepted field. Deletes everything downstream of the ROI mask of this field!
+# RoiMask().deploy_roi_mask(correction['corrected'][0]['field_key'], roi_table=Roi, roi_mask_dir='CorrectedROIs')
+
+# %% [markdown]
 # ### Correct single fields in the ROI canvas
 #
 # To check or correct a mask by hand, open the canvas on a field. It starts from the mask in the database.
