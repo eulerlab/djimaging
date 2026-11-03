@@ -11,6 +11,7 @@ import numpy as np
 from djimaging.utils.scanm import read_h5_utils, read_utils
 
 from djimaging.autorois import default_models
+from djimaging.autorois.autoshift_utils import compute_corr_map, compute_corr_map_match_indexes, extract_best_shift
 from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 
 from djimaging.utils.filesystem_utils import as_pre_filepath
@@ -19,7 +20,7 @@ from djimaging.utils.dj_utils import get_primary_key, check_unique_one
 from djimaging.utils.mask_utils import (
     to_roi_mask_file, sort_roi_mask_files,
     load_preferred_roi_mask_igor, load_preferred_roi_mask_file, compare_roi_masks,
-    save_roi_mask_file, load_roi_mask_file, _ROI_FILE_FORMAT_HELP,
+    save_roi_mask_file, load_roi_mask_file, relabel_mask, clean_rois, shift_array, _ROI_FILE_FORMAT_HELP,
 )
 from djimaging.utils.mask_format_utils import to_igor_format, to_python_format
 from djimaging.utils.plot_utils import plot_field
@@ -229,6 +230,69 @@ class RoiMaskTemplate(dj.Manual):
             raise ValueError('No field_key provided and no missing field found.')
         field_key = (self.field_table & field_key).proj().fetch1()
 
+        field_data = self._load_field_stacks(
+            field_key, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
+            old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset)
+        pres_keys, pres_names, stacks, output_files = (
+            field_data[k] for k in ('pres_keys', 'pres_names', 'stacks', 'output_files'))
+        ch_names, roi_channel = field_data['ch_names'], field_data['roi_channel']
+        n_artifact, pixel_size_d1_d2 = field_data['n_artifact'], field_data['pixel_size_d1_d2']
+
+        # Load high resolution data is possible
+        high_res_bg_dict = self.load_high_res_bg_dict(
+            field_key, ch_names=ch_names, verbose=verbose) if load_high_res else dict()
+
+        # Load initial ROI masks
+        igor_roi_masks = (self.raw_params_table & field_key).fetch1('igor_roi_masks')
+        initial_roi_mask, _ = self.load_initial_roi_mask(
+            field_key=field_key, igor_roi_masks=igor_roi_masks,
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix, verbose=verbose)
+
+        if initial_roi_mask is not None:
+            initial_roi_mask = to_python_format(initial_roi_mask)
+
+        # Load default AutoROIs models
+        if isinstance(autorois_models, str):
+            autorois_models = load_default_autorois_models(autorois_models)
+        elif isinstance(autorois_models, (list, tuple)):
+            autorois_models = load_default_autorois_models(models=list(autorois_models))
+
+        # Load shifts if available
+        shifts = self.init_shifts(field_key, pres_keys)
+
+        roi_canvas = InteractiveRoiCanvas(
+            pres_names=pres_names,
+            stacks=stacks, primary_channel=roi_channel, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
+            main_stim_idx=0, initial_roi_mask=initial_roi_mask, shifts=shifts,
+            canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
+            pixel_size_um=pixel_size_d1_d2, show_diagnostics=show_diagnostics,
+            max_shift=self._max_shift if max_shift is None else max_shift,
+            deploy_callback=None if roi_table is None else (lambda: self.deploy_roi_mask(
+                field_key, roi_table=roi_table, roi_mask_dir=roi_mask_dir,
+                old_prefix=old_prefix, new_prefix=new_prefix, max_shift=max_shift, verbose=verbose)),
+            **kwargs,
+        )
+        if verbose:
+            print(f"Returned InteractiveRoiCanvas object. To start GUI, call <enter_object_name>.start_gui().")
+        return roi_canvas
+
+    def _load_field_stacks(
+            self,
+            field_key: dict,
+            roi_channel: str | None = None,
+            roi_mask_dir: str = 'ROIs',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+            use_stim_onset: bool = True,
+    ) -> dict:
+        """Load the stacks of all presentations of a field, as used for ROI detection.
+
+        Returns:
+            A dict with the presentation keys (``pres_keys``) and names (``pres_names``), the stacks of each channel
+            (``stacks``, channel name -> list with one stack per presentation), the ROI mask file of each presentation
+            (``output_files``), the channel names (``ch_names``) and target channel (``roi_channel``), the number of
+            artifact rows (``n_artifact``) and the pixel size (``pixel_size_d1_d2``).
+        """
         from_raw_data = (self.raw_params_table & field_key).fetch1("from_raw_data")
 
         field_file_info_df = self.load_field_file_info_df(field_key)
@@ -290,43 +354,9 @@ class RoiMaskTemplate(dj.Manual):
             stacks = {ch_name: [stack[:, :, stim_onset_idx:] for stack, stim_onset_idx in zip(ch_stacks, stim_onset_idxs)]
                       for ch_name, ch_stacks in stacks.items()}
 
-        # Load high resolution data is possible
-        high_res_bg_dict = self.load_high_res_bg_dict(
-            field_key, ch_names=ch_names, verbose=verbose) if load_high_res else dict()
-
-        # Load initial ROI masks
-        igor_roi_masks = (self.raw_params_table & field_key).fetch1('igor_roi_masks')
-        initial_roi_mask, _ = self.load_initial_roi_mask(
-            field_key=field_key, igor_roi_masks=igor_roi_masks,
-            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix, verbose=verbose)
-
-        if initial_roi_mask is not None:
-            initial_roi_mask = to_python_format(initial_roi_mask)
-
-        # Load default AutoROIs models
-        if isinstance(autorois_models, str):
-            autorois_models = load_default_autorois_models(autorois_models)
-        elif isinstance(autorois_models, (list, tuple)):
-            autorois_models = load_default_autorois_models(models=list(autorois_models))
-
-        # Load shifts if available
-        shifts = self.init_shifts(field_key, pres_keys)
-
-        roi_canvas = InteractiveRoiCanvas(
-            pres_names=pres_names,
-            stacks=stacks, primary_channel=roi_channel, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
-            main_stim_idx=0, initial_roi_mask=initial_roi_mask, shifts=shifts,
-            canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
-            pixel_size_um=pixel_size_d1_d2, show_diagnostics=show_diagnostics,
-            max_shift=self._max_shift if max_shift is None else max_shift,
-            deploy_callback=None if roi_table is None else (lambda: self.deploy_roi_mask(
-                field_key, roi_table=roi_table, roi_mask_dir=roi_mask_dir,
-                old_prefix=old_prefix, new_prefix=new_prefix, max_shift=max_shift, verbose=verbose)),
-            **kwargs,
-        )
-        if verbose:
-            print(f"Returned InteractiveRoiCanvas object. To start GUI, call <enter_object_name>.start_gui().")
-        return roi_canvas
+        return dict(
+            pres_keys=pres_keys, pres_names=pres_names, stacks=stacks, output_files=output_files,
+            ch_names=ch_names, roi_channel=roi_channel, n_artifact=n_artifact, pixel_size_d1_d2=pixel_size_d1_d2)
 
     def init_shifts(self, field_key: dict, pres_keys: list) -> list | None:
         """Load saved shift values between the field mask and each presentation mask.
@@ -488,6 +518,175 @@ class RoiMaskTemplate(dj.Manual):
             print(f'Loaded ROI mask from file={src_file} for files=\n{files}\nfor mask_alias={mask_alias}')
 
         return roi_mask, src_file
+
+    def create_missing_roi_masks(
+            self,
+            model: str | None = None,
+            kind: str = 'default_rgc',
+            autorois_models: dict | None = None,
+            restrictions: dict | None = None,
+            roi_mask_dir: str = 'AutoROIs',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+            roi_channel: str | None = None,
+            use_stim_onset: bool = True,
+            use_all_stacks: bool = False,
+            clean: bool = True,
+            min_size: int = 3,
+            connectivity: int = 2,
+            auto_shift: bool = True,
+            max_shift: int | None = None,
+            overwrite_files: bool = False,
+            suppress_errors: bool = False,
+            verbose: bool = True,
+    ) -> dict:
+        """Generate ROI mask files with an AutoROIs model for all fields that have no ROI mask yet (no GUI).
+
+        For each field without an entry in this table, the model proposes a mask on the stacks of the first
+        presentation (the reference). The mask is optionally cleaned, shifted to every other presentation
+        (auto shift, as the 'Auto shift' button of the ROI canvas), and written to one file per presentation in
+        ``roi_mask_dir``, exactly as 'Save all to file' in the ROI canvas does. Nothing is written to the database;
+        load the files afterwards with ``rescan_filesystem(roi_mask_dir=...)``.
+
+        Args:
+            model: Name of the AutoROIs model, see ``load_default_autorois_models``: 'UNet', 'UNet_v1',
+                'Cellpose3_cyto2', 'Cellpose3_cyto3', 'MEDIAR' or 'CorrRoiMask'. Defaults to 'UNet' for
+                ``kind='default_rgc'`` and to 'CorrRoiMask' for all other kinds.
+            kind: Cell type variant of the model ('default_rgc', 'default_bc', 'default_ac', 'default_pr' or
+                'default_pr_watershed'). Only 'CorrRoiMask' is available for kinds other than 'default_rgc'.
+            autorois_models: Already loaded models (dict name -> model), e.g. from ``load_default_autorois_models``,
+                from which ``model`` is picked. If None, only the requested model is loaded and released again
+                at the end.
+            restrictions: Restrictions for the fields, e.g. ``dict(experimenter='Ran')``.
+            roi_mask_dir: Sub-directory (next to the recording files) the mask files are written to.
+            old_prefix: Path prefix to replace when resolving file paths.
+            new_prefix: Replacement path prefix.
+            roi_channel: Name of the channel the model is applied to. Defaults to the channel flagged as ROI
+                channel (see ``UserInfoTemplate.get_ch_names``). The first other channel is passed as second input,
+                which only ``UNet_v1`` uses.
+            use_stim_onset: If True, only use the recording after the stimulus onset (first trigger).
+            use_all_stacks: If True, the model is applied to the stacks of all presentations of a field
+                (concatenated in time) instead of only the first one. Only useful if presentations are aligned.
+            clean: If True, clean the mask (remove the light artifact rows, split disconnected ROIs and remove
+                ROIs smaller than ``min_size`` pixels), see ``clean_rois``.
+            min_size: Minimum ROI size in pixels for cleaning.
+            connectivity: 1 (only NSEW neighbours) or 2 (also diagonal neighbours) connect pixels of a ROI.
+            auto_shift: If True, estimate the shift of every other presentation relative to the first one from
+                the correlation maps. Otherwise all presentations get the same mask without shift.
+            max_shift: Largest shift in pixels that auto shift searches for. Defaults to the table-level value.
+            overwrite_files: If False, fields for which the mask files of all presentations already exist are
+                skipped (load them with ``rescan_filesystem`` instead). If True, existing files are overwritten.
+            suppress_errors: If True, continue with the next field if a field fails and report the error.
+            verbose: If True, print progress.
+
+        Returns:
+            A dict with the lists ``created`` (field keys with new mask files), ``skipped`` (field keys whose files
+            already exist) and ``errors`` (tuples of field key and exception).
+        """
+        if model is None:
+            model = 'UNet' if kind == 'default_rgc' else 'CorrRoiMask'
+        if connectivity not in (1, 2):
+            raise ValueError(f'connectivity={connectivity} must be 1 or 2')
+        max_shift = self._max_shift if max_shift is None else max_shift
+
+        restrictions = dict() if restrictions is None else restrictions
+        field_keys = (self.field_table.proj() & (self.presentation_table.proj() - self.proj()) & restrictions
+                      ).to_dicts()
+        result = dict(created=[], skipped=[], errors=[])
+        if len(field_keys) == 0:
+            if verbose:
+                print('No fields without ROI mask found.')
+            return result
+
+        loaded_here = autorois_models is None
+        if loaded_here:
+            autorois_models = load_default_autorois_models(kind=kind, models=[model])
+        if autorois_models is None or model not in autorois_models:
+            raise ValueError(f"Model {model!r} is not available, got {list(autorois_models or [])}")
+        autorois_model = autorois_models[model]
+
+        try:
+            for i, field_key in enumerate(field_keys, start=1):
+                if verbose:
+                    print(f'[{i}/{len(field_keys)}] {model}: {field_key}')
+                try:
+                    created = self._create_field_roi_mask_files(
+                        field_key, autorois_model, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
+                        old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset,
+                        use_all_stacks=use_all_stacks, clean=clean, min_size=min_size, connectivity=connectivity,
+                        auto_shift=auto_shift, max_shift=max_shift, overwrite_files=overwrite_files)
+                    result['created' if created else 'skipped'].append(field_key)
+                    if verbose and not created:
+                        print('  Mask files already exist, skipped. Load them with `rescan_filesystem`.')
+                except Exception as e:
+                    if not suppress_errors:
+                        raise
+                    warnings.warn(f'Error for field_key={field_key}:\n{e}')
+                    result['errors'].append((field_key, e))
+        finally:
+            del autorois_model, autorois_models
+            if loaded_here:
+                _free_memory()
+
+        if verbose:
+            print(f"Created mask files for {len(result['created'])} fields, skipped {len(result['skipped'])}, "
+                  f"{len(result['errors'])} errors. Load the new files with `rescan_filesystem(roi_mask_dir=...)`.")
+        return result
+
+    def _create_field_roi_mask_files(
+            self, field_key: dict, autorois_model, roi_channel, roi_mask_dir, old_prefix, new_prefix,
+            use_stim_onset, use_all_stacks, clean, min_size, connectivity, auto_shift, max_shift, overwrite_files,
+    ) -> bool:
+        """Create the mask files of all presentations of one field. Returns False if skipped because files exist."""
+        data = self._load_field_stacks(
+            field_key, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
+            old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset)
+        output_files, stacks, n_artifact = data['output_files'], data['stacks'], data['n_artifact']
+
+        if not overwrite_files and all(os.path.isfile(f) for f in output_files):
+            return False
+
+        ch0_stacks = stacks[data['roi_channel']]
+        other_chs = [ch_name for ch_name in data['ch_names'] if ch_name != data['roi_channel']]
+        ch1_stacks = stacks[other_chs[0]] if len(other_chs) > 0 else None
+
+        if use_all_stacks:
+            roi_mask = autorois_model.create_mask_from_data(
+                ch0_stack=ch0_stacks, ch1_stack=ch1_stacks, n_artifact=n_artifact,
+                pixel_size_um=data['pixel_size_d1_d2'], multiple_stacks=True)
+        else:
+            roi_mask = autorois_model.create_mask_from_data(
+                ch0_stack=ch0_stacks[0], ch1_stack=None if ch1_stacks is None else ch1_stacks[0],
+                n_artifact=n_artifact, pixel_size_um=data['pixel_size_d1_d2'])
+
+        roi_mask = relabel_mask(np.asarray(roi_mask), connectivity=connectivity)
+        if clean:
+            roi_mask = clean_rois(roi_mask, n_artifact, min_size=min_size, connectivity=connectivity, verbose=False)
+
+        # Shifts are defined as in the ROI canvas: the mask is in the frame of the first presentation, and the
+        # mask file of a presentation is the mask shifted by the inverse of the presentation's shift.
+        roi_masks = [roi_mask.copy()]
+        if auto_shift and len(ch0_stacks) > 1:
+            ref_corr_map = compute_corr_map(ch0_stacks[0])
+        for stack in ch0_stacks[1:]:
+            shift = (0, 0)
+            if auto_shift:
+                match_indexes = compute_corr_map_match_indexes(
+                    compute_corr_map(stack), ref_corr_map, shift_max=max_shift)
+                shift_x, shift_y = extract_best_shift(match_indexes)
+                shift = (-shift_x, -shift_y)
+            roi_masks.append(shift_array(roi_mask, shift=(-shift[0], -shift[1]), cval=0))
+
+        # Never create the root directory, but create the sub-directory
+        for output_file in output_files:
+            f_root, f_dir = os.path.split(os.path.dirname(output_file))
+            if not os.path.isdir(f_root):
+                raise FileNotFoundError(f'Could not find directory {f_root}')
+            os.makedirs(os.path.join(f_root, f_dir), exist_ok=True)
+
+        for output_file, roi_mask_i in zip(output_files, roi_masks):
+            save_roi_mask_file(output_file, roi_mask_i, self._get_roi_file_format())
+        return True
 
     def rescan_filesystem(
             self,
@@ -1007,6 +1206,18 @@ class RoiMaskTemplate(dj.Manual):
             return dict()
 
         return bg_dict
+
+
+def _free_memory() -> None:
+    """Release memory of unreferenced objects, also on the GPU."""
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
 
 
 def _roi_mask_source_from_path(path: str | Path) -> str:
