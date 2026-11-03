@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 
 from djimaging.tables.core.snippets import fetch_snippets_and_times
 from djimaging.utils.dj_storage import load_array
-from djimaging.utils.dj_utils import get_primary_key
+from djimaging.utils.dj_utils import get_primary_key, get_ch_ids
 from djimaging.utils import plot_utils, math_utils, trace_utils
 
 
@@ -93,34 +93,41 @@ class ResampledAveragesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        if 'ch_id' in self.primary_key:
-            # Multi-channel: one figure per channel, so that channels are not mixed in one heatmap.
-            for ch_id in np.unique((self & restriction).to_arrays('ch_id')):
-                self._plot_heatmaps({**restriction, 'ch_id': int(ch_id)} if isinstance(restriction, dict)
-                                    else dj.AndList([restriction, dict(ch_id=int(ch_id))]), sort=sort)
-        else:
-            self._plot_heatmaps(restriction, sort=sort)
+        ch_ids = get_ch_ids(self, restriction)
 
-    def _plot_heatmaps(self, restriction, sort: bool = True) -> None:
-        """Plot heatmaps of all averages matching the restriction in one figure."""
-        averages = (self & restriction).to_arrays('average')
-        averages_norm = (self & restriction).to_arrays('average_norm')
+        # Align channels on the remaining primary key, so that row i is the same ROI in every channel.
+        pk = [k for k in self.primary_key if k != 'ch_id']
+        ch_rows = {}
+        for ch_id in ch_ids:
+            rows = (self & restriction & ({} if ch_id is None else dict(ch_id=ch_id))).proj(
+                'average', 'average_norm').to_dicts()
+            ch_rows[ch_id] = {tuple(row[k] for k in pk): row for row in rows}
 
-        averages = math_utils.padded_vstack(averages, cval=np.nan)
-        averages_norm = math_utils.padded_vstack(averages_norm, cval=np.nan)
+        common_keys = [k for k in ch_rows[ch_ids[0]] if all(k in ch_rows[ch_id] for ch_id in ch_ids)]
+        if len(common_keys) < max(len(rows) for rows in ch_rows.values()):
+            warnings.warn("Not all ROIs have averages in all channels. Only plotting ROIs with averages in all channels.")
 
-        n = averages.shape[0]
+        averages = {ch_id: math_utils.padded_vstack([ch_rows[ch_id][k]['average'] for k in common_keys], cval=np.nan)
+                    for ch_id in ch_ids}
+        averages_norm = {
+            ch_id: math_utils.padded_vstack([ch_rows[ch_id][k]['average_norm'] for k in common_keys], cval=np.nan)
+            for ch_id in ch_ids}
 
-        fig, axs = plt.subplots(1, 2, figsize=(14, 1 + np.minimum(n * 0.1, 10)))
+        n = len(common_keys)
+        sort_idxs = trace_utils.argsort_traces(averages_norm[ch_ids[0]], ignore_nan=True) if sort else np.arange(n)
+
+        fig, axs = plt.subplots(2, len(ch_ids), figsize=(7 * len(ch_ids), 2 + np.minimum(n * 0.1, 10)),
+                                squeeze=False)
         if len(restriction) > 0:
             plot_utils.set_long_title(fig=fig, title=restriction)
 
-        sort_idxs = trace_utils.argsort_traces(averages_norm, ignore_nan=True) if sort else np.arange(n)
-
-        axs[0].set_title('average')
-        plot_utils.plot_signals_heatmap(ax=axs[0], signals=averages[sort_idxs, :])
-        axs[1].set_title('average_norm')
-        plot_utils.plot_signals_heatmap(ax=axs[1], signals=averages_norm[sort_idxs, :])
+        for i, ch_id in enumerate(ch_ids):
+            suffix = '' if ch_id is None else f'[{ch_id=}]'
+            axs[0, i].set_title(f'average{suffix}')
+            plot_utils.plot_signals_heatmap(ax=axs[0, i], signals=averages[ch_id][sort_idxs, :])
+            axs[1, i].set_title(f'average_norm{suffix}')
+            plot_utils.plot_signals_heatmap(ax=axs[1, i], signals=averages_norm[ch_id][sort_idxs, :])
+        plt.tight_layout()
         plt.show()
 
     @property
@@ -172,25 +179,32 @@ class ResampledAveragesTemplate(dj.Computed):
             x-axis limits for the plot. Default is None (auto).
         """
         key = get_primary_key(table=self, key=key)
+        key.pop('ch_id', None)  # Plot all channels, one column each
+        ch_ids = get_ch_ids(self, key)
 
-        snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, key)
+        fig, axs = plt.subplots(2, len(ch_ids), figsize=(10, 4), sharex='all', squeeze=False)
 
-        average, average_norm, average_t0, average_dt, triggertimes_rel = \
-            (self & key).fetch1('average', 'average_norm', 'average_t0', 'average_dt', 'triggertimes_rel')
-        average, average_norm, triggertimes_rel = (
-            load_array(average), load_array(average_norm), load_array(triggertimes_rel))
+        for i, ch_id in enumerate(ch_ids):
+            ch_key = key if ch_id is None else {**key, 'ch_id': ch_id}
 
-        average_times = np.arange(len(average)) * average_dt + average_t0
+            snippets, snippets_times, triggertimes_snippets = fetch_snippets_and_times(self.snippets_table, ch_key)
 
-        fig, axs = plt.subplots(2, 1, figsize=(10, 4), sharex='all')
+            average, average_norm, average_t0, average_dt, triggertimes_rel = \
+                (self & ch_key).fetch1('average', 'average_norm', 'average_t0', 'average_dt', 'triggertimes_rel')
+            average, average_norm, triggertimes_rel = (
+                load_array(average), load_array(average_norm), load_array(triggertimes_rel))
 
-        axs[0].plot(snippets_times - triggertimes_snippets[0], snippets, alpha=0.5)
-        axs[0].set(ylabel='trace', xlabel='rel. to trigger', xlim=xlim)
+            average_times = np.arange(len(average)) * average_dt + average_t0
 
-        plot_utils.plot_trace_and_trigger(
-            ax=axs[1], time=average_times, trace=average,
-            triggertimes=triggertimes_rel, trace_norm=average_norm)
+            axs[0, i].plot(snippets_times - triggertimes_snippets[0], snippets, alpha=0.5)
+            axs[0, i].set(ylabel='trace', xlabel='rel. to trigger', xlim=xlim,
+                          title='' if ch_id is None else f'[{ch_id=}]')
 
+            plot_utils.plot_trace_and_trigger(
+                ax=axs[1, i], time=average_times, trace=average,
+                triggertimes=triggertimes_rel, trace_norm=average_norm)
+
+        plt.tight_layout()
         plt.show()
 
 

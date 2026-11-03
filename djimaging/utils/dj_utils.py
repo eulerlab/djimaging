@@ -162,6 +162,20 @@ def get_primary_key(table: dj.Table, key: dict | None = None) -> dict:
     return key
 
 
+def get_ch_ids(table: dj.Table, restriction: dict | None = None) -> list:
+    """Return the channel ids of the entries matching the restriction, for plotting one panel per channel.
+
+    Returns [None] for tables without channels (no `ch_id` in the primary key), so that the same plotting loop
+    works for single- and multi-channel tables.
+    """
+    if 'ch_id' not in table.primary_key:
+        return [None]
+    ch_ids = [int(ch_id) for ch_id in np.unique((table & (restriction or dict())).to_arrays('ch_id'))]
+    if len(ch_ids) == 0:
+        raise ValueError(f"No entries found for {restriction}")
+    return ch_ids
+
+
 def merge_keys(key1: dict, key2: dict) -> dict:
     """Merge two DataJoint key dictionaries, raising on conflicts.
 

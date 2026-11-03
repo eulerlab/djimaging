@@ -110,28 +110,91 @@ def test_features_channels_off_by_default_and_per_channel_when_on():
     assert '-> self.channel_table' in table.definition
 
 
-def test_averages_plot_splits_channels_without_recursing(monkeypatch):
+class FakeTable:
+    """Minimal stand-in for a table with a restrictable list of rows."""
+
+    def __init__(self, rows, primary_key):
+        self.rows = rows
+        self.primary_key = primary_key
+
+    def __and__(self, restriction):
+        return FakeTable([r for r in self.rows if all(r[k] == v for k, v in restriction.items() if k in r)],
+                         self.primary_key)
+
+    def __call__(self):
+        return self
+
+    def __len__(self):
+        return len(self.rows)
+
+    def proj(self, *attrs):
+        return self
+
+    def to_dicts(self):
+        return list(self.rows)
+
+    def to_arrays(self, attr):
+        return np.array([r[attr] for r in self.rows])
+
+    def fetch1(self, *attrs):
+        assert len(self.rows) == 1
+        return tuple(self.rows[0][a] for a in attrs)
+
+
+@pytest.fixture
+def count_figures(monkeypatch):
     import matplotlib
     matplotlib.use('Agg')
+    from matplotlib import pyplot as plt
+    monkeypatch.setattr(plt, 'show', lambda: None)
+    plt.close('all')
+    return plt
+
+
+def test_get_ch_ids():
+    from djimaging.utils.dj_utils import get_ch_ids
+    assert get_ch_ids(FakeTable([], ['roi_id']), {}) == [None]
+    table = FakeTable([dict(roi_id=1, ch_id=1), dict(roi_id=1, ch_id=0)], ['roi_id', 'ch_id'])
+    assert get_ch_ids(table, {'roi_id': 1}) == [0, 1]
+    with pytest.raises(ValueError):
+        get_ch_ids(table, {'roi_id': 2})
+
+
+@pytest.mark.parametrize('n_channels', [1, 2])
+def test_averages_plot_one_figure_with_column_per_channel(n_channels, count_figures):
     from djimaging.tables.core import averages
+    pk = ['roi_id', 'ch_id'] if n_channels > 1 else ['roi_id']
+    rows = [dict(roi_id=i, average=np.arange(5.) + i, average_norm=np.arange(5.) + i,
+                 **({'ch_id': c} if n_channels > 1 else {}))
+            for i in range(3) for c in range(n_channels)]
+    averages.ResampledAveragesTemplate.plot(FakeTable(rows, pk), {})
+    assert len(count_figures.get_fignums()) == 1
+    titles = [ax.get_title() for ax in count_figures.gcf().axes if ax.get_title()]
+    assert len([t for t in titles if t.startswith('average_norm')]) == n_channels
+    assert len([t for t in titles if t.startswith('average') and not t.startswith('average_norm')]) == n_channels
 
-    class Avgs:
-        primary_key = ['roi_id', 'ch_id']
 
-        def __init__(self, rows):
-            self.rows = rows
+@pytest.mark.parametrize('n_channels', [1, 2])
+def test_averages_plot1_and_snippets_plot1_column_per_channel(n_channels, monkeypatch, count_figures):
+    from djimaging.tables.core import averages, snippets
+    pk = ['roi_id', 'ch_id'] if n_channels > 1 else ['roi_id']
+    times = np.arange(10.)[:, None] + np.zeros((1, 3))
+    fetched = (np.random.rand(10, 3), times, np.array([[0.], [0.], [0.]]).T + times[:1, :])
+    monkeypatch.setattr(averages, 'fetch_snippets_and_times', lambda table, key: fetched)
+    monkeypatch.setattr(snippets, 'fetch_snippets_and_times', lambda table, key: fetched)
 
-        def __and__(self, restriction):
-            return Avgs([r for r in self.rows if all(r[k] == v for k, v in restriction.items() if k in r)])
+    rows = [dict(roi_id=1, average=np.arange(5.), average_norm=np.arange(5.), average_t0=0., average_dt=1.,
+                 triggertimes_rel=np.array([0.]), **({'ch_id': c} if n_channels > 1 else {}))
+            for c in range(n_channels)]
+    table = FakeTable(rows, pk)
+    table.snippets_table = None
 
-        def to_arrays(self, attr):
-            return np.array([r[attr] for r in self.rows])
+    def n_columns(fig):
+        return len([ax for ax in fig.axes if ax.get_xlabel() == 'rel. to trigger'])
 
-        _plot_heatmaps = averages.ResampledAveragesTemplate._plot_heatmaps
+    averages.ResampledAveragesTemplate.plot1(table, key={'roi_id': 1})
+    assert n_columns(count_figures.gcf()) == n_channels
+    count_figures.close('all')
 
-    rows = [dict(roi_id=i, ch_id=c, average=np.arange(5.) + i, average_norm=np.arange(5.) + i)
-            for i in range(3) for c in (0, 1)]
-    plotted = []
-    monkeypatch.setattr(averages.plt, 'show', lambda: plotted.append(1))
-    averages.ResampledAveragesTemplate.plot(Avgs(rows), {'roi_id': 1})
-    assert len(plotted) == 2  # one figure per channel
+    snippets.SnippetsTemplate.plot1(table, key={'roi_id': 1})
+    assert n_columns(count_figures.gcf()) == n_channels
