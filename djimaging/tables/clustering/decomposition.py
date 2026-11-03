@@ -67,8 +67,8 @@ class FeaturesTemplate(dj.Computed):
     _restr_filter = None  # Restriction applied to roi_quality_table if any.
     roi_filter_table = None
 
-    # Multi-channel recordings. If True, features are computed separately for every channel in `channel_table`
-    # (using the Averages of that channel) and `ch_id` becomes part of the primary key.
+    # Multiple functional channels. If True, features are computed separately for every functional channel in
+    # `channel_table` (using the Averages of that channel) and `ch_id` becomes part of the primary key.
     _use_channels = False
 
     @property
@@ -113,7 +113,7 @@ class FeaturesTemplate(dj.Computed):
     def key_source(self):
         try:
             if self._use_channels:
-                return self.params_table.proj() * self.channel_table.proj()
+                return self.params_table.proj() * (self.channel_table & dict(is_functional=1)).proj()
             return self.params_table.proj()
         except (AttributeError, TypeError):
             pass

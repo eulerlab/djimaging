@@ -8,6 +8,7 @@ class FakeUserInfo:
     """Stand-in with the UserInfoTemplate methods and a single user row."""
     get_ch_names = UserInfoTemplate.get_ch_names
     get_stack_names = UserInfoTemplate.get_stack_names
+    get_functional_ch_names = UserInfoTemplate.get_functional_ch_names
 
     def __init__(self, use_channels, channel_table=None, row=None):
         self._use_channels = use_channels
@@ -18,7 +19,8 @@ class FakeUserInfo:
         return self
 
     def fetch1(self, *attrs):
-        return tuple(self.row[attr] for attr in attrs)
+        values = tuple(self.row[attr] for attr in attrs)
+        return values[0] if len(values) == 1 else values
 
 
 def user_info(**kwargs):
@@ -62,3 +64,12 @@ def test_single_channel_has_no_alt_stack():
     channels = FakeChannelTable()
     channels.add_channels([('wDataCh0', 0)])
     assert FakeUserInfo(True, channels).get_stack_names() == ('wDataCh0', None)
+
+
+def test_functional_ch_names():
+    channels = FakeChannelTable()
+    channels.add_channels([('wDataCh0', 0), ('wDataCh1', 1), ('wDataCh2', 2)], functional=['wDataCh2', 'wDataCh0'])
+    assert FakeUserInfo(True, channels).get_functional_ch_names() == ['wDataCh0', 'wDataCh2']
+
+    table = FakeUserInfo(False, row=dict(data_stack_name='main', alt_stack_name='alt'))
+    assert table.get_functional_ch_names({}) == ['main']  # The alternative stack is not functional

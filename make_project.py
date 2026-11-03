@@ -35,7 +35,10 @@ BLOCKS_PLACEHOLDER = '__BLOCKS__'
 PROJECT_PLACEHOLDER = '__PROJECT__'
 NOTEBOOK_TEMPLATE_NAME = 'populate_my_schema'  # Replaced by populate_<project>_schema
 
-# Anchors in the core blocks that are extended when the recordings have more than one functional channel.
+# Channels (n_functional, n_background) of new schemas. None is the legacy design without Channel table.
+DEFAULT_CHANNELS = (1, 1)
+
+# Anchors in the core blocks that are extended by the Channel table.
 USER_INFO_CLASS_HEADER = "@schema\nclass UserInfo(core.UserInfoTemplate):\n"
 TRACES_CLASS_HEADER = "@schema\nclass Traces(core.TracesTemplate):\n"
 NOTEBOOK_RAW_PARAMS_CELL = "RawDataParams().add_default()\nRawDataParams()\n"
@@ -51,10 +54,17 @@ def parse_args(argv=None):
              f'Available: {", ".join(BLOCKS)}. Default: ask interactively.')
     parser.add_argument('--all', action='store_true', help='Use all table blocks.')
     parser.add_argument(
-        '--n-channels', type=int, default=None,
-        help='Number of functional (imaging) channels, e.g. 2 for two-color recordings. With more than one channel, '
-             'a Channel table is added and traces are extracted for every channel (wDataCh0, wDataCh1, ...). '
-             'Default: ask interactively, or 1 if not interactive.')
+        '--n-functional', type=int, default=None,
+        help='Number of functional (imaging) channels (wDataCh0, ...), traces are extracted for these channels. '
+             'Use 1 for standard recordings, more for two-color imaging. Default: ask interactively, or 1.')
+    parser.add_argument(
+        '--n-background', type=int, default=None,
+        help='Number of background channels (e.g. 1 for SR-101, a marker for blood vessels) that are recorded after '
+             'the functional channels, but no traces are extracted from. Default: ask interactively, or 1.')
+    parser.add_argument(
+        '--legacy-userinfo-stacks', action='store_true',
+        help='Use the old design without Channel table: the stacks are defined by data_stack_name and alt_stack_name '
+             'in UserInfo (functional channel and alternative channel) and one trace per ROI is extracted.')
     return parser.parse_args(argv)
 
 
@@ -66,15 +76,15 @@ def main(argv=None):
     blocks = resolve_blocks(select_blocks(args))
     print(f"Selected blocks: {', '.join(blocks)}")
 
-    n_channels = select_n_channels(args)
-    print(f"Number of functional channels: {n_channels}")
+    channels = select_channels(args)
+    print(describe_channels(channels))
 
     djimaging_dir = os.path.split(os.path.abspath(__file__))[0]
     project_dir = create_project_dir(djimaging_dir, project)
     copy_notebooks(djimaging_dir, project_dir, project)
     copy_table(djimaging_dir, project_dir)
-    copy_schema(djimaging_dir, project_dir, project, blocks, n_channels)
-    copy_populate_notebook(djimaging_dir, project_dir, project, blocks, n_channels)
+    copy_schema(djimaging_dir, project_dir, project, blocks, channels)
+    copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels)
 
 
 def validate_project_name(project):
@@ -102,32 +112,60 @@ def select_blocks(args):
     return selected
 
 
-def validate_n_channels(n_channels):
-    assert isinstance(n_channels, int) and not isinstance(n_channels, bool) and n_channels >= 1, \
-        f"Number of functional channels must be an integer >= 1, got {n_channels!r}."
-    return n_channels
+def validate_channels(channels):
+    """The channels are `None` (legacy design without Channel table) or (n_functional, n_background)."""
+    if channels is None:
+        return None
+
+    n_functional, n_background = channels
+    for n, minimum, name in [(n_functional, 1, 'functional'), (n_background, 0, 'background')]:
+        assert isinstance(n, int) and not isinstance(n, bool) and n >= minimum, \
+            f"Number of {name} channels must be an integer >= {minimum}, got {n!r}."
+    return n_functional, n_background
 
 
-def select_n_channels(args):
-    """Get the number of functional channels from the arguments or by asking the user."""
-    if args.n_channels is not None:
-        return validate_n_channels(args.n_channels)
-    if not sys.stdin.isatty():
-        return 1
-
-    answer = input('Number of functional (imaging) channels, e.g. 2 for two-color recordings [1]: ').strip()
-    return validate_n_channels(int(answer)) if answer else 1
+def ask_n_channels(question, default):
+    answer = input(f'{question} [{default}]: ').strip()
+    return int(answer) if answer else default
 
 
-def channels_name_id(n_channels):
-    """Channel names and ids as used by `ChannelTemplate.add_channels`, e.g. [('wDataCh0', 0), ('wDataCh1', 1)]."""
-    return [(f'wDataCh{i}', i) for i in range(validate_n_channels(n_channels))]
+def select_channels(args):
+    """Get the channels from the arguments or by asking the user: `None` for the legacy design, otherwise
+    (n_functional, n_background)."""
+    if args.legacy_userinfo_stacks:
+        assert args.n_functional is None and args.n_background is None, \
+            "--n-functional and --n-background cannot be used with --legacy-userinfo-stacks."
+        return None
+
+    n_functional, n_background = args.n_functional, args.n_background
+    if sys.stdin.isatty():
+        if n_functional is None:
+            n_functional = ask_n_channels('Number of functional channels (traces are extracted), '
+                                          'e.g. 2 for two-color recordings', 1)
+        if n_background is None:
+            n_background = ask_n_channels('Number of background channels (no traces), e.g. 1 for SR-101', 1)
+
+    return validate_channels((1 if n_functional is None else n_functional,
+                              1 if n_background is None else n_background))
 
 
-def add_channels_to_schema(code, n_channels):
-    """For multi-channel recordings, add the Channel table, which defines the stacks instead of the UserInfo,
-    and let Traces extract all channels."""
-    if validate_n_channels(n_channels) == 1:
+def describe_channels(channels):
+    if channels is None:
+        return "Legacy design: stacks are defined by data_stack_name and alt_stack_name in UserInfo."
+    return f"Functional channels: {channels[0]}, background channels: {channels[1]}"
+
+
+def channels_name_id(channels):
+    """Channel names and ids as used by `ChannelTemplate.add_channels`, e.g. [('wDataCh0', 0), ('wDataCh1', 1)].
+    Functional channels come first."""
+    n_functional, n_background = validate_channels(channels)
+    return [(f'wDataCh{i}', i) for i in range(n_functional + n_background)]
+
+
+def add_channels_to_schema(code, channels):
+    """Add the Channel table, which defines the stacks instead of the UserInfo. Traces are extracted for the
+    functional channels, and only get ch_id in the primary key if there are several."""
+    if validate_channels(channels) is None:
         return code
     assert USER_INFO_CLASS_HEADER in code, "UserInfo table not found in the schema blocks."
     assert TRACES_CLASS_HEADER in code, "Traces table not found in the schema blocks."
@@ -138,31 +176,46 @@ def add_channels_to_schema(code, n_channels):
         + "    _use_channels = True  # Stacks are defined by Channel, not by data_stack_name and alt_stack_name\n"
         + "    channel_table = Channel\n",
         1)
+
+    if channels[0] == 1:
+        return code
     return code.replace(
         TRACES_CLASS_HEADER,
         TRACES_CLASS_HEADER
-        + "    _use_channels = True  # Extract traces for every channel in Channel, adds ch_id to the primary key\n"
+        + "    _use_channels = True  # Traces for every functional channel in Channel, adds ch_id to the primary key\n"
         + "    channel_table = Channel\n",
         1)
 
 
-def add_channels_to_notebook(text, n_channels):
-    """For multi-channel recordings, add a cell that fills the Channel table."""
-    if validate_n_channels(n_channels) == 1:
+def add_channels_to_notebook(text, channels):
+    """Add a cell that fills the Channel table."""
+    if validate_channels(channels) is None:
         return text
     assert NOTEBOOK_RAW_PARAMS_CELL in text, "RawDataParams cell not found in the notebook blocks."
+    n_functional, n_background = channels
+    channels_name_id_ = channels_name_id(channels)
+    functional = [name for name, _ in channels_name_id_[:n_functional]]
+
+    markdown = (
+        "# ## Imaging channels\n#\n"
+        "# The channels of the recordings are defined in the `Channel` table, there are no `data_stack_name` and "
+        "`alt_stack_name` in `UserInfo`.\n"
+        f"# This schema has {n_functional} functional channel(s), traces are only extracted for these, and "
+        f"{n_background} background channel(s), e.g. SR-101 as marker for blood vessels, without traces.\n"
+        + ("# `ch_id` is part of the primary key of `Traces` and the tables that depend on it.\n"
+           if n_functional > 1 else "")
+        + "# Edit the names (the name of the data stack in the recording file) and the `functional` list if yours "
+          "differ.\n#\n"
+          "# All channels can be shown as background in the ROI canvas. `roi_channel` is the default target for ROI "
+          "detection there (cc tool, diagnostics, AutoROIs); it can be changed in the canvas.\n"
+          "# AutoROIs only use one (or two) channels, multi-color AutoROIs are not supported.\n")
     cell = (
         NOTEBOOK_RAW_PARAMS_CELL
         + "\n# %% [markdown]\n"
-        + f"# ## Imaging channels\n#\n# This schema extracts traces from {n_channels} functional channels. "
-        + "`ch_id` is part of the primary key of `Traces` and the tables that depend on it.\n"
-        + "# The channels replace `data_stack_name` and `alt_stack_name`, which are not part of `UserInfo` here.\n"
-        + "# Edit the names (the name of the data stack in the recording file) if yours differ.\n#\n"
-        + "# All channels can be shown as background in the ROI canvas. `roi_channel` is the default target for ROI "
-        + "detection there (cc tool, diagnostics, AutoROIs); it can be changed in the canvas.\n"
-        + "# AutoROIs only use one (or two) channels, multi-color AutoROIs are not supported.\n\n"
-        + "# %%\n"
-        + f"Channel().add_channels({channels_name_id(n_channels)!r}, roi_channel='wDataCh0', skip_duplicates=True)\n"
+        + markdown
+        + "\n# %%\n"
+        + f"Channel().add_channels({channels_name_id_!r}, functional={functional!r}, "
+          f"roi_channel={functional[0]!r}, skip_duplicates=True)\n"
         + "Channel()\n")
     return text.replace(NOTEBOOK_RAW_PARAMS_CELL, cell, 1)
 
@@ -245,7 +298,7 @@ def split_imports(source):
     return imports, code
 
 
-def build_schema_text(djimaging_dir, blocks, n_channels=1):
+def build_schema_text(djimaging_dir, blocks, channels=DEFAULT_CHANNELS):
     """Combine the schema blocks to one schema file. Imports between blocks are replaced by the block's code."""
     imports, codes = [], []
     for name in blocks:
@@ -255,18 +308,18 @@ def build_schema_text(djimaging_dir, blocks, n_channels=1):
                 imports.append(line)
         codes.append(code)
 
-    return "\n".join(imports) + "\n\n\n" + add_channels_to_schema("\n\n\n".join(codes), n_channels) + "\n"
+    return "\n".join(imports) + "\n\n\n" + add_channels_to_schema("\n\n\n".join(codes), channels) + "\n"
 
 
-def build_notebook_text(djimaging_dir, blocks, schema_module, project, n_channels=1):
+def build_notebook_text(djimaging_dir, blocks, schema_module, project, channels=DEFAULT_CHANNELS):
     """Combine the notebook blocks in the order of the blocks, followed by the clean-up section."""
     parts = [read_block(djimaging_dir, 'notebooks', name).strip("\n") for name in blocks]
     parts.append(read_block(djimaging_dir, 'notebooks', 'cleanup').strip("\n"))
-    text = add_channels_to_notebook("\n\n".join(parts) + "\n", n_channels)
+    text = add_channels_to_notebook("\n\n".join(parts) + "\n", channels)
     return text.replace(SCHEMA_MODULE_PLACEHOLDER, schema_module).replace(BLOCKS_PLACEHOLDER, ", ".join(blocks))         .replace(PROJECT_PLACEHOLDER, project)
 
 
-def copy_schema(djimaging_dir, project_dir, project, blocks, n_channels=1):
+def copy_schema(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS):
     dst = os.path.join(project_dir, f'schemas/{project}_schema.py')
 
     if os.path.isfile(dst):
@@ -284,13 +337,13 @@ def copy_schema(djimaging_dir, project_dir, project, blocks, n_channels=1):
         "# class ExampleTable(ExampleTableTemplate):\n" + \
         "#     field_table = Field\n"
 
-    header = f"# Generated by make_project.py. Blocks: {', '.join(blocks)}. Functional channels: {n_channels}\n"
+    header = f"# Generated by make_project.py. Blocks: {', '.join(blocks)}. {describe_channels(channels)}\n"
 
     with open(dst, 'w', encoding='utf8') as f:
-        f.write(header + new_import + build_schema_text(djimaging_dir, blocks, n_channels) + new_table)
+        f.write(header + new_import + build_schema_text(djimaging_dir, blocks, channels) + new_table)
 
 
-def copy_populate_notebook(djimaging_dir, project_dir, project, blocks, n_channels=1):
+def copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS):
     dst = os.path.join(project_dir, 'notebooks', f'populate_{project}_schema.ipynb')
 
     if os.path.isfile(dst):
@@ -299,7 +352,7 @@ def copy_populate_notebook(djimaging_dir, project_dir, project, blocks, n_channe
 
     text = build_notebook_text(
         djimaging_dir, blocks, schema_module=f'djimaging.user.{project}.schemas.{project}_schema',
-        project=project, n_channels=n_channels)
+        project=project, channels=channels)
 
     try:
         import jupytext

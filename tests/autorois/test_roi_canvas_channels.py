@@ -79,6 +79,9 @@ class FakeChannelTable:
     def __init__(self, rows=()):
         self.rows = [dict(r) for r in rows]
 
+    def __call__(self):
+        return self
+
     def to_dicts(self):
         return self.rows
 
@@ -86,6 +89,7 @@ class FakeChannelTable:
         self.rows.extend(rows)
 
     add_channels = ChannelTemplate.add_channels
+    get_functional_channels = ChannelTemplate.get_functional_channels
     get_roi_channel = ChannelTemplate.get_roi_channel
     get_ch_names = ChannelTemplate.get_ch_names
 
@@ -94,6 +98,7 @@ def test_add_channels_default_is_first_channel():
     table = FakeChannelTable()
     table.add_channels([('wDataCh0', 0), ('wDataCh1', 1)])
     assert [r['roi_default'] for r in table.rows] == [1, 0]
+    assert [r['is_functional'] for r in table.rows] == [1, 1]  # All channels are functional by default
 
 
 def test_add_channels_roi_channel():
@@ -103,15 +108,44 @@ def test_add_channels_roi_channel():
     assert table.get_ch_names() == ['wDataCh1', 'wDataCh0', 'wDataCh2']
 
 
-@pytest.mark.parametrize('channels, roi_channel', [([], None), ([('wDataCh0', 0)], 'wDataCh1')])
-def test_add_channels_invalid(channels, roi_channel):
+def test_add_channels_functional_and_background():
+    table = FakeChannelTable()
+    table.add_channels([('wDataCh0', 0), ('wDataCh1', 1)], functional=['wDataCh0'])
+    assert [r['is_functional'] for r in table.rows] == [1, 0]
+    assert table.get_functional_channels() == [('wDataCh0', 0)]
+    assert table.get_roi_channel() == 'wDataCh0'
+
+
+def test_roi_channel_defaults_to_first_functional_channel():
+    table = FakeChannelTable()
+    table.add_channels([('marker', 0), ('wDataCh1', 1), ('wDataCh2', 2)], functional=['wDataCh2', 'wDataCh1'])
+    assert table.get_roi_channel() == 'wDataCh1'
+    assert table.get_functional_channels() == [('wDataCh1', 1), ('wDataCh2', 2)]
+    assert table.get_ch_names() == ['wDataCh1', 'marker', 'wDataCh2']
+
+
+def test_roi_channel_can_be_background_channel():
+    table = FakeChannelTable()
+    table.add_channels([('wDataCh0', 0), ('wDataCh1', 1)], functional=['wDataCh0'], roi_channel='wDataCh1')
+    assert table.get_roi_channel() == 'wDataCh1'
+    assert table.get_functional_channels() == [('wDataCh0', 0)]
+
+
+@pytest.mark.parametrize('channels, kwargs', [
+    ([], {}),
+    ([('wDataCh0', 0)], dict(roi_channel='wDataCh1')),
+    ([('wDataCh0', 0)], dict(functional=[])),
+    ([('wDataCh0', 0)], dict(functional=['wDataCh1'])),
+])
+def test_add_channels_invalid(channels, kwargs):
     with pytest.raises(ValueError):
-        FakeChannelTable().add_channels(channels, roi_channel=roi_channel)
+        FakeChannelTable().add_channels(channels, **kwargs)
 
 
 def test_get_roi_channel_fallbacks():
-    rows = [dict(ch_id=1, ch_name='b', roi_default=0), dict(ch_id=0, ch_name='a', roi_default=0)]
-    assert FakeChannelTable(rows).get_roi_channel() == 'a'  # lowest id if none is flagged
+    rows = [dict(ch_id=1, ch_name='b', roi_default=0, is_functional=1),
+            dict(ch_id=0, ch_name='a', roi_default=0, is_functional=0)]
+    assert FakeChannelTable(rows).get_roi_channel() == 'b'  # first functional channel if none is flagged
 
     rows[0]['roi_default'] = rows[1]['roi_default'] = 1
     with pytest.raises(ValueError):

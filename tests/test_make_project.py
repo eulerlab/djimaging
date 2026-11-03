@@ -106,40 +106,79 @@ def test_notebook_schema_name_uses_project():
     assert 'schema_name = f"ageuler_{username}_tester"' in text
 
 
-def test_single_channel_is_default_and_unchanged():
+def test_default_schema_uses_channel_table_with_one_functional_channel():
     blocks = make_project.resolve_blocks(['rf_sta'])
-    assert make_project.build_schema_text(ROOT, blocks) == make_project.build_schema_text(ROOT, blocks, n_channels=1)
-    namespace = exec_schema(make_project.build_schema_text(ROOT, blocks))
-    assert 'Channel' not in namespace and not namespace['Traces']._use_channels
-    assert not namespace['UserInfo']._use_channels
-    assert 'data_stack_name' in namespace['UserInfo']().definition
+    default = make_project.build_schema_text(ROOT, blocks)
+    assert default == make_project.build_schema_text(ROOT, blocks, channels=(1, 1))
+    namespace = exec_schema(default)
+    assert namespace['UserInfo']._use_channels and namespace['UserInfo'].channel_table is namespace['Channel']
+    assert 'data_stack_name' not in namespace['UserInfo']().definition
+    assert not namespace['Traces']._use_channels  # One functional channel: no ch_id in the keys
+    assert 'ch_id' not in namespace['Traces']().definition
+
     text = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester')
+    ast.parse(text)
+    assert ("Channel().add_channels([('wDataCh0', 0), ('wDataCh1', 1)], functional=['wDataCh0'], "
+            "roi_channel='wDataCh0', skip_duplicates=True)") in text
+    assert text.index('Channel().add_channels') > text.index('RawDataParams().add_default()')
+
+
+@pytest.mark.parametrize('blocks', [['core'], OPTIONAL_BLOCKS])
+def test_legacy_schema_and_notebook_have_no_channel_table(blocks):
+    blocks = make_project.resolve_blocks(blocks)
+    namespace = exec_schema(make_project.build_schema_text(ROOT, blocks, channels=None))
+    assert 'Channel' not in namespace
+    assert not namespace['UserInfo']._use_channels and not namespace['Traces']._use_channels
+    assert "data_stack_name='wDataCh0'" in namespace['UserInfo']().definition
+    assert "alt_stack_name='wDataCh1'" in namespace['UserInfo']().definition
+
+    text = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester', channels=None)
     assert 'Channel' not in text
 
 
 @pytest.mark.parametrize('blocks', [['core'], OPTIONAL_BLOCKS])
-def test_multi_channel_schema_and_notebook(blocks):
+def test_two_functional_channels_add_ch_id_to_traces(blocks):
     blocks = make_project.resolve_blocks(blocks)
-    namespace = exec_schema(make_project.build_schema_text(ROOT, blocks, n_channels=2))
+    namespace = exec_schema(make_project.build_schema_text(ROOT, blocks, channels=(2, 1)))
     assert namespace['Traces']._use_channels and namespace['Traces'].channel_table is namespace['Channel']
     assert '-> self.channel_table' in namespace['Traces']().definition
     assert namespace['UserInfo']._use_channels and namespace['UserInfo'].channel_table is namespace['Channel']
-    assert 'data_stack_name' not in namespace['UserInfo']().definition
-    assert 'alt_stack_name' not in namespace['UserInfo']().definition
 
-    text = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester', n_channels=2)
+    text = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester', channels=(2, 1))
     ast.parse(text)
-    assert ("Channel().add_channels([('wDataCh0', 0), ('wDataCh1', 1)], roi_channel='wDataCh0', "
-            "skip_duplicates=True)") in text
-    assert text.index('Channel().add_channels') > text.index('RawDataParams().add_default()')
+    assert ("Channel().add_channels([('wDataCh0', 0), ('wDataCh1', 1), ('wDataCh2', 2)], "
+            "functional=['wDataCh0', 'wDataCh1'], roi_channel='wDataCh0', skip_duplicates=True)") in text
 
 
-@pytest.mark.parametrize('n_channels', [0, -1, 1.5, '2', None, True])
-def test_invalid_n_channels_rejected(n_channels):
+def test_no_background_channel():
+    assert make_project.channels_name_id((1, 0)) == [('wDataCh0', 0)]
+    text = make_project.build_notebook_text(ROOT, ['core'], schema_module='my.schema', project='tester',
+                                            channels=(1, 0))
+    assert "add_channels([('wDataCh0', 0)], functional=['wDataCh0']" in text
+
+
+@pytest.mark.parametrize('channels', [(0, 1), (1, -1), (1.5, 1), (1, '1'), (True, 1), (1, None)])
+def test_invalid_channels_rejected(channels):
     with pytest.raises(AssertionError):
-        make_project.validate_n_channels(n_channels)
+        make_project.validate_channels(channels)
 
 
-def test_n_channels_argument():
-    args = make_project.parse_args(['proj', '--n-channels', '2'])
-    assert make_project.select_n_channels(args) == 2
+def select(*argv):
+    return make_project.select_channels(make_project.parse_args(['proj', *argv]))
+
+
+def test_channel_arguments(monkeypatch):
+    monkeypatch.setattr(make_project.sys.stdin, 'isatty', lambda: False)
+    assert select() == (1, 1)
+    assert select('--n-functional', '2', '--n-background', '0') == (2, 0)
+    assert select('--n-background', '2') == (1, 2)
+    assert select('--legacy-userinfo-stacks') is None
+    with pytest.raises(AssertionError):
+        select('--legacy-userinfo-stacks', '--n-functional', '2')
+
+
+def test_channels_are_asked_interactively(monkeypatch):
+    monkeypatch.setattr(make_project.sys.stdin, 'isatty', lambda: True)
+    answers = iter(['2', ''])
+    monkeypatch.setattr('builtins.input', lambda prompt: next(answers))
+    assert select() == (2, 1)

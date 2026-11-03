@@ -19,8 +19,9 @@ from djimaging.utils.plot_utils import plot_trace_and_trigger
 class TracesTemplate(dj.Computed):
     database = ""
 
-    # Multi-channel recordings. If True, traces are extracted for every channel in `channel_table`
+    # Multiple functional channels. If True, traces are extracted for every functional channel in `channel_table`
     # and `ch_id` becomes part of the primary key. Changes the key structure, so it requires a new/repopulated table.
+    # If False, there has to be exactly one functional channel (see `UserInfoTemplate.get_functional_ch_names`).
     _use_channels = False
 
     # Motion correction parameters
@@ -131,12 +132,13 @@ class TracesTemplate(dj.Computed):
         roi_ids = (self.roi_table & key).to_arrays("roi_id")
 
         if self._use_channels:
-            channels_name_id = [(row['ch_name'], row['ch_id']) for row in self.channel_table.to_dicts()]
-            if len(channels_name_id) == 0:
-                raise ValueError("channel_table is empty")
+            channels_name_id = self.channel_table().get_functional_channels()
         else:
-            data_stack_name, _ = self.userinfo_table().get_stack_names(key)
-            channels_name_id = [(data_stack_name, None)]
+            data_stack_names = self.userinfo_table().get_functional_ch_names(key)
+            if len(data_stack_names) != 1:
+                raise ValueError(f"Expected exactly one functional channel, found {data_stack_names}. "
+                                 f"Set `_use_channels = True` to extract traces from several channels.")
+            channels_name_id = [(data_stack_names[0], None)]
 
         with local_path(filepath_ref, self.presentation_table._filepath_store) as filepath:
             for ch_name, ch_id in channels_name_id:

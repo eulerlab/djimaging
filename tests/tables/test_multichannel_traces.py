@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from djimaging.tables.core import traces
+from tests.autorois.test_roi_canvas_channels import FakeChannelTable
 
 
 class Relation:
@@ -41,31 +42,33 @@ class Relation:
 
 
 class FakeUserInfo:
+    def __init__(self, functional):
+        self.functional = functional
+
     def __call__(self):
         return self
 
-    @staticmethod
-    def get_stack_names(key):
-        return 'wDataCh0', 'wDataCh1'
+    def get_functional_ch_names(self, key):
+        return self.functional
 
 
-@pytest.mark.parametrize('channels', [None, [('wDataCh0', 0), ('wDataCh1', 1)]])
-def test_channel_extraction_uses_live_staged_path(channels, monkeypatch, tmp_path):
+def make_channel_table():
+    """Two functional channels and one background channel (e.g. SR-101)."""
+    channels = FakeChannelTable()
+    channels.add_channels([('wDataCh0', 0), ('wDataCh1', 1), ('wDataCh2', 2)], functional=['wDataCh0', 'wDataCh1'])
+    return channels
+
+
+def make_traces_table(monkeypatch, tmp_path, use_channels, userinfo_functional, calls, inserted):
     staged = tmp_path / 'recording.h5'
-    active = False
 
     @contextmanager
     def local_path(value, store):
-        nonlocal active
         assert (value, store) == ('recording.h5', 'reference')
-        active = True
         yield staged
-        active = False
-
-    calls = []
 
     def compute(key, filepath, roi_ids, precision, raw, data_stack_name, verboselvl):
-        assert active and filepath == staged
+        assert filepath == staged
         calls.append(data_stack_name)
         return {1: {'trace': np.array([1., 2., 3.]), 'trace_times': np.array([0., 1., 2.]),
                     'trace_valid': True}}, 1.
@@ -73,21 +76,39 @@ def test_channel_extraction_uses_live_staged_path(channels, monkeypatch, tmp_pat
     monkeypatch.setattr(traces, 'local_path', local_path)
     presentation = Relation([{'pres_data_file': 'recording.h5', 'triggertimes': np.array([1.])}])
     presentation._filepath_store = 'reference'
-    inserted = []
-    table = SimpleNamespace(
-        _use_channels=channels is not None, _include_motion_correction=False,
-        channel_table=Relation([dict(ch_name=n, ch_id=i) for n, i in channels or []]),
+    return SimpleNamespace(
+        _use_channels=use_channels, _include_motion_correction=False,
+        channel_table=make_channel_table(),
         raw_params_table=Relation([dict(include_artifacts=False, compute_from_stack=True,
                                        trace_precision='line', from_raw_data=False)]),
         presentation_table=presentation, roi_table=Relation([{'roi_id': 1}]),
-        userinfo_table=FakeUserInfo(),
+        userinfo_table=FakeUserInfo(userinfo_functional),
         _compute_roi2trace_from_stack=compute, insert1=inserted.append,
     )
+
+
+def test_single_functional_channel_without_ch_id(monkeypatch, tmp_path):
+    calls, inserted = [], []
+    table = make_traces_table(monkeypatch, tmp_path, False, ['wDataCh0'], calls, inserted)
     traces.TracesTemplate.make(table, {'presentation_id': 1})
-    assert not active
-    assert calls == (['wDataCh0'] if channels is None else ['wDataCh0', 'wDataCh1'])
-    assert [row.get('ch_id') for row in inserted] == ([None] if channels is None else [0, 1])
+    assert calls == ['wDataCh0']
+    assert [row.get('ch_id') for row in inserted] == [None]
     assert all(row['trigger_valid'] for row in inserted)
+
+
+def test_traces_only_for_functional_channels(monkeypatch, tmp_path):
+    calls, inserted = [], []
+    table = make_traces_table(monkeypatch, tmp_path, True, ['wDataCh0', 'wDataCh1'], calls, inserted)
+    traces.TracesTemplate.make(table, {'presentation_id': 1})
+    assert calls == ['wDataCh0', 'wDataCh1']  # Not the background channel wDataCh2
+    assert [row['ch_id'] for row in inserted] == [0, 1]
+    assert all(row['trigger_valid'] for row in inserted)
+
+
+def test_several_functional_channels_require_ch_id(monkeypatch, tmp_path):
+    table = make_traces_table(monkeypatch, tmp_path, False, ['wDataCh0', 'wDataCh1'], [], [])
+    with pytest.raises(ValueError, match='exactly one functional channel'):
+        traces.TracesTemplate.make(table, {'presentation_id': 1})
 
 
 def test_multichannel_requires_compute_from_stack():

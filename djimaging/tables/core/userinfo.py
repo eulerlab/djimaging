@@ -65,6 +65,17 @@ class UserInfoTemplate(dj.Manual):
         data_name, alt_name = (self & key).fetch1('data_stack_name', 'alt_stack_name')
         return list(dict.fromkeys([data_name, alt_name]))
 
+    def get_functional_ch_names(self, key: dict | None = None) -> list[str]:
+        """Names of the functional data stacks, i.e. the stacks that traces are extracted from.
+
+        With `_use_channels`, the functional channels of `channel_table` ordered by channel id, otherwise only
+        `data_stack_name`.
+        """
+        if self._use_channels:
+            return [ch_name for ch_name, _ in self.channel_table().get_functional_channels()]
+
+        return [(self & key).fetch1('data_stack_name')]
+
     def get_stack_names(self, key: dict | None = None) -> tuple[str, str | None]:
         """Names of the main and the alternative data stack. The alternative is None if there is only one channel.
 
