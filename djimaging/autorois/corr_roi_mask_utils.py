@@ -126,29 +126,15 @@ class CorrRoiMask:
         if stack is None:
             raise ValueError("ch1_stack must be provided when use_ch0_stack=False")
 
-        if self.n_pix_min is not None:
-            n_pix_min = self.n_pix_min
-        else:
-            n_pix_min = max(2, int(np.round(self.min_area_um2 / (pixel_size_um[0] * pixel_size_um[1]))))
-
-        if self.n_pix_max is not None:
-            n_pix_max = self.n_pix_max
-        else:
-            n_pix_max = max(2, int(np.round(self.max_area_um2 / (pixel_size_um[0] * pixel_size_um[1]))))
-
-        # At most twice as long as wide, converted to pixels
-        n_pix_max_x = max(1, int(np.sqrt(2 * self.max_area_um2) / pixel_size_um[
-            0])) if self.n_pix_max_x is None else self.n_pix_max_x
-        n_pix_max_z = max(1, int(np.sqrt(2 * self.max_area_um2) / pixel_size_um[
-            1])) if self.n_pix_max_z is None else self.n_pix_max_z
+        n_pix_min, n_pix_max, n_pix_max_x, n_pix_max_z = get_roi_pixel_limits(
+            self.min_area_um2, self.max_area_um2, pixel_size_um,
+            n_pix_min=self.n_pix_min, n_pix_max=self.n_pix_max,
+            n_pix_max_x=self.n_pix_max_x, n_pix_max_z=self.n_pix_max_z)
 
         print(f'Creating ROI mask for stack of shape={stack.shape}, '
               f'with n_pix_min={n_pix_min}, n_pix_max={n_pix_max}, '
               f'n_pix_max_x={n_pix_max_x}, n_pix_max_z={n_pix_max_z}, '
               f'pixel_size_um={pixel_size_um}')
-
-        if n_pix_max < n_pix_min:
-            n_pix_max = n_pix_min
 
         roi_mask = corr_map_rois(
             stack, cut_x=cut_x, cut_z=self.cut_z, n_pix_max_x=n_pix_max_x, n_pix_max_z=n_pix_max_z,
@@ -158,6 +144,39 @@ class CorrRoiMask:
             grow_threshold=self.grow_threshold, plot=plot)
 
         return roi_mask
+
+
+def get_roi_pixel_limits(
+        min_area_um2: float,
+        max_area_um2: float,
+        pixel_size_um: tuple,
+        n_pix_min: int | None = None,
+        n_pix_max: int | None = None,
+        n_pix_max_x: int | None = None,
+        n_pix_max_z: int | None = None,
+) -> tuple[int, int, int, int]:
+    """Convert ROI area limits in µm² to pixel limits.
+
+    The pixel counts ``n_pix_min``, ``n_pix_max``, ``n_pix_max_x`` and ``n_pix_max_z`` take precedence if given.
+    Otherwise, the extent is at most twice as long as wide (``sqrt(2 * max_area_um2)``).
+
+    Returns
+    -------
+    tuple[int, int, int, int]
+        ``n_pix_min``, ``n_pix_max``, ``n_pix_max_x``, ``n_pix_max_z``
+    """
+    pixel_area_um2 = pixel_size_um[0] * pixel_size_um[1]
+
+    if n_pix_min is None:
+        n_pix_min = max(2, int(np.round(min_area_um2 / pixel_area_um2)))
+    if n_pix_max is None:
+        n_pix_max = max(2, int(np.round(max_area_um2 / pixel_area_um2)))
+    if n_pix_max_x is None:
+        n_pix_max_x = max(1, int(np.sqrt(2 * max_area_um2) / pixel_size_um[0]))
+    if n_pix_max_z is None:
+        n_pix_max_z = max(1, int(np.sqrt(2 * max_area_um2) / pixel_size_um[1]))
+
+    return n_pix_min, max(n_pix_max, n_pix_min), n_pix_max_x, n_pix_max_z
 
 
 def stack_corr_image(
