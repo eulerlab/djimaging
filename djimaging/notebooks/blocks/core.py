@@ -293,6 +293,11 @@ print(f"{len(missing_fields)} fields without ROI mask")
 #   correlated with their neighbours and grows them while they stay correlated and below a maximum area. The
 #   parameters depend on the cell type (`kind='default_rgc'`, `'default_bc'`, `'default_ac'`), and it is the only
 #   model available for bipolar and amacrine cells.
+#   **For photoreceptors**, use `kind='default_pr'` or `kind='default_pr_watershed'`. These use a multi-scale
+#   correlation map (correlations at pixel shifts of 1 to 3) and seed ROIs at local maxima that stand out from their
+#   neighbourhood. `'default_pr'` grows the ROIs from the seeds, `'default_pr_watershed'` uses a watershed on the
+#   correlation map instead. The two give similar results, `'default_pr'` was slightly better in first tests. Both
+#   are loaded under the name `CorrRoiMask`, so only one of them can be loaded at a time.
 # - **`UNet`, `UNet_v1`**: Instance segmentation in the style of Panoptic-DeepLab. The network predicts foreground,
 #   offsets to the ROI centres and a centre heat map; pixels are assigned to the closest centre. `UNet` was retrained
 #   on a larger dataset and uses only ch0, `UNet_v1` uses ch0 and ch1. Use `UNet` unless you want to compare.
@@ -339,6 +344,8 @@ try:
     # Other selections (each loaded model needs memory):
     # autorois_models = load_default_autorois_models(models=['UNet', 'Cellpose3_cyto3'])
     # autorois_models = load_default_autorois_models(models=['UNet_v1', 'Cellpose3_cyto2', 'MEDIAR'])
+    # Photoreceptors (only CorrRoiMask is available, 'default_pr_watershed' for the watershed variant):
+    # autorois_models = load_default_autorois_models(kind='default_pr', models=['CorrRoiMask'])
 except ImportError:
     print("AutoROIs dependencies are not installed (extra 'autorois'), use manual ROIs only.")
     autorois_models = None
