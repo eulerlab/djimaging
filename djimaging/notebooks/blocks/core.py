@@ -353,13 +353,22 @@ print(f"{len(missing_fields)} fields without ROI mask")
 # | `clean` | Clean the mask after the model (artifact rows, disconnected ROIs, tiny ROIs). |
 # | `min_size` | Smallest ROI in pixels that survives cleaning. |
 # | `connectivity` | `1`: only horizontal/vertical neighbours belong to the same ROI. `2`: diagonal neighbours too. |
-# | `vessel_threshold` | `None`: off. A number, e.g. `10`: remove ROIs on blood vessels, which the model sometimes mistakes for cells. Vessels are pixels that stand out in the second recording channel (e.g. SR101) beyond what the ROI channel explains (cells can be bright in both); the number is the distance in robust standard deviations (lower finds more). Fields without vessels are not affected. |
+# | `vessel_threshold` | Remove ROIs on blood vessels, which the model sometimes mistakes for cells (default `50`, `None`: off). Needs a second recording channel (e.g. SR101), otherwise it is ignored. See below. |
 # | `max_vessel_overlap` | A ROI is removed if more than this fraction of its pixels is on a vessel. |
 # | `auto_shift` | `True`: estimate the shift of the other presentations from their correlation maps. `False`: no shift, all presentations get the same mask. |
 # | `max_shift` | Largest shift in pixels that auto shift searches for. Default: `_max_shift` of the table (5). |
 # | `overwrite_files` | `False`: skip fields whose mask files all exist. `True`: overwrite the files, **including masks you corrected by hand**. |
 # | `suppress_errors` | `True`: continue with the next field if one fails, and report the errors in the result. |
 # | `verbose` | Print progress. |
+#
+# **Blood vessels.** Vessels are bright in the second recording channel (e.g. SR101) and the model sometimes proposes
+# ROIs on them. Cells can be bright in both channels (bleed-through), so the second channel is not simply
+# thresholded. Instead, both average images are z-scored (median and MAD, ignoring the light artifact rows), the
+# second channel is predicted from the ROI channel, and pixels that stand out from this prediction are vessels.
+# `vessel_threshold` is the distance in robust standard deviations: it is relative to each field and does not depend on
+# absolute brightness. Lower values find more vessel pixels. A ROI is removed if more than `max_vessel_overlap` of its
+# pixels are on vessels. Fields without vessels are not affected. To choose the value, plot
+# `djimaging.utils.mask_utils.estimate_vessel_mask(alt_img, main_img, n_artifact, alt_z=...)`.
 #
 # The function returns a dict with the fields that got new files (`'created'`), were skipped (`'skipped'`) and
 # failed (`'errors'`).
@@ -383,7 +392,7 @@ result = RoiMask().create_missing_roi_masks(
     clean=True,
     min_size=3,
     connectivity=2,
-    vessel_threshold=None,
+    vessel_threshold=50,
     max_vessel_overlap=0.2,
     auto_shift=True,
     max_shift=None,
@@ -424,7 +433,7 @@ RoiMask().rescan_filesystem(verboselvl=2, roi_mask_dir='AutoROIs')
 # |---|---|
 # | `roi_mask_dir` | Sub-directory for the corrected files. Use another one than `AutoROIs`, so the originals are kept. |
 # | `add_missing` | `True`: add the ROIs that the model finds but the mask misses. `False`: only clean the masks (no model is loaded). |
-# | `vessel_filter_existing` | `True`: also remove vessel ROIs from the existing mask. Default: only new ROIs are filtered. |
+# | `vessel_filter_existing` | `True`: also remove vessel ROIs (see `vessel_threshold` above) from the existing mask. Default `False`: only new ROIs are filtered, since the existing mask may be curated. |
 # | `iou_threshold` | A ROI of the model counts as missing if its overlap (intersection over union) with every existing ROI is below this value. Lower values add fewer ROIs. |
 # | `deploy` | `True`: replace the database entries of the corrected fields right away. Requires `roi_table`. **Deletes the downstream tables of these fields.** |
 # | `roi_table` | The ROI table, populated for the deployed fields. |
@@ -446,7 +455,7 @@ correction = RoiMask().correct_roi_masks(
     clean=True,
     min_size=3,
     connectivity=2,
-    vessel_threshold=None,
+    vessel_threshold=50,
     max_vessel_overlap=0.2,
     vessel_filter_existing=False,
     add_missing=True,

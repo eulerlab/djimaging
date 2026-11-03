@@ -2,6 +2,7 @@ import os
 from unittest import mock
 
 import numpy as np
+import pytest
 
 from djimaging.tables.core import roi_mask as roi_mask_module
 from djimaging.tables.core.roi_mask import RoiMaskTemplate
@@ -176,14 +177,11 @@ def test_vessel_rois_are_not_added_but_existing_are_kept_by_default(tmp_path):
     assert not np.any(ref[10:14, 14:17] > 0)
 
 
-def test_vessel_threshold_needs_second_channel(tmp_path):
+def test_vessel_threshold_is_ignored_without_second_channel(tmp_path):
     fake = _FakeRoiMask(tmp_path, _original_mask())
-    try:
-        _run(fake, _FakeModel(), vessel_threshold=10.)
-    except ValueError as e:
-        assert 'second channel' in str(e)
-    else:
-        raise AssertionError('expected ValueError')
+    with pytest.warns(UserWarning, match='second channel'):
+        info = _run(fake, _FakeModel(), vessel_threshold=50.)
+    assert info['status'] == 'corrected'
 
 
 def test_no_vessels_in_field_without_bright_alt_structures():

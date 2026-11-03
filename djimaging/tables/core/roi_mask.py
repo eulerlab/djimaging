@@ -535,7 +535,7 @@ class RoiMaskTemplate(dj.Manual):
             clean: bool = True,
             min_size: int = 3,
             connectivity: int = 2,
-            vessel_threshold: float | None = None,
+            vessel_threshold: float | None = 50.,
             max_vessel_overlap: float = 0.2,
             auto_shift: bool = True,
             max_shift: int | None = None,
@@ -578,7 +578,8 @@ class RoiMaskTemplate(dj.Manual):
                 cells. Vessels are found by comparing the channels: the alternative channel (the first channel other than
                 ``roi_channel``, e.g. SR101) is predicted from the ROI channel (cells can be bright in both), and
                 pixels that stand out more than this many robust standard deviations from that prediction count as
-                vessel. Fields without vessels yield no vessel pixels. Try 10; lower values find more vessel pixels.
+                vessel. Fields without vessels yield no vessel pixels. Default 50; lower values find more vessel pixels. None switches the check off. It is skipped
+                (with a warning) if the recording has no second channel.
                 See ``mask_utils.estimate_vessel_mask``.
             max_vessel_overlap: A ROI is removed if more than this fraction of its pixels are on vessels.
             auto_shift: If True, estimate the shift of every other presentation relative to the first one from
@@ -702,7 +703,7 @@ class RoiMaskTemplate(dj.Manual):
             clean: bool = True,
             min_size: int = 3,
             connectivity: int = 2,
-            vessel_threshold: float | None = None,
+            vessel_threshold: float | None = 50.,
             max_vessel_overlap: float = 0.2,
             vessel_filter_existing: bool = False,
             add_missing: bool = True,
@@ -1501,7 +1502,8 @@ def _remove_vessel_rois(roi_mask: np.ndarray, data: dict, ref_idx: int, vessel_t
         return roi_mask
     other_chs = [ch_name for ch_name in data['ch_names'] if ch_name != data['roi_channel']]
     if len(other_chs) == 0:
-        raise ValueError('vessel_threshold requires a second channel, but only one channel is available.')
+        warnings.warn('vessel_threshold is ignored, because the recording has no second channel.')
+        return roi_mask
     alt_img = np.mean(data['stacks'][other_chs[0]][ref_idx], axis=-1)
     main_img = np.mean(data['stacks'][data['roi_channel']][ref_idx], axis=-1)
     vessel_mask = estimate_vessel_mask(alt_img, main_img, n_artifact=data['n_artifact'], alt_z=vessel_threshold)

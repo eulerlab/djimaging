@@ -548,7 +548,7 @@ def _robust_z(img: np.ndarray, n_artifact: int = 0) -> np.ndarray:
 
 
 def estimate_vessel_mask(alt_img: np.ndarray, main_img: np.ndarray, n_artifact: int = 0,
-                         alt_z: float = 10., smooth_sigma: float = 0.7) -> np.ndarray:
+                         alt_z: float = 50., smooth_sigma: float = 0.7) -> np.ndarray:
     """Estimate blood vessel pixels by comparing the alternative channel (e.g. SR101) to the main channel.
 
     Cells can be bright in both channels (bleed-through), but only vessels (and astrocytes) stand out in the
@@ -566,7 +566,7 @@ def estimate_vessel_mask(alt_img: np.ndarray, main_img: np.ndarray, n_artifact: 
     n_artifact : int, optional
         Number of rows at the top that form the light-artifact region, ignored for the statistics and never vessel.
     alt_z : float, optional
-        Robust z-score of the residual above which a pixel is a vessel. Lower values find more. Default is 10.
+        Robust z-score of the residual above which a pixel is a vessel. Lower values find more. Default is 50.
     smooth_sigma : float, optional
         Sigma in pixels of the Gaussian smoothing applied before thresholding. Default is 0.7.
 
