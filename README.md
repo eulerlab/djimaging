@@ -131,6 +131,35 @@ If `jupytext` is not installed (<code>pip install jupytext</code>), the notebook
 <code>.py</code> file instead of an <code>.ipynb</code>; it can be converted later with
 <code>jupytext --to ipynb</code>.
 
+#### Two-color (multi-channel) recordings
+
+By default, one functional channel is extracted per recording (the stack named by `data_stack_name` in `UserInfo`).
+For recordings with several functional channels (e.g. two-color imaging), pass the number of channels:
+
+```bash
+python3 make_project.py your_project_name --blocks basic --n-channels 2
+```
+
+Without `--n-channels`, the script asks interactively (default 1; 1 when there is no terminal).
+With more than one channel, the generated schema contains
+
+- a `Channel` table (`ch_id`, `ch_name`) that lists the channels, filled by an extra notebook cell with
+  `wDataCh0`, `wDataCh1`, ... (edit the names if your data stacks are named differently), and
+- `Traces` with `_use_channels = True` and `channel_table = Channel`.
+
+Traces are then extracted for every channel, and `ch_id` becomes part of the primary key of `Traces` and of all
+tables that depend on it (`PreprocessTraces`, `Snippets`, `Averages`, response features, ...), so these are computed
+separately per channel. `data_stack_name` in `UserInfo` is ignored in this mode, and traces must be computed from the
+stack (`compute_from_stack=True` in `RawDataParams`).
+
+Notes:
+
+- Single-channel schemas are not affected: nothing changes unless `_use_channels` is enabled.
+- Enabling it changes primary keys, so it cannot be added to a populated schema; create a new schema and repopulate.
+- The same switch exists on the templates, see `TracesTemplate._use_channels` and `ChannelTemplate`
+  (`djimaging/tables/core/`), and `FeaturesTemplate._use_channels` for clustering features per channel.
+- Tables that aggregate over ROIs and are not listed above should be checked before use with several channels.
+
 #### How blocks work
 
 Every block has two matching parts:
