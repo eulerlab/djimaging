@@ -24,7 +24,7 @@ from djimaging.utils.mask_utils import (
     generate_roi_suggestions, _ROI_FILE_FORMAT_HELP,
 )
 from djimaging.utils.mask_format_utils import to_igor_format, to_python_format
-from djimaging.utils.plot_utils import plot_field
+from djimaging.utils.plot_utils import plot_field, field_extent_and_labels
 
 
 class RoiMaskTemplate(dj.Manual):
@@ -887,6 +887,7 @@ class RoiMaskTemplate(dj.Manual):
         roi_mask_old = to_python_format(load_array(main_row['roi_mask']))
         roi_mask_new = load_roi_mask_file(roi_mask_file).astype(int)
 
+        scan_type = (self.field_table & field_key).fetch1('scan_type')
         data_name, _ = self.userinfo_table().get_stack_names(field_key)
         ch_average = load_array(
             (self.presentation_table.StackAverages & pres_key & dict(ch_name=data_name)).fetch1('ch_average'))
@@ -896,15 +897,21 @@ class RoiMaskTemplate(dj.Manual):
         average = ch_average.astype(float)
         average = (average - np.nanmin(average)) / max(np.nanmax(average) - np.nanmin(average), 1e-12)
 
-        fig, axs = plt.subplots(1, 4, figsize=(20, 4))
+        # Same layout as `plot_field`, which is used by `plot1`
+        extent, xlabel, ylabel = field_extent_and_labels(roi_mask_old.shape, scan_type)
+        fig, axs = plt.subplots(1, 4, figsize=(18, 4), sharex='all', sharey='all')
         fig.suptitle(str(field_key))
+        for ax in axs:
+            ax.set(xlabel=xlabel)
+        axs[0].set(ylabel=ylabel)
+
         for ax, img, title in zip(axs[:2], (roi_mask_old, roi_mask_new), ('Current', 'Corrected')):
-            ax.imshow(np.where(img > 0, img, np.nan).T, cmap='nipy_spectral')
+            ax.imshow(np.where(img > 0, img, np.nan).T.astype(float), cmap='jet', origin='lower', extent=extent)
             ax.set(title=f'{title} ({len(np.unique(img[img > 0]))} ROIs)')
-        axs[2].imshow(diff.T, vmin=-1, vmax=1, cmap='bwr')
+        axs[2].imshow(diff.T, vmin=-1, vmax=1, cmap='bwr', origin='lower', extent=extent)
         axs[2].set(title='Added (red) / removed (blue)')
-        axs[3].imshow((average ** gamma).T, cmap='gray')
-        axs[3].imshow(diff.T, vmin=-1, vmax=1, cmap='bwr', alpha=0.5)
+        axs[3].imshow((average ** gamma).T, cmap='gray', origin='lower', extent=extent)
+        axs[3].imshow(diff.T, vmin=-1, vmax=1, cmap='bwr', alpha=0.5, origin='lower', extent=extent)
         axs[3].set(title='Stack average + difference')
         plt.tight_layout()
         plt.show()
