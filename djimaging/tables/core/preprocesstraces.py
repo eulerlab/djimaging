@@ -255,13 +255,8 @@ class PreprocessTracesTemplate(dj.Computed):
         key = get_primary_key(self, key)
 
         # --- channel logic (taken from first plot1) ---
-        if self.traces_table._channels_name_id is not None:
-            key.pop('ch_id', None)
-
-        if self.traces_table._channels_name_id is None:
-            ch_ids = [None]
-        else:
-            ch_ids = np.unique((self & key).to_arrays('ch_id'))
+        key.pop('ch_id', None)
+        ch_ids = self.traces_table()._get_ch_ids(key) if self.traces_table._use_channels else [None]
 
         n_chs = len(ch_ids)
 

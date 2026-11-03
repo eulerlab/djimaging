@@ -19,8 +19,9 @@ from djimaging.utils.plot_utils import plot_trace_and_trigger
 class TracesTemplate(dj.Computed):
     database = ""
 
-    # Channel information
-    _channels_name_id = None  # if not None, then e.g. [('wDataCh0', 0), ('wDataCh1', 1)]
+    # Multi-channel recordings. If True, traces are extracted for every channel in `channel_table`
+    # and `ch_id` becomes part of the primary key. Changes the key structure, so it requires a new/repopulated table.
+    _use_channels = False
 
     # Motion correction parameters
     _include_motion_correction = False
@@ -39,13 +40,9 @@ class TracesTemplate(dj.Computed):
             definition += """
         -> self.motion_detection_table
         """
-        if self._channels_name_id is not None:
-            assert len(self._channels_name_id) > 0, "_channels_name_id must be a non-empty list"
-            for ch_name_id in self._channels_name_id:
-                assert isinstance(ch_name_id, tuple) and len(ch_name_id) == 2, \
-                    "_channels_name_id must be a list of tuples (channel_name, channel_id)"
+        if self._use_channels:
             definition += """
-        ch_id : uint8  # imaging channel
+        -> self.channel_table
         """
         definition += """
         ---
@@ -88,6 +85,11 @@ class TracesTemplate(dj.Computed):
         pass
 
     @property
+    def channel_table(self) -> dj.Table:
+        """Return the channel table. Required when `_use_channels` is True."""
+        raise NotImplementedError("Set `channel_table` (a ChannelTemplate) when using `_use_channels=True`")
+
+    @property
     def motion_detection_table(self) -> None:
         """Return the motion detection table, or None if not used."""
         return None
@@ -121,16 +123,20 @@ class TracesTemplate(dj.Computed):
             raise ValueError("Motion correction only supported for compute_from_stack")
         if from_raw_data and not compute_from_stack:
             raise ValueError("from_raw_data=True only supported for compute_from_stack=True")
+        if self._use_channels and not compute_from_stack:
+            raise ValueError("Multiple channels only supported for compute_from_stack=True")
 
         filepath_ref = (self.presentation_table & key).fetch1("pres_data_file")
         triggertimes = load_array((self.presentation_table & key).fetch1("triggertimes"))
         roi_ids = (self.roi_table & key).to_arrays("roi_id")
 
-        if self._channels_name_id is None:
+        if self._use_channels:
+            channels_name_id = [(row['ch_name'], row['ch_id']) for row in self.channel_table.to_dicts()]
+            if len(channels_name_id) == 0:
+                raise ValueError("channel_table is empty")
+        else:
             data_stack_name = (self.userinfo_table & key).fetch1("data_stack_name")
             channels_name_id = [(data_stack_name, None)]
-        else:
-            channels_name_id = self._channels_name_id
 
         with local_path(filepath_ref, self.presentation_table._filepath_store) as filepath:
             for ch_name, ch_id in channels_name_id:
@@ -269,6 +275,15 @@ class TracesTemplate(dj.Computed):
                      trace_valid=valid_trace, trigger_valid=valid_trigger)
         self.update1(entry)
 
+    def _get_ch_ids(self, restriction: dict | None = None) -> list:
+        """Channel ids present for the restriction; [None] for single-channel tables."""
+        if not self._use_channels:
+            return [None]
+        ch_ids = [int(ch_id) for ch_id in np.unique((self & restriction).to_arrays('ch_id'))]
+        if len(ch_ids) == 0:
+            raise ValueError(f"No traces found for {restriction}")
+        return ch_ids
+
     def plot1(self, key: dict = None, xlim: tuple = None, ylim: tuple = None) -> None:
         """Plot the raw trace with trigger times for one ROI presentation.
 
@@ -280,13 +295,8 @@ class TracesTemplate(dj.Computed):
         """
         key = get_primary_key(table=self, key=key)
 
-        if self._channels_name_id is not None:
-            key.pop('ch_id')
-
-        if self._channels_name_id is None:
-            ch_ids = [None]
-        else:
-            ch_ids = np.unique((self & key).to_arrays('ch_id'))
+        key.pop('ch_id', None)
+        ch_ids = self._get_ch_ids(key)
         n_chs = len(ch_ids)
 
         fig, axs = plt.subplots(n_chs, 1, figsize=(10, 2 * n_chs), squeeze=False, sharex=True)
@@ -319,20 +329,24 @@ class TracesTemplate(dj.Computed):
         if restriction is None:
             restriction = dict()
 
-        if self._channels_name_id is None:
-            ch_ids = [None]
-        else:
-            ch_ids = np.unique((self & restriction).to_arrays('ch_id'))
+        ch_ids = self._get_ch_ids(restriction)
         n_chs = len(ch_ids)
 
-        traces = {}
+        # Align channels on the remaining primary key, so that row i is the same ROI in every channel.
+        pk = [k for k in self.primary_key if k != 'ch_id']
+        ch_rows = {}
         for ch_id in ch_ids:
-            ch_restriction = dict() if ch_id is None else f"ch_id={ch_id}"
-            ch_traces = (self & restriction & ch_restriction).to_arrays("trace")
-            ch_traces = math_utils.padded_vstack(ch_traces, cval=np.nan)
-            traces[ch_id] = ch_traces
+            rows = (self & restriction & ({} if ch_id is None else dict(ch_id=ch_id))).to_dicts()
+            ch_rows[ch_id] = {tuple(row[k] for k in pk): row['trace'] for row in rows}
 
-        n = traces[ch_ids[0]].shape[0]
+        common_keys = [k for k in ch_rows[ch_ids[0]] if all(k in ch_rows[ch_id] for ch_id in ch_ids)]
+        if len(common_keys) < max(len(rows) for rows in ch_rows.values()):
+            warnings.warn("Not all ROIs have traces in all channels. Only plotting ROIs with traces in all channels.")
+
+        traces = {ch_id: math_utils.padded_vstack([load_array(ch_rows[ch_id][k]) for k in common_keys], cval=np.nan)
+                  for ch_id in ch_ids}
+
+        n = len(common_keys)
         sort_idxs = trace_utils.argsort_traces(traces[ch_ids[0]], ignore_nan=True) if sort else np.arange(n)
 
         fig, axs = plt.subplots(1, n_chs, figsize=(10, 1 + np.minimum(n * 0.1, 10)),
@@ -342,6 +356,6 @@ class TracesTemplate(dj.Computed):
 
         for i, ax in enumerate(axs.flat):
             ch_id = ch_ids[i]
-            ax.set_title(f'traces[{ch_id=}]')
+            ax.set_title(f'traces[{ch_id=}]' if ch_id is not None else 'traces')
             plot_utils.plot_signals_heatmap(ax=ax, signals=traces[ch_id][sort_idxs, :], symmetric=False)
         plt.show()

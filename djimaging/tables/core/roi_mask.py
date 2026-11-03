@@ -28,7 +28,6 @@ from djimaging.utils.plot_utils import plot_field
 class RoiMaskTemplate(dj.Manual):
     database = ""
     _max_shift = 5
-    _include_roi_mask_dir = False  # Whether to include roi_mask_dir as primary key
     _roi_file_format: str = 'numpy'
     _filepath_store = "reference"
 
@@ -38,12 +37,6 @@ class RoiMaskTemplate(dj.Manual):
         # ROI mask
         -> self.field_table
         -> self.raw_params_table
-        """
-        if self._include_roi_mask_dir:
-            definition += """
-            roi_mask_dir : varchar(31)  # Sub-directory name where ROI mask pickle files are stored, e.g. 'ROIs', 'AutoROIs'
-            """
-        definition += f"""
         ---
         -> self.presentation_table
         roi_mask     : <blob>                   # ROI mask for recording field
@@ -162,7 +155,7 @@ class RoiMaskTemplate(dj.Manual):
             field_key: dict | None = None,
             pres_key: dict | None = None,
             canvas_width: int = 20,
-            autorois_models: str | list | dict | None = None,
+            autorois_models: str | list | dict = 'default_rgc',
             show_diagnostics: bool = True,
             load_high_res: bool = True,
             max_shift: int | None = None,
@@ -182,7 +175,7 @@ class RoiMaskTemplate(dj.Manual):
                 used. Takes precedence over field_key when both are given.
             canvas_width: Width of the canvas as a percentage of the screen
                 width (must be between 0 and 100 exclusive).
-            autorois_models: None (no models), a dict of auto-ROI models, a string key
+            autorois_models: Either a dict of auto-ROI models, a string key
                 ('default_rgc', etc.) to load the default model set (latest UNet), or a list of model
                 names (e.g. ['UNet', 'Cellpose3_cyto3', 'MEDIAR']) to load specific models, see
                 ``load_default_autorois_models``.
@@ -362,7 +355,7 @@ class RoiMaskTemplate(dj.Manual):
         Last try to load from Igor file, unless ROI masks should never be loaded from Igor.
         """
 
-        roi_mask = self.load_field_roi_mask_database(field_key=field_key, roi_mask_dir=roi_mask_dir)
+        roi_mask = self.load_field_roi_mask_database(field_key=field_key)
 
         if roi_mask is not None:
             return roi_mask, 'database'
@@ -381,14 +374,11 @@ class RoiMaskTemplate(dj.Manual):
 
         return None, 'none'
 
-    def load_field_roi_mask_database(
-            self, field_key: dict, roi_mask_dir: str | None = None,
-    ) -> np.ndarray | None:
+    def load_field_roi_mask_database(self, field_key: dict) -> np.ndarray | None:
         """Load the ROI mask stored in the database for the given field.
 
         Args:
             field_key: Primary key dict for the field.
-            roi_mask_dir: Restrict to this directory when it is a primary key.
 
         Returns:
             The ROI mask array if exactly one entry exists, or None if no entry
@@ -397,12 +387,7 @@ class RoiMaskTemplate(dj.Manual):
         Raises:
             ValueError: If more than one ROI mask is found for the key.
         """
-        restrict_key = (
-            {**field_key, 'roi_mask_dir': roi_mask_dir}
-            if (roi_mask_dir is not None and 'roi_mask_dir' in self.primary_key and self._include_roi_mask_dir)
-            else field_key
-        )
-        database_roi_masks = (self & restrict_key).to_arrays("roi_mask")
+        database_roi_masks = (self & field_key).to_arrays("roi_mask")
 
         if len(database_roi_masks) == 1:
             database_roi_mask = database_roi_masks[0].copy()
@@ -512,14 +497,9 @@ class RoiMaskTemplate(dj.Manual):
             restrictions = dict()
 
         if only_new_fields:
-            if 'roi_mask_dir' in self.primary_key and self._include_roi_mask_dir:
-                # Only skip fields that already have an entry for this specific roi_mask_dir,
-                # so the same field can be populated from multiple source directories.
-                restrictions = (self.key_source - (self & dict(roi_mask_dir=roi_mask_dir))) & restrictions
-            else:
-                restrictions = (self.key_source - self) & restrictions
-
-        keys_to_scan = (self.key_source & restrictions).proj().to_dicts()
+            keys_to_scan = ((self.key_source - self) & restrictions).proj().to_dicts()
+        else:
+            keys_to_scan = (self.key_source & restrictions).proj().to_dicts()
 
         if verboselvl > 0:
             print(f'Scanning {len(keys_to_scan)} keys for new ROI masks...')
@@ -677,12 +657,8 @@ class RoiMaskTemplate(dj.Manual):
         # entries are not needlessly read from disk and their filesystem-vs-database
         # consistency is not checked here (which would cause rescan to fail if any
         # pre-existing mask file was edited outside the database).
-        if 'roi_mask_dir' in self.primary_key and self._include_roi_mask_dir:
-            new_pres_keys = [pk for pk in pres_keys
-                             if len(self.RoiMaskPresentation & {**pk, 'roi_mask_dir': roi_mask_dir}) == 0]
-        else:
-            new_pres_keys = [pk for pk in pres_keys
-                             if len(self.RoiMaskPresentation & pk) == 0]
+        new_pres_keys = [pk for pk in pres_keys
+                         if len(self.RoiMaskPresentation & pk) == 0]
 
         if len(new_pres_keys) == 0:
             if verboselvl > 1:
@@ -707,14 +683,7 @@ class RoiMaskTemplate(dj.Manual):
                 print('No ROI masks found for field:', field_key)
             return
 
-        # When roi_mask_dir is a PK, scope the lookup to the current directory only
-        _field_dir_filter = (
-            {**field_key, 'roi_mask_dir': roi_mask_dir}
-            if ('roi_mask_dir' in self.primary_key and self._include_roi_mask_dir)
-            else field_key
-        )
-
-        if len(self & _field_dir_filter) == 0:
+        if len(self & field_key) == 0:
             # Find preferred file that should be used as main key.
             mask_alias, highres_alias = (self.userinfo_table & field_key).fetch1("mask_alias", "highres_alias")
             keys_masks_files = [
@@ -738,7 +707,7 @@ class RoiMaskTemplate(dj.Manual):
 
             main_pres_key, (main_roi_mask, main_file, main_source) = keys_masks_files[sort_idxs[0]][:2]
         else:
-            main_pres_key = (self.RoiMaskPresentation().proj() & (self & _field_dir_filter)).fetch1()
+            main_pres_key = (self.RoiMaskPresentation().proj() & (self & field_key)).fetch1()
             main_roi_mask = load_array((self.RoiMaskPresentation & main_pres_key).fetch1('roi_mask'))
             main_file, main_source = (self.RoiMaskPresentation & main_pres_key).fetch1(
                 'roi_mask_file', 'roi_mask_source')
@@ -767,16 +736,11 @@ class RoiMaskTemplate(dj.Manual):
 
         if add_primary_keys is not None:
             main_key = {**main_key, **add_primary_keys}
-        if 'roi_mask_dir' in self.primary_key and self._include_roi_mask_dir:
-            main_key['roi_mask_dir'] = roi_mask_dir
-
         self.insert1(main_key, skip_duplicates=True)
 
         for roi_mask_pres_key in roi_mask_pres_keys:
             if add_primary_keys is not None:
                 roi_mask_pres_key = {**roi_mask_pres_key, **add_primary_keys}
-            if 'roi_mask_dir' in self.primary_key and self._include_roi_mask_dir:
-                roi_mask_pres_key['roi_mask_dir'] = roi_mask_dir
 
             self.RoiMaskPresentation().insert1(roi_mask_pres_key, skip_duplicates=True)
 
@@ -830,15 +794,8 @@ class RoiMaskTemplate(dj.Manual):
             else:
                 filesystem_roi_mask = None
 
-        # Restrict to the current roi_mask_dir when it is a PK to avoid cross-dir conflicts
-        _pres_dir_filter = (
-            {**key, 'roi_mask_dir': roi_mask_dir}
-            if ('roi_mask_dir' in self.primary_key and self._include_roi_mask_dir)
-            else key
-        )
-
-        if len((self.RoiMaskPresentation & _pres_dir_filter).proj()) > 0:
-            database_roi_mask = load_array((self.RoiMaskPresentation & _pres_dir_filter).fetch1('roi_mask'))
+        if len((self.RoiMaskPresentation & key).proj()) > 0:
+            database_roi_mask = load_array((self.RoiMaskPresentation & key).fetch1('roi_mask'))
 
             if filesystem_roi_mask is None:
                 if igor_roi_masks == 'yes':

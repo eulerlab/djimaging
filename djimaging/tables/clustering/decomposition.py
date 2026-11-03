@@ -67,10 +67,20 @@ class FeaturesTemplate(dj.Computed):
     _restr_filter = None  # Restriction applied to roi_quality_table if any.
     roi_filter_table = None
 
+    # Multi-channel recordings. If True, features are computed separately for every channel in `channel_table`
+    # (using the Averages of that channel) and `ch_id` becomes part of the primary key.
+    _use_channels = False
+
     @property
     def definition(self):
         definition = """
         -> self.params_table
+        """
+        if self._use_channels:
+            definition += """
+        -> self.channel_table
+        """
+        definition += """
         ---
         features: <blob@processed>  # Feature matrix.
         traces: <blob@processed>  # Input traces.
@@ -78,6 +88,11 @@ class FeaturesTemplate(dj.Computed):
         decomp_infos: <blob@processed>  # information about decomposition of different stimuli
         """
         return definition
+
+    @property
+    def channel_table(self):
+        """Return the channel table. Required when `_use_channels` is True."""
+        raise NotImplementedError("Set `channel_table` (a ChannelTemplate) when using `_use_channels=True`")
 
     @property
     @abstractmethod
@@ -97,6 +112,8 @@ class FeaturesTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
+            if self._use_channels:
+                return self.params_table.proj() * self.channel_table.proj()
             return self.params_table.proj()
         except (AttributeError, TypeError):
             pass
@@ -122,12 +139,13 @@ class FeaturesTemplate(dj.Computed):
         tab = self.roi_table.proj()
 
         restr = self._restr_filter if self._restr_filter is not None else dict()
+        ch_restr = dict(ch_id=key['ch_id']) if self._use_channels else dict()
 
         if self.roi_filter_table is not None:
             tab = tab & self.roi_filter_table & restr
 
         for stim_i in stim_names:
-            tab = tab * (self.averages_table & f"stim_name='{stim_i}'" & restr).proj(
+            tab = tab * (self.averages_table & f"stim_name='{stim_i}'" & restr & ch_restr).proj(
                 **{f'{stim_i}_avgs': average_key, f'{stim_i}_dt': 'average_dt',
                    f'{stim_i}_t0': 'average_t0', f'{stim_i}_name': 'stim_name'})
 
