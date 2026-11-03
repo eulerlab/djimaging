@@ -104,3 +104,36 @@ def test_validate_project_name_rejects(project):
 def test_notebook_schema_name_uses_project():
     text = make_project.build_notebook_text(ROOT, ['core'], schema_module='my.schema', project='tester')
     assert 'schema_name = f"ageuler_{username}_tester"' in text
+
+
+def test_single_channel_is_default_and_unchanged():
+    blocks = make_project.resolve_blocks(['rf_sta'])
+    assert make_project.build_schema_text(ROOT, blocks) == make_project.build_schema_text(ROOT, blocks, n_channels=1)
+    namespace = exec_schema(make_project.build_schema_text(ROOT, blocks))
+    assert 'Channel' not in namespace and not namespace['Traces']._use_channels
+    text = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester')
+    assert 'Channel' not in text
+
+
+@pytest.mark.parametrize('blocks', [['core'], OPTIONAL_BLOCKS])
+def test_multi_channel_schema_and_notebook(blocks):
+    blocks = make_project.resolve_blocks(blocks)
+    namespace = exec_schema(make_project.build_schema_text(ROOT, blocks, n_channels=2))
+    assert namespace['Traces']._use_channels and namespace['Traces'].channel_table is namespace['Channel']
+    assert '-> self.channel_table' in namespace['Traces']().definition
+
+    text = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester', n_channels=2)
+    ast.parse(text)
+    assert "Channel().add_channels([('wDataCh0', 0), ('wDataCh1', 1)], skip_duplicates=True)" in text
+    assert text.index('Channel().add_channels') > text.index('RawDataParams().add_default()')
+
+
+@pytest.mark.parametrize('n_channels', [0, -1, 1.5, '2', None, True])
+def test_invalid_n_channels_rejected(n_channels):
+    with pytest.raises(AssertionError):
+        make_project.validate_n_channels(n_channels)
+
+
+def test_n_channels_argument():
+    args = make_project.parse_args(['proj', '--n-channels', '2'])
+    assert make_project.select_n_channels(args) == 2
