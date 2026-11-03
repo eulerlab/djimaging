@@ -21,7 +21,7 @@ from djimaging.utils.mask_utils import (
     to_roi_mask_file, sort_roi_mask_files,
     load_preferred_roi_mask_igor, load_preferred_roi_mask_file, compare_roi_masks,
     save_roi_mask_file, load_roi_mask_file, relabel_mask, clean_rois, shift_array, add_rois,
-    generate_roi_suggestions, remove_bright_alt_channel_rois, _ROI_FILE_FORMAT_HELP,
+    generate_roi_suggestions, estimate_vessel_mask, remove_vessel_rois, _ROI_FILE_FORMAT_HELP,
 )
 from djimaging.utils.mask_format_utils import to_igor_format, to_python_format
 from djimaging.utils.plot_utils import plot_field, field_extent_and_labels
@@ -535,7 +535,8 @@ class RoiMaskTemplate(dj.Manual):
             clean: bool = True,
             min_size: int = 3,
             connectivity: int = 2,
-            max_alt_intensity: float | None = None,
+            vessel_threshold: float | None = None,
+            max_vessel_overlap: float = 0.2,
             auto_shift: bool = True,
             max_shift: int | None = None,
             overwrite_files: bool = False,
@@ -573,10 +574,13 @@ class RoiMaskTemplate(dj.Manual):
                 ROIs smaller than ``min_size`` pixels), see ``clean_rois``.
             min_size: Minimum ROI size in pixels for cleaning.
             connectivity: 1 (only NSEW neighbours) or 2 (also diagonal neighbours) connect pixels of a ROI.
-            max_alt_intensity: If not None, remove ROIs that are bright in the alternative channel (the first channel
-                other than ``roi_channel``, e.g. SR101, which labels blood vessels and astrocytes that the model
-                often mistakes for cells). The channel's time-average is scaled to [0, 1] (1st to 99th percentile)
-                and ROIs with a mean above this value are removed, e.g. 0.5. Lower values remove more ROIs.
+            vessel_threshold: If not None, remove ROIs on blood vessels, which the model sometimes mistakes for
+                cells. Vessels are found by comparing the channels: the alternative channel (the first channel other than
+                ``roi_channel``, e.g. SR101) is predicted from the ROI channel (cells can be bright in both), and
+                pixels that stand out more than this many robust standard deviations from that prediction count as
+                vessel. Fields without vessels yield no vessel pixels. Try 10; lower values find more vessel pixels.
+                See ``mask_utils.estimate_vessel_mask``.
+            max_vessel_overlap: A ROI is removed if more than this fraction of its pixels are on vessels.
             auto_shift: If True, estimate the shift of every other presentation relative to the first one from
                 the correlation maps. Otherwise all presentations get the same mask without shift.
             max_shift: Largest shift in pixels that auto shift searches for. Defaults to the table-level value.
@@ -614,7 +618,8 @@ class RoiMaskTemplate(dj.Manual):
                         field_key, autorois_model, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
                         old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset,
                         use_all_stacks=use_all_stacks, clean=clean, min_size=min_size, connectivity=connectivity,
-                        max_alt_intensity=max_alt_intensity, auto_shift=auto_shift, max_shift=max_shift, overwrite_files=overwrite_files)
+                        vessel_threshold=vessel_threshold, max_vessel_overlap=max_vessel_overlap,
+                        auto_shift=auto_shift, max_shift=max_shift, overwrite_files=overwrite_files)
                     result['created' if created else 'skipped'].append(field_key)
                     if verbose and not created:
                         print('  Mask files already exist, skipped. Load them with `rescan_filesystem`.')
@@ -636,7 +641,7 @@ class RoiMaskTemplate(dj.Manual):
     def _create_field_roi_mask_files(
             self, field_key: dict, autorois_model, roi_channel, roi_mask_dir, old_prefix, new_prefix,
             use_stim_onset, use_all_stacks, clean, min_size, connectivity, auto_shift, max_shift, overwrite_files,
-            max_alt_intensity=None,
+            vessel_threshold=None, max_vessel_overlap=0.2,
     ) -> bool:
         """Create the mask files of all presentations of one field. Returns False if skipped because files exist."""
         data = self._load_field_stacks(
@@ -653,7 +658,7 @@ class RoiMaskTemplate(dj.Manual):
         roi_mask = relabel_mask(np.asarray(roi_mask), connectivity=connectivity)
         if clean:
             roi_mask = clean_rois(roi_mask, n_artifact, min_size=min_size, connectivity=connectivity, verbose=False)
-        roi_mask = _remove_bright_alt_channel_rois(roi_mask, data, 0, max_alt_intensity, connectivity)
+        roi_mask = _remove_vessel_rois(roi_mask, data, 0, vessel_threshold, max_vessel_overlap, connectivity)
 
         # Shifts are defined as in the ROI canvas: the mask is in the frame of the first presentation, and the
         # mask file of a presentation is the mask shifted by the inverse of the presentation's shift.
@@ -697,7 +702,9 @@ class RoiMaskTemplate(dj.Manual):
             clean: bool = True,
             min_size: int = 3,
             connectivity: int = 2,
-            max_alt_intensity: float | None = None,
+            vessel_threshold: float | None = None,
+            max_vessel_overlap: float = 0.2,
+            vessel_filter_existing: bool = False,
             add_missing: bool = True,
             iou_threshold: float = 0.1,
             overwrite_files: bool = False,
@@ -733,9 +740,10 @@ class RoiMaskTemplate(dj.Manual):
             clean: If True, clean the existing mask, see ``clean_rois``.
             min_size: Minimum ROI size in pixels, for cleaning and for added ROIs.
             connectivity: 1 (only NSEW neighbours) or 2 (also diagonal neighbours) connect pixels of a ROI.
-            max_alt_intensity: If not None, ROIs that are bright in the alternative channel (the first channel other
-                than ``roi_channel``, e.g. SR101, which labels blood vessels) are not added, and, if ``clean``, also
-                removed from the existing mask. See ``create_missing_roi_masks``.
+            vessel_threshold: If not None, ROIs on blood vessels are not added, see ``create_missing_roi_masks``.
+            max_vessel_overlap: A ROI is considered on a vessel if more than this fraction of its pixels are on vessels.
+            vessel_filter_existing: If True, ROIs of the existing mask that are on vessels are removed too. By
+                default only new ROIs are filtered, since the existing mask may be curated.
             add_missing: If True, add ROIs that the model finds but that are missing in the mask.
             iou_threshold: A ROI of the model counts as missing if its intersection over union with every existing
                 ROI is below this value. Lower values add fewer ROIs.
@@ -780,7 +788,8 @@ class RoiMaskTemplate(dj.Manual):
                         field_key, autorois_model, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
                         old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset, clean=clean,
                         min_size=min_size, connectivity=connectivity, iou_threshold=iou_threshold,
-                        overwrite_files=overwrite_files, max_alt_intensity=max_alt_intensity)
+                        overwrite_files=overwrite_files, vessel_threshold=vessel_threshold,
+                        max_vessel_overlap=max_vessel_overlap, vessel_filter_existing=vessel_filter_existing)
                     status = info.pop('status')
                     result[status].append(info if status in ('corrected', 'skipped') else info['field_key'])
                     if verbose:
@@ -810,7 +819,7 @@ class RoiMaskTemplate(dj.Manual):
     def _correct_field_roi_mask(
             self, field_key: dict, autorois_model, roi_channel, roi_mask_dir, old_prefix, new_prefix,
             use_stim_onset, clean, min_size, connectivity, iou_threshold, overwrite_files,
-            max_alt_intensity=None,
+            vessel_threshold=None, max_vessel_overlap=0.2, vessel_filter_existing=False,
     ) -> dict:
         """Correct the mask of one field and save it. Returns a dict with ``status`` and information."""
         field_key = (self.field_table & field_key).proj().fetch1()
@@ -835,14 +844,14 @@ class RoiMaskTemplate(dj.Manual):
         roi_mask_old = to_python_format(load_array(main_row['roi_mask']))
         roi_mask = clean_rois(roi_mask_old, n_artifact, min_size=min_size, connectivity=connectivity,
                               verbose=False) if clean else roi_mask_old.copy()
-        if clean:
-            roi_mask = _remove_bright_alt_channel_rois(roi_mask, data, ref_idx, max_alt_intensity, connectivity)
+        if vessel_filter_existing:
+            roi_mask = _remove_vessel_rois(roi_mask, data, ref_idx, vessel_threshold, max_vessel_overlap, connectivity)
 
         n_added = 0
         if autorois_model is not None:
             roi_mask_pred = _predict_roi_mask(autorois_model, data, ref_idx=ref_idx)
-            roi_mask_pred = _remove_bright_alt_channel_rois(
-                roi_mask_pred, data, ref_idx, max_alt_intensity, connectivity)
+            roi_mask_pred = _remove_vessel_rois(
+                roi_mask_pred, data, ref_idx, vessel_threshold, max_vessel_overlap, connectivity)
             if np.any(roi_mask > 0):
                 rois_to_add = generate_roi_suggestions(
                     mask_pred=roi_mask_pred, mask_true=roi_mask, n_artifact=n_artifact, threshold=iou_threshold)
@@ -1485,18 +1494,19 @@ def _predict_roi_mask(autorois_model, data: dict, ref_idx: int = 0, use_all_stac
         n_artifact=n_artifact, pixel_size_um=data['pixel_size_d1_d2']))
 
 
-def _remove_bright_alt_channel_rois(roi_mask: np.ndarray, data: dict, ref_idx: int, max_alt_intensity: float | None,
-                                    connectivity: int) -> np.ndarray:
-    """Remove ROIs that are bright in the first channel other than the ROI channel (no-op if None)."""
-    if max_alt_intensity is None:
+def _remove_vessel_rois(roi_mask: np.ndarray, data: dict, ref_idx: int, vessel_threshold: float | None,
+                        max_vessel_overlap: float, connectivity: int) -> np.ndarray:
+    """Remove ROIs on blood vessels, found by comparing the first other channel to the ROI channel (no-op if None)."""
+    if vessel_threshold is None:
         return roi_mask
     other_chs = [ch_name for ch_name in data['ch_names'] if ch_name != data['roi_channel']]
     if len(other_chs) == 0:
-        raise ValueError('max_alt_intensity requires a second channel, but only one channel is available.')
+        raise ValueError('vessel_threshold requires a second channel, but only one channel is available.')
     alt_img = np.mean(data['stacks'][other_chs[0]][ref_idx], axis=-1)
-    return remove_bright_alt_channel_rois(
-        roi_mask, alt_img, n_artifact=data['n_artifact'], max_rel_intensity=max_alt_intensity,
-        connectivity=connectivity, verbose=False)
+    main_img = np.mean(data['stacks'][data['roi_channel']][ref_idx], axis=-1)
+    vessel_mask = estimate_vessel_mask(alt_img, main_img, n_artifact=data['n_artifact'], alt_z=vessel_threshold)
+    return remove_vessel_rois(roi_mask, vessel_mask, max_overlap=max_vessel_overlap, connectivity=connectivity,
+                              verbose=False)
 
 
 def _free_memory() -> None:

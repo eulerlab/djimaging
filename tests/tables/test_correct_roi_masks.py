@@ -136,36 +136,81 @@ def test_fields_with_different_presentation_masks_are_skipped(tmp_path):
     assert info['status'] == 'skipped' and 'different' in info['reason']
 
 
-def test_bright_alt_channel_rois_are_removed(tmp_path):
-    fake = _FakeRoiMask(tmp_path, _original_mask())
-    alt = np.zeros((20, 20, 3))
-    alt[12:17, :, :] = 10.  # vessel-like bright band over the second cell and the new cell
-    fake.data['stacks']['ch1'] = [alt] * 2
+def _vessel_stacks():
+    """Main channel with a dark vertical vessel (cols 14-16), bright in the alt channel; cells elsewhere."""
+    rng = np.random.default_rng(0)
+    main = 5. + rng.normal(0, .1, (20, 20, 3))
+    main[:, 14:17] = 0.
+    alt = rng.normal(0, .1, (20, 20, 3))
+    alt[:, 14:17] += 50.
+    return main, alt
+
+
+def test_vessel_rois_are_not_added_but_existing_are_kept_by_default(tmp_path):
+    mask = np.zeros((20, 20), dtype=int)
+    mask[5:9, 5:9] = 1
+    mask[10:14, 14:17] = 2  # existing ROI on the vessel
+    fake = _FakeRoiMask(tmp_path, mask)
+    main, alt = _vessel_stacks()
+    fake.data['stacks'] = {'ch0': [main] * 2, 'ch1': [alt] * 2}
     fake.data['ch_names'] = ['ch0', 'ch1']
+    fake.data['n_artifact'] = 0
 
-    info = _run(fake, _FakeModel(), max_alt_intensity=0.5)
-    assert info['status'] == 'corrected'
+    class _Model:  # finds the existing cell, a new cell and a new ROI on the vessel
+        def create_mask_from_data(self, *args, **kwargs):
+            pred = np.zeros((20, 20), dtype=int)
+            pred[5:9, 5:9] = 1
+            pred[12:16, 2:6] = 2
+            pred[2:6, 14:17] = 3
+            return pred
+
+    info = _run(fake, _Model(), vessel_threshold=10., clean=False)
     ref = mask_utils.load_roi_mask_file(fake.output_files[0])
-    assert np.all(ref[5:9, 5:9] > 0)
-    assert not np.any(ref[12:17, :] > 0)
-    assert info['n_added'] == 0
+    assert info['n_added'] == 1
+    assert np.all(ref[12:16, 2:6] > 0)
+    assert not np.any(ref[2:6, 14:17] > 0)  # new vessel ROI rejected
+    assert np.all(ref[10:14, 14:17] > 0)  # existing vessel ROI kept
+
+    info = _run(fake, _Model(), vessel_threshold=10., clean=False, vessel_filter_existing=True, overwrite_files=True)
+    ref = mask_utils.load_roi_mask_file(fake.output_files[0])
+    assert not np.any(ref[10:14, 14:17] > 0)
 
 
-def test_bright_alt_channel_needs_second_channel(tmp_path):
+def test_vessel_threshold_needs_second_channel(tmp_path):
     fake = _FakeRoiMask(tmp_path, _original_mask())
     try:
-        _run(fake, _FakeModel(), max_alt_intensity=0.5)
+        _run(fake, _FakeModel(), vessel_threshold=10.)
     except ValueError as e:
         assert 'second channel' in str(e)
     else:
         raise AssertionError('expected ValueError')
 
 
-def test_light_artifact_does_not_count_for_bright_alt_channel_rois():
-    mask = np.zeros((20, 20), dtype=int)
-    mask[0:6, 5:9] = 1  # mostly in the artifact rows, dim below them
-    alt = np.zeros((20, 20))
-    alt[:2] = 100.  # light artifact
-    alt[10:14] = 5.
-    out = mask_utils.remove_bright_alt_channel_rois(mask, alt, n_artifact=2, max_rel_intensity=0.5, verbose=False)
-    assert np.any(out > 0)
+def test_no_vessels_in_field_without_bright_alt_structures():
+    rng = np.random.default_rng(1)
+    main = 5. + rng.normal(0, .1, (20, 20))
+    alt = rng.normal(0, .1, (20, 20))
+    assert not mask_utils.estimate_vessel_mask(alt, main).any()
+
+
+def test_vessel_mask_ignores_light_artifact():
+    main, alt = _vessel_stacks()
+    main, alt = main.mean(-1), alt.mean(-1)
+    alt[:2] = 500.
+    vessel = mask_utils.estimate_vessel_mask(alt, main, n_artifact=2)
+    assert not vessel[:2].any()
+    assert vessel[10, 15]
+
+
+def test_cells_bright_in_both_channels_are_not_vessels():
+    rng = np.random.default_rng(2)
+    main = 1. + rng.normal(0, .1, (30, 30))
+    alt = rng.normal(0, .1, (30, 30))
+    for r, c in [(5, 5), (15, 20), (22, 2)]:  # cells with bleed-through
+        main[r:r + 4, c:c + 4] += 20.
+        alt[r:r + 4, c:c + 4] += 8.
+    alt[:, 12] += 15.  # thin vessel, not visible in the main channel
+    vessel = mask_utils.estimate_vessel_mask(alt, main)
+    assert vessel[:, 12].mean() > 0.8
+    for r, c in [(5, 5), (15, 20), (22, 2)]:
+        assert not vessel[r:r + 4, c:c + 4].any()
