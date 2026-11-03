@@ -353,6 +353,7 @@ print(f"{len(missing_fields)} fields without ROI mask")
 # | `clean` | Clean the mask after the model (artifact rows, disconnected ROIs, tiny ROIs). |
 # | `min_size` | Smallest ROI in pixels that survives cleaning. |
 # | `connectivity` | `1`: only horizontal/vertical neighbours belong to the same ROI. `2`: diagonal neighbours too. |
+# | `max_alt_intensity` | `None`: off. A number, e.g. `0.5`: remove ROIs that are bright in the second recording channel (e.g. SR101, which labels blood vessels and astrocytes that the model sometimes mistakes for cells). The channel's average image is scaled to 0-1 and ROIs with a mean above this value are removed; lower values remove more. |
 # | `auto_shift` | `True`: estimate the shift of the other presentations from their correlation maps. `False`: no shift, all presentations get the same mask. |
 # | `max_shift` | Largest shift in pixels that auto shift searches for. Default: `_max_shift` of the table (5). |
 # | `overwrite_files` | `False`: skip fields whose mask files all exist. `True`: overwrite the files, **including masks you corrected by hand**. |
@@ -381,6 +382,7 @@ result = RoiMask().create_missing_roi_masks(
     clean=True,
     min_size=3,
     connectivity=2,
+    max_alt_intensity=None,
     auto_shift=True,
     max_shift=None,
     overwrite_files=False,
@@ -413,7 +415,7 @@ RoiMask().rescan_filesystem(verboselvl=2, roi_mask_dir='AutoROIs')
 # replaced right away, so only use it if you do not want to review them.
 #
 # The parameters `model`, `kind`, `autorois_models`, `restrictions`, `old_prefix`, `new_prefix`, `roi_channel`,
-# `use_stim_onset`, `clean`, `min_size`, `connectivity`, `overwrite_files`, `suppress_errors` and `verbose` are
+# `use_stim_onset`, `clean`, `min_size`, `connectivity`, `max_alt_intensity`, `overwrite_files`, `suppress_errors` and `verbose` are
 # the same as above. In addition:
 #
 # | Parameter | Meaning |
@@ -441,6 +443,7 @@ correction = RoiMask().correct_roi_masks(
     clean=True,
     min_size=3,
     connectivity=2,
+    max_alt_intensity=None,
     add_missing=True,
     iou_threshold=0.1,
     overwrite_files=False,

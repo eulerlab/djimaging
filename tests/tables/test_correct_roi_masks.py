@@ -134,3 +134,38 @@ def test_fields_with_different_presentation_masks_are_skipped(tmp_path):
     fake = _FakeRoiMask(tmp_path, _original_mask(), different=True)
     info = _run(fake, _FakeModel())
     assert info['status'] == 'skipped' and 'different' in info['reason']
+
+
+def test_bright_alt_channel_rois_are_removed(tmp_path):
+    fake = _FakeRoiMask(tmp_path, _original_mask())
+    alt = np.zeros((20, 20, 3))
+    alt[12:17, :, :] = 10.  # vessel-like bright band over the second cell and the new cell
+    fake.data['stacks']['ch1'] = [alt] * 2
+    fake.data['ch_names'] = ['ch0', 'ch1']
+
+    info = _run(fake, _FakeModel(), max_alt_intensity=0.5)
+    assert info['status'] == 'corrected'
+    ref = mask_utils.load_roi_mask_file(fake.output_files[0])
+    assert np.all(ref[5:9, 5:9] > 0)
+    assert not np.any(ref[12:17, :] > 0)
+    assert info['n_added'] == 0
+
+
+def test_bright_alt_channel_needs_second_channel(tmp_path):
+    fake = _FakeRoiMask(tmp_path, _original_mask())
+    try:
+        _run(fake, _FakeModel(), max_alt_intensity=0.5)
+    except ValueError as e:
+        assert 'second channel' in str(e)
+    else:
+        raise AssertionError('expected ValueError')
+
+
+def test_light_artifact_does_not_count_for_bright_alt_channel_rois():
+    mask = np.zeros((20, 20), dtype=int)
+    mask[0:6, 5:9] = 1  # mostly in the artifact rows, dim below them
+    alt = np.zeros((20, 20))
+    alt[:2] = 100.  # light artifact
+    alt[10:14] = 5.
+    out = mask_utils.remove_bright_alt_channel_rois(mask, alt, n_artifact=2, max_rel_intensity=0.5, verbose=False)
+    assert np.any(out > 0)

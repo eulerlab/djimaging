@@ -535,6 +535,61 @@ def clean_rois(mask: np.ndarray, n_artifact: int, min_size: int = 3,
     return mask_new
 
 
+def remove_bright_alt_channel_rois(mask: np.ndarray, alt_img: np.ndarray, n_artifact: int = 0,
+                                   max_rel_intensity: float = 0.5, connectivity: int = 2,
+                                   verbose: bool = True) -> np.ndarray:
+    """Remove ROIs that are bright in the alternative channel (e.g. SR101, which labels blood vessels and astrocytes).
+
+    The alternative channel image is scaled to [0, 1] using its 1st and 99th percentile outside the light artifact.
+    ROIs whose mean scaled intensity exceeds `max_rel_intensity` are set to background.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        2-D integer ROI mask in Python format (background 0, ROIs positive).
+    alt_img : np.ndarray
+        2-D time-average of the alternative channel with the same shape as `mask`.
+    n_artifact : int, optional
+        Number of rows at the top that form the light-artifact region and are ignored for scaling.
+    max_rel_intensity : float, optional
+        Largest allowed mean scaled intensity of a ROI. Default is 0.5.
+    connectivity : int, optional
+        Pixel connectivity used for relabelling. Default is 2.
+    verbose : bool, optional
+        If True, print the number of removed ROIs. Default is True.
+
+    Returns
+    -------
+    np.ndarray
+        Relabelled ROI mask without the bright ROIs.
+    """
+    mask = np.asarray(mask)
+    alt_img = np.asarray(alt_img, dtype=float)
+    if alt_img.shape != mask.shape:
+        raise ValueError(f'alt_img {alt_img.shape} and mask {mask.shape} must have the same shape')
+
+    lo, hi = np.nanpercentile(alt_img[n_artifact:], [1, 99])
+    if not hi > lo:
+        return mask.copy()
+    scaled = np.clip((alt_img - lo) / (hi - lo), 0, 1)
+
+    mask_new = mask.copy()
+    n_removed = 0
+    for roi_id in np.unique(mask[mask > 0]):
+        roi_pixels = mask == roi_id
+        valid_pixels = roi_pixels.copy()
+        valid_pixels[:n_artifact] = False  # the light artifact must not contribute
+        if not valid_pixels.any():
+            continue
+        if np.nanmean(scaled[valid_pixels]) > max_rel_intensity:
+            mask_new[roi_pixels] = 0
+            n_removed += 1
+
+    if verbose and n_removed:
+        print(f'Removed {n_removed} ROIs that are bright in the alternative channel.')
+    return relabel_mask(mask_new, connectivity=connectivity)
+
+
 def find_neighbor_labels(x: int, y: int, labels: np.ndarray) -> np.ndarray:
     """Return the NSEW neighbour labels for a given pixel in a 2-D label image.
 
