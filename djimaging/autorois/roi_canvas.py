@@ -1585,6 +1585,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         new_key = {**field_key, **self.pres_names[self.main_stim_idx], "roi_mask": main_roi_mask}
 
         roi_mask_tab().insert1(new_key)
+        if not getattr(roi_mask_tab, '_presentation_masks', True):
+            return  # Motion mode: only the field mask, presentation masks are computed by the motion tables
         for i, (pres_key, roi_mask) in enumerate(pres_and_roi_mask):
             new_key = {**field_key, **pres_key, "roi_mask": roi_mask}
 

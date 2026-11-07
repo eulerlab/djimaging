@@ -13,6 +13,10 @@ BLOCKS = {
     'core': dict(
         description='UserInfo, Experiment, Field, Stimulus, Presentation, RoiMask, Roi, Traces, Snippets, Averages',
         requires=[]),
+    'motion': dict(
+        description='Motion correction and motion QC (motion mode): MotionParams, MotionReference, MotionDetection, '
+                    'MotionRoiMask, MotionTrust. RoiMask then has no presentation masks and Traces are motion corrected',
+        requires=['core']),
     'basic': dict(
         description='ChirpQI, ChirpFeatures, OsDsIndexes',
         requires=['core']),
@@ -42,6 +46,11 @@ DEFAULT_CHANNELS = (1, 1)
 USER_INFO_CLASS_HEADER = "@schema\nclass UserInfo(core.UserInfoTemplate):\n"
 TRACES_CLASS_HEADER = "@schema\nclass Traces(core.TracesTemplate):\n"
 NOTEBOOK_RAW_PARAMS_CELL = "RawDataParams().add_default()\nRawDataParams()\n"
+
+# Anchors in the core blocks that are changed by the motion block (motion mode).
+ROI_MASK_PRESENTATION_CLASS = ("    class RoiMaskPresentation(core.RoiMaskTemplate.RoiMaskPresentation):\n"
+                               "        presentation_table = Presentation\n")
+NOTEBOOK_TRACES_SECTION = "# %% [markdown]\n# # Core: Traces and responses\n"
 
 
 def parse_args(argv=None):
@@ -187,6 +196,32 @@ def add_channels_to_schema(code, channels):
         1)
 
 
+def add_motion_to_schema(code, motion_code):
+    """Motion mode: insert the motion tables before Traces (Traces depends on MotionRoiMask), let RoiMask only store
+    the field mask (no RoiMaskPresentation, MotionRoiMask replaces it) and extract motion-corrected Traces."""
+    assert ROI_MASK_PRESENTATION_CLASS in code, "RoiMaskPresentation not found in the schema blocks."
+    assert TRACES_CLASS_HEADER in code, "Traces table not found in the schema blocks."
+    code = code.replace(
+        ROI_MASK_PRESENTATION_CLASS,
+        "    # Motion mode: only the field mask, the presentation masks are computed by MotionRoiMask\n"
+        "    _presentation_masks = False\n"
+        "    RoiMaskPresentation = None\n",
+        1)
+    code = code.replace(TRACES_CLASS_HEADER, motion_code.strip("\n") + "\n\n\n" + TRACES_CLASS_HEADER, 1)
+    return code.replace(
+        TRACES_CLASS_HEADER,
+        TRACES_CLASS_HEADER
+        + "    _include_motion_correction = True  # Registered stack + presentation ROI weights of MotionRoiMask\n"
+        + "    motion_roi_mask_table = MotionRoiMask\n",
+        1)
+
+
+def add_motion_to_notebook(text, motion_text):
+    """Insert the motion section before the Traces section (Traces need MotionRoiMask)."""
+    assert NOTEBOOK_TRACES_SECTION in text, "Traces section not found in the notebook blocks."
+    return text.replace(NOTEBOOK_TRACES_SECTION, motion_text.strip("\n") + "\n\n" + NOTEBOOK_TRACES_SECTION, 1)
+
+
 def add_channels_to_notebook(text, channels):
     """Add a cell that fills the Channel table."""
     if validate_channels(channels) is None:
@@ -300,22 +335,31 @@ def split_imports(source):
 
 def build_schema_text(djimaging_dir, blocks, channels=DEFAULT_CHANNELS):
     """Combine the schema blocks to one schema file. Imports between blocks are replaced by the block's code."""
-    imports, codes = [], []
+    imports, codes, motion_code = [], [], None
     for name in blocks:
         block_imports, code = split_imports(read_block(djimaging_dir, 'schemas', name))
         for line in block_imports:
             if 'djimaging.schemas.blocks' not in line and line not in imports:
                 imports.append(line)
-        codes.append(code)
+        if name == 'motion':
+            motion_code = code
+        else:
+            codes.append(code)
 
-    return "\n".join(imports) + "\n\n\n" + add_channels_to_schema("\n\n\n".join(codes), channels) + "\n"
+    code = "\n\n\n".join(codes)
+    if motion_code is not None:
+        code = add_motion_to_schema(code, motion_code)
+    return "\n".join(imports) + "\n\n\n" + add_channels_to_schema(code, channels) + "\n"
 
 
 def build_notebook_text(djimaging_dir, blocks, schema_module, project, channels=DEFAULT_CHANNELS):
     """Combine the notebook blocks in the order of the blocks, followed by the clean-up section."""
-    parts = [read_block(djimaging_dir, 'notebooks', name).strip("\n") for name in blocks]
+    parts = [read_block(djimaging_dir, 'notebooks', name).strip("\n") for name in blocks if name != 'motion']
     parts.append(read_block(djimaging_dir, 'notebooks', 'cleanup').strip("\n"))
-    text = add_channels_to_notebook("\n\n".join(parts) + "\n", channels)
+    text = "\n\n".join(parts) + "\n"
+    if 'motion' in blocks:
+        text = add_motion_to_notebook(text, read_block(djimaging_dir, 'notebooks', 'motion'))
+    text = add_channels_to_notebook(text, channels)
     return text.replace(SCHEMA_MODULE_PLACEHOLDER, schema_module).replace(BLOCKS_PLACEHOLDER, ", ".join(blocks))         .replace(PROJECT_PLACEHOLDER, project)
 
 

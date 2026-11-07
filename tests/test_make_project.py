@@ -47,6 +47,26 @@ def test_generated_schema_defines_tables_of_blocks(blocks):
     assert ('OsDsIndexes' in namespace) == ('basic' in blocks)
     assert ('OpticDisk' in namespace) == ('location' in blocks)
     assert ('CelltypeAssignmentV2' in namespace) == ('classifier' in blocks)
+    assert ('MotionRoiMask' in namespace) == ('motion' in blocks)
+    # Motion mode: one presentation mask format only
+    assert (namespace['RoiMask'].RoiMaskPresentation is None) == ('motion' in blocks)
+    assert namespace['RoiMask']._presentation_masks == ('motion' not in blocks)
+    assert namespace['Traces']._include_motion_correction == ('motion' in blocks)
+
+
+@pytest.mark.parametrize('channels', [None, (1, 1), (2, 1)])
+def test_motion_mode_schema_and_notebook(channels):
+    blocks = make_project.resolve_blocks(['motion', 'rf_sta'])
+    text = make_project.build_schema_text(ROOT, blocks, channels=channels)
+    namespace = exec_schema(text)
+    assert namespace['Traces'].motion_roi_mask_table is namespace['MotionRoiMask']
+    assert text.index('class MotionRoiMask(') < text.index('class Traces(')
+    assert text.index('class Roi(core.RoiTemplate)') < text.index('class MotionRoiMask(')
+    assert namespace['MotionTrust'].Roi.motion_roi_mask_table is namespace['MotionRoiMask']
+    nb = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester', channels=channels)
+    ast.parse(nb)
+    assert nb.index('MotionRoiMask().populate') < nb.index('Traces().populate')
+    assert nb.index('Roi().populate') < nb.index('MotionReference().populate')
 
 
 def test_generated_schema_has_no_duplicate_tables():

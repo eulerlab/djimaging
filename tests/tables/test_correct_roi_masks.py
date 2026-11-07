@@ -63,6 +63,7 @@ def _original_mask():
 
 class _FakeRoiMask:
     _roi_file_format = 'numpy'
+    _presentation_masks = True
     _get_roi_file_format = RoiMaskTemplate._get_roi_file_format
     _save_roi_mask_files = RoiMaskTemplate._save_roi_mask_files
     init_shifts = None

@@ -32,6 +32,11 @@ class RoiMaskTemplate(dj.Manual):
     _max_shift = 5
     _roi_file_format: str = 'numpy'
     _filepath_store = "reference"
+    # Per-presentation masks in the part table RoiMaskPresentation (same / shifted / different from the field mask).
+    # False = motion mode: only the field mask (and the presentation it belongs to) is stored here; the presentation
+    # masks are computed by djimaging.tables.motion_correction (MotionRoiMask). The concrete table then defines
+    # `RoiMaskPresentation = None`.
+    _presentation_masks: bool = True
 
     @property
     def definition(self):
@@ -370,7 +375,7 @@ class RoiMaskTemplate(dj.Manual):
             A list of (shift_dx, shift_dy) tuples aligned with pres_keys, or
             None if no ROI mask entry exists yet for the field.
         """
-        if len(self & field_key) == 0:
+        if len(self & field_key) == 0 or not self._presentation_masks:
             return None
         shifts = []
         for pres_key in pres_keys:
@@ -825,7 +830,7 @@ class RoiMaskTemplate(dj.Manual):
         """Correct the mask of one field and save it. Returns a dict with ``status`` and information."""
         field_key = (self.field_table & field_key).proj().fetch1()
 
-        if len(self.RoiMaskPresentation & field_key & "as_field_mask='different'") > 0:
+        if self._presentation_masks and len(self.RoiMaskPresentation & field_key & "as_field_mask='different'") > 0:
             return dict(status='skipped', field_key=field_key, reason="has presentations with 'different' masks")
 
         data = self._load_field_stacks(
@@ -840,7 +845,7 @@ class RoiMaskTemplate(dj.Manual):
         if len(ref_idxs) != 1:
             raise ValueError(f'Could not find the presentation of the ROI mask of field_key={field_key}')
         ref_idx = ref_idxs[0]
-        shifts = self.init_shifts(field_key, pres_keys)
+        shifts = self.init_shifts(field_key, pres_keys) or [(0, 0)] * len(pres_keys)
 
         roi_mask_old = to_python_format(load_array(main_row['roi_mask']))
         roi_mask = clean_rois(roi_mask_old, n_artifact, min_size=min_size, connectivity=connectivity,
@@ -1051,7 +1056,7 @@ class RoiMaskTemplate(dj.Manual):
             self._add_field_roi_masks(
                 field_key, source='autorois', roi_mask_dir=roi_mask_dir,
                 old_prefix=old_prefix, new_prefix=new_prefix, max_shift=max_shift)
-            n_new = len(self.RoiMaskPresentation & field_key)
+            n_new = len(self.RoiMaskPresentation & field_key) if self._presentation_masks else len(pres_keys)
             if len(self & field_key) != 1 or n_new != len(pres_keys):
                 raise ValueError(f'Expected 1 ROI mask for {len(pres_keys)} presentations, '
                                  f'got {len(self & field_key)} for {n_new}; rolled back.')
@@ -1105,13 +1110,15 @@ class RoiMaskTemplate(dj.Manual):
             restrictions = dict()
 
         problems = []
-        pres_keys = (self.RoiMaskPresentation & restrictions).proj().to_dicts()
+        # In motion mode (no presentation masks) only the field masks are stored, with the file they came from.
+        mask_tab = self.RoiMaskPresentation if self._presentation_masks else self
+        pres_keys = (mask_tab & restrictions).proj().to_dicts()
 
         if verbose:
             print(f'Checking filesystem consistency for {len(pres_keys)} presentation(s)...')
 
         for i, key in enumerate(pres_keys):
-            roi_mask_file, roi_mask_source, database_roi_mask = (self.RoiMaskPresentation & key).fetch1(
+            roi_mask_file, roi_mask_source, database_roi_mask = (mask_tab & key).fetch1(
                 'roi_mask_file', 'roi_mask_source', 'roi_mask')
             filesystem_file = local_file_path(roi_mask_file, self._filepath_store)
             database_roi_mask = load_array(database_roi_mask)
@@ -1196,8 +1203,12 @@ class RoiMaskTemplate(dj.Manual):
         # entries are not needlessly read from disk and their filesystem-vs-database
         # consistency is not checked here (which would cause rescan to fail if any
         # pre-existing mask file was edited outside the database).
-        new_pres_keys = [pk for pk in pres_keys
-                         if len(self.RoiMaskPresentation & pk) == 0]
+        if self._presentation_masks:
+            new_pres_keys = [pk for pk in pres_keys
+                             if len(self.RoiMaskPresentation & pk) == 0]
+        else:
+            # Motion mode: only the field mask is stored; presentation masks come from the motion tables.
+            new_pres_keys = pres_keys if len(self & field_key) == 0 else []
 
         if len(new_pres_keys) == 0:
             if verboselvl > 1:
@@ -1259,7 +1270,8 @@ class RoiMaskTemplate(dj.Manual):
 
         roi_mask_pres_keys = []
 
-        for pres_key, (roi_mask, roi_mask_file, roi_mask_source) in data_pairs:
+        # Motion mode: no presentation masks, only the field mask is inserted below.
+        for pres_key, (roi_mask, roi_mask_file, roi_mask_source) in (data_pairs if self._presentation_masks else []):
             if roi_mask is not None:
                 as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(
                     roi_mask, main_roi_mask, max_shift=self._max_shift if max_shift is None else max_shift)
@@ -1372,8 +1384,11 @@ class RoiMaskTemplate(dj.Manual):
             else:
                 filesystem_roi_mask = None
 
-        if len((self.RoiMaskPresentation & key).proj()) > 0:
-            database_roi_mask = load_array((self.RoiMaskPresentation & key).fetch1('roi_mask'))
+        # Database entry of this presentation: its presentation mask, or in motion mode the field mask if the field
+        # mask belongs to this presentation.
+        db_tab = self.RoiMaskPresentation if self._presentation_masks else self
+        if len((db_tab & key).proj()) > 0:
+            database_roi_mask = load_array((db_tab & key).fetch1('roi_mask'))
 
             if filesystem_roi_mask is None:
                 if igor_roi_masks == 'yes':
@@ -1425,7 +1440,10 @@ class RoiMaskTemplate(dj.Manual):
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
 
-        roi_mask = load_array((self.RoiMaskPresentation & key).fetch1('roi_mask'))
+        if self._presentation_masks:
+            roi_mask = load_array((self.RoiMaskPresentation & key).fetch1('roi_mask'))
+        else:  # Motion mode: field mask (presentation masks are in MotionRoiMask)
+            roi_mask = load_array((self & {k: key[k] for k in self.primary_key}).fetch1('roi_mask'))
         plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
                    roi_mask=roi_mask, title=key, npixartifact=npixartifact, gamma=gamma)
 
