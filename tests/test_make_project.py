@@ -51,6 +51,9 @@ def test_generated_schema_defines_tables_of_blocks(blocks):
     # Motion mode: one presentation mask format only
     assert (namespace['RoiMask'].RoiMaskPresentation is None) == ('motion' in blocks)
     assert namespace['RoiMask']._presentation_masks == ('motion' not in blocks)
+    # Motion mode: the presentation of the field mask is chosen by fit and the mask aligned to it
+    assert namespace['RoiMask']()._selects_field_mask == ('motion' in blocks)
+    assert ('mask_selection' in namespace['RoiMask']().definition) == ('motion' in blocks)
     assert namespace['Traces']._include_motion_correction == ('motion' in blocks)
 
 

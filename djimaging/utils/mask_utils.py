@@ -1147,3 +1147,153 @@ def compare_roi_masks(roi_mask: np.ndarray, ref_roi_mask: np.ndarray,
                 return 'shifted', (dx, dy)
 
     return 'different', (0, 0)
+
+
+def _fit_image(img: np.ndarray, n_artifact: int = 0, highpass_sigma: float = 6.) -> np.ndarray:
+    """High-passed, robustly z-scored mean image; light artifact rows are NaN.
+
+    Pixel noise is negligible in mean images of typical recordings (< 0.1 % of the variance of the high-passed image
+    even for 40 frames), so fits of short and long recordings are comparable without noise correction.
+    """
+    from scipy.ndimage import gaussian_filter
+    img = np.asarray(img, dtype=float)
+    hp = _robust_z(img - gaussian_filter(img, highpass_sigma, mode='nearest'), n_artifact=n_artifact)
+    hp[:n_artifact] = np.nan
+    return hp
+
+
+def _roi_and_ring_indices(roi_mask: np.ndarray, ring_px: int = 2) -> list:
+    """Flat pixel indices of each ROI (Igor format) and of the ring of background pixels around it."""
+    from scipy.ndimage import binary_dilation
+    occupied = roi_mask < 0
+    out = []
+    for roi_id in np.unique(roi_mask[occupied]):
+        inner = roi_mask == roi_id
+        ring = binary_dilation(inner, iterations=ring_px) & ~occupied
+        if ring.sum() > 3:
+            out.append((np.flatnonzero(inner), np.flatnonzero(ring)))
+    return out
+
+
+def _offset_image(img: np.ndarray, offset: tuple) -> np.ndarray:
+    """``out[p] = img[p - offset]`` with NaN outside: scoring a mask on ``out`` equals scoring the mask shifted by
+    ``offset`` (``shift_array(mask, offset)``) on ``img``, inverted."""
+    dx, dy = int(offset[0]), int(offset[1])
+    out = np.full_like(img, np.nan)
+    nx, ny = img.shape
+    out[max(dx, 0):nx + min(dx, 0), max(dy, 0):ny + min(dy, 0)] = \
+        img[max(-dx, 0):nx + min(-dx, 0), max(-dy, 0):ny + min(-dy, 0)]
+    return out
+
+
+def _fit_score(indices: list, fit_img: np.ndarray) -> float:
+    flat = fit_img.ravel()
+    vals = []
+    for inner, ring in indices:
+        vi, vr = flat[inner], flat[ring]
+        if np.mean(np.isfinite(vi)) < 0.5 or np.mean(np.isfinite(vr)) < 0.5:
+            continue
+        vals.append(np.nanmean(vi) - np.nanmean(vr))
+    return float(np.median(vals)) if len(vals) > 0 else np.nan
+
+
+def mask_fit_score(roi_mask: np.ndarray, img: np.ndarray, n_artifact: int = 0, ring_px: int = 2,
+                   highpass_sigma: float = 6.) -> float:
+    """How well an ROI mask (Igor format) fits a mean image.
+
+    Median over ROIs of the mean of the high-passed, robustly z-scored image inside the ROI minus the mean in a ring
+    of ``ring_px`` background pixels around it. ROIs drawn on cell bodies give positive values; a mask that is
+    misaligned or belongs to a different image gives values close to zero.
+    """
+    assert_igor_format(roi_mask)
+    return _fit_score(_roi_and_ring_indices(roi_mask, ring_px=ring_px),
+                      _fit_image(img, n_artifact=n_artifact, highpass_sigma=highpass_sigma))
+
+
+def best_mask_offset(roi_mask: np.ndarray, img: np.ndarray, max_offset: int = 2, n_artifact: int = 0,
+                     min_gain: float = 0.1, ring_px: int = 2, highpass_sigma: float = 6.) -> dict:
+    """Integer offset that aligns an ROI mask (Igor format) to a mean image.
+
+    All offsets within ``max_offset`` px are scored with ``mask_fit_score``. The best one is only accepted if it
+    improves the score by more than ``min_gain`` (relative to the score without offset), so that noise alone does
+    not shift a mask. Apply it with ``shift_array(roi_mask, offset, cval=1)``.
+
+    Returns:
+        dict with ``offset`` (accepted offset), ``score`` (score at the accepted offset), ``score0`` (score without
+        offset), and ``best_offset`` / ``best_score`` (best offset before the ``min_gain`` check).
+    """
+    assert_igor_format(roi_mask)
+    indices = _roi_and_ring_indices(roi_mask, ring_px=ring_px)
+    fit_img = _fit_image(img, n_artifact=n_artifact, highpass_sigma=highpass_sigma)
+    scores = {}
+    for dx in range(-max_offset, max_offset + 1):
+        for dy in range(-max_offset, max_offset + 1):
+            # Shifting the mask by (dx, dy) is equivalent to shifting the image by (-dx, -dy)
+            scores[(dx, dy)] = _fit_score(indices, _offset_image(fit_img, (-dx, -dy)))
+    score0 = scores[(0, 0)]
+    finite = {k: v for k, v in scores.items() if np.isfinite(v)}
+    if len(finite) == 0:
+        return dict(offset=(0, 0), score=score0, score0=score0, best_offset=(0, 0), best_score=score0)
+    best_offset = max(finite, key=lambda k: (finite[k], -abs(k[0]) - abs(k[1])))
+    best_score = finite[best_offset]
+    accept = best_offset != (0, 0) and (not np.isfinite(score0) or best_score > score0 + min_gain * abs(score0))
+    offset = best_offset if accept else (0, 0)
+    return dict(offset=offset, score=scores[offset], score0=score0, best_offset=best_offset, best_score=best_score)
+
+
+def select_field_roi_mask(roi_masks: list, images: list, preferred_idx: int = 0, has_stack_ave: list | None = None,
+                          n_artifact: int = 0, max_offset: int = 2, max_copy_shift: int = 5, tol: float = 0.05,
+                          min_gain: float = 0.1) -> dict:
+    """Choose the presentation an ROI mask was drawn on, and align the mask to its mean image.
+
+    In Igor, the ROI mask is drawn on one presentation of a field and copied (possibly with an integer shift) to the
+    other presentations. Which presentation it was drawn on is not stored. Here every presentation whose mask is a
+    copy of the preferred mask (``compare_roi_masks``: same or shifted) is a candidate. Its own mask is aligned to its
+    own mean image (``best_mask_offset``), and the candidate with the best fit is chosen. Candidates within ``tol``
+    (relative) of the best fit count as equally good; among those, a presentation with a ``Stack_ave`` (written by
+    Igor's ROI drawing) is preferred, then the preferred presentation (``mask_alias`` order), then the best fit.
+
+    Args:
+        roi_masks: ROI mask (Igor format) of each presentation.
+        images: Mean image of the ROI channel of each presentation (same shape as the masks).
+        preferred_idx: Index of the presentation preferred by ``mask_alias``.
+        has_stack_ave: Whether each presentation file contains a ``Stack_ave``.
+        n_artifact: Number of light artifact rows.
+        max_offset: Maximum offset [px] for aligning the mask to the chosen presentation.
+        max_copy_shift: Maximum shift for detecting copied masks, see ``compare_roi_masks``.
+        tol: Relative tolerance for treating fits as equal.
+        min_gain: See ``best_mask_offset``.
+
+    Returns:
+        dict with ``idx`` (chosen presentation), ``roi_mask`` (its mask, aligned), ``offset`` (alignment offset
+        applied with ``shift_array(roi_masks[idx], offset, cval=1)``), ``score`` (fit of the aligned mask),
+        ``selection`` ('fit', or 'alias' if no candidate fits, i.e. no positive score), ``scores`` (best fit per
+        presentation, NaN for non-candidates) and ``n_different`` (presentations with a different, not copied mask).
+    """
+    n = len(roi_masks)
+    if len(images) != n:
+        raise ValueError(f'Got {n} ROI masks but {len(images)} images.')
+    has_stack_ave = [False] * n if has_stack_ave is None else list(has_stack_ave)
+
+    ref = roi_masks[preferred_idx]
+    is_copy = [i == preferred_idx or compare_roi_masks(m, ref, max_shift=max_copy_shift)[0] != 'different'
+               for i, m in enumerate(roi_masks)]
+
+    fits = [best_mask_offset(m, img, max_offset=max_offset, n_artifact=n_artifact, min_gain=min_gain)
+            if c else None for m, img, c in zip(roi_masks, images, is_copy)]
+    scores = np.array([f['score'] if f is not None else np.nan for f in fits], dtype=float)
+
+    finite = np.isfinite(scores)
+    if not np.any(finite) or np.nanmax(scores) <= 0:
+        idx, selection = preferred_idx, 'alias'
+    else:
+        best = np.nanmax(scores)
+        close = [i for i in range(n) if finite[i] and scores[i] >= best - tol * abs(best)]
+        idx = max(close, key=lambda i: (has_stack_ave[i], i == preferred_idx, scores[i]))
+        selection = 'fit'
+
+    fit = fits[idx]
+    offset = tuple(int(v) for v in fit['offset'])
+    roi_mask = roi_masks[idx] if offset == (0, 0) else shift_array(roi_masks[idx], offset, cval=1)
+    return dict(idx=int(idx), roi_mask=roi_mask, offset=offset, score=float(fit['score']), selection=selection,
+                scores=scores, n_different=int(n - np.sum(is_copy)))

@@ -67,6 +67,12 @@ def test_motion_pipeline(motion_schema, tutorial_data_dir):
     # Motion mode: RoiMask only stores the field mask
     assert s.RoiMask.RoiMaskPresentation is None
     assert len(s.RoiMask() & experiment_key) == 1
+    # The presentation of the field mask is chosen by fit and the mask aligned to it; the file is unchanged
+    row = (s.RoiMask() & experiment_key).fetch1()
+    assert row['mask_selection'] in ('fit', 'alias')
+    assert abs(row['align_dx']) <= s.RoiMask._field_mask_max_offset
+    assert abs(row['align_dy']) <= s.RoiMask._field_mask_max_offset
+    assert s.RoiMask().check_filesystem_consistency(experiment_key, verbose=False) == []
 
     s.MotionParams().add(motion_params_id=1)
     s.MotionReference().populate(display_progress=False)

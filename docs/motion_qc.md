@@ -230,6 +230,25 @@ from → optimistic; the cross-validated errors above are the honest numbers):
 - The `low_contrast` flag fires for ~50 % of ROIs in some D recordings (drug changes OGB brightness) → needs
   recalibration / should not be read as "ROI lost" in D.
 
+## Field ROI mask: which presentation, aligned (`RoiMask`, motion mode)
+
+Igor masks are drawn on one presentation and copied (same or integer-shifted) to the others; which one is not stored.
+`mask_alias` order picked Chirp in all 2018 fields, but only the DS files have a `Stack_ave` (written by the drawing)
+and the mask fits DS best. Copied shifts are often wrong outside the drawing condition (20220215 GCL0 C2: copied
+(-1, 0), best fit (2, -1)). In motion mode the presentation of the field mask is the motion reference, so `RoiMask`
+now chooses it from the data (`mask_utils.select_field_roi_mask`):
+
+- Fit = median over ROIs of (mean inside − mean in a 2 px background ring) of the high-passed (σ = 6 px), robustly
+  z-scored mean image of the ROI channel after stimulus onset. Pixel noise is negligible in mean images (≤ 0.04 % of
+  the variance even for 40 frames), so differences between presentations are real image differences (activity, z).
+- Candidates: presentations whose mask is a copy of the `mask_alias` mask; each copy is aligned to its own image
+  (integer offset ≤ 2 px, accepted only if the fit improves by > 10 %). Best fit wins; within 5 % a presentation with
+  `Stack_ave` wins, then the `mask_alias` one. No positive fit → `mask_alias` (`mask_selection='alias'`, warning).
+- Stored: `align_dx/dy` (the file keeps the mask as drawn; `check_filesystem_consistency` applies the offset),
+  `mask_fit`, `mask_selection`.
+- All 16 xy fields: offset (0, 0) everywhere; choice DS (7 of 8 fields of 2018, one MC5 with fit 0.33 vs. DS 0.25),
+  `MB_C1` (with `Stack_ave`) or `chirp_C1` in 2022. C2/D fit 2–4× worse than C1, consistent with the z changes above.
+
 ## Open points / next steps
 
 1. ~~Per-ROI shift field between presentations~~ done (see above). Open: within-condition changes of the deformation

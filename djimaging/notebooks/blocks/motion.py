@@ -5,6 +5,11 @@
 # reference). The ROI masks of all presentations are computed from the data instead of being drawn or shifted by
 # hand, and `Traces` are motion corrected. Method and validation: `docs/motion_qc.md`.
 #
+# Which presentation a (copied) Igor mask was drawn on is not stored, so `RoiMask` chooses it from the data: the
+# presentation whose mean image fits the mask best (presentations with a `Stack_ave` and then `mask_alias` win ties),
+# and aligns the mask to it by up to 2 px (`align_dx`, `align_dy`; the mask file is not changed). Check `mask_fit`
+# and `mask_selection` ('alias': the mask fits no presentation).
+#
 # - `MotionParams`: Parameters (defaults in `motion_correction.DEFAULT_MOTION_PARAMS`).
 # - `MotionReference`: Reference images of a field, from the presentation the field ROI mask was drawn on.
 # - `MotionDetection`: Per presentation: rigid subpixel displacement vs. the reference (only the slow part, `tau_slow_s`,

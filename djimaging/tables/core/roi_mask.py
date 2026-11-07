@@ -21,7 +21,8 @@ from djimaging.utils.mask_utils import (
     to_roi_mask_file, sort_roi_mask_files,
     load_preferred_roi_mask_igor, load_preferred_roi_mask_file, compare_roi_masks,
     save_roi_mask_file, load_roi_mask_file, relabel_mask, clean_rois, shift_array, add_rois,
-    generate_roi_suggestions, estimate_vessel_mask, remove_vessel_rois, _ROI_FILE_FORMAT_HELP,
+    generate_roi_suggestions, estimate_vessel_mask, remove_vessel_rois, select_field_roi_mask,
+    _ROI_FILE_FORMAT_HELP,
 )
 from djimaging.utils.mask_format_utils import to_igor_format, to_python_format
 from djimaging.utils.plot_utils import plot_field, field_extent_and_labels
@@ -37,6 +38,15 @@ class RoiMaskTemplate(dj.Manual):
     # masks are computed by djimaging.tables.motion_correction (MotionRoiMask). The concrete table then defines
     # `RoiMaskPresentation = None`.
     _presentation_masks: bool = True
+    # Choose the presentation of the field mask from the data instead of only by `mask_alias`, and align the mask to
+    # its mean image (see `select_field_roi_mask`). None: on in motion mode (`_presentation_masks=False`), where the
+    # presentation of the field mask is the motion reference.
+    _select_field_mask: bool | None = None
+    _field_mask_max_offset: int = 2  # maximum alignment offset [px] of the field mask
+
+    @property
+    def _selects_field_mask(self) -> bool:
+        return (not self._presentation_masks) if self._select_field_mask is None else bool(self._select_field_mask)
 
     @property
     def definition(self):
@@ -49,6 +59,13 @@ class RoiMaskTemplate(dj.Manual):
         roi_mask     : <blob>                   # ROI mask for recording field
         roi_mask_file   : <filepath@{self._filepath_store}>  # file the ROI mask was loaded from (relative to store)
         roi_mask_source : enum('igor_h5', 'numpy', 'pickle', 'other')  # format of roi_mask_file
+        """
+        if self._selects_field_mask:
+            definition += """
+        align_dx : int32  # roi_mask = shift_array(mask in roi_mask_file, (align_dx, align_dy), cval=1)
+        align_dy : int32
+        mask_fit=null : float32  # fit of roi_mask to the mean image of its presentation (mask_fit_score)
+        mask_selection : enum('fit', 'alias')  # presentation chosen by the fit, or by mask_alias (no fit)
         """
         return definition
 
@@ -1122,6 +1139,9 @@ class RoiMaskTemplate(dj.Manual):
                 'roi_mask_file', 'roi_mask_source', 'roi_mask')
             filesystem_file = local_file_path(roi_mask_file, self._filepath_store)
             database_roi_mask = load_array(database_roi_mask)
+            # The field mask may be aligned to its presentation; the file has the mask as drawn
+            align = (mask_tab & key).fetch1('align_dx', 'align_dy') \
+                if mask_tab is self and self._selects_field_mask else (0, 0)
 
             if verbose:
                 print(f'  [{i + 1}/{len(pres_keys)}] Checking key={key}')
@@ -1144,6 +1164,9 @@ class RoiMaskTemplate(dj.Manual):
                     continue
                 filesystem_roi_mask = load_roi_mask_file(str(filesystem_file)).astype(np.int32)
                 filesystem_roi_mask = to_igor_format(filesystem_roi_mask)
+
+            if tuple(align) != (0, 0):
+                filesystem_roi_mask = shift_array(filesystem_roi_mask, shift=(int(align[0]), int(align[1])), cval=1)
 
             if not np.all(filesystem_roi_mask == database_roi_mask):
                 if verbose:
@@ -1261,7 +1284,14 @@ class RoiMaskTemplate(dj.Manual):
                 files=[f for k, m, f in keys_masks_files],
                 mask_alias=mask_alias, highres_alias=highres_alias, as_index=True)
 
-            main_pres_key, (main_roi_mask, main_file, main_source) = keys_masks_files[sort_idxs[0]][:2]
+            main_idx, selection_info = int(sort_idxs[0]), dict()
+            if self._selects_field_mask:
+                main_idx, main_roi_mask_aligned, selection_info = self._select_field_mask_presentation(
+                    field_key, keys_masks_files, preferred_idx=main_idx, verboselvl=verboselvl)
+
+            main_pres_key, (main_roi_mask, main_file, main_source) = keys_masks_files[main_idx][:2]
+            if self._selects_field_mask:
+                main_roi_mask = main_roi_mask_aligned
         else:
             main_pres_key = (self.RoiMaskPresentation().proj() & (self & field_key)).fetch1()
             main_roi_mask = load_array((self.RoiMaskPresentation & main_pres_key).fetch1('roi_mask'))
@@ -1289,7 +1319,7 @@ class RoiMaskTemplate(dj.Manual):
                 raise ValueError(f'No ROI mask found for key={pres_key} but `auto_fill_pres_keys` is False')
 
         main_key = {**field_key, **main_pres_key, "roi_mask": main_roi_mask,
-                    "roi_mask_file": main_file, "roi_mask_source": main_source}
+                    "roi_mask_file": main_file, "roi_mask_source": main_source, **selection_info}
 
         if add_primary_keys is not None:
             main_key = {**main_key, **add_primary_keys}
@@ -1300,6 +1330,73 @@ class RoiMaskTemplate(dj.Manual):
                 roi_mask_pres_key = {**roi_mask_pres_key, **add_primary_keys}
 
             self.RoiMaskPresentation().insert1(roi_mask_pres_key, skip_duplicates=True)
+
+    def _select_field_mask_presentation(
+            self,
+            field_key: dict,
+            keys_masks_files: list,
+            preferred_idx: int,
+            verboselvl: int = 0,
+    ) -> tuple[int, np.ndarray, dict]:
+        """Choose the presentation of the field mask and align the mask to it, see ``select_field_roi_mask``.
+
+        Args:
+            field_key: Primary key of the field.
+            keys_masks_files: List of (pres_key, (roi_mask, roi_mask_file, roi_mask_source), data_file).
+            preferred_idx: Index of the presentation preferred by ``mask_alias``.
+            verboselvl: Verbosity level.
+
+        Returns:
+            Index of the chosen presentation, its aligned mask and the selection columns of the table.
+        """
+        _, roi_channel = self._get_stack_names(field_key)
+        images, has_stack_ave, n_artifact = [], [], 0
+        for pres_key, _, data_file in keys_masks_files:
+            img, stack_ave, n_artifact = self._presentation_mean_image(pres_key, data_file, roi_channel)
+            images.append(img)
+            has_stack_ave.append(stack_ave)
+
+        res = select_field_roi_mask(
+            [mask_info[0] for _, mask_info, _ in keys_masks_files], images, preferred_idx=preferred_idx,
+            has_stack_ave=has_stack_ave, n_artifact=n_artifact, max_offset=self._field_mask_max_offset,
+            max_copy_shift=self._max_shift)
+
+        pres_names = [os.path.basename(f) for _, _, f in keys_masks_files]
+        msg = (f"field mask of {field_key}: {pres_names[res['idx']]} (mask_alias: {pres_names[preferred_idx]}, "
+               f"selection={res['selection']}, offset={res['offset']}, fit={res['score']:.3f})")
+        if res['n_different'] > 0:
+            warnings.warn(f"{res['n_different']} presentation(s) have a different (not copied) ROI mask, they are "
+                          f"ignored for the {msg}")
+        if res['selection'] == 'alias':
+            warnings.warn(f"The ROI mask does not fit the mean image of any presentation, check the {msg}")
+        elif res['offset'] != (0, 0) or verboselvl > 0:
+            print(f"Aligned {msg}" if res['offset'] != (0, 0) else f"Selected {msg}")
+
+        return res['idx'], res['roi_mask'], dict(
+            align_dx=int(res['offset'][0]), align_dy=int(res['offset'][1]),
+            mask_fit=float(res['score']) if np.isfinite(res['score']) else None, mask_selection=res['selection'])
+
+    def _presentation_mean_image(self, pres_key: dict, data_file: str, roi_channel: str) -> tuple:
+        """Mean image of the ROI channel after stimulus onset, whether the file has a ``Stack_ave`` (written by the
+        ROI drawing of Igor) and the number of light artifact rows."""
+        from_raw_data = (self.raw_params_table & pres_key).fetch1('from_raw_data')
+        stacks, _ = read_utils.load_stacks(data_file, from_raw_data=from_raw_data, ch_names=(roi_channel,))
+        stack = np.asarray(stacks[roi_channel], dtype=np.float32)
+
+        triggertimes = load_array((self.presentation_table & pres_key).fetch1('triggertimes'))
+        fs = (self.presentation_table.ScanInfo & pres_key).fetch1('scan_frequency')
+        onset = int(np.floor(triggertimes[0] * fs)) if len(triggertimes) > 0 else 0
+        if onset >= stack.shape[2] - 1:
+            onset = 0
+        img = stack[:, :, onset:].mean(axis=2)
+
+        has_stack_ave = False
+        if str(data_file).endswith('.h5') and os.path.isfile(data_file):
+            import h5py
+            with h5py.File(data_file, 'r') as f:
+                has_stack_ave = 'Stack_ave' in f
+        n_artifact = int((self.presentation_table & pres_key).fetch1('npixartifact'))
+        return img, has_stack_ave, n_artifact
 
     def _resolve_field_source(
             self,
@@ -1389,6 +1486,10 @@ class RoiMaskTemplate(dj.Manual):
         db_tab = self.RoiMaskPresentation if self._presentation_masks else self
         if len((db_tab & key).proj()) > 0:
             database_roi_mask = load_array((db_tab & key).fetch1('roi_mask'))
+            # The field mask may have been aligned to its presentation (the file has the mask as drawn)
+            align = (db_tab & key).fetch1('align_dx', 'align_dy') \
+                if db_tab is self and self._selects_field_mask else (0, 0)
+            align = (int(align[0]), int(align[1]))
 
             if filesystem_roi_mask is None:
                 if igor_roi_masks == 'yes':
@@ -1406,9 +1507,10 @@ class RoiMaskTemplate(dj.Manual):
                     )
                     save_roi_mask_file(roimask_file, to_python_format(database_roi_mask), file_format)
 
-            elif not np.all(filesystem_roi_mask == database_roi_mask):
+            elif not np.all((filesystem_roi_mask if align == (0, 0) else
+                             shift_array(filesystem_roi_mask, shift=align, cval=1)) == database_roi_mask):
                 raise ValueError(f'ROI mask for key=\n{key}\nhas been changed on filesystem but not in database.')
-            else:
+            elif align == (0, 0):
                 filesystem_roi_mask = database_roi_mask.copy()
 
         if filesystem_roi_mask is None:
