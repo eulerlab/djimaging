@@ -450,7 +450,7 @@ def remove_small_rois(mask: np.ndarray, min_size: int = 3, verbose: bool = True)
     min_size : int, optional
         Minimum number of pixels required to keep an ROI. Default is 3.
     verbose : bool, optional
-        If True, a warning is issued listing removed ROIs. Default is True.
+        If True, the number of removed ROIs is printed. Default is True.
 
     Returns
     -------
@@ -462,7 +462,7 @@ def remove_small_rois(mask: np.ndarray, min_size: int = 3, verbose: bool = True)
     small_roi_ids = roi_ids[roi_sizes < min_size]
     small_roi_locations = np.isin(mask, small_roi_ids)
     if verbose and small_roi_ids.size > 0:
-        warnings.warn(f'{len(small_roi_ids)} ROIs <{min_size}px removed.')
+        print(f'{len(small_roi_ids)} ROIs <{min_size}px removed.')
     mask[small_roi_locations] = 0
 
     return mask
@@ -533,6 +533,113 @@ def clean_rois(mask: np.ndarray, n_artifact: int, min_size: int = 3,
     mask_new = relabel_mask(mask_new, connectivity=connectivity)  # re-label to fix ROI numbering after cleaning
 
     return mask_new
+
+
+def _robust_z(img: np.ndarray, n_artifact: int = 0) -> np.ndarray:
+    """Z-score an image with the median and MAD of the pixels outside the light artifact."""
+    valid = img[n_artifact:]
+    med = np.nanmedian(valid)
+    mad = 1.4826 * np.nanmedian(np.abs(valid - med))
+    if not mad > 0:
+        mad = np.nanstd(valid)
+    if not mad > 0:
+        return np.zeros_like(img, dtype=float)
+    return (img - med) / mad
+
+
+def estimate_vessel_mask(alt_img: np.ndarray, main_img: np.ndarray, n_artifact: int = 0,
+                         alt_z: float = 50., smooth_sigma: float = 0.7) -> np.ndarray:
+    """Estimate blood vessel pixels by comparing the alternative channel (e.g. SR101) to the main channel.
+
+    Cells can be bright in both channels (bleed-through), but only vessels (and astrocytes) stand out in the
+    alternative channel alone. Both images are z-scored robustly (median and MAD outside the light artifact), the
+    alternative channel is predicted from the main channel with one non-negative slope (fitted with iterative
+    outlier clipping, so vessels do not bias it), and pixels whose robust z-score of the remaining residual exceeds
+    `alt_z` are vessels. Fields without vessels yield (almost) no vessel pixels.
+
+    Parameters
+    ----------
+    alt_img : np.ndarray
+        2-D time-average of the alternative channel.
+    main_img : np.ndarray
+        2-D time-average of the main (ROI) channel, same shape.
+    n_artifact : int, optional
+        Number of rows at the top that form the light-artifact region, ignored for the statistics and never vessel.
+    alt_z : float, optional
+        Robust z-score of the residual above which a pixel is a vessel. Lower values find more. Default is 50.
+    smooth_sigma : float, optional
+        Sigma in pixels of the Gaussian smoothing applied before thresholding. Default is 0.7.
+
+    Returns
+    -------
+    np.ndarray
+        2-D boolean array, True for vessel pixels.
+    """
+    from scipy import ndimage
+
+    alt_img = np.asarray(alt_img, dtype=float)
+    main_img = np.asarray(main_img, dtype=float)
+    if alt_img.shape != main_img.shape:
+        raise ValueError(f'alt_img {alt_img.shape} and main_img {main_img.shape} must have the same shape')
+
+    if smooth_sigma > 0:
+        alt_img = ndimage.gaussian_filter(alt_img, smooth_sigma)
+        main_img = ndimage.gaussian_filter(main_img, smooth_sigma)
+
+    alt_zs, main_zs = _robust_z(alt_img, n_artifact), _robust_z(main_img, n_artifact)
+    valid = np.zeros(alt_img.shape, dtype=bool)
+    valid[n_artifact:] = True
+
+    fit = valid.copy()
+    slope = 0.
+    for _ in range(5):
+        denom = np.sum(main_zs[fit] ** 2)
+        slope = float(np.clip(np.sum(alt_zs[fit] * main_zs[fit]) / denom, 0., 1.)) if denom > 0 else 0.
+        residual = alt_zs - slope * main_zs
+        residual_z = _robust_z(residual, n_artifact)
+        fit = valid & (residual_z < 3.)
+
+    return valid & (residual_z > alt_z)
+
+
+def remove_vessel_rois(mask: np.ndarray, vessel_mask: np.ndarray, max_overlap: float = 0.2,
+                       connectivity: int = 2, verbose: bool = True) -> np.ndarray:
+    """Remove ROIs that overlap with blood vessels, see `estimate_vessel_mask`.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        2-D integer ROI mask in Python format (background 0, ROIs positive).
+    vessel_mask : np.ndarray
+        2-D boolean array of vessel pixels, same shape as `mask`.
+    max_overlap : float, optional
+        Largest allowed fraction of a ROI's pixels on vessel pixels. Default is 0.2.
+    connectivity : int, optional
+        Pixel connectivity used for relabelling. Default is 2.
+    verbose : bool, optional
+        If True, print the number of removed ROIs. Default is True.
+
+    Returns
+    -------
+    np.ndarray
+        Relabelled ROI mask without the vessel ROIs.
+    """
+    mask = np.asarray(mask)
+    vessel_mask = np.asarray(vessel_mask, dtype=bool)
+    if vessel_mask.shape != mask.shape:
+        raise ValueError(f'vessel_mask {vessel_mask.shape} and mask {mask.shape} must have the same shape')
+
+    mask_new = mask.copy()
+    n_removed = 0
+    for roi_id in np.unique(mask[mask > 0]):
+        roi_pixels = mask == roi_id
+        if vessel_mask[roi_pixels].mean() > max_overlap:
+            mask_new[roi_pixels] = 0
+            n_removed += 1
+
+    if verbose and n_removed:
+        print(f'Removed {n_removed} ROIs that overlap with blood vessels.')
+    return relabel_mask(mask_new, connectivity=connectivity)
 
 
 def find_neighbor_labels(x: int, y: int, labels: np.ndarray) -> np.ndarray:
@@ -656,7 +763,7 @@ def add_rois(rois_to_add: np.ndarray, rois: np.ndarray, connectivity: int = 2,
         connected_comps, n_comps = fix_disconnected_rois(suggested_roi.astype(int) * new_roi_id,
                                                          connectivity=connectivity, return_num=True)
         # filter small ROIs
-        connected_large_comps = remove_small_rois(connected_comps)
+        connected_large_comps = remove_small_rois(connected_comps, verbose=False)
         comp_ids = np.unique(connected_large_comps)
         comp_ids = comp_ids[comp_ids > 0]  # ignore background
         for comp_id in comp_ids:

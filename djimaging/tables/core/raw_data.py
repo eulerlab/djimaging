@@ -19,7 +19,7 @@ class RawDataParamsTemplate(dj.Lookup):
         include_artifacts: bool  # automatically exclude all ROIs with artifacts?
         trace_precision: enum('line', 'pixel')  # Compute traces with either line precision or pixel precision?
         trigger_precision: enum('line', 'pixel')   # Compute triggers with either line precision or pixel precision?
-        igor_roi_masks: enum('yes', 'init', 'no')  # Either load or ignore existing ROI masks, e.g. from Igor
+        igor_roi_masks: enum('yes', 'init', 'no', 'either')  # Load or ignore existing ROI masks, e.g. from Igor; 'either': per field, mask file if available, else Igor
         """
         return definition
 
@@ -58,7 +58,8 @@ class RawDataParamsTemplate(dj.Lookup):
             trigger_precision: Precision mode for trigger computation, either
                 'line' or 'pixel'. Default is 'line'.
             igor_roi_masks: How to handle Igor ROI masks: 'yes' loads them,
-                'init' uses them only for initialisation, 'no' ignores them.
+                'init' uses them only for initialisation, 'no' ignores them,
+                'either' decides per field: ROI mask file if one exists, else the Igor mask.
                 Default is 'yes'.
             skip_duplicates: If True, silently skip duplicate entries.
                 Default is True.

@@ -6,6 +6,9 @@ import pytest
 from sklearn.dummy import DummyClassifier
 
 from djimaging.tables.classifier_v2.rgc_classifier_v2 import save_classifier_to_file
+from djimaging.utils import mask_utils
+from djimaging.utils.dj_storage import load_array, local_file_path
+from djimaging.utils.mask_format_utils import to_python_format
 from tests.fixtures.random_utils import numpy_seed
 
 
@@ -161,3 +164,29 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
     assert len(assignments) == 2
     for row in assignments:
         np.testing.assert_allclose(row["probs_per_cluster"], np.full(75, 1 / 75))
+
+    # Deploying a modified ROI mask replaces the entry, cascades the delete and only repopulates Roi.
+    # The masks come from the Igor h5 files, so write corrected numpy mask files (one ROI removed) first.
+    pres_keys = (tutorial_schema.RoiMask.RoiMaskPresentation() & experiment_key).proj().to_dicts()
+    pres_files = [
+        mask_utils.to_roi_mask_file(
+            str(local_file_path((tutorial_schema.Presentation() & key).fetch1("pres_data_file"), "reference")),
+            roi_mask_dir="CorrectedROIs", file_format="numpy")
+        for key in pres_keys]
+    corrected_masks = []
+    for key in pres_keys:
+        mask = to_python_format(load_array((tutorial_schema.RoiMask.RoiMaskPresentation() & key).fetch1("roi_mask")))
+        mask[mask == mask.max()] = 0
+        corrected_masks.append(mask)
+    tutorial_schema.RoiMask()._save_roi_mask_files(pres_files, corrected_masks)
+
+    tutorial_schema.RoiMask().deploy_roi_mask(
+        (tutorial_schema.Field() & experiment_key).proj().fetch1(),
+        roi_table=tutorial_schema.Roi(), roi_mask_dir="CorrectedROIs", verbose=False)
+
+    assert len(tutorial_schema.RoiMask() & experiment_key) == 1
+    assert len(tutorial_schema.RoiMask.RoiMaskPresentation() & experiment_key) == 3
+    assert len(tutorial_schema.Roi() & experiment_key) == 1
+    for table in (tutorial_schema.Traces(), tutorial_schema.Snippets(), tutorial_schema.ChirpQI(),
+                  tutorial_schema.CelltypeAssignmentV2()):
+        assert len(table & experiment_key) == 0, table.full_table_name

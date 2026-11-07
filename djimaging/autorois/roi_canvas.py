@@ -2,7 +2,7 @@ import os.path
 import warnings
 from collections import deque
 from datetime import datetime
-from typing import Optional, Dict
+from typing import Callable, Optional, Dict
 
 import numpy as np
 from IPython.display import clear_output
@@ -467,11 +467,16 @@ class InteractiveRoiCanvas(RoiCanvas):
             swap_channels=False,
             stacks: Optional[Dict[str, list]] = None,
             primary_channel: Optional[str] = None,
+            deploy_callback: Optional[Callable[[], object]] = None,
     ):
         """Interactive ROI canvas, see `RoiCanvas` for the stacks and the primary (target) channel.
 
         The primary channel can be changed in the GUI. `swap_channels=True` is a shortcut for choosing the
         second channel as primary channel.
+
+        If `deploy_callback` is given, the GUI has a 'Deploy to database' button (enabled in the dangerzone). It
+        first saves the masks of all presentations to `output_files` and then calls `deploy_callback()`, which is
+        expected to replace the database entry with the saved masks, see `RoiMaskTemplate.deploy_roi_mask`.
         """
         if _widgets_import_error is not None:
             raise ImportError('InteractiveRoiCanvas requires ipywidgets; install djimaging[autorois].') \
@@ -492,6 +497,7 @@ class InteractiveRoiCanvas(RoiCanvas):
                          upscale=upscale, autorois_models=autorois_models,
                          output_files=output_files, pixel_size_um=pixel_size_um)
         self.debug_mode = False
+        self.deploy_callback = deploy_callback
 
         # Pause all drawing
         self.draw_updates = False
@@ -558,6 +564,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_reset_all = self.create_widget_reset_all()
         self.widget_save_to_file = self.create_widget_save_to_file()
         self.widget_save_all_to_file = self.create_widget_save_all_to_file()
+        self.widget_deploy = self.create_widget_deploy()
         self.widget_save_info = self.create_widget_save_info()
 
         self.widget_read_only = self.create_widget_read_only()
@@ -627,7 +634,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         w_other_tools = VBox((
             HBox((self.widget_clean, self.widget_save_all_to_file, self.widget_save_to_file)),
             self.widget_save_info,
-            HBox((self.widget_kill_all, self.widget_reset_all)),
+            HBox((self.widget_kill_all, self.widget_reset_all, self.widget_deploy)),
         ))
 
         w_main = VBox((HBox((w_outputs, VBox((w_tools, self.log_widget)))),
@@ -758,6 +765,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_exec_autorois_missing.disabled = not dangerzone
         self.widget_kill_all.disabled = not dangerzone
         self.widget_reset_all.disabled = not dangerzone
+        self.widget_deploy.disabled = not dangerzone or self.deploy_callback is None
 
     def create_widget_read_only(self):
         widget = Checkbox(value=False, description='Read only', disabled=False)
@@ -1305,6 +1313,31 @@ class InteractiveRoiCanvas(RoiCanvas):
         else:
             self.widget_save_info.description = 'Error!'.ljust(20)
 
+    def create_widget_deploy(self):
+        widget = Button(description='Deploy to database', disabled=True, button_style='danger',
+                        tooltip='Save masks of all presentations to file, then replace the database entry '
+                                '(deletes all downstream entries of this field)')
+        widget.on_click(self.exec_deploy)
+        return widget
+
+    def exec_deploy(self, button=None):
+        """Save all masks to file and replace the database entry of the field with them."""
+        if self.deploy_callback is None:
+            raise RuntimeError('No deploy_callback was set.')
+
+        self.log('Deploying to database')
+        self.set_busy()
+        try:
+            self.exec_save_all_to_file(raise_error=True)
+            self.deploy_callback()
+            self.widget_save_info.description = 'Deployed!'.ljust(20)
+        except Exception as e:
+            self.widget_save_info.description = 'Deploy error!'.ljust(20)
+            warnings.warn(f'Deploying to the database failed: {e}')
+            raise
+        finally:
+            self.set_idle()
+
     def create_widget_save_info(self):
         widget = HTML(value=f'{self.output_file}', placeholder='output_file', description=''.ljust(20))
         return widget
@@ -1552,6 +1585,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         new_key = {**field_key, **self.pres_names[self.main_stim_idx], "roi_mask": main_roi_mask}
 
         roi_mask_tab().insert1(new_key)
+        if not getattr(roi_mask_tab, '_presentation_masks', True):
+            return  # Motion mode: only the field mask, presentation masks are computed by the motion tables
         for i, (pres_key, roi_mask) in enumerate(pres_and_roi_mask):
             new_key = {**field_key, **pres_key, "roi_mask": roi_mask}
 

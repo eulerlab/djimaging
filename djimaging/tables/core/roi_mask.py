@@ -11,6 +11,7 @@ import numpy as np
 from djimaging.utils.scanm import read_h5_utils, read_utils
 
 from djimaging.autorois import default_models
+from djimaging.autorois.autoshift_utils import compute_corr_map, compute_corr_map_match_indexes, extract_best_shift
 from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 
 from djimaging.utils.filesystem_utils import as_pre_filepath
@@ -19,10 +20,11 @@ from djimaging.utils.dj_utils import get_primary_key, check_unique_one
 from djimaging.utils.mask_utils import (
     to_roi_mask_file, sort_roi_mask_files,
     load_preferred_roi_mask_igor, load_preferred_roi_mask_file, compare_roi_masks,
-    save_roi_mask_file, load_roi_mask_file, _ROI_FILE_FORMAT_HELP,
+    save_roi_mask_file, load_roi_mask_file, relabel_mask, clean_rois, shift_array, add_rois,
+    generate_roi_suggestions, estimate_vessel_mask, remove_vessel_rois, _ROI_FILE_FORMAT_HELP,
 )
 from djimaging.utils.mask_format_utils import to_igor_format, to_python_format
-from djimaging.utils.plot_utils import plot_field
+from djimaging.utils.plot_utils import plot_field, field_extent_and_labels
 
 
 class RoiMaskTemplate(dj.Manual):
@@ -30,6 +32,11 @@ class RoiMaskTemplate(dj.Manual):
     _max_shift = 5
     _roi_file_format: str = 'numpy'
     _filepath_store = "reference"
+    # Per-presentation masks in the part table RoiMaskPresentation (same / shifted / different from the field mask).
+    # False = motion mode: only the field mask (and the presentation it belongs to) is stored here; the presentation
+    # masks are computed by djimaging.tables.motion_correction (MotionRoiMask). The concrete table then defines
+    # `RoiMaskPresentation = None`.
+    _presentation_masks: bool = True
 
     @property
     def definition(self):
@@ -177,6 +184,7 @@ class RoiMaskTemplate(dj.Manual):
             use_stim_onset: bool = True,
             verbose: bool = True,
             roi_channel: str | None = None,
+            roi_table: dj.Table | None = None,
             **kwargs,
     ):
         """Launch the interactive ROI-drawing GUI for a field.
@@ -206,6 +214,9 @@ class RoiMaskTemplate(dj.Manual):
                 (cc tool, diagnostics, auto shift, AutoROIs). Can be changed in the GUI. Defaults to the channel
                 flagged `roi_default` in the channel table (`data_stack_name` of the user info without channel table).
                 All channels are shown as background.
+            roi_table: The ROI table (``RoiTemplate``). If the field already has an ROI mask in the database, the GUI
+                can replace it ('Deploy to database', only in the dangerzone), see ``deploy_roi_mask``. The ROI table is
+                then repopulated for the field. Without it the GUI cannot deploy.
             **kwargs: Additional keyword arguments forwarded to
                 ``InteractiveRoiCanvas``.
 
@@ -225,6 +236,69 @@ class RoiMaskTemplate(dj.Manual):
             raise ValueError('No field_key provided and no missing field found.')
         field_key = (self.field_table & field_key).proj().fetch1()
 
+        field_data = self._load_field_stacks(
+            field_key, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
+            old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset)
+        pres_keys, pres_names, stacks, output_files = (
+            field_data[k] for k in ('pres_keys', 'pres_names', 'stacks', 'output_files'))
+        ch_names, roi_channel = field_data['ch_names'], field_data['roi_channel']
+        n_artifact, pixel_size_d1_d2 = field_data['n_artifact'], field_data['pixel_size_d1_d2']
+
+        # Load high resolution data is possible
+        high_res_bg_dict = self.load_high_res_bg_dict(
+            field_key, ch_names=ch_names, verbose=verbose) if load_high_res else dict()
+
+        # Load initial ROI masks
+        igor_roi_masks = (self.raw_params_table & field_key).fetch1('igor_roi_masks')
+        initial_roi_mask, _ = self.load_initial_roi_mask(
+            field_key=field_key, igor_roi_masks=igor_roi_masks,
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix, verbose=verbose)
+
+        if initial_roi_mask is not None:
+            initial_roi_mask = to_python_format(initial_roi_mask)
+
+        # Load default AutoROIs models
+        if isinstance(autorois_models, str):
+            autorois_models = load_default_autorois_models(autorois_models)
+        elif isinstance(autorois_models, (list, tuple)):
+            autorois_models = load_default_autorois_models(models=list(autorois_models))
+
+        # Load shifts if available
+        shifts = self.init_shifts(field_key, pres_keys)
+
+        roi_canvas = InteractiveRoiCanvas(
+            pres_names=pres_names,
+            stacks=stacks, primary_channel=roi_channel, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
+            main_stim_idx=0, initial_roi_mask=initial_roi_mask, shifts=shifts,
+            canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
+            pixel_size_um=pixel_size_d1_d2, show_diagnostics=show_diagnostics,
+            max_shift=self._max_shift if max_shift is None else max_shift,
+            deploy_callback=None if roi_table is None else (lambda: self.deploy_roi_mask(
+                field_key, roi_table=roi_table, roi_mask_dir=roi_mask_dir,
+                old_prefix=old_prefix, new_prefix=new_prefix, max_shift=max_shift, verbose=verbose)),
+            **kwargs,
+        )
+        if verbose:
+            print(f"Returned InteractiveRoiCanvas object. To start GUI, call <enter_object_name>.start_gui().")
+        return roi_canvas
+
+    def _load_field_stacks(
+            self,
+            field_key: dict,
+            roi_channel: str | None = None,
+            roi_mask_dir: str = 'ROIs',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+            use_stim_onset: bool = True,
+    ) -> dict:
+        """Load the stacks of all presentations of a field, as used for ROI detection.
+
+        Returns:
+            A dict with the presentation keys (``pres_keys``) and names (``pres_names``), the stacks of each channel
+            (``stacks``, channel name -> list with one stack per presentation), the ROI mask file of each presentation
+            (``output_files``), the channel names (``ch_names``) and target channel (``roi_channel``), the number of
+            artifact rows (``n_artifact``) and the pixel size (``pixel_size_d1_d2``).
+        """
         from_raw_data = (self.raw_params_table & field_key).fetch1("from_raw_data")
 
         field_file_info_df = self.load_field_file_info_df(field_key)
@@ -286,40 +360,9 @@ class RoiMaskTemplate(dj.Manual):
             stacks = {ch_name: [stack[:, :, stim_onset_idx:] for stack, stim_onset_idx in zip(ch_stacks, stim_onset_idxs)]
                       for ch_name, ch_stacks in stacks.items()}
 
-        # Load high resolution data is possible
-        high_res_bg_dict = self.load_high_res_bg_dict(
-            field_key, ch_names=ch_names, verbose=verbose) if load_high_res else dict()
-
-        # Load initial ROI masks
-        igor_roi_masks = (self.raw_params_table & field_key).fetch1('igor_roi_masks')
-        initial_roi_mask, _ = self.load_initial_roi_mask(
-            field_key=field_key, igor_roi_masks=igor_roi_masks,
-            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix, verbose=verbose)
-
-        if initial_roi_mask is not None:
-            initial_roi_mask = to_python_format(initial_roi_mask)
-
-        # Load default AutoROIs models
-        if isinstance(autorois_models, str):
-            autorois_models = load_default_autorois_models(autorois_models)
-        elif isinstance(autorois_models, (list, tuple)):
-            autorois_models = load_default_autorois_models(models=list(autorois_models))
-
-        # Load shifts if available
-        shifts = self.init_shifts(field_key, pres_keys)
-
-        roi_canvas = InteractiveRoiCanvas(
-            pres_names=pres_names,
-            stacks=stacks, primary_channel=roi_channel, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
-            main_stim_idx=0, initial_roi_mask=initial_roi_mask, shifts=shifts,
-            canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
-            pixel_size_um=pixel_size_d1_d2, show_diagnostics=show_diagnostics,
-            max_shift=self._max_shift if max_shift is None else max_shift,
-            **kwargs,
-        )
-        if verbose:
-            print(f"Returned InteractiveRoiCanvas object. To start GUI, call <enter_object_name>.start_gui().")
-        return roi_canvas
+        return dict(
+            pres_keys=pres_keys, pres_names=pres_names, stacks=stacks, output_files=output_files,
+            ch_names=ch_names, roi_channel=roi_channel, n_artifact=n_artifact, pixel_size_d1_d2=pixel_size_d1_d2)
 
     def init_shifts(self, field_key: dict, pres_keys: list) -> list | None:
         """Load saved shift values between the field mask and each presentation mask.
@@ -332,7 +375,7 @@ class RoiMaskTemplate(dj.Manual):
             A list of (shift_dx, shift_dy) tuples aligned with pres_keys, or
             None if no ROI mask entry exists yet for the field.
         """
-        if len(self & field_key) == 0:
+        if len(self & field_key) == 0 or not self._presentation_masks:
             return None
         shifts = []
         for pres_key in pres_keys:
@@ -482,6 +525,428 @@ class RoiMaskTemplate(dj.Manual):
 
         return roi_mask, src_file
 
+    def create_missing_roi_masks(
+            self,
+            model: str | None = None,
+            kind: str = 'default_rgc',
+            autorois_models: dict | None = None,
+            restrictions: dict | None = None,
+            roi_mask_dir: str = 'AutoROIs',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+            roi_channel: str | None = None,
+            use_stim_onset: bool = True,
+            use_all_stacks: bool = False,
+            clean: bool = True,
+            min_size: int = 3,
+            connectivity: int = 2,
+            vessel_threshold: float | None = 50.,
+            max_vessel_overlap: float = 0.2,
+            auto_shift: bool = True,
+            max_shift: int | None = None,
+            overwrite_files: bool = False,
+            suppress_errors: bool = False,
+            verbose: bool = True,
+    ) -> dict:
+        """Generate ROI mask files with an AutoROIs model for all fields that have no ROI mask yet (no GUI).
+
+        For each field without an entry in this table, the model proposes a mask on the stacks of the first
+        presentation (the reference). The mask is optionally cleaned, shifted to every other presentation
+        (auto shift, as the 'Auto shift' button of the ROI canvas), and written to one file per presentation in
+        ``roi_mask_dir``, exactly as 'Save all to file' in the ROI canvas does. Nothing is written to the database;
+        load the files afterwards with ``rescan_filesystem(roi_mask_dir=...)``.
+
+        Args:
+            model: Name of the AutoROIs model, see ``load_default_autorois_models``: 'UNet', 'UNet_v1',
+                'Cellpose3_cyto2', 'Cellpose3_cyto3', 'MEDIAR' or 'CorrRoiMask'. Defaults to 'UNet' for
+                ``kind='default_rgc'`` and to 'CorrRoiMask' for all other kinds.
+            kind: Cell type variant of the model ('default_rgc', 'default_bc', 'default_ac', 'default_pr' or
+                'default_pr_watershed'). Only 'CorrRoiMask' is available for kinds other than 'default_rgc'.
+            autorois_models: Already loaded models (dict name -> model), e.g. from ``load_default_autorois_models``,
+                from which ``model`` is picked. If None, only the requested model is loaded and released again
+                at the end.
+            restrictions: Restrictions for the fields, e.g. ``dict(experimenter='Ran')``.
+            roi_mask_dir: Sub-directory (next to the recording files) the mask files are written to.
+            old_prefix: Path prefix to replace when resolving file paths.
+            new_prefix: Replacement path prefix.
+            roi_channel: Name of the channel the model is applied to. Defaults to the channel flagged as ROI
+                channel (see ``UserInfoTemplate.get_ch_names``). The first other channel is passed as second input,
+                which only ``UNet_v1`` uses.
+            use_stim_onset: If True, only use the recording after the stimulus onset (first trigger).
+            use_all_stacks: If True, the model is applied to the stacks of all presentations of a field
+                (concatenated in time) instead of only the first one. Only useful if presentations are aligned.
+            clean: If True, clean the mask (remove the light artifact rows, split disconnected ROIs and remove
+                ROIs smaller than ``min_size`` pixels), see ``clean_rois``.
+            min_size: Minimum ROI size in pixels for cleaning.
+            connectivity: 1 (only NSEW neighbours) or 2 (also diagonal neighbours) connect pixels of a ROI.
+            vessel_threshold: If not None, remove ROIs on blood vessels, which the model sometimes mistakes for
+                cells. Vessels are found by comparing the channels: the alternative channel (the first channel other than
+                ``roi_channel``, e.g. SR101) is predicted from the ROI channel (cells can be bright in both), and
+                pixels that stand out more than this many robust standard deviations from that prediction count as
+                vessel. Fields without vessels yield no vessel pixels. Default 50; lower values find more vessel pixels. None switches the check off. It is skipped
+                (with a warning) if the recording has no second channel.
+                See ``mask_utils.estimate_vessel_mask``.
+            max_vessel_overlap: A ROI is removed if more than this fraction of its pixels are on vessels.
+            auto_shift: If True, estimate the shift of every other presentation relative to the first one from
+                the correlation maps. Otherwise all presentations get the same mask without shift.
+            max_shift: Largest shift in pixels that auto shift searches for. Defaults to the table-level value.
+            overwrite_files: If False, fields for which the mask files of all presentations already exist are
+                skipped (load them with ``rescan_filesystem`` instead). If True, existing files are overwritten.
+            suppress_errors: If True, continue with the next field if a field fails and report the error.
+            verbose: If True, print progress.
+
+        Returns:
+            A dict with the lists ``created`` (field keys with new mask files), ``skipped`` (field keys whose files
+            already exist) and ``errors`` (tuples of field key and exception).
+        """
+        if connectivity not in (1, 2):
+            raise ValueError(f'connectivity={connectivity} must be 1 or 2')
+        max_shift = self._max_shift if max_shift is None else max_shift
+
+        restrictions = dict() if restrictions is None else restrictions
+        field_keys = (self.field_table.proj() & (self.presentation_table.proj() - self.proj()) & restrictions
+                      ).to_dicts()
+        result = dict(created=[], skipped=[], errors=[])
+        if len(field_keys) == 0:
+            if verbose:
+                print('No fields without ROI mask found.')
+            return result
+
+        model, autorois_model, loaded_here = _get_autorois_model(model, kind, autorois_models)
+        del autorois_models
+
+        try:
+            for i, field_key in enumerate(field_keys, start=1):
+                if verbose:
+                    print(f'[{i}/{len(field_keys)}] {model}: {field_key}')
+                try:
+                    created = self._create_field_roi_mask_files(
+                        field_key, autorois_model, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
+                        old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset,
+                        use_all_stacks=use_all_stacks, clean=clean, min_size=min_size, connectivity=connectivity,
+                        vessel_threshold=vessel_threshold, max_vessel_overlap=max_vessel_overlap,
+                        auto_shift=auto_shift, max_shift=max_shift, overwrite_files=overwrite_files)
+                    result['created' if created else 'skipped'].append(field_key)
+                    if verbose and not created:
+                        print('  Mask files already exist, skipped. Load them with `rescan_filesystem`.')
+                except Exception as e:
+                    if not suppress_errors:
+                        raise
+                    warnings.warn(f'Error for field_key={field_key}:\n{e}')
+                    result['errors'].append((field_key, e))
+        finally:
+            del autorois_model
+            if loaded_here:
+                _free_memory()
+
+        if verbose:
+            print(f"Created mask files for {len(result['created'])} fields, skipped {len(result['skipped'])}, "
+                  f"{len(result['errors'])} errors. Load the new files with `rescan_filesystem(roi_mask_dir=...)`.")
+        return result
+
+    def _create_field_roi_mask_files(
+            self, field_key: dict, autorois_model, roi_channel, roi_mask_dir, old_prefix, new_prefix,
+            use_stim_onset, use_all_stacks, clean, min_size, connectivity, auto_shift, max_shift, overwrite_files,
+            vessel_threshold=None, max_vessel_overlap=0.2,
+    ) -> bool:
+        """Create the mask files of all presentations of one field. Returns False if skipped because files exist."""
+        data = self._load_field_stacks(
+            field_key, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
+            old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset)
+        output_files, stacks, n_artifact = data['output_files'], data['stacks'], data['n_artifact']
+
+        if not overwrite_files and all(os.path.isfile(f) for f in output_files):
+            return False
+
+        ch0_stacks = stacks[data['roi_channel']]
+        roi_mask = _predict_roi_mask(autorois_model, data, ref_idx=0, use_all_stacks=use_all_stacks)
+
+        roi_mask = relabel_mask(np.asarray(roi_mask), connectivity=connectivity)
+        if clean:
+            roi_mask = clean_rois(roi_mask, n_artifact, min_size=min_size, connectivity=connectivity, verbose=False)
+        roi_mask = _remove_vessel_rois(roi_mask, data, 0, vessel_threshold, max_vessel_overlap, connectivity)
+
+        # Shifts are defined as in the ROI canvas: the mask is in the frame of the first presentation, and the
+        # mask file of a presentation is the mask shifted by the inverse of the presentation's shift.
+        roi_masks = [roi_mask.copy()]
+        if auto_shift and len(ch0_stacks) > 1:
+            ref_corr_map = compute_corr_map(ch0_stacks[0])
+        for stack in ch0_stacks[1:]:
+            shift = (0, 0)
+            if auto_shift:
+                match_indexes = compute_corr_map_match_indexes(
+                    compute_corr_map(stack), ref_corr_map, shift_max=max_shift)
+                shift_x, shift_y = extract_best_shift(match_indexes)
+                shift = (-shift_x, -shift_y)
+            roi_masks.append(shift_array(roi_mask, shift=(-shift[0], -shift[1]), cval=0))
+
+        self._save_roi_mask_files(output_files, roi_masks)
+        return True
+
+    def _save_roi_mask_files(self, output_files: list, roi_masks: list) -> None:
+        """Save one mask per output file. The root directory has to exist, the sub-directory is created."""
+        for output_file in output_files:
+            f_root, f_dir = os.path.split(os.path.dirname(output_file))
+            if not os.path.isdir(f_root):
+                raise FileNotFoundError(f'Could not find directory {f_root}')
+            os.makedirs(os.path.join(f_root, f_dir), exist_ok=True)
+
+        for output_file, roi_mask in zip(output_files, roi_masks):
+            save_roi_mask_file(output_file, roi_mask, self._get_roi_file_format())
+
+    def correct_roi_masks(
+            self,
+            model: str | None = None,
+            kind: str = 'default_rgc',
+            autorois_models: dict | None = None,
+            restrictions: dict | None = None,
+            roi_mask_dir: str = 'CorrectedROIs',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+            roi_channel: str | None = None,
+            use_stim_onset: bool = True,
+            clean: bool = True,
+            min_size: int = 3,
+            connectivity: int = 2,
+            vessel_threshold: float | None = 50.,
+            max_vessel_overlap: float = 0.2,
+            vessel_filter_existing: bool = False,
+            add_missing: bool = True,
+            iou_threshold: float = 0.1,
+            overwrite_files: bool = False,
+            deploy: bool = False,
+            roi_table: dj.Table | None = None,
+            suppress_errors: bool = False,
+            verbose: bool = True,
+    ) -> dict:
+        """Propose corrections for existing ROI masks and save them to files (no GUI).
+
+        For each field with a ROI mask in the database, the mask is cleaned (light artifact rows, disconnected ROIs
+        and tiny ROIs are removed) and ROIs that an AutoROIs model finds but that are missing in the mask (e.g. cells
+        without activity that were not marked, 'dead cells') are added. Added ROIs never overlap or touch existing
+        ones. If the mask changed, the corrected mask is saved to one file per presentation in ``roi_mask_dir``,
+        shifted like the stored presentation masks, exactly as 'Save all to file' in the ROI canvas does.
+        Unchanged masks are not saved.
+
+        By default only files are written and the database is not touched. Use ``plot_roi_mask_correction`` to
+        review a correction, and ``deploy_roi_mask`` (or ``deploy=True``) to replace the database entry.
+
+        Args:
+            model: Name of the AutoROIs model, see ``create_missing_roi_masks``. Only used if ``add_missing``.
+            kind: Cell type variant of the model, see ``create_missing_roi_masks``.
+            autorois_models: Already loaded models (dict name -> model). If None, only ``model`` is loaded and
+                released again at the end.
+            restrictions: Restrictions for the fields, e.g. ``dict(experimenter='Ran')``.
+            roi_mask_dir: Sub-directory the corrected mask files are written to. Use a directory different from the
+                one the current masks were loaded from, to keep the original files.
+            old_prefix: Path prefix to replace when resolving file paths.
+            new_prefix: Replacement path prefix.
+            roi_channel: Name of the channel the model is applied to. Default: the ROI channel of the user info.
+            use_stim_onset: If True, only use the recording after the stimulus onset (first trigger).
+            clean: If True, clean the existing mask, see ``clean_rois``.
+            min_size: Minimum ROI size in pixels, for cleaning and for added ROIs.
+            connectivity: 1 (only NSEW neighbours) or 2 (also diagonal neighbours) connect pixels of a ROI.
+            vessel_threshold: If not None, ROIs on blood vessels are not added, see ``create_missing_roi_masks``.
+            max_vessel_overlap: A ROI is considered on a vessel if more than this fraction of its pixels are on vessels.
+            vessel_filter_existing: If True, ROIs of the existing mask that are on vessels are removed too. By
+                default only new ROIs are filtered, since the existing mask may be curated.
+            add_missing: If True, add ROIs that the model finds but that are missing in the mask.
+            iou_threshold: A ROI of the model counts as missing if its intersection over union with every existing
+                ROI is below this value. Lower values add fewer ROIs.
+            overwrite_files: If False, fields for which the corrected files exist are skipped. If True, they are
+                overwritten.
+            deploy: If True, replace the database entry of every corrected field with the corrected masks right
+                away (``deploy_roi_mask``). **This deletes everything downstream of the ROI mask of that field**
+                and only repopulates ``roi_table``. Requires ``roi_table``.
+            roi_table: ROI table (``RoiTemplate``), populated for the deployed fields.
+            suppress_errors: If True, continue with the next field if a field fails and report the error.
+            verbose: If True, print progress.
+
+        Returns:
+            A dict with the lists ``corrected`` (a dict per field with the field key and the number of ROIs
+            ``n_before``, ``n_after`` and ``n_added``), ``unchanged``, ``skipped`` (dicts with field key and reason),
+            ``deployed`` (field keys) and ``errors`` (tuples of field key and exception).
+        """
+        if connectivity not in (1, 2):
+            raise ValueError(f'connectivity={connectivity} must be 1 or 2')
+        if deploy and roi_table is None:
+            raise ValueError('deploy=True requires roi_table, which is repopulated for the deployed fields.')
+
+        restrictions = dict() if restrictions is None else restrictions
+        field_keys = (self & restrictions).proj().to_dicts()
+        result = dict(corrected=[], unchanged=[], skipped=[], deployed=[], errors=[])
+        if len(field_keys) == 0:
+            if verbose:
+                print('No ROI masks found.')
+            return result
+
+        autorois_model, loaded_here = None, False
+        if add_missing:
+            model, autorois_model, loaded_here = _get_autorois_model(model, kind, autorois_models)
+        del autorois_models
+
+        try:
+            for i, field_key in enumerate(field_keys, start=1):
+                if verbose:
+                    print(f'[{i}/{len(field_keys)}] {field_key}')
+                try:
+                    info = self._correct_field_roi_mask(
+                        field_key, autorois_model, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
+                        old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset, clean=clean,
+                        min_size=min_size, connectivity=connectivity, iou_threshold=iou_threshold,
+                        overwrite_files=overwrite_files, vessel_threshold=vessel_threshold,
+                        max_vessel_overlap=max_vessel_overlap, vessel_filter_existing=vessel_filter_existing)
+                    status = info.pop('status')
+                    result[status].append(info if status in ('corrected', 'skipped') else info['field_key'])
+                    if verbose:
+                        print(f'  {status}: ' + ', '.join(f'{k}={v}' for k, v in info.items() if k != 'field_key'))
+
+                    if deploy and status == 'corrected':
+                        self.deploy_roi_mask(
+                            info['field_key'], roi_table=roi_table, roi_mask_dir=roi_mask_dir,
+                            old_prefix=old_prefix, new_prefix=new_prefix, verbose=False)
+                        result['deployed'].append(info['field_key'])
+                except Exception as e:
+                    if not suppress_errors:
+                        raise
+                    warnings.warn(f'Error for field_key={field_key}:\n{e}')
+                    result['errors'].append((field_key, e))
+        finally:
+            del autorois_model
+            if loaded_here:
+                _free_memory()
+
+        if verbose:
+            print(f"Corrected {len(result['corrected'])} masks ({len(result['deployed'])} deployed), "
+                  f"{len(result['unchanged'])} unchanged, {len(result['skipped'])} skipped, "
+                  f"{len(result['errors'])} errors.")
+        return result
+
+    def _correct_field_roi_mask(
+            self, field_key: dict, autorois_model, roi_channel, roi_mask_dir, old_prefix, new_prefix,
+            use_stim_onset, clean, min_size, connectivity, iou_threshold, overwrite_files,
+            vessel_threshold=None, max_vessel_overlap=0.2, vessel_filter_existing=False,
+    ) -> dict:
+        """Correct the mask of one field and save it. Returns a dict with ``status`` and information."""
+        field_key = (self.field_table & field_key).proj().fetch1()
+
+        if self._presentation_masks and len(self.RoiMaskPresentation & field_key & "as_field_mask='different'") > 0:
+            return dict(status='skipped', field_key=field_key, reason="has presentations with 'different' masks")
+
+        data = self._load_field_stacks(
+            field_key, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
+            old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset)
+        pres_keys, output_files, n_artifact = data['pres_keys'], data['output_files'], data['n_artifact']
+
+        # The field mask is the mask of the presentation stored with it, which is the reference for the shifts.
+        main_row = (self & field_key).fetch1()
+        ref_idxs = [i for i, pres_key in enumerate(pres_keys)
+                    if all(pres_key[k] == main_row[k] for k in self.presentation_table.primary_key)]
+        if len(ref_idxs) != 1:
+            raise ValueError(f'Could not find the presentation of the ROI mask of field_key={field_key}')
+        ref_idx = ref_idxs[0]
+        shifts = self.init_shifts(field_key, pres_keys) or [(0, 0)] * len(pres_keys)
+
+        roi_mask_old = to_python_format(load_array(main_row['roi_mask']))
+        roi_mask = clean_rois(roi_mask_old, n_artifact, min_size=min_size, connectivity=connectivity,
+                              verbose=False) if clean else roi_mask_old.copy()
+        if vessel_filter_existing:
+            roi_mask = _remove_vessel_rois(roi_mask, data, ref_idx, vessel_threshold, max_vessel_overlap, connectivity)
+
+        n_added = 0
+        if autorois_model is not None:
+            roi_mask_pred = _predict_roi_mask(autorois_model, data, ref_idx=ref_idx)
+            roi_mask_pred = _remove_vessel_rois(
+                roi_mask_pred, data, ref_idx, vessel_threshold, max_vessel_overlap, connectivity)
+            if np.any(roi_mask > 0):
+                rois_to_add = generate_roi_suggestions(
+                    mask_pred=roi_mask_pred, mask_true=roi_mask, n_artifact=n_artifact, threshold=iou_threshold)
+            else:
+                rois_to_add = clean_rois(roi_mask_pred, n_artifact, min_size=min_size, verbose=False)
+
+            if np.any(rois_to_add > 0):
+                roi_mask, rois_added = add_rois(rois_to_add, roi_mask, connectivity=connectivity)
+                n_added = len(np.unique(rois_added[rois_added > 0]))
+
+        n_before, n_after = len(np.unique(roi_mask_old[roi_mask_old > 0])), len(np.unique(roi_mask[roi_mask > 0]))
+        info = dict(field_key=field_key, n_before=n_before, n_after=n_after, n_added=n_added)
+
+        if np.all((roi_mask_old > 0) == (roi_mask > 0)) and n_before == n_after:
+            return dict(info, status='unchanged')
+
+        if not overwrite_files and all(os.path.isfile(f) for f in output_files):
+            return dict(status='skipped', field_key=field_key, reason=f'corrected files exist in {roi_mask_dir}')
+
+        self._save_roi_mask_files(output_files, [
+            shift_array(roi_mask, shift=(-shift[0], -shift[1]), cval=0) for shift in shifts])
+        return dict(info, status='corrected')
+
+    def plot_roi_mask_correction(
+            self,
+            field_key: dict | None = None,
+            roi_mask_dir: str = 'CorrectedROIs',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+            gamma: float = 0.5,
+    ) -> None:
+        """Plot the ROI mask in the database against its correction from ``correct_roi_masks``.
+
+        Shows the current mask, the corrected mask, the pixels that were added (red) or removed (blue), and the
+        stack average with these differences.
+
+        Args:
+            field_key: Primary key identifying the field. If None, the first available key is used.
+            roi_mask_dir: Sub-directory the corrected mask files were written to.
+            old_prefix: Path prefix to replace when resolving file paths.
+            new_prefix: Replacement path prefix.
+            gamma: Gamma correction value for the stack average.
+        """
+        from matplotlib import pyplot as plt
+
+        field_key = get_primary_key(table=self.proj(), key=field_key)
+        main_row = (self & field_key).fetch1()
+        pres_key = {k: main_row[k] for k in self.presentation_table.primary_key}
+
+        input_file = local_file_path(
+            (self.presentation_table & pres_key).fetch1("pres_data_file"), self.presentation_table._filepath_store)
+        roi_mask_file = to_roi_mask_file(
+            input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+            file_format=self._get_roi_file_format())
+        if not os.path.isfile(roi_mask_file):
+            raise FileNotFoundError(f'No corrected ROI mask file {roi_mask_file}')
+
+        roi_mask_old = to_python_format(load_array(main_row['roi_mask']))
+        roi_mask_new = load_roi_mask_file(roi_mask_file).astype(int)
+
+        scan_type = (self.field_table & field_key).fetch1('scan_type')
+        data_name, _ = self.userinfo_table().get_stack_names(field_key)
+        ch_average = load_array(
+            (self.presentation_table.StackAverages & pres_key & dict(ch_name=data_name)).fetch1('ch_average'))
+
+        diff = (roi_mask_new > 0).astype(float) - (roi_mask_old > 0).astype(float)
+        diff[diff == 0] = np.nan
+        average = ch_average.astype(float)
+        average = (average - np.nanmin(average)) / max(np.nanmax(average) - np.nanmin(average), 1e-12)
+
+        # Same layout as `plot_field`, which is used by `plot1`
+        extent, xlabel, ylabel = field_extent_and_labels(roi_mask_old.shape, scan_type)
+        fig, axs = plt.subplots(1, 4, figsize=(18, 4), sharex='all', sharey='all')
+        fig.suptitle(str(field_key))
+        for ax in axs:
+            ax.set(xlabel=xlabel)
+        axs[0].set(ylabel=ylabel)
+
+        for ax, img, title in zip(axs[:2], (roi_mask_old, roi_mask_new), ('Current', 'Corrected')):
+            ax.imshow(np.where(img > 0, img, np.nan).T.astype(float), cmap='jet', origin='lower', extent=extent)
+            ax.set(title=f'{title} ({len(np.unique(img[img > 0]))} ROIs)')
+        axs[2].imshow(diff.T, vmin=-1, vmax=1, cmap='bwr', origin='lower', extent=extent)
+        axs[2].set(title='Added (red) / removed (blue)')
+        axs[3].imshow((average ** gamma).T, cmap='gray', origin='lower', extent=extent)
+        axs[3].imshow(diff.T, vmin=-1, vmax=1, cmap='bwr', alpha=0.5, origin='lower', extent=extent)
+        axs[3].set(title='Stack average + difference')
+        plt.tight_layout()
+        plt.show()
+
     def rescan_filesystem(
             self,
             restrictions: dict | None = None,
@@ -540,6 +1005,69 @@ class RoiMaskTemplate(dj.Manual):
 
         return err_list
 
+    def deploy_roi_mask(
+            self,
+            field_key: dict,
+            roi_table: dj.Table | None = None,
+            roi_mask_dir: str = 'ROIs',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+            max_shift: int | None = None,
+            verbose: bool = True,
+    ) -> None:
+        """Replace the ROI mask of a field in the database by the mask files in ``roi_mask_dir``.
+
+        The existing entry is deleted, which cascades to ALL downstream tables (ROI, traces, ...). The mask files
+        of all presentations of the field (e.g. written by the ROI canvas, 'Save all to file') are then inserted as
+        for ``rescan_filesystem(source='autorois')``. Delete and insert are one transaction, so the old entry is kept
+        if anything fails. Afterwards only ``roi_table`` is repopulated for the field; further downstream tables
+        have to be populated by the caller.
+
+        Args:
+            field_key: Primary key dict identifying the field.
+            roi_table: ROI table (``RoiTemplate``) that is populated for the field afterwards. If None, nothing is
+                populated.
+            roi_mask_dir: Sub-directory name containing ROI mask files.
+            old_prefix: Path prefix to replace when resolving file paths.
+            new_prefix: Replacement path prefix.
+            max_shift: Maximum allowed pixel shift between presentations. Defaults to the table-level value.
+            verbose: If True, print a summary.
+
+        Raises:
+            FileNotFoundError: If a presentation of the field has no mask file. Nothing is deleted then.
+        """
+        field_key = (self.field_table & field_key).proj().fetch1()
+        pres_keys = (self.presentation_table & field_key).proj().to_dicts()
+
+        missing_files = []
+        for pres_key in pres_keys:
+            input_file = local_file_path(
+                (self.presentation_table & pres_key).fetch1("pres_data_file"), self.presentation_table._filepath_store)
+            roimask_file = to_roi_mask_file(
+                input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+                file_format=self._get_roi_file_format())
+            if not os.path.isfile(roimask_file):
+                missing_files.append(roimask_file)
+        if len(missing_files) > 0:
+            raise FileNotFoundError(f'Missing ROI mask files, nothing was changed:\n{missing_files}')
+
+        with self.connection.transaction:
+            (self & field_key).delete(prompt=False)
+            self._add_field_roi_masks(
+                field_key, source='autorois', roi_mask_dir=roi_mask_dir,
+                old_prefix=old_prefix, new_prefix=new_prefix, max_shift=max_shift)
+            n_new = len(self.RoiMaskPresentation & field_key) if self._presentation_masks else len(pres_keys)
+            if len(self & field_key) != 1 or n_new != len(pres_keys):
+                raise ValueError(f'Expected 1 ROI mask for {len(pres_keys)} presentations, '
+                                 f'got {len(self & field_key)} for {n_new}; rolled back.')
+
+        if roi_table is not None:
+            roi_table.populate(field_key)
+
+        if verbose:
+            print(f'Deployed ROI mask for field_key=\n{field_key}\n'
+                  f'({n_new} presentations; populated ROI table: {roi_table is not None})')
+
     def check_filesystem_consistency(
             self,
             restrictions: dict | None = None,
@@ -582,13 +1110,15 @@ class RoiMaskTemplate(dj.Manual):
             restrictions = dict()
 
         problems = []
-        pres_keys = (self.RoiMaskPresentation & restrictions).proj().to_dicts()
+        # In motion mode (no presentation masks) only the field masks are stored, with the file they came from.
+        mask_tab = self.RoiMaskPresentation if self._presentation_masks else self
+        pres_keys = (mask_tab & restrictions).proj().to_dicts()
 
         if verbose:
             print(f'Checking filesystem consistency for {len(pres_keys)} presentation(s)...')
 
         for i, key in enumerate(pres_keys):
-            roi_mask_file, roi_mask_source, database_roi_mask = (self.RoiMaskPresentation & key).fetch1(
+            roi_mask_file, roi_mask_source, database_roi_mask = (mask_tab & key).fetch1(
                 'roi_mask_file', 'roi_mask_source', 'roi_mask')
             filesystem_file = local_file_path(roi_mask_file, self._filepath_store)
             database_roi_mask = load_array(database_roi_mask)
@@ -673,8 +1203,12 @@ class RoiMaskTemplate(dj.Manual):
         # entries are not needlessly read from disk and their filesystem-vs-database
         # consistency is not checked here (which would cause rescan to fail if any
         # pre-existing mask file was edited outside the database).
-        new_pres_keys = [pk for pk in pres_keys
-                         if len(self.RoiMaskPresentation & pk) == 0]
+        if self._presentation_masks:
+            new_pres_keys = [pk for pk in pres_keys
+                             if len(self.RoiMaskPresentation & pk) == 0]
+        else:
+            # Motion mode: only the field mask is stored; presentation masks come from the motion tables.
+            new_pres_keys = pres_keys if len(self & field_key) == 0 else []
 
         if len(new_pres_keys) == 0:
             if verboselvl > 1:
@@ -682,6 +1216,12 @@ class RoiMaskTemplate(dj.Manual):
             if verboselvl > 2:
                 print('pres_keys:', [k for k in pres_keys])
             return
+
+        if source == 'infer' and (self.raw_params_table & field_key).fetch1('igor_roi_masks') == 'either':
+            source = self._resolve_field_source(
+                field_key, pres_keys, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            if verboselvl > 1:
+                print(f"igor_roi_masks='either': using source={source!r} for field:", field_key)
 
         loaded = [self._load_presentation_roi_mask(
             key, roi_mask_dir, source=source, old_prefix=old_prefix, new_prefix=new_prefix)
@@ -730,7 +1270,8 @@ class RoiMaskTemplate(dj.Manual):
 
         roi_mask_pres_keys = []
 
-        for pres_key, (roi_mask, roi_mask_file, roi_mask_source) in data_pairs:
+        # Motion mode: no presentation masks, only the field mask is inserted below.
+        for pres_key, (roi_mask, roi_mask_file, roi_mask_source) in (data_pairs if self._presentation_masks else []):
             if roi_mask is not None:
                 as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(
                     roi_mask, main_roi_mask, max_shift=self._max_shift if max_shift is None else max_shift)
@@ -759,6 +1300,32 @@ class RoiMaskTemplate(dj.Manual):
                 roi_mask_pres_key = {**roi_mask_pres_key, **add_primary_keys}
 
             self.RoiMaskPresentation().insert1(roi_mask_pres_key, skip_duplicates=True)
+
+    def _resolve_field_source(
+            self,
+            field_key: dict,
+            pres_keys: list,
+            roi_mask_dir: str = 'ROIs',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+    ) -> str:
+        """Choose one mask source ('igor' or 'autorois') for a whole field, for ``igor_roi_masks='either'``.
+
+        If the field already has a mask in the database, its source is kept. Otherwise a mask file
+        (``roi_mask_dir``) of any presentation is preferred over an Igor mask.
+        """
+        if len(self & field_key) > 0:
+            return 'igor' if (self & field_key).fetch1('roi_mask_source') == 'igor_h5' else 'autorois'
+
+        for pres_key in pres_keys:
+            input_file = local_file_path(
+                (self.presentation_table & pres_key).fetch1("pres_data_file"), self.presentation_table._filepath_store)
+            roimask_file = to_roi_mask_file(
+                input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+                file_format=self._get_roi_file_format())
+            if os.path.isfile(roimask_file):
+                return 'autorois'
+        return 'igor'
 
     def _load_presentation_roi_mask(
             self,
@@ -789,11 +1356,15 @@ class RoiMaskTemplate(dj.Manual):
             self.presentation_table._filepath_store)
 
         if source == 'infer':
-            igor_roi_masks, from_raw_data = (self.raw_params_table & key).fetch1('igor_roi_masks', 'from_raw_data')
+            igor_roi_masks = (self.raw_params_table & key).fetch1('igor_roi_masks')
+            if igor_roi_masks == 'either':
+                raise ValueError("igor_roi_masks='either' has to be resolved per field, see `_resolve_field_source`.")
         elif source == 'igor':
-            igor_roi_masks, from_raw_data = 'yes', False
+            igor_roi_masks = 'yes'
         elif source == 'autorois':
-            igor_roi_masks, from_raw_data = 'no', True
+            igor_roi_masks = 'no'
+        else:
+            raise ValueError(f"source={source!r} must be 'infer', 'igor' or 'autorois'")
 
         file_format = self._get_roi_file_format()
         roimask_file = to_roi_mask_file(
@@ -801,8 +1372,11 @@ class RoiMaskTemplate(dj.Manual):
             file_format=file_format)
 
         if igor_roi_masks == 'yes':
-            assert not from_raw_data, 'Inconsistent parameters'
-            filesystem_roi_mask = read_h5_utils.load_roi_mask(filepath=input_file, ignore_not_found=True)
+            # Igor masks are stored in the h5 file, also if the presentation was loaded from the raw file.
+            userinfo = (self.userinfo_table & key).fetch1()
+            igor_file = as_pre_filepath(
+                input_file, raw_data_dir=userinfo['raw_data_dir'], pre_data_dir=userinfo['pre_data_dir'])
+            filesystem_roi_mask = read_h5_utils.load_roi_mask(filepath=igor_file, ignore_not_found=True)
         else:
             if os.path.isfile(roimask_file):
                 filesystem_roi_mask = load_roi_mask_file(roimask_file).astype(np.int32)
@@ -810,8 +1384,11 @@ class RoiMaskTemplate(dj.Manual):
             else:
                 filesystem_roi_mask = None
 
-        if len((self.RoiMaskPresentation & key).proj()) > 0:
-            database_roi_mask = load_array((self.RoiMaskPresentation & key).fetch1('roi_mask'))
+        # Database entry of this presentation: its presentation mask, or in motion mode the field mask if the field
+        # mask belongs to this presentation.
+        db_tab = self.RoiMaskPresentation if self._presentation_masks else self
+        if len((db_tab & key).proj()) > 0:
+            database_roi_mask = load_array((db_tab & key).fetch1('roi_mask'))
 
             if filesystem_roi_mask is None:
                 if igor_roi_masks == 'yes':
@@ -838,7 +1415,7 @@ class RoiMaskTemplate(dj.Manual):
             return None, None, None
 
         if igor_roi_masks == 'yes':
-            src_file, src_format = input_file, 'igor_h5'
+            src_file, src_format = igor_file, 'igor_h5'
         else:
             src_file, src_format = roimask_file, _roi_mask_source_from_path(roimask_file)
 
@@ -863,7 +1440,10 @@ class RoiMaskTemplate(dj.Manual):
         except dj.DataJointError:
             alt_ch_average = np.full_like(main_ch_average, np.nan)
 
-        roi_mask = load_array((self.RoiMaskPresentation & key).fetch1('roi_mask'))
+        if self._presentation_masks:
+            roi_mask = load_array((self.RoiMaskPresentation & key).fetch1('roi_mask'))
+        else:  # Motion mode: field mask (presentation masks are in MotionRoiMask)
+            roi_mask = load_array((self & {k: key[k] for k in self.primary_key}).fetch1('roi_mask'))
         plot_field(main_ch_average, alt_ch_average, scan_type=scan_type,
                    roi_mask=roi_mask, title=key, npixartifact=npixartifact, gamma=gamma)
 
@@ -898,6 +1478,67 @@ class RoiMaskTemplate(dj.Manual):
             return dict()
 
         return bg_dict
+
+
+def _get_autorois_model(model: str | None, kind: str, autorois_models: dict | None) -> tuple[str, object, bool]:
+    """Pick (or load) one AutoROIs model. Returns its name, the model and whether it was loaded here."""
+    if model is None:
+        model = 'UNet' if kind == 'default_rgc' else 'CorrRoiMask'
+
+    loaded_here = autorois_models is None
+    if loaded_here:
+        autorois_models = load_default_autorois_models(kind=kind, models=[model])
+    if autorois_models is None or model not in autorois_models:
+        raise ValueError(f"Model {model!r} is not available, got {list(autorois_models or [])}")
+    return model, autorois_models[model], loaded_here
+
+
+def _predict_roi_mask(autorois_model, data: dict, ref_idx: int = 0, use_all_stacks: bool = False) -> np.ndarray:
+    """Let an AutoROIs model propose a ROI mask for the stacks loaded by `RoiMaskTemplate._load_field_stacks`.
+
+    The model is applied to the stack of the reference presentation `ref_idx`, or to all stacks (concatenated in
+    time) if `use_all_stacks`. The first channel other than the ROI channel is passed as second input.
+    """
+    stacks, n_artifact = data['stacks'], data['n_artifact']
+    ch0_stacks = stacks[data['roi_channel']]
+    other_chs = [ch_name for ch_name in data['ch_names'] if ch_name != data['roi_channel']]
+    ch1_stacks = stacks[other_chs[0]] if len(other_chs) > 0 else None
+
+    if use_all_stacks:
+        return np.asarray(autorois_model.create_mask_from_data(
+            ch0_stack=ch0_stacks, ch1_stack=ch1_stacks, n_artifact=n_artifact,
+            pixel_size_um=data['pixel_size_d1_d2'], multiple_stacks=True))
+    return np.asarray(autorois_model.create_mask_from_data(
+        ch0_stack=ch0_stacks[ref_idx], ch1_stack=None if ch1_stacks is None else ch1_stacks[ref_idx],
+        n_artifact=n_artifact, pixel_size_um=data['pixel_size_d1_d2']))
+
+
+def _remove_vessel_rois(roi_mask: np.ndarray, data: dict, ref_idx: int, vessel_threshold: float | None,
+                        max_vessel_overlap: float, connectivity: int) -> np.ndarray:
+    """Remove ROIs on blood vessels, found by comparing the first other channel to the ROI channel (no-op if None)."""
+    if vessel_threshold is None:
+        return roi_mask
+    other_chs = [ch_name for ch_name in data['ch_names'] if ch_name != data['roi_channel']]
+    if len(other_chs) == 0:
+        warnings.warn('vessel_threshold is ignored, because the recording has no second channel.')
+        return roi_mask
+    alt_img = np.mean(data['stacks'][other_chs[0]][ref_idx], axis=-1)
+    main_img = np.mean(data['stacks'][data['roi_channel']][ref_idx], axis=-1)
+    vessel_mask = estimate_vessel_mask(alt_img, main_img, n_artifact=data['n_artifact'], alt_z=vessel_threshold)
+    return remove_vessel_rois(roi_mask, vessel_mask, max_overlap=max_vessel_overlap, connectivity=connectivity,
+                              verbose=False)
+
+
+def _free_memory() -> None:
+    """Release memory of unreferenced objects, also on the GPU."""
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except ImportError:
+        pass
 
 
 def _roi_mask_source_from_path(path: str | Path) -> str:
