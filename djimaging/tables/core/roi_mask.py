@@ -237,6 +237,11 @@ class RoiMaskTemplate(dj.Manual):
             **kwargs: Additional keyword arguments forwarded to
                 ``InteractiveRoiCanvas``.
 
+        In motion mode (no presentation masks) the canvas opens on the presentation the initial mask belongs to (the
+        presentation stored in the database, else the one of the mask file, else the ``mask_alias`` choice), and
+        shifts between presentations are disabled: the mask is saved unchanged for all presentations, the
+        presentation masks are computed by ``MotionRoiMask`` after deploying.
+
         Returns:
             An ``InteractiveRoiCanvas`` instance. Call ``.start_gui()`` on it
             to open the interactive widget.
@@ -267,7 +272,7 @@ class RoiMaskTemplate(dj.Manual):
 
         # Load initial ROI masks
         igor_roi_masks = (self.raw_params_table & field_key).fetch1('igor_roi_masks')
-        initial_roi_mask, _ = self.load_initial_roi_mask(
+        initial_roi_mask, initial_src = self.load_initial_roi_mask(
             field_key=field_key, igor_roi_masks=igor_roi_masks,
             roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix, verbose=verbose)
 
@@ -283,10 +288,15 @@ class RoiMaskTemplate(dj.Manual):
         # Load shifts if available
         shifts = self.init_shifts(field_key, pres_keys)
 
+        # Motion mode: draw on the presentation of the mask, no shifts between presentations
+        main_stim_idx = 0 if self._presentation_masks else self._main_presentation_idx(
+            field_key, pres_keys, field_data['filepaths'], output_files, initial_src)
+
         roi_canvas = InteractiveRoiCanvas(
             pres_names=pres_names,
             stacks=stacks, primary_channel=roi_channel, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
-            main_stim_idx=0, initial_roi_mask=initial_roi_mask, shifts=shifts,
+            main_stim_idx=main_stim_idx, initial_roi_mask=initial_roi_mask, shifts=shifts,
+            allow_shifts=self._presentation_masks,
             canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
             pixel_size_um=pixel_size_d1_d2, show_diagnostics=show_diagnostics,
             max_shift=self._max_shift if max_shift is None else max_shift,
@@ -296,8 +306,37 @@ class RoiMaskTemplate(dj.Manual):
             **kwargs,
         )
         if verbose:
+            if not self._presentation_masks:
+                print(f"Motion mode: draw on {pres_names[main_stim_idx]}; the mask is saved unchanged for all "
+                      f"presentations (no shifts).")
             print(f"Returned InteractiveRoiCanvas object. To start GUI, call <enter_object_name>.start_gui().")
         return roi_canvas
+
+    def _main_presentation_idx(self, field_key: dict, pres_keys: list, filepaths: list, output_files: list,
+                               initial_src: str) -> int:
+        """Index of the presentation an initial field mask belongs to: the presentation stored in the database,
+        else the presentation of the mask file (``initial_src``), else the first one in ``mask_alias`` order."""
+        def same_file(a, b):
+            return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(os.path.abspath(str(b)))
+
+        pres_primary_key = self.presentation_table.primary_key
+        if initial_src == 'database':
+            row = (self & field_key).fetch1()
+            idxs = [i for i, pk in enumerate(pres_keys) if all(pk[k] == row[k] for k in pres_primary_key)]
+            if len(idxs) == 1:
+                return idxs[0]
+        elif initial_src not in (None, 'none'):
+            idxs = [i for i, f in enumerate(output_files) if same_file(f, initial_src)]
+            if len(idxs) == 0:  # Igor mask: stored in the h5 file of the presentation
+                raw_data_dir, pre_data_dir = (self.userinfo_table & field_key).fetch1('raw_data_dir', 'pre_data_dir')
+                idxs = [i for i, f in enumerate(filepaths) if same_file(
+                    as_pre_filepath(f, raw_data_dir=raw_data_dir, pre_data_dir=pre_data_dir), initial_src)]
+            if len(idxs) == 1:
+                return idxs[0]
+
+        mask_alias, highres_alias = (self.userinfo_table & field_key).fetch1("mask_alias", "highres_alias")
+        return int(sort_roi_mask_files(
+            files=list(filepaths), mask_alias=mask_alias, highres_alias=highres_alias, as_index=True)[0])
 
     def _load_field_stacks(
             self,
@@ -378,7 +417,7 @@ class RoiMaskTemplate(dj.Manual):
                       for ch_name, ch_stacks in stacks.items()}
 
         return dict(
-            pres_keys=pres_keys, pres_names=pres_names, stacks=stacks, output_files=output_files,
+            pres_keys=pres_keys, pres_names=pres_names, filepaths=filepaths, stacks=stacks, output_files=output_files,
             ch_names=ch_names, roi_channel=roi_channel, n_artifact=n_artifact, pixel_size_d1_d2=pixel_size_d1_d2)
 
     def init_shifts(self, field_key: dict, pres_keys: list) -> list | None:

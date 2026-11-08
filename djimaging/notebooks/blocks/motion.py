@@ -10,6 +10,10 @@
 # and aligns the mask to it by up to 2 px (`align_dx`, `align_dy`; the mask file is not changed). Check `mask_fit`
 # and `mask_selection` ('alias': the mask fits no presentation).
 #
+# In the ROI canvas (`RoiMask().draw_roi_mask(...)`), motion mode opens the presentation the mask belongs to and
+# disables the shifts between presentations: draw on that presentation, the mask is saved unchanged for all
+# presentations, and the presentation masks are computed by `MotionRoiMask` after deploying.
+#
 # - `MotionParams`: Parameters (defaults in `motion_correction.DEFAULT_MOTION_PARAMS`).
 # - `MotionReference`: Reference images of a field, from the presentation the field ROI mask was drawn on.
 # - `MotionDetection`: Per presentation: rigid subpixel displacement vs. the reference (only the slow part, `tau_slow_s`,

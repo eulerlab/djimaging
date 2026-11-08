@@ -65,6 +65,7 @@ class RoiCanvas:
             pixel_size_um=(1., 1.),
             stacks: Optional[Dict[str, list]] = None,
             primary_channel: Optional[str] = None,
+            allow_shifts: bool = True,
     ):
         """ROI canvas to draw ROIs
 
@@ -81,6 +82,10 @@ class RoiCanvas:
             auto shift and as the first input of the AutoROIs models. Defaults to the first channel.
             The first other channel is passed as second input to the AutoROIs models. Multi-color AutoROIs are
             not supported.
+        allow_shifts : bool, optional
+            If False, the presentations have no shifts relative to the main presentation (``main_stim_idx``) and
+            all presentations get the same mask when saved. Used in motion mode, where the mask is drawn on the main
+            presentation and the presentation masks are computed by the motion tables (``MotionRoiMask``).
         """
         self.stacks = _resolve_stacks(ch0_stacks, ch1_stacks, stacks)
         self.ch_names = list(self.stacks)
@@ -110,6 +115,11 @@ class RoiCanvas:
 
         if self.shifts.shape[0] != n_stacks:
             raise ValueError('Incompatible shapes between shifts and stacks')
+        self.allow_shifts = allow_shifts
+        if not allow_shifts and np.any(self.shifts != 0):
+            raise ValueError('allow_shifts=False requires zero shifts')
+        if not 0 <= main_stim_idx < n_stacks:
+            raise ValueError(f'main_stim_idx={main_stim_idx} out of range for {n_stacks} presentations')
 
         if pres_names is None:
             pres_names = [f"stim{i + 1}" for i in range(n_stacks)]
@@ -148,8 +158,8 @@ class RoiCanvas:
         self.roi_masks_backup = self.roi_masks.copy()
         self.roi_mask_img = np.zeros((self.nx, self.ny, 4), dtype=int)
 
-        # Selection
-        self._selected_stim_idx = 0
+        # Selection: start on the main presentation, the one the mask belongs to
+        self._selected_stim_idx = main_stim_idx
         self._selected_bg = f'stack: {self.primary_channel}[mean]'
         self._selected_cmap = 'gray'
         self._selected_gamma = 0.33
@@ -468,6 +478,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             stacks: Optional[Dict[str, list]] = None,
             primary_channel: Optional[str] = None,
             deploy_callback: Optional[Callable[[], object]] = None,
+            allow_shifts: bool = True,
     ):
         """Interactive ROI canvas, see `RoiCanvas` for the stacks and the primary (target) channel.
 
@@ -477,6 +488,9 @@ class InteractiveRoiCanvas(RoiCanvas):
         If `deploy_callback` is given, the GUI has a 'Deploy to database' button (enabled in the dangerzone). It
         first saves the masks of all presentations to `output_files` and then calls `deploy_callback()`, which is
         expected to replace the database entry with the saved masks, see `RoiMaskTemplate.deploy_roi_mask`.
+
+        With `allow_shifts=False` (motion mode) the shift widgets and auto shift are disabled: the mask is drawn on
+        the main presentation (`main_stim_idx`) and saved unchanged for all presentations.
         """
         if _widgets_import_error is not None:
             raise ImportError('InteractiveRoiCanvas requires ipywidgets; install djimaging[autorois].') \
@@ -495,7 +509,7 @@ class InteractiveRoiCanvas(RoiCanvas):
                          pres_names=pres_names, bg_dict=bg_dict, n_artifact=n_artifact,
                          initial_roi_mask=initial_roi_mask, shifts=shifts, main_stim_idx=main_stim_idx,
                          upscale=upscale, autorois_models=autorois_models,
-                         output_files=output_files, pixel_size_um=pixel_size_um)
+                         output_files=output_files, pixel_size_um=pixel_size_um, allow_shifts=allow_shifts)
         self.debug_mode = False
         self.deploy_callback = deploy_callback
 
@@ -839,7 +853,7 @@ class InteractiveRoiCanvas(RoiCanvas):
     def update_shift_widget(self):
         self.log(f'Updating shift widget')
 
-        if self._selected_stim_idx == self.main_stim_idx:
+        if self._selected_stim_idx == self.main_stim_idx or not self.allow_shifts:
             self.widget_shift_dx.disabled = True
             self.widget_shift_dy.disabled = True
             self.widget_auto_shift.disabled = True
@@ -1049,6 +1063,8 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def set_shift(self, value, axis, update=True):
         self.log(f'Setting shift {axis}: {value}')
+        if not self.allow_shifts and value != 0:
+            raise ValueError('Shifts are disabled (allow_shifts=False, motion mode)')
 
         if axis == 'x':
             self.widget_shift_dx.value = value
