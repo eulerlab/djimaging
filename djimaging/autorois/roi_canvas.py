@@ -575,6 +575,10 @@ class InteractiveRoiCanvas(RoiCanvas):
                          view_masks=view_masks)
         self.debug_mode = False
         self.deploy_callback = deploy_callback
+        # Parameters of mask_utils.shrink_rois_to_fit: sensitive for 'Shrink ROI' (one ROI picked as suspicious),
+        # strict defaults for 'Shrink all ROIs'
+        self.shrink_roi_kws = dict(mask_utils.SHRINK_SENSITIVE)
+        self.shrink_all_kws = dict()
 
         # Pause all drawing
         self.draw_updates = False
@@ -636,6 +640,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_save = self.create_widget_save()
         self.widget_info = self.create_widget_info()
         self.widget_clean = self.create_widget_clean()
+        self.widget_shrink_roi = self.create_widget_shrink_roi()
+        self.widget_shrink_all = self.create_widget_shrink_all()
         self.widget_kill_roi = self.create_widget_kill_roi()
         self.widget_kill_all = self.create_widget_kill_all()
         self.widget_reset_all = self.create_widget_reset_all()
@@ -700,7 +706,8 @@ class InteractiveRoiCanvas(RoiCanvas):
                   self.widget_exec_autorois_all_stacks, self.widget_sel_autorois)),
             HBox((self.widget_stim_prev, self.widget_stim_next, self.widget_sel_stim)),
             HBox((self.widget_roi_prev, self.widget_roi_next, self.widget_roi)),
-            HBox((self.widget_save_and_new, self.widget_save, self.widget_undo, self.widget_kill_roi)),
+            HBox((self.widget_save_and_new, self.widget_save, self.widget_undo, self.widget_kill_roi,
+                  self.widget_shrink_roi)),
             HBox((self.widget_tool, self.widget_size, self.widget_thresh)),
             HBox((self.widget_view, self.widget_alpha_bg, self.widget_alpha_hl, self.widget_alpha_ft)),
             HBox((self.widget_primary_channel, self.widget_bg, self.widget_gamma, self.widget_cmap)),
@@ -711,7 +718,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         w_other_tools = VBox((
             HBox((self.widget_clean, self.widget_save_all_to_file, self.widget_save_to_file)),
             self.widget_save_info,
-            HBox((self.widget_kill_all, self.widget_reset_all, self.widget_deploy)),
+            HBox((self.widget_kill_all, self.widget_reset_all, self.widget_shrink_all, self.widget_deploy)),
         ))
 
         w_main = VBox((HBox((w_outputs, VBox((w_tools, self.log_widget)))),
@@ -842,6 +849,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_exec_autorois_missing.disabled = not dangerzone
         self.widget_kill_all.disabled = not dangerzone
         self.widget_reset_all.disabled = not dangerzone
+        self.widget_shrink_all.disabled = not dangerzone
         self.widget_deploy.disabled = not dangerzone or self.deploy_callback is None
         self._disable_editing_if_view_only()
 
@@ -862,6 +870,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_kill_roi.disabled = read_only
         self.widget_tool.disabled = read_only
         self.widget_clean.disabled = read_only
+        self.widget_shrink_roi.disabled = read_only
 
         if read_only:
             self.set_selected_tool('select')
@@ -881,7 +890,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         for widget in (self.widget_save, self.widget_save_and_new, self.widget_undo, self.widget_kill_roi,
                        self.widget_tool, self.widget_clean, self.widget_exec_autorois,
                        self.widget_exec_autorois_all_stacks, self.widget_exec_autorois_missing,
-                       self.widget_kill_all, self.widget_reset_all):
+                       self.widget_kill_all, self.widget_reset_all, self.widget_shrink_roi, self.widget_shrink_all):
             widget.disabled = True
         if self._selected_tool != 'select':
             self.set_selected_tool('select')
@@ -1312,6 +1321,54 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.set_roi_masks(roi_masks)
         self.draw_current_mask_img(update=True)
         self.draw_roi_masks_img(update=True)
+
+    def create_widget_shrink_roi(self):
+        widget = Button(description='Shrink ROI', disabled=False, button_style='warning',
+                        tooltip='Remove border pixels of the selected ROI that do not fit its activity '
+                                '(shrink_rois_to_fit; most ROIs stay unchanged). Undo restores them.')
+        widget.on_click(self.exec_shrink_roi)
+        return widget
+
+    def create_widget_shrink_all(self):
+        widget = Button(description='Shrink all ROIs', disabled=True, button_style='danger',
+                        tooltip='Shrink to fit for all ROIs (shrink_rois_to_fit). Undo restores them.')
+        widget.on_click(self.exec_shrink_all)
+        return widget
+
+    def exec_shrink_roi(self, button=None):
+        self.log(f'Executing shrink for roi = {self._selected_roi}')
+        return self._exec_shrink(roi_ids=[self._selected_roi], shrink_kws=self.shrink_roi_kws)
+
+    def exec_shrink_all(self, button=None):
+        self.log('Executing shrink for all rois')
+        info = self._exec_shrink(roi_ids=None, shrink_kws=self.shrink_all_kws)
+        self.set_dangerzone(False)
+        return info
+
+    def _exec_shrink(self, roi_ids=None, shrink_kws=None):
+        """Remove border pixels that do not fit the activity of their ROI, on the stack of the selected presentation
+        (target channel), see ``mask_utils.shrink_rois_to_fit``. Undo restores the mask."""
+        if self.is_view_only:
+            raise RuntimeError('This presentation is view only, shrink on the main presentation.')
+        self.exec_save_current_roi()
+        stack = np.nan_to_num(self.get_current_stack())  # shifted like the background; pixels shifted in are 0
+        new_masks, info = mask_utils.shrink_rois_to_fit(
+            self.roi_masks, stack, n_artifact=self.n_artifact, roi_ids=roi_ids, **(shrink_kws or dict()))
+        shrunk = {label: d for label, d in info.items() if d['status'] == 'shrunk'}
+        if len(shrunk) > 0:
+            self.set_roi_masks(new_masks)  # keeps a backup for undo
+            self.reset_current_mask()
+            self.load_current_mask()
+            self.draw_current_mask_img(update=True)
+            self.draw_roi_masks_img(update=True)
+            self.update_info()
+        if roi_ids is not None and len(roi_ids) == 1:
+            d = info.get(int(roi_ids[0]), dict(status='unknown ROI', n_removed=0))
+            msg = f"ROI {roi_ids[0]}: {d['status']}" + (f", {d['n_removed']} px removed" if d['n_removed'] else '')
+        else:
+            msg = f"{len(shrunk)} of {len(info)} ROIs shrunk, {sum(d['n_removed'] for d in shrunk.values())} px removed"
+        self.widget_info.value = f"n_px={np.sum(self.current_mask)} | shrink: {msg}"
+        return info
 
     def create_widget_kill_roi(self):
         widget_kill_roi = Button(description='Kill selected ROI', disabled=False, button_style='warning')

@@ -498,6 +498,142 @@ def shrink_light_artifact_rois(mask: np.ndarray, n_artifact: int, verbose: bool 
     return mask
 
 
+SHRINK_STATUS = ('unchanged', 'shrunk', 'low_signal', 'too_small', 'too_many', 'split')
+# Sensitive parameters of shrink_rois_to_fit for one ROI the user picked as suspicious (ROI canvas, 'Shrink ROI'). The
+# defaults are strict (batch use: changes ~2 % of the ROIs of the xy-RGCs test data, most fields none).
+SHRINK_SENSITIVE = dict(margin=0.15, min_rel_corr=0.2, min_group=1)
+
+
+def _zscored_highpass(traces: np.ndarray, highpass_frames: float) -> np.ndarray:
+    """High-pass (minus a Gaussian-smoothed copy) and z-score traces (n, t) along time."""
+    from scipy import ndimage
+    traces = np.asarray(traces, dtype=np.float64)
+    if highpass_frames is not None and highpass_frames > 0:
+        traces = traces - ndimage.gaussian_filter1d(traces, highpass_frames, axis=1, mode='nearest')
+    traces = traces - traces.mean(axis=1, keepdims=True)
+    sd = traces.std(axis=1, keepdims=True)
+    return np.divide(traces, sd, out=np.zeros_like(traces), where=sd > 0)
+
+
+def _corr_with(z: np.ndarray, others: np.ndarray) -> np.ndarray:
+    """Pearson correlation of z-scored rows ``z`` (n, t) with the rows of ``others`` (n, t), row by row."""
+    others = others - others.mean(axis=1, keepdims=True)
+    norm = np.linalg.norm(others, axis=1) * np.sqrt(z.shape[1])
+    return np.divide(np.sum(z * others, axis=1), norm, out=np.zeros(z.shape[0]), where=norm > 0)
+
+
+def shrink_rois_to_fit(
+        roi_mask: np.ndarray, stack: np.ndarray, n_artifact: int = 0, roi_ids=None, highpass_frames: float = 40.,
+        margin: float = 0.3, min_rel_corr: float = 0.0, min_ref_corr: float = 0.2, min_size: int = 6,
+        min_keep_frac: float = 0.6, local_px: int = 2, min_group: int = 2) -> tuple[np.ndarray, dict]:
+    """Remove border pixels whose activity does not belong to the ROI, e.g. of an ROI drawn one pixel too large.
+
+    Conservative by design: most ROIs are left unchanged. Per ROI (python format, labels > 0):
+
+    1. Traces of all pixels are high-passed (``highpass_frames``, removes bleaching / slow drift) and z-scored.
+    2. Each pixel is correlated with the mean of the other pixels of the ROI (``corr_in``, leave one out) and with
+       the mean of the pixels outside the ROI within ``local_px`` of it (``corr_out``: neighbouring cell or
+       neuropil; light artifact rows excluded).
+    3. The reference is the median ``corr_in`` of the core (pixels without a 4-neighbour outside the ROI; all pixels
+       if the core has fewer than 3). ROIs with a reference below ``min_ref_corr`` have too little signal to judge and
+       are left unchanged (``low_signal``), as are ROIs with fewer than ``min_size`` pixels (``too_small``).
+    4. A *border* pixel does not fit if it belongs to its surround, ``corr_out > corr_in + margin`` (e.g. part of a
+       neighbouring cell), or has no signal of the ROI at all, ``corr_in < min_rel_corr * reference`` (e.g. a dark
+       gap or vessel). Border pixels of the cell itself keep part of its signal (optical blur), also when dim, and are
+       kept: pixels just outside a cell still correlate with it, so a ROI that is one pixel too large is only changed
+       where that pixel clearly belongs elsewhere. Only connected groups (8-neighbourhood) of at least ``min_group``
+       such pixels are removed: an ROI drawn too large has a whole edge that does not fit, single pixels are mostly
+       noise. Defaults are strict, so that most ROIs and most fields are left unchanged (validation: 1.7 % of 1340
+       ROIs changed, 6 of 16 fields none; ``docs/motion_qc.md``). ``SHRINK_SENSITIVE`` is for a single ROI that looks
+       wrong. Pixels exactly between two touching cells are mixed (optical blur) and often not detected.
+    5. The ROI is left unchanged if it would keep fewer than ``min_keep_frac`` of its pixels (``too_many``) or split
+       into several parts (``split``). Pixels are never added, ROI labels are kept, only one border layer is checked.
+
+    Args:
+        roi_mask: Label mask in python format (0 background, ROI labels > 0), shape (x, y).
+        stack: Recording (x, y, t) the mask belongs to (e.g. the presentation the mask was drawn on).
+        n_artifact: Number of light artifact rows (excluded from the surround).
+        roi_ids: Labels of the ROIs to check. Default: all.
+
+    Returns:
+        The shrunk mask (python format) and a dict label -> dict(status, n_px, n_removed, ref_corr, removed (list of
+        (x, y))).
+    """
+    from scipy import ndimage
+
+    roi_mask = np.asarray(roi_mask).astype(int)
+    if np.any(roi_mask < 0):
+        raise ValueError('roi_mask must be in python format (labels > 0), see to_python_format')
+    if stack.shape[:2] != roi_mask.shape:
+        raise ValueError(f'stack shape {stack.shape[:2]} does not match roi_mask shape {roi_mask.shape}')
+
+    nx, ny = roi_mask.shape
+    valid = np.ones_like(roi_mask, dtype=bool)
+    valid[:n_artifact, :] = False  # light artifact rows, see shrink_light_artifact_rois
+    labels = np.unique(roi_mask[roi_mask > 0]) if roi_ids is None else np.asarray(roi_ids, dtype=int)
+    out_mask, info = roi_mask.copy(), dict()
+    four = ndimage.generate_binary_structure(2, 1)
+    # High-passed, z-scored traces of all pixels that can be used (ROIs to check and their surround)
+    used = ndimage.binary_dilation(np.isin(roi_mask, labels), iterations=local_px) if len(labels) else roi_mask > 0
+    zs = np.zeros(roi_mask.shape + (stack.shape[2],))
+    zs[used] = _zscored_highpass(stack[used], highpass_frames)
+
+    for label in labels:
+        roi = roi_mask == label
+        n_px = int(roi.sum())
+        d = dict(status='unchanged', n_px=n_px, n_removed=0, ref_corr=np.nan, removed=[])
+        info[int(label)] = d
+        if n_px < min_size:
+            d['status'] = 'too_small'
+            continue
+
+        xs, ys = np.nonzero(roi)
+        z = zs[xs, ys]
+        corr_in = _corr_with(z, z.sum(axis=0, keepdims=True) - z)
+        border = (roi & ~ndimage.binary_erosion(roi, structure=four, border_value=0))[xs, ys]
+        core = ~border
+        ref = float(np.median(corr_in[core] if core.sum() >= 3 else corr_in))
+        d['ref_corr'] = ref
+        if not ref >= min_ref_corr:
+            d['status'] = 'low_signal'
+            continue
+
+        remove = []
+        for i in np.flatnonzero(border):
+            if corr_in[i] < min_rel_corr * ref:
+                remove.append(i)
+                continue
+            x0, x1 = max(xs[i] - local_px, 0), min(xs[i] + local_px + 1, nx)
+            y0, y1 = max(ys[i] - local_px, 0), min(ys[i] + local_px + 1, ny)
+            surround = ~roi[x0:x1, y0:y1] & valid[x0:x1, y0:y1]
+            if surround.sum() < 2:
+                continue
+            out_mean = zs[x0:x1, y0:y1][surround].mean(axis=0, keepdims=True)
+            if _corr_with(z[i:i + 1], out_mean)[0] > corr_in[i] + margin:
+                remove.append(i)
+
+        if len(remove) > 0 and min_group > 1:
+            flagged = np.zeros_like(roi)
+            flagged[xs[remove], ys[remove]] = True
+            groups, _ = ndimage.label(flagged, structure=np.ones((3, 3)))
+            sizes = np.bincount(groups.ravel())
+            remove = [i for i in remove if sizes[groups[xs[i], ys[i]]] >= min_group]
+        if len(remove) == 0:
+            continue
+        new_roi = roi.copy()
+        new_roi[xs[remove], ys[remove]] = False
+        if new_roi.sum() < min_keep_frac * n_px:
+            d['status'] = 'too_many'
+            continue
+        if ndimage.label(new_roi, structure=np.ones((3, 3)))[1] > 1:
+            d['status'] = 'split'
+            continue
+        out_mask[roi & ~new_roi] = 0
+        d.update(status='shrunk', n_removed=len(remove), removed=[(int(xs[i]), int(ys[i])) for i in remove])
+
+    return out_mask, info
+
+
 def clean_rois(mask: np.ndarray, n_artifact: int, min_size: int = 3,
                connectivity: int = 2, verbose: bool = True) -> np.ndarray:
     """Clean an ROI mask by removing artifacts, splitting disconnected ROIs, and removing small ROIs.

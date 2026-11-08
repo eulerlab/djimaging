@@ -213,3 +213,24 @@ def test_cells_bright_in_both_channels_are_not_vessels():
     assert vessel[:, 12].mean() > 0.8
     for r, c in [(5, 5), (15, 20), (22, 2)]:
         assert not vessel[r:r + 4, c:c + 4].any()
+
+
+def test_shrink_is_off_by_default_and_uses_the_field_mask_presentation(tmp_path):
+    mask = np.zeros((20, 20), dtype=int)
+    mask[5:9, 5:9] = 1
+    fake = _FakeRoiMask(tmp_path, mask)
+    fake.data['stacks'] = {'ch0': [np.full((20, 20, 3), i, dtype=float) for i in range(2)]}
+    calls = []
+
+    def fake_shrink(roi_mask, stack, n_artifact=0, **kws):
+        calls.append((stack[0, 0, 0], n_artifact, kws))
+        shrunk = roi_mask.copy()
+        shrunk[5, 5:9] = 0  # one edge removed
+        return shrunk, {1: dict(status='shrunk', n_removed=4)}
+
+    with mock.patch.object(roi_mask_module, 'shrink_rois_to_fit', side_effect=fake_shrink):
+        assert _run(fake, None, clean=False)['status'] == 'unchanged' and calls == []
+        info = _run(fake, None, clean=False, shrink=True, shrink_kws=dict(margin=0.5))
+    assert info['status'] == 'corrected' and info['n_shrunk'] == 1 and info['n_added'] == 0
+    assert calls == [(0., 2, dict(margin=0.5))]  # stack of the presentation of the field mask (pres 0)
+    assert not np.any(mask_utils.load_roi_mask_file(fake.output_files[0])[5, 5:9])

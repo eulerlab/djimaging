@@ -22,7 +22,7 @@ from djimaging.utils.mask_utils import (
     load_preferred_roi_mask_igor, load_preferred_roi_mask_file, compare_roi_masks,
     save_roi_mask_file, load_roi_mask_file, relabel_mask, clean_rois, shift_array, add_rois,
     generate_roi_suggestions, estimate_vessel_mask, remove_vessel_rois, select_field_roi_mask,
-    to_field_roi_mask_file, mask_fit_score, _ROI_FILE_FORMAT_HELP,
+    to_field_roi_mask_file, mask_fit_score, shrink_rois_to_fit, _ROI_FILE_FORMAT_HELP,
 )
 from djimaging.utils.mask_format_utils import to_igor_format, to_python_format
 from djimaging.utils.plot_utils import plot_field, field_extent_and_labels
@@ -843,6 +843,8 @@ class RoiMaskTemplate(dj.Manual):
             vessel_filter_existing: bool = False,
             add_missing: bool = True,
             iou_threshold: float = 0.1,
+            shrink: bool = False,
+            shrink_kws: dict | None = None,
             overwrite_files: bool = False,
             deploy: bool = False,
             roi_table: dj.Table | None = None,
@@ -883,6 +885,11 @@ class RoiMaskTemplate(dj.Manual):
             add_missing: If True, add ROIs that the model finds but that are missing in the mask.
             iou_threshold: A ROI of the model counts as missing if its intersection over union with every existing
                 ROI is below this value. Lower values add fewer ROIs.
+            shrink: If True, remove border pixels that do not fit the activity of their ROI ('shrink to fit', e.g.
+                an ROI drawn one pixel too large into a neighbouring cell or a dark gap), on the recording of the
+                presentation of the field mask, see ``mask_utils.shrink_rois_to_fit``. Strict: most ROIs and most
+                fields stay unchanged.
+            shrink_kws: Parameters of ``shrink_rois_to_fit``.
             overwrite_files: If False, fields for which the corrected files exist are skipped. If True, they are
                 overwritten.
             deploy: If True, replace the database entry of every corrected field with the corrected masks right
@@ -894,7 +901,8 @@ class RoiMaskTemplate(dj.Manual):
 
         Returns:
             A dict with the lists ``corrected`` (a dict per field with the field key and the number of ROIs
-            ``n_before``, ``n_after`` and ``n_added``), ``unchanged``, ``skipped`` (dicts with field key and reason),
+            ``n_before``, ``n_after``, ``n_added`` and ``n_shrunk``), ``unchanged``, ``skipped`` (dicts with field key
+            and reason),
             ``deployed`` (field keys) and ``errors`` (tuples of field key and exception).
         """
         if connectivity not in (1, 2):
@@ -925,7 +933,8 @@ class RoiMaskTemplate(dj.Manual):
                         old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset, clean=clean,
                         min_size=min_size, connectivity=connectivity, iou_threshold=iou_threshold,
                         overwrite_files=overwrite_files, vessel_threshold=vessel_threshold,
-                        max_vessel_overlap=max_vessel_overlap, vessel_filter_existing=vessel_filter_existing)
+                        max_vessel_overlap=max_vessel_overlap, vessel_filter_existing=vessel_filter_existing,
+                        shrink=shrink, shrink_kws=shrink_kws)
                     status = info.pop('status')
                     result[status].append(info if status in ('corrected', 'skipped') else info['field_key'])
                     if verbose:
@@ -955,7 +964,8 @@ class RoiMaskTemplate(dj.Manual):
     def _correct_field_roi_mask(
             self, field_key: dict, autorois_model, roi_channel, roi_mask_dir, old_prefix, new_prefix,
             use_stim_onset, clean, min_size, connectivity, iou_threshold, overwrite_files,
-            vessel_threshold=None, max_vessel_overlap=0.2, vessel_filter_existing=False,
+            vessel_threshold=None, max_vessel_overlap=0.2, vessel_filter_existing=False, shrink=False,
+            shrink_kws=None,
     ) -> dict:
         """Correct the mask of one field and save it. Returns a dict with ``status`` and information."""
         field_key = (self.field_table & field_key).proj().fetch1()
@@ -998,10 +1008,16 @@ class RoiMaskTemplate(dj.Manual):
                 roi_mask, rois_added = add_rois(rois_to_add, roi_mask, connectivity=connectivity)
                 n_added = len(np.unique(rois_added[rois_added > 0]))
 
-        n_before, n_after = len(np.unique(roi_mask_old[roi_mask_old > 0])), len(np.unique(roi_mask[roi_mask > 0]))
-        info = dict(field_key=field_key, n_before=n_before, n_after=n_after, n_added=n_added)
+        n_shrunk = 0
+        if shrink:
+            roi_mask, shrink_info = shrink_rois_to_fit(
+                roi_mask, data['stacks'][data['roi_channel']][ref_idx], n_artifact=n_artifact, **(shrink_kws or dict()))
+            n_shrunk = sum(d['status'] == 'shrunk' for d in shrink_info.values())
 
-        if np.all((roi_mask_old > 0) == (roi_mask > 0)) and n_before == n_after:
+        n_before, n_after = len(np.unique(roi_mask_old[roi_mask_old > 0])), len(np.unique(roi_mask[roi_mask > 0]))
+        info = dict(field_key=field_key, n_before=n_before, n_after=n_after, n_added=n_added, n_shrunk=n_shrunk)
+
+        if np.array_equal(roi_mask_old > 0, roi_mask > 0) and n_before == n_after:
             return dict(info, status='unchanged')
 
         if not self._presentation_masks:  # Motion mode: one field mask file of the presentation of the mask

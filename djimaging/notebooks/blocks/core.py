@@ -434,6 +434,7 @@ RoiMask().rescan_filesystem(verboselvl=2, roi_mask_dir='AutoROIs')
 # | `roi_mask_dir` | Sub-directory for the corrected files. Use another one than `AutoROIs`, so the originals are kept. |
 # | `add_missing` | `True`: add the ROIs that the model finds but the mask misses. `False`: only clean the masks (no model is loaded). |
 # | `vessel_filter_existing` | `True`: also remove vessel ROIs (see `vessel_threshold` above) from the existing mask. Default `False`: only new ROIs are filtered, since the existing mask may be curated. |
+# | `shrink` | `True`: also remove border pixels that do not fit the activity of their ROI (e.g. drawn one pixel into a neighbour or a dark gap), see `mask_utils.shrink_rois_to_fit`. Strict: most fields stay unchanged. In the ROI canvas: 'Shrink ROI' (selected ROI, more sensitive) and 'Shrink all ROIs' (dangerzone). |
 # | `iou_threshold` | A ROI of the model counts as missing if its overlap (intersection over union) with every existing ROI is below this value. Lower values add fewer ROIs. |
 # | `deploy` | `True`: replace the database entries of the corrected fields right away. Requires `roi_table`. **Deletes the downstream tables of these fields.** |
 # | `roi_table` | The ROI table, populated for the deployed fields. |
@@ -460,6 +461,7 @@ correction = RoiMask().correct_roi_masks(
     vessel_filter_existing=False,
     add_missing=True,
     iou_threshold=0.1,
+    shrink=False,
     overwrite_files=False,
     deploy=False,
     roi_table=None,

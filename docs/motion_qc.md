@@ -288,6 +288,42 @@ correlation of the ROI trace with the surrounding neuropil:
 - The `low_contrast` flag of `MotionRoiMask` is not caused by the offset (it compares two contrasts against nearly the
   same background, so the offset cancels).
 
+## Shrink to fit: border pixels that do not fit the ROI (`shrink_rois_to_fit`; `shrink_masks.py`, `shrink_synthetic.py`)
+
+For masks drawn a little too large (by hand or AutoROIs). Not motion specific; ROI canvas ('Shrink ROI', 'Shrink all
+ROIs') and `correct_roi_masks(shrink=True)` (files, review, deploy). Per ROI, on one recording: high-passed pixel traces;
+`corr_in` = correlation with the rest of the ROI, `corr_out` = with the pixels outside within 2 px; reference = median
+`corr_in` of the core. A border pixel does not fit if `corr_out > corr_in + margin` (belongs to the surround, e.g. a
+neighbour) or `corr_in < min_rel_corr * reference` (no signal of the ROI, e.g. a dark gap / vessel); only connected
+groups of `min_group` such pixels are removed; ROIs that would lose > 40 % or split stay as drawn.
+
+Key observation (real data, pixel classes): correlation with the cell falls off smoothly outside the ROI (blur, somata
+larger than the ROI): pixels 1 px outside keep a median of 0.51 of the ROI's correlation, 2 px outside 0.24-0.28. So a
+pixel 1 px outside a cell is usually *not* decorrelated, and removing it hardly matters. Temporal binning raises the
+correlations of wrong and correct pixels alike (no better separation).
+
+Synthetic ground truth (cells r 2.3 px, PSF 0.6 px, own + shared activity, neuropil, noise matched to the real pixel
+SNR; trace fidelity = corr with the true activity):
+
+| ROI drawn 1 px too large into | fidelity true / drawn | strict default | sensitive preset |
+|---|---|---|---|
+| neuropil | 0.738 / 0.703 | not detected | not detected |
+| touching neighbour (30 % shared activity) | 0.778 / 0.759 | not detected | 0-3 of 3 px (mixed pixels) |
+| neighbour with own activity (unit test) | - | not detected | 14 of 15 px |
+| dark gap / vessel | 0.697 / 0.696 | 16 % of px | 73-77 % of px |
+
+No correct ROI was changed in any synthetic setting.
+
+Real data (16 xy fields, 1340 ROIs), decided on the field mask presentation, evaluated on the other presentations:
+
+| preset | parameters | ROIs changed | fields unchanged | dQI (same / other condition) | dNP |
+|---|---|---|---|---|---|
+| strict (default) | margin 0.3, min_rel_corr 0.0, min_group 2 | 23 (1.7 %), 0-4 per field | 6 / 16 | +0.003 (68 % > 0) / +0.001 | -0.001 |
+| sensitive (`SHRINK_SENSITIVE`) | margin 0.15, min_rel_corr 0.2, min_group 1 | 210 (15.7 %) | 0 / 16 | -0.000 / -0.000 | -0.002 / -0.003 |
+
+The strict default matches the expectation "most fields need nothing, some 1-3 ROIs"; the few ROIs it changes get
+slightly better traces. The sensitive preset is for a single ROI that looks wrong in the canvas (undo restores it).
+
 ## Open points / next steps
 
 1. ~~Per-ROI shift field between presentations~~ done (see above). Open: within-condition changes of the deformation

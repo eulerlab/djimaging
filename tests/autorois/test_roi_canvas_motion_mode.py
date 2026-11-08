@@ -157,3 +157,55 @@ def test_preview_moves_mask_by_auto_shift(tmp_path, monkeypatch):
     assert canvas._view_source == 'preview (global shift 1, -1)'
     # As saved for a presentation with this shift (prep_roi_mask_for_file)
     assert np.array_equal(shown, shift_array(canvas.roi_masks.copy(), shift=(-1, 1), cval=0))
+
+
+# Shrink to fit in the canvas
+
+def _canvas_with_wrong_pixels(tmp_path, allow_shifts=True):
+    """Two cells with independent activity; ROI 1 is drawn one pixel into cell 2 (rows 6 / 7 border)."""
+    pytest.importorskip('ipycanvas')
+    rng = np.random.default_rng(1)
+    n = 1200
+    act = [np.convolve(rng.poisson(0.05, n).astype(float), np.exp(-np.arange(40) / 8.))[:n] for _ in range(2)]
+    stack = 0.3 + 0.5 * rng.standard_normal((12, 10, n)) * 0.3
+    stack[2:6, 3:7] += act[0]
+    stack[6:10, 3:7] += act[1]
+    mask = np.zeros((12, 10), dtype=int)
+    mask[2:7, 3:7] = 1  # one row too many (row 6 belongs to cell 2)
+    mask[7:10, 3:7] = 2
+    kws = dict(output_files=[str(tmp_path / f'mask{i}.npy') for i in range(2)], initial_roi_mask=mask)
+    if not allow_shifts:
+        kws.update(allow_shifts=False, main_stim_idx=0)
+    canvas = InteractiveRoiCanvas(stacks={'ch0': [stack, stack.copy()]}, **kws)
+    canvas.set_read_only(False)
+    return canvas
+
+
+def test_shrink_selected_roi_and_undo(tmp_path):
+    canvas = _canvas_with_wrong_pixels(tmp_path)
+    label = canvas.roi_masks[3, 4]
+    canvas.set_selected_roi(label)
+    before = canvas.roi_masks.copy()
+    info = canvas.exec_shrink_roi()
+    assert info[label]['status'] == 'shrunk' and set(info) == {label}
+    assert not np.any(canvas.roi_masks[6] == label) and np.all(canvas.roi_masks[2:6, 3:7] == label)
+    assert 'shrink' in canvas.widget_info.value
+    canvas.exec_undo()
+    assert np.array_equal(canvas.roi_masks, before)
+
+
+def test_shrink_buttons_follow_read_only_dangerzone_and_view_only(tmp_path):
+    canvas = _canvas_with_wrong_pixels(tmp_path)
+    assert not canvas.widget_shrink_roi.disabled and canvas.widget_shrink_all.disabled
+    canvas.set_dangerzone(True)
+    assert not canvas.widget_shrink_all.disabled
+    canvas.exec_shrink_all()  # strict defaults, closes the dangerzone
+    assert canvas.widget_shrink_all.disabled
+    canvas.set_read_only(True)
+    assert canvas.widget_shrink_roi.disabled
+
+    canvas = _canvas_with_wrong_pixels(tmp_path, allow_shifts=False)
+    canvas.set_selected_stim(canvas.pres_names[1])  # view only
+    assert canvas.widget_shrink_roi.disabled and canvas.widget_shrink_all.disabled
+    with pytest.raises(RuntimeError):
+        canvas.exec_shrink_roi()
