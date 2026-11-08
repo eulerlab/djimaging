@@ -3,12 +3,16 @@ Presentation ROI masks of the motion mode: the field ROI mask with a per-ROI bet
 border reshape, as subpixel weights in the frame of the (slowly) registered stack. In motion mode this table replaces
 RoiMask.RoiMaskPresentation (RoiMask then only stores the field mask, see RoiMaskTemplate._presentation_masks).
 
+The field mask is RoiMask.roi_mask, or the refined mask of RefinedRoiMask if ``refined_roi_mask_table`` is set
+(optional, off by default: the refinement made no measurable difference to the traces, see docs/motion_qc.md).
+
 Example usage:
 
 @schema
 class MotionRoiMask(motion_correction.MotionRoiMaskTemplate):
     motion_detection_table = MotionDetection
     roi_table = Roi
+    # refined_roi_mask_table = RefinedRoiMask  # optional
 
     class Roi(motion_correction.MotionRoiMaskTemplate.Roi):
         roi_table = Roi
@@ -35,9 +39,10 @@ class MotionRoiMaskTemplate(dj.Computed):
 
     @property
     def definition(self) -> str:
-        return """
+        refined = "\n        -> self.refined_roi_mask_table" if self.refined_roi_mask_table is not None else ""
+        return f"""
         # ROI mask of a presentation in motion mode (replaces RoiMask.RoiMaskPresentation)
-        -> self.motion_detection_table
+        -> self.motion_detection_table{refined}
         ---
         roi_mask : <blob>  # label mask (Igor format), raw presentation coordinates: weights >= 0.5 + global shift
         shift_dx : int32  # rounded global shift, as in RoiMaskPresentation: shift_array(roi_mask, (dx, dy)) ~ field mask
@@ -79,6 +84,9 @@ class MotionRoiMaskTemplate(dj.Computed):
     def motion_detection_table(self):
         pass
 
+    # Optional RefinedRoiMask: if set, the presentation masks start from the refined instead of the drawn field mask.
+    refined_roi_mask_table = None
+
     @property
     @abstractmethod
     def roi_table(self):
@@ -87,9 +95,20 @@ class MotionRoiMaskTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.motion_detection_table.proj()
+            key_source = self.motion_detection_table.proj()
+            if self.refined_roi_mask_table is not None:
+                key_source = key_source * self.refined_roi_mask_table.proj()
+            return key_source
         except (AttributeError, TypeError):
             pass
+
+    def get_field_mask(self, key: dict) -> np.ndarray:
+        """Field mask the presentation masks start from: RefinedRoiMask if used, else RoiMask.roi_mask (as drawn)."""
+        if self.refined_roi_mask_table is not None:
+            return self.refined_roi_mask_table().get_mask(key)
+        roi_mask_table = self.motion_detection_table.roi_mask_table
+        field_key = {k: key[k] for k in roi_mask_table.primary_key}
+        return load_array((roi_mask_table & field_key).fetch1('roi_mask'))
 
     @property
     def _reference_table(self):
@@ -120,7 +139,7 @@ class MotionRoiMaskTemplate(dj.Computed):
         ref_tab = self._reference_table
         params = ref_tab.motion_params_table().get_params(key)
         field_key = {k: key[k] for k in det.roi_mask_table.primary_key}
-        field_mask = load_array((det.roi_mask_table & field_key).fetch1('roi_mask'))
+        field_mask = self.get_field_mask(key)
         roi_ids = roi_ids_from_mask(field_mask)
         n = len(roi_ids)
         ref_key = reference_pres_key(det.roi_mask_table, det.presentation_table, field_key)
@@ -177,13 +196,12 @@ class MotionRoiMaskTemplate(dj.Computed):
         return roi_ids, weights, shifts
 
     def plot1(self, key: dict | None = None, gamma: float = 0.7) -> None:
-        """Registered mean image with field mask (yellow), presentation mask (green) and per-ROI shifts (x3)."""
+        """Registered mean image with field mask (yellow), presentation mask (green), per-ROI shifts (x3)."""
         from matplotlib import pyplot as plt
         key = get_primary_key(self, key)
         det = self.motion_detection_table
         roi_ids, weights, shifts = self.get_weights(key)
-        field_key = {k: key[k] for k in det.roi_mask_table.primary_key}
-        field_mask = load_array((det.roi_mask_table & field_key).fetch1('roi_mask'))
+        field_mask = self.get_field_mask(key)
         data = load_presentation_channels(det.presentation_table, det.userinfo_table, det.raw_params_table, key,
                                           structural=False)
         img = np.nanmean(register_stack(data['ch0'], det().get_motion(key).slow_frames), axis=2)

@@ -95,8 +95,7 @@ class MotionTrustTemplate(dj.Computed):
         motion = det().get_motion(key)
         npix, z_edges, z_self_ch1 = (det & key).fetch1('npixartifact_qc', 'z_bin_edges', 'z_self_ch1')
         edges = load_array(z_edges)
-        field_key = {k: key[k] for k in det.roi_mask_table.primary_key}
-        field_mask = load_array((det.roi_mask_table & field_key).fetch1('roi_mask'))
+        field_mask = mask_tab().get_field_mask(key)
         roi_ids, _, shifts = mask_tab().get_weights(key)
         order = {abs(int(r)): i for i, r in enumerate(roi_ids_from_mask(field_mask))}
         shifts_field_order = np.zeros((len(order), 2))

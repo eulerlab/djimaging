@@ -249,6 +249,33 @@ now chooses it from the data (`mask_utils.select_field_roi_mask`):
 - All 16 xy fields: offset (0, 0) everywhere; choice DS (7 of 8 fields of 2018, one MC5 with fit 0.33 vs. DS 0.25),
   `MB_C1` (with `Stack_ave`) or `chirp_C1` in 2022. C2/D fit 2–4× worse than C1, consistent with the z changes above.
 
+## Refined field ROI mask (`RefinedRoiMask`, optional; `refine_masks.py`, `out/refine/`)
+
+Tested, no gain → optional block `motion_refine` in `make_project.py`, off by default. Without it, `MotionRoiMask` and
+`MotionTrust` start from the drawn (aligned) `RoiMask` mask.
+
+Method (`utils.motion.refine.refine_roi_mask`): on the registered mean of all presentations of the reference condition,
+each ROI keeps its core (eroded by 1 px); border pixels within ±`refine_max_px` = 1 px are kept/added if
+(img − local background) / (peak − background) ≥ `refine_rel_thresh`. ROI ids kept; never takes pixels from other ROIs
+or the light artifact; dim ROIs (`refine_min_contrast`) and ROIs that would keep < `refine_min_keep_frac` stay as drawn.
+Contrast must ignore the raw offset (~11000): relative to the raw background it is ~0.004 for every ROI.
+
+All xy experiments (16 fields, 72 presentations, ~1300 ROIs), drawn vs. refined mask; QI across repeats (QI ≈ 0.5) and
+correlation of the ROI trace with the surrounding neuropil:
+
+| setting | ROIs changed | median size | Δ QI | Δ neuropil corr. |
+|---|---|---|---|---|
+| threshold 0.5, grow + trim (default) | 75 % | ×1.00 | −0.002 | ±0.000 |
+| threshold 0.5, trim only | 70 % | ×0.86 | −0.003 | −0.004 |
+| threshold 0.7, trim only | 70 % | ×0.72 | −0.008 | −0.010 |
+
+- All changes < ~1.5 %, and a plain trade-off: growing raises QI slightly, trimming lowers the neuropil correlation
+  slightly; no setting improves both. ROIs whose shape changed by > 50 % of their pixels gain nothing either (QI +0.002).
+- Consistent with the erosion test above: at 1.5 µm/px ROIs have ~17 px, so ±1 px changes the shape a lot but the
+  averaged trace hardly.
+- The `low_contrast` flag of `MotionRoiMask` is not caused by the offset (it compares two contrasts against nearly the
+  same background, so the offset cancels).
+
 ## Open points / next steps
 
 1. ~~Per-ROI shift field between presentations~~ done (see above). Open: within-condition changes of the deformation

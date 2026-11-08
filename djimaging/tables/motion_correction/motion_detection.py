@@ -6,6 +6,8 @@ Tables:
 - MotionReference: field reference images from the presentation the field ROI mask was drawn on.
 - MotionDetection: per presentation: rigid subpixel displacement (slow part is corrected, fast part flagged),
   relative z proxy, and per-ROI displacements vs. the reference.
+- RefinedRoiMask (refined_roi_mask.py): field ROI mask with borders refined (+-1 px) on the registered mean of the
+  reference condition; ROI ids kept.
 - MotionRoiMask (motion_roi_mask.py): presentation ROI weights (per-ROI between-presentation shift + mild reshape).
   In motion mode this replaces RoiMask.RoiMaskPresentation.
 - MotionTrust (motion_trust.py): per-ROI trust over time and per stimulus repeat.
@@ -65,6 +67,13 @@ DEFAULT_MOTION_PARAMS = dict(
     pooling='cond1',  # 'cond1': pool presentations of the same condition; 'presentation': each on its own
     local_sigma=4.,  # smoothness of the displacement field [px]
     lam_single=0.5,  # shrinkage of per-ROI deviations if only one presentation is pooled
+    # refinement of the field mask on the registered mean of the reference condition (RefinedRoiMask)
+    refine_mask=True,  # False: the field mask is used as drawn
+    refine_max_px=1,  # ROI borders may move by at most this many pixels (in and out)
+    refine_rel_thresh=0.5,  # border pixels are part of the cell if (img - bg) / (peak - bg) >= this
+    refine_min_contrast=0.5,  # ROIs dimmer than this (vs. surround, in robust SDs of the image) kept as drawn
+    refine_min_keep_frac=0.5,  # ROIs that would keep fewer pixels are kept as drawn
+    refine_grow=True,  # border pixels outside the drawn ROI may be added
     # presentation mask reshape
     rel_thresh=0.2, rel_drop=0.3, min_valid_frac=0.95, min_contrast_frac=0.5,
     # trust

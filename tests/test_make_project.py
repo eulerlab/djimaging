@@ -48,6 +48,7 @@ def test_generated_schema_defines_tables_of_blocks(blocks):
     assert ('OpticDisk' in namespace) == ('location' in blocks)
     assert ('CelltypeAssignmentV2' in namespace) == ('classifier' in blocks)
     assert ('MotionRoiMask' in namespace) == ('motion' in blocks)
+    assert ('RefinedRoiMask' in namespace) == ('motion_refine' in blocks)
     # Motion mode: one presentation mask format only
     assert (namespace['RoiMask'].RoiMaskPresentation is None) == ('motion' in blocks)
     assert namespace['RoiMask']._presentation_masks == ('motion' not in blocks)
@@ -66,10 +67,30 @@ def test_motion_mode_schema_and_notebook(channels):
     assert text.index('class MotionRoiMask(') < text.index('class Traces(')
     assert text.index('class Roi(core.RoiTemplate)') < text.index('class MotionRoiMask(')
     assert namespace['MotionTrust'].Roi.motion_roi_mask_table is namespace['MotionRoiMask']
+    # RefinedRoiMask is optional (motion_refine block) and off by default
+    assert 'RefinedRoiMask' not in namespace
+    assert namespace['MotionRoiMask'].refined_roi_mask_table is None
+    assert '-> self.refined_roi_mask_table' not in namespace['MotionRoiMask']().definition
     nb = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester', channels=channels)
     ast.parse(nb)
     assert nb.index('MotionRoiMask().populate') < nb.index('Traces().populate')
     assert nb.index('Roi().populate') < nb.index('MotionReference().populate')
+    assert 'RefinedRoiMask' not in nb
+
+
+@pytest.mark.parametrize('channels', [None, (1, 1)])
+def test_motion_refine_schema_and_notebook(channels):
+    blocks = make_project.resolve_blocks(['motion_refine'])
+    assert blocks == ['core', 'motion', 'motion_refine']
+    text = make_project.build_schema_text(ROOT, blocks, channels=channels)
+    namespace = exec_schema(text)
+    assert namespace['MotionRoiMask'].refined_roi_mask_table is namespace['RefinedRoiMask']
+    assert '-> self.refined_roi_mask_table' in namespace['MotionRoiMask']().definition
+    assert text.index('class MotionDetection(') < text.index('class RefinedRoiMask(') < text.index('class MotionRoiMask(')
+    nb = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester', channels=channels)
+    ast.parse(nb)
+    assert nb.index('MotionDetection().populate') < nb.index('RefinedRoiMask().populate') \
+        < nb.index('MotionRoiMask().populate') < nb.index('Traces().populate')
 
 
 def test_generated_schema_has_no_duplicate_tables():

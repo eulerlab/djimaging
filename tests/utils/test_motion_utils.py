@@ -8,6 +8,7 @@ from djimaging.utils.motion import (
     make_reference, pool_roi_shifts, presentation_roi_weights, register_stack, roi_ids_from_mask, smooth_shift_field,
     trust_per_repeat, xcorr_disp)
 from djimaging.utils.motion.image_utils import masked_pearson, pearson, reg_image
+from djimaging.utils.motion.refine import pooled_mean_image, refine_roi_mask
 from djimaging.utils.motion.roi_shifts import local_shifts_batch, roi_centroids
 from djimaging.utils.motion.trust import fast_per_bin
 
@@ -260,3 +261,58 @@ def test_full_chain_runs_on_tiny_synthetic_recordings(synthetic_recording_path):
     assert np.all(np.isfinite(motion.disp_bins))
     assert res.trust.shape[0] == len(roi_ids_from_mask(mask)) and np.all(np.isfinite(res.trust))
     assert traces.shape == (p0.shape[2], len(roi_ids_from_mask(mask))) and np.all(np.isfinite(traces))
+
+
+def _dilate_rois(mask, grow):
+    """Each ROI dilated (grow > 0) or eroded (grow < 0) by one pixel, without touching other ROIs."""
+    out = np.ones_like(mask)
+    for rid in roi_ids_from_mask(mask):
+        m = mask == rid
+        m = ndimage.binary_dilation(m) & ((mask == rid) | (mask == 1)) if grow > 0 else ndimage.binary_erosion(m)
+        out[m & (out == 1)] = rid
+    return out
+
+
+def test_refine_roi_mask_trims_too_large_and_grows_too_small_rois():
+    img, _, mask = _field()
+    ids = roi_ids_from_mask(mask)
+    for grow, sign in ((1, -1), (-1, 1)):
+        drawn = _dilate_rois(mask, grow)
+        refined, info = refine_roi_mask(img, drawn, NPIX)
+        n_drawn = np.array([(drawn == i).sum() for i in ids])
+        n_ref = np.array([(refined == i).sum() for i in ids])
+        n_true = np.array([(mask == i).sum() for i in ids])
+        # moves towards the cell: smaller if drawn too large, larger if drawn too small
+        assert np.mean(np.sign(n_ref - n_drawn) == sign) > 0.8
+        assert np.median(np.abs(n_ref - n_true)) < np.median(np.abs(n_drawn - n_true))
+        assert set(info) == set(int(i) for i in ids)
+        for i in ids:
+            d = drawn == i
+            assert not np.any((refined == i) & ~ndimage.binary_dilation(d))  # at most 1 px out
+            assert not np.any(ndimage.binary_erosion(d) & (refined != i))  # the core is kept
+            assert not np.any((refined == i) & (drawn < 0) & ~d)  # never takes pixels of other ROIs
+
+
+def test_refine_roi_mask_keeps_dim_rois_and_respects_artifact():
+    img, _, mask = _field()
+    img = img + np.random.default_rng(3).normal(0, 3, img.shape) + 11000.  # ScanM-like offset
+    mask = mask.copy()
+    # an "ROI" without a cell next to the light artifact: background only
+    dim = np.zeros_like(mask, bool)
+    dim[NPIX:NPIX + 3, 30:33] = True
+    mask[dim] = -99
+    img[np.abs(np.arange(NX) - NPIX - 1)[:, None] + np.abs(np.arange(NY) - 31)[None, :] <= 6] =         np.median(img) + np.random.default_rng(4).normal(0, 3, 1)[0]
+    refined, info = refine_roi_mask(img, mask, NPIX)
+    assert info[-99]['status'] == 'low_contrast'
+    assert np.array_equal(refined == -99, mask == -99)
+    assert not np.any(refined[:NPIX] < 0)  # never grows into the light artifact
+    assert set(np.unique(refined[refined < 0])) == set(np.unique(mask[mask < 0]))
+    assert sum(d['status'] == 'low_contrast' for d in info.values()) == 1
+
+
+def test_pooled_mean_image_ignores_nan():
+    a = np.full((4, 4), 1.)
+    b = np.full((4, 4), 3.)
+    b[0, 0] = np.nan
+    p = pooled_mean_image([a, b], [1, 3])
+    assert p[0, 0] == 1. and p[1, 1] == 2.5
