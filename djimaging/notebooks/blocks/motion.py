@@ -25,6 +25,16 @@
 # the presentations of a condition. If presentations are added later, repopulate `MotionRoiMask` (and downstream) for
 # that field and condition.
 
+# %% [markdown]
+# Optional: save the prepared field masks (chosen presentation, aligned) to files in a separate directory, e.g. to
+# review or edit them in the ROI canvas. The original files are kept. With `update_database=True` the database entry
+# references the new file of its presentation and `align_dx = align_dy = 0`; the mask itself is unchanged, so nothing
+# downstream is deleted. Load edited files with `RoiMask().deploy_roi_mask(field_key, roi_table=Roi,
+# roi_mask_dir='PreparedROIs')`. Files with a different mask (e.g. edited) are only replaced with `overwrite_files=True`.
+
+# %%
+# export = RoiMask().export_field_roi_masks(roi_mask_dir='PreparedROIs', update_database=True, overwrite_files=False)
+
 # %%
 MotionParams().add(motion_params_id=1, skip_duplicates=True)
 MotionParams()

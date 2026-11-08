@@ -964,6 +964,123 @@ class RoiMaskTemplate(dj.Manual):
         plt.tight_layout()
         plt.show()
 
+    def export_field_roi_masks(
+            self,
+            restrictions: dict | None = None,
+            roi_mask_dir: str = 'PreparedROIs',
+            old_prefix: str | None = None,
+            new_prefix: str | None = None,
+            overwrite_files: bool = False,
+            update_database: bool = True,
+            suppress_errors: bool = False,
+            verbose: bool = True,
+    ) -> dict:
+        """Motion mode: save the prepared field ROI masks (presentation chosen by fit, aligned) to files.
+
+        In motion mode the field mask in the database can differ from its file: it is aligned to the mean image of
+        its presentation (``align_dx``, ``align_dy``), while the file keeps the mask as drawn. This writes the field
+        mask of the database to one file per presentation in ``roi_mask_dir`` (all presentations get the same mask;
+        presentation masks only come from ``MotionRoiMask``), like 'Save all to file' in the ROI canvas. The original
+        files are kept, so use a directory other than the one the masks were loaded from.
+
+        With ``update_database``, the database entry then references the new file of its presentation
+        (``roi_mask_file``, ``roi_mask_source``) and ``align_dx = align_dy = 0``. The mask itself is unchanged, so
+        nothing downstream is deleted. Review or edit the files (e.g. ``draw_roi_mask(roi_mask_dir=...)``) and load
+        edited files with ``deploy_roi_mask(roi_mask_dir=...)``; deploying chooses the presentation of the field mask
+        again by fit.
+
+        Args:
+            restrictions: Restrictions for the fields, e.g. ``dict(experimenter='Ran')``.
+            roi_mask_dir: Sub-directory (next to the recording files) the mask files are written to.
+            old_prefix: Path prefix to replace when resolving file paths.
+            new_prefix: Replacement path prefix.
+            overwrite_files: If False, fields whose files exist with a different mask are skipped. Files with the
+                same mask count as exported.
+            update_database: If True, let the database entry reference the new files (see above).
+            suppress_errors: If True, continue with the next field if a field fails and report the error.
+            verbose: If True, print progress.
+
+        Returns:
+            A dict with the lists ``exported`` (field keys whose files were written), ``linked`` (field keys whose
+            database entry now references the files), ``skipped`` (dicts with field key and reason) and ``errors``
+            (tuples of field key and exception).
+        """
+        if self._presentation_masks:
+            raise NotImplementedError(
+                'export_field_roi_masks is for motion mode (no presentation masks). With presentation masks, the '
+                'database masks are the files they were loaded from; use correct_roi_masks or draw_roi_mask.')
+
+        restrictions = dict() if restrictions is None else restrictions
+        field_keys = (self & restrictions).proj().to_dicts()
+        result = dict(exported=[], linked=[], skipped=[], errors=[])
+        for i, field_key in enumerate(field_keys, start=1):
+            try:
+                info = self._export_field_roi_mask(
+                    field_key, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+                    overwrite_files=overwrite_files, update_database=update_database)
+            except Exception as e:
+                if not suppress_errors:
+                    raise
+                warnings.warn(f'Error for field_key={field_key}:\n{e}')
+                result['errors'].append((field_key, e))
+                continue
+            if info['status'] == 'skipped':
+                result['skipped'].append(dict(field_key=field_key, reason=info['reason']))
+            elif info['status'] == 'exported':
+                result['exported'].append(field_key)
+            if info['linked']:
+                result['linked'].append(field_key)
+            if verbose:
+                print(f"[{i}/{len(field_keys)}] {info['status']}{' + linked' if info['linked'] else ''}: {field_key}"
+                      + (f" ({info['reason']})" if 'reason' in info else ''))
+
+        if verbose:
+            print(f"Exported {len(result['exported'])} field masks to {roi_mask_dir} ({len(result['linked'])} linked "
+                  f"in the database), {len(result['skipped'])} skipped, {len(result['errors'])} errors.")
+        return result
+
+    def _presentation_roi_mask_files(self, pres_keys: list, roi_mask_dir: str, old_prefix: str | None,
+                                     new_prefix: str | None) -> list:
+        """Mask file of each presentation in ``roi_mask_dir``."""
+        return [to_roi_mask_file(
+            local_file_path((self.presentation_table & pres_key).fetch1("pres_data_file"),
+                            self.presentation_table._filepath_store),
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+            file_format=self._get_roi_file_format()) for pres_key in pres_keys]
+
+    def _export_field_roi_mask(self, field_key: dict, roi_mask_dir: str, old_prefix: str | None,
+                               new_prefix: str | None, overwrite_files: bool, update_database: bool) -> dict:
+        """Write the field mask of one field to files and optionally link it. Returns a dict with ``status``
+        ('exported', 'exists' or 'skipped') and ``linked``."""
+        row = (self & field_key).fetch1()
+        pres_primary_key = self.presentation_table.primary_key
+        ref_pres_key = {k: row[k] for k in pres_primary_key}
+        pres_keys = (self.presentation_table & field_key).proj().to_dicts()
+        output_files = self._presentation_roi_mask_files(pres_keys, roi_mask_dir, old_prefix, new_prefix)
+        ref_idxs = [i for i, pk in enumerate(pres_keys) if all(pk[k] == ref_pres_key[k] for k in pres_primary_key)]
+        if len(ref_idxs) != 1:
+            raise ValueError(f'Could not find the presentation of the ROI mask of field_key={field_key}')
+
+        roi_mask = to_python_format(load_array(row['roi_mask']))
+        existing = [f for f in output_files if os.path.isfile(f)]
+        same = [f for f in existing if np.array_equal(load_roi_mask_file(f).astype(int), roi_mask)]
+        if len(existing) > len(same) and not overwrite_files:
+            return dict(status='skipped', linked=False, reason=f'files with a different mask exist in {roi_mask_dir}')
+
+        status = 'exists'
+        if len(same) < len(output_files):
+            self._save_roi_mask_files(output_files, [roi_mask] * len(output_files))
+            status = 'exported'
+
+        ref_file = output_files[ref_idxs[0]]
+        new_values = dict(roi_mask_file=relative_store_path(ref_file, self._filepath_store),
+                          roi_mask_source=_roi_mask_source_from_path(ref_file))
+        if self._selects_field_mask:
+            new_values.update(align_dx=0, align_dy=0)
+        if update_database:  # idempotent; the mask itself is unchanged, so nothing downstream is affected
+            self.update1({**{k: row[k] for k in self.primary_key}, **new_values})
+        return dict(status=status, linked=update_database)
+
     def rescan_filesystem(
             self,
             restrictions: dict | None = None,

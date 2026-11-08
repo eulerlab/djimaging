@@ -77,6 +77,15 @@ def test_motion_pipeline(motion_schema, tutorial_data_dir):
     assert abs(row['align_dy']) <= s.RoiMask._field_mask_max_offset
     assert s.RoiMask().check_filesystem_consistency(experiment_key, verbose=False) == []
 
+    # The prepared (aligned) field mask is saved to files and the entry references them; the mask is unchanged
+    export = s.RoiMask().export_field_roi_masks(experiment_key, roi_mask_dir="PreparedROIs", verbose=False)
+    assert export['skipped'] == [] and export['errors'] == [] and len(export['linked']) == 1
+    row_exported = (s.RoiMask() & experiment_key).fetch1()
+    assert np.array_equal(load_array(row_exported['roi_mask']), load_array(row['roi_mask']))
+    assert row_exported['align_dx'] == 0 and row_exported['align_dy'] == 0
+    assert row_exported['roi_mask_source'] == 'numpy'
+    assert s.RoiMask().check_filesystem_consistency(experiment_key, verbose=False) == []
+
     s.MotionParams().add(motion_params_id=1)
     s.MotionReference().populate(display_progress=False)
     s.MotionDetection().populate(display_progress=False)

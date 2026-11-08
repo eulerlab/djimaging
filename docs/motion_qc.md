@@ -248,6 +248,11 @@ now chooses it from the data (`mask_utils.select_field_roi_mask`):
   `mask_fit`, `mask_selection`.
 - All 16 xy fields: offset (0, 0) everywhere; choice DS (7 of 8 fields of 2018, one MC5 with fit 0.33 vs. DS 0.25),
   `MB_C1` (with `Stack_ave`) or `chirp_C1` in 2022. C2/D fit 2–4× worse than C1, consistent with the z changes above.
+- Files: `RoiMask().export_field_roi_masks(roi_mask_dir='PreparedROIs')` writes the prepared field mask to one file per
+  presentation (all the same mask) and, by default, lets the entry reference the file of its presentation with
+  `align = (0, 0)` (mask unchanged, nothing downstream deleted). The original files are kept; edited files are loaded
+  with `deploy_roi_mask`. The per-presentation H5 masks (copies) are only the input of the selection; presentation
+  masks in motion mode come only from `MotionRoiMask` (`Traces`, `rf_offset` and `RoiMask.plot1` follow this).
 
 ## Refined field ROI mask (`RefinedRoiMask`, optional; `refine_masks.py`, `out/refine/`)
 
