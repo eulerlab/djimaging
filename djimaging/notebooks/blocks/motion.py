@@ -5,14 +5,21 @@
 # reference). The ROI masks of all presentations are computed from the data instead of being drawn or shifted by
 # hand, and `Traces` are motion corrected. Method and validation: `docs/motion_qc.md`.
 #
-# Which presentation a (copied) Igor mask was drawn on is not stored, so `RoiMask` chooses it from the data: the
-# presentation whose mean image fits the mask best (presentations with a `Stack_ave` and then `mask_alias` win ties),
-# and aligns the mask to it by up to 2 px (`align_dx`, `align_dy`; the mask file is not changed). Check `mask_fit`
-# and `mask_selection` ('alias': the mask fits no presentation).
+# A field has one ROI mask, saved in a **field mask file** `<stem>_FieldROIs.npy` (in `roi_mask_dir`) named after
+# the presentation it belongs to. Presentation mask files (`<stem>_ROIs.npy`) and Igor masks are not written in motion
+# mode; a copy for a shifted presentation would be wrong if loaded in a schema without motion mode.
 #
-# In the ROI canvas (`RoiMask().draw_roi_mask(...)`), motion mode opens the presentation the mask belongs to and
-# disables the shifts between presentations: draw on that presentation, the mask is saved unchanged for all
-# presentations, and the presentation masks are computed by `MotionRoiMask` after deploying.
+# Masks without field mask file (e.g. Igor masks copied to all presentations) do not tell which presentation they were
+# drawn on, so `RoiMask` chooses it from the data: the presentation whose mean image fits the mask best (presentations
+# with a `Stack_ave` and then `mask_alias` win ties), and aligns the mask to it by up to 2 px (`align_dx`, `align_dy`;
+# the mask file is not changed). Check `mask_fit` and `mask_selection` ('alias': the mask fits no presentation;
+# 'file': from a field mask file, not aligned).
+#
+# In the ROI canvas (`RoiMask().draw_roi_mask(...)`), the mask is drawn and edited on the presentation it belongs to.
+# The other presentations are view only: they show the presentation masks of `MotionRoiMask` (if populated, pass
+# `motion_roi_mask_table=MotionRoiMask`, and as long as the mask is not edited), else a preview (the mask moved by the
+# global shift between the mean images). 'Save all to file' writes the field mask file; deploy it with
+# `deploy_roi_mask`. The presentation masks are computed by `MotionRoiMask` after deploying.
 #
 # - `MotionParams`: Parameters (defaults in `motion_correction.DEFAULT_MOTION_PARAMS`).
 # - `MotionReference`: Reference images of a field, from the presentation the field ROI mask was drawn on.
@@ -30,14 +37,20 @@
 # that field and condition.
 
 # %% [markdown]
-# Optional: save the prepared field masks (chosen presentation, aligned) to files in a separate directory, e.g. to
-# review or edit them in the ROI canvas. The original files are kept. With `update_database=True` the database entry
-# references the new file of its presentation and `align_dx = align_dy = 0`; the mask itself is unchanged, so nothing
-# downstream is deleted. Load edited files with `RoiMask().deploy_roi_mask(field_key, roi_table=Roi,
-# roi_mask_dir='PreparedROIs')`. Files with a different mask (e.g. edited) are only replaced with `overwrite_files=True`.
+# Optional: save the prepared field masks (chosen presentation, aligned) to field mask files in a separate directory,
+# e.g. to review or edit them in the ROI canvas. The original files are kept. With `update_database=True` the database
+# entry references the new file and `align_dx = align_dy = 0`; the mask itself is unchanged, so nothing downstream is
+# deleted. Load edited files with `RoiMask().deploy_roi_mask(field_key, roi_table=Roi, roi_mask_dir='PreparedROIs')`.
+# A file with a different mask (e.g. edited) is only replaced with `overwrite_files=True`.
 
 # %%
 # export = RoiMask().export_field_roi_masks(roi_mask_dir='PreparedROIs', update_database=True, overwrite_files=False)
+
+# %%
+# Review / edit a field mask in the ROI canvas (other presentations show the MotionRoiMask masks once populated)
+# roi_canvas = RoiMask().draw_roi_mask(field_key=..., roi_mask_dir='PreparedROIs', roi_table=Roi,
+#                                      motion_roi_mask_table=MotionRoiMask)
+# roi_canvas.start_gui()
 
 # %%
 MotionParams().add(motion_params_id=1, skip_duplicates=True)

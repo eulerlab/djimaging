@@ -853,6 +853,18 @@ def generate_roi_suggestions(mask_pred: np.ndarray, mask_true: np.ndarray, n_art
     return rois_to_add
 
 
+FIELD_ROI_MASK_SUFFIX = '_FieldROIs.npy'
+
+
+def to_field_roi_mask_file(data_file: str, roi_mask_dir: str | None = None, old_prefix: str | None = None,
+                           new_prefix: str | None = None) -> str:
+    """File of a field ROI mask (motion mode): one mask per field, named after the data file of the presentation it
+    belongs to (``<stem>_FieldROIs.npy``). Unlike presentation mask files (``<stem>_ROIs.npy``), it is not loaded as
+    the mask of that presentation, see ``RoiMaskTemplate``."""
+    return to_roi_mask_file(data_file, new_suffix=FIELD_ROI_MASK_SUFFIX, roi_mask_dir=roi_mask_dir,
+                            old_prefix=old_prefix, new_prefix=new_prefix)
+
+
 def to_roi_mask_file(data_file: str, old_suffix: str | None = None, new_suffix: str = '_ROIs.npy',
                      roi_mask_dir: str | None = None, old_prefix: str | None = None,
                      new_prefix: str | None = None, file_format: str | None = None) -> str:

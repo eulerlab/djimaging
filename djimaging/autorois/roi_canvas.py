@@ -66,6 +66,7 @@ class RoiCanvas:
             stacks: Optional[Dict[str, list]] = None,
             primary_channel: Optional[str] = None,
             allow_shifts: bool = True,
+            view_masks: Optional[list] = None,
     ):
         """ROI canvas to draw ROIs
 
@@ -86,6 +87,11 @@ class RoiCanvas:
             If False, the presentations have no shifts relative to the main presentation (``main_stim_idx``) and
             all presentations get the same mask when saved. Used in motion mode, where the mask is drawn on the main
             presentation and the presentation masks are computed by the motion tables (``MotionRoiMask``).
+            The other presentations are then view only, see ``get_displayed_roi_masks``.
+        view_masks : list, optional
+            Only with ``allow_shifts=False``: one ROI mask (python format) or None per presentation, shown on the other
+            presentations (view only) as long as the mask was not edited, e.g. the presentation masks of
+            ``MotionRoiMask``. Presentations without one show a preview (mask moved by the auto shift).
         """
         self.stacks = _resolve_stacks(ch0_stacks, ch1_stacks, stacks)
         self.ch_names = list(self.stacks)
@@ -120,6 +126,13 @@ class RoiCanvas:
             raise ValueError('allow_shifts=False requires zero shifts')
         if not 0 <= main_stim_idx < n_stacks:
             raise ValueError(f'main_stim_idx={main_stim_idx} out of range for {n_stacks} presentations')
+        if view_masks is not None:
+            if allow_shifts:
+                raise ValueError('view_masks are only used with allow_shifts=False')
+            if len(view_masks) != n_stacks or any(m is not None and m.shape != shape_xy for m in view_masks):
+                raise ValueError('view_masks needs one mask (or None) of the stack shape per presentation')
+        self._preview_shifts = dict()  # presentation index -> auto shift, for the preview of view-only presentations
+        self._view_source = None
 
         if pres_names is None:
             pres_names = [f"stim{i + 1}" for i in range(n_stacks)]
@@ -184,6 +197,9 @@ class RoiCanvas:
             self.init_roi_mask(self._initial_roi_mask)
         else:
             self._initial_roi_mask = None
+        self._roi_masks_at_init = self.roi_masks.copy()
+        self.view_masks = None if view_masks is None else [
+            None if m is None else self._to_canvas_labels(m) for m in view_masks]
 
         self.clean_min_size = 3
         self.clean_connectivity = 2
@@ -213,6 +229,48 @@ class RoiCanvas:
             raise ValueError(f'Unknown channel {ch_name!r}, choose from {self.ch_names}')
         self.primary_channel = ch_name
         self.ref_corr_map = None  # Computed from the primary channel
+        self._preview_shifts = dict()
+
+    @property
+    def is_view_only(self) -> bool:
+        """Without shifts (motion mode), only the main presentation can be edited."""
+        return not self.allow_shifts and self._selected_stim_idx != self.main_stim_idx
+
+    def _to_canvas_labels(self, mask):
+        """Relabel a mask with the labels of the initial mask (as given) to the labels of the canvas, which relabels
+        the initial mask (``init_roi_mask``), so that a ROI has the same color in all presentations."""
+        mask = np.asarray(mask).astype(int)
+        if self._initial_roi_mask is None:
+            return mask
+        out = np.zeros_like(mask)
+        for label in np.unique(mask[mask > 0]):
+            canvas_labels = self._roi_masks_at_init[(self._initial_roi_mask == label) & (self._roi_masks_at_init > 0)]
+            if canvas_labels.size > 0:
+                out[mask == label] = np.bincount(canvas_labels).argmax()
+        return out
+
+    def get_displayed_roi_masks(self):
+        """ROI masks shown for the selected presentation.
+
+        Editable presentations show the mask itself. View-only presentations (``allow_shifts=False``) show their
+        ``view_masks`` entry (e.g. the presentation mask of MotionRoiMask) if there is one and the mask was not edited,
+        else a preview: the mask moved by the auto shift of the presentation relative to the main presentation.
+        The source is stored in ``_view_source``.
+        """
+        if not self.is_view_only:
+            self._view_source = None
+            return self.roi_masks
+        idx = self._selected_stim_idx
+        if self.view_masks is not None and self.view_masks[idx] is not None \
+                and np.array_equal(self.roi_masks, self._roi_masks_at_init):
+            self._view_source = 'MotionRoiMask'
+            return self.view_masks[idx]
+        if idx not in self._preview_shifts:
+            self._preview_shifts[idx] = self.compute_autoshift(shift_max=getattr(self, 'max_shift', 5))
+        dx, dy = self._preview_shifts[idx]
+        self._view_source = f'preview (global shift {dx}, {dy})'
+        # Same convention as the files: the mask in raw coordinates of a presentation with shift (dx, dy)
+        return mask_utils.shift_array(img=self.roi_masks.copy(), shift=(-dx, -dy), cval=0)
 
     def compute_bg(self, stack, shift, proj_fun):
         background = proj_fun(stack, axis=2).astype(np.float32)
@@ -408,18 +466,19 @@ class RoiCanvas:
         if self._selected_view == 'none':
             return
 
-        unique_rois = np.unique(self.roi_masks)[1:]  # skip background label 0
+        roi_masks = self.get_displayed_roi_masks()
+        unique_rois = np.unique(roi_masks)[1:]  # skip background label 0
         if unique_rois.size == 0:
             return
 
         # Build a per-label RGBA lookup table; index 0 = background (stays 0)
-        max_label = int(self.roi_masks.max())
+        max_label = int(roi_masks.max())
         lut = np.zeros((max_label + 1, 4), dtype=int)
         for roi in unique_rois:
             lut[roi] = self._get_roi_rgba255(roi)
 
         # Single vectorized index: no per-label np.where needed
-        self.roi_mask_img[:] = lut[self.roi_masks]
+        self.roi_mask_img[:] = lut[roi_masks]
 
     def print_state(self):
         print('bg'.ljust(15), self._selected_bg)
@@ -479,6 +538,7 @@ class InteractiveRoiCanvas(RoiCanvas):
             primary_channel: Optional[str] = None,
             deploy_callback: Optional[Callable[[], object]] = None,
             allow_shifts: bool = True,
+            view_masks: Optional[list] = None,
     ):
         """Interactive ROI canvas, see `RoiCanvas` for the stacks and the primary (target) channel.
 
@@ -489,8 +549,10 @@ class InteractiveRoiCanvas(RoiCanvas):
         first saves the masks of all presentations to `output_files` and then calls `deploy_callback()`, which is
         expected to replace the database entry with the saved masks, see `RoiMaskTemplate.deploy_roi_mask`.
 
-        With `allow_shifts=False` (motion mode) the shift widgets and auto shift are disabled: the mask is drawn on
-        the main presentation (`main_stim_idx`) and saved unchanged for all presentations.
+        With `allow_shifts=False` (motion mode) the shift widgets and auto shift are disabled: the mask is drawn and
+        edited on the main presentation (`main_stim_idx`) only, and only its mask is saved ('Save all to file' writes
+        `output_files[main_stim_idx]`). The other presentations are view only and show `view_masks` or a preview,
+        see `RoiCanvas.get_displayed_roi_masks`.
         """
         if _widgets_import_error is not None:
             raise ImportError('InteractiveRoiCanvas requires ipywidgets; install djimaging[autorois].') \
@@ -509,7 +571,8 @@ class InteractiveRoiCanvas(RoiCanvas):
                          pres_names=pres_names, bg_dict=bg_dict, n_artifact=n_artifact,
                          initial_roi_mask=initial_roi_mask, shifts=shifts, main_stim_idx=main_stim_idx,
                          upscale=upscale, autorois_models=autorois_models,
-                         output_files=output_files, pixel_size_um=pixel_size_um, allow_shifts=allow_shifts)
+                         output_files=output_files, pixel_size_um=pixel_size_um, allow_shifts=allow_shifts,
+                         view_masks=view_masks)
         self.debug_mode = False
         self.deploy_callback = deploy_callback
 
@@ -780,6 +843,7 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.widget_kill_all.disabled = not dangerzone
         self.widget_reset_all.disabled = not dangerzone
         self.widget_deploy.disabled = not dangerzone or self.deploy_callback is None
+        self._disable_editing_if_view_only()
 
     def create_widget_read_only(self):
         widget = Checkbox(value=False, description='Read only', disabled=False)
@@ -804,6 +868,23 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.set_dangerzone(False)
 
         self.update_shift_widget()
+        self._disable_editing_if_view_only()
+
+    def _disable_editing_if_view_only(self):
+        """Without shifts (motion mode), the presentations other than the main one can not be edited or saved."""
+        if self.allow_shifts:
+            return
+        view_only = self.is_view_only
+        self.widget_save_to_file.disabled = view_only
+        if not view_only:
+            return
+        for widget in (self.widget_save, self.widget_save_and_new, self.widget_undo, self.widget_kill_roi,
+                       self.widget_tool, self.widget_clean, self.widget_exec_autorois,
+                       self.widget_exec_autorois_all_stacks, self.widget_exec_autorois_missing,
+                       self.widget_kill_all, self.widget_reset_all):
+            widget.disabled = True
+        if self._selected_tool != 'select':
+            self.set_selected_tool('select')
 
     def set_busy(self):
         self.set_read_only(read_only=True)
@@ -849,6 +930,14 @@ class InteractiveRoiCanvas(RoiCanvas):
         self.update_shift_widget()
         self.update_info()
         self.draw_bg(update=True)
+
+        if not self.allow_shifts:  # Motion mode: other presentations are view only and show another mask
+            self.set_dangerzone(self.widget_dangerzone.value)
+            self.set_read_only(self.widget_read_only.value)
+            self.draw_roi_masks_img(update=True)
+            if self.is_view_only:
+                self.widget_save_info.value = f'View only, ROI mask: {self._view_source}. Edit on ' \
+                                              f'{self.pres_names[self.main_stim_idx]}; saved to {self.output_file}'
 
     def update_shift_widget(self):
         self.log(f'Updating shift widget')
@@ -1281,6 +1370,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         return roi_mask, self.output_file
 
     def exec_save_to_file(self, botton=None):
+        if self.is_view_only:
+            raise RuntimeError('This presentation is view only, save on the main presentation.')
         self.log(f'Saving to file: {self.output_file}')
 
         roi_mask, output_file = self._prep_save_to_file()
@@ -1305,7 +1396,9 @@ class InteractiveRoiCanvas(RoiCanvas):
 
         roi_masks, output_files = [], []
 
-        for i, stim in enumerate(self.pres_names, start=1):
+        # Without shifts (motion mode) only the mask of the main presentation is saved (one field mask file)
+        stims = self.pres_names if self.allow_shifts else [self.pres_names[self.main_stim_idx]]
+        for i, stim in enumerate(stims, start=1):
             self.set_selected_stim(stim)
             try:
                 roi_mask, output_file = self._prep_save_to_file()
@@ -1317,7 +1410,7 @@ class InteractiveRoiCanvas(RoiCanvas):
                 self.widget_save_info.description = 'Error!'.ljust(20)
                 warnings.warn(f'Error saving {stim}: {e}')
 
-            self.update_progress(100 * i / len(self.pres_names))
+            self.update_progress(100 * i / len(stims))
 
         for roi_mask, output_file in zip(roi_masks, output_files):
             mask_utils.save_roi_mask_file(output_file, roi_mask,
@@ -1366,6 +1459,8 @@ class InteractiveRoiCanvas(RoiCanvas):
         return current_stack
 
     def get_current_selected_roi_mask(self):
+        if self.is_view_only:  # Motion mode: the displayed mask of this presentation
+            return self.get_displayed_roi_masks() == self._selected_roi
         return (self.roi_masks == self._selected_roi) | (self.current_mask > 0)
 
     def update_info(self):
@@ -1440,6 +1535,13 @@ class InteractiveRoiCanvas(RoiCanvas):
         iy = self.ny - int(y / self.rescale) - 1  # Flip ud
 
         self.log(f'Apply tool={self._selected_tool} at x={x}, y={y}, ix={ix}, iy={iy}')
+
+        if self.is_view_only:  # Motion mode: only select ROIs on the other presentations
+            if self._selected_tool == 'select' and down:
+                roi_masks = self.get_displayed_roi_masks()
+                if 0 <= ix < self.nx and 0 <= iy < self.ny and roi_masks[ix, iy] > 0:
+                    self.set_selected_roi(roi_masks[ix, iy])
+            return
 
         # TODO: Make draw mask computation more efficient
 

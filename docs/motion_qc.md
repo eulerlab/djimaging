@@ -248,11 +248,18 @@ now chooses it from the data (`mask_utils.select_field_roi_mask`):
   `mask_fit`, `mask_selection`.
 - All 16 xy fields: offset (0, 0) everywhere; choice DS (7 of 8 fields of 2018, one MC5 with fit 0.33 vs. DS 0.25),
   `MB_C1` (with `Stack_ave`) or `chirp_C1` in 2022. C2/D fit 2–4× worse than C1, consistent with the z changes above.
-- Files: `RoiMask().export_field_roi_masks(roi_mask_dir='PreparedROIs')` writes the prepared field mask to one file per
-  presentation (all the same mask) and, by default, lets the entry reference the file of its presentation with
-  `align = (0, 0)` (mask unchanged, nothing downstream deleted). The original files are kept; edited files are loaded
-  with `deploy_roi_mask`. The per-presentation H5 masks (copies) are only the input of the selection; presentation
-  masks in motion mode come only from `MotionRoiMask` (`Traces`, `rf_offset` and `RoiMask.plot1` follow this).
+- Files: in motion mode a field has one **field mask file** `<stem>_FieldROIs.npy` (`to_field_roi_mask_file`), named
+  after the presentation it belongs to; no per-presentation copies are written (a copy for a shifted presentation would
+  be wrong in a schema without motion mode, which never loads field mask files). Loading prefers a field mask file:
+  its presentation is used without choice by fit or alignment (`mask_selection='file'`, `mask_fit` kept for QC);
+  several field mask files of one field are an error. Written by the ROI canvas ('Save all to file' / deploy),
+  `correct_roi_masks` and `RoiMask().export_field_roi_masks(roi_mask_dir='PreparedROIs')`, which by default also lets
+  the entry reference the file with `align = (0, 0)` (mask unchanged, nothing downstream deleted). The per-presentation
+  H5 masks (copies) are only the input of the selection; presentation masks in motion mode come only from
+  `MotionRoiMask` (`Traces`, `rf_offset` and `RoiMask.plot1` follow this).
+- ROI canvas: drawn and edited on the presentation of the mask only; the other presentations are view only and show
+  the `MotionRoiMask` masks (`draw_roi_mask(motion_roi_mask_table=MotionRoiMask)`, while the mask is unedited) or a
+  preview (mask moved by the auto shift between the mean images).
 
 ## Refined field ROI mask (`RefinedRoiMask`, optional; `refine_masks.py`, `out/refine/`)
 

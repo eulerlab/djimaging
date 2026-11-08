@@ -58,13 +58,13 @@ class _FakeRoiMask:
         self.presentation_table = _PresentationTable(n_pres)
         self.row = dict(field=1, pres=1, roi_mask=to_igor_format(_field_mask()), roi_mask_file='Pre/orig.h5',
                         roi_mask_source='igor_h5', align_dx=1, align_dy=-1)
-        self.files = [str(tmp_path / 'Prepared' / f'pres{i}_ROIs.npy') for i in range(n_pres)]
+        self.files = [str(tmp_path / 'Prepared' / f'pres{i}_FieldROIs.npy') for i in range(n_pres)]
         self.updates = []
 
     def __and__(self, key):
         return _Rows([self.row], self.primary_key)
 
-    def _presentation_roi_mask_files(self, pres_keys, roi_mask_dir, old_prefix, new_prefix):
+    def _field_roi_mask_files(self, pres_keys, roi_mask_dir, old_prefix=None, new_prefix=None):
         return [self.files[k['pres']] for k in pres_keys]
 
     def update1(self, row):
@@ -78,47 +78,56 @@ def _relative_paths():
         yield
 
 
-def test_writes_field_mask_to_every_presentation_and_links_reference_file(tmp_path):
+def test_writes_one_field_mask_file_and_links_it(tmp_path):
     tab = _FakeRoiMask(tmp_path)
     result = tab.export_field_roi_masks(verbose=False)
 
     assert result['exported'] == [dict(field=1)] and result['linked'] == [dict(field=1)]
-    for f in tab.files:
-        assert np.array_equal(load_roi_mask_file(f).astype(int), _field_mask())
-    assert tab.updates == [dict(field=1, roi_mask_file='pres1_ROIs.npy', roi_mask_source='numpy',
+    assert np.array_equal(load_roi_mask_file(tab.files[1]).astype(int), _field_mask())
+    assert not os.path.isfile(tab.files[0]) and not os.path.isfile(tab.files[2])  # no copies
+    assert tab.updates == [dict(field=1, roi_mask_file='pres1_FieldROIs.npy', roi_mask_source='numpy',
                                 align_dx=0, align_dy=0)]
 
 
-def test_files_only_without_database_update(tmp_path):
+def test_file_only_without_database_update(tmp_path):
     tab = _FakeRoiMask(tmp_path)
     result = tab.export_field_roi_masks(update_database=False, verbose=False)
     assert result['exported'] == [dict(field=1)] and result['linked'] == []
-    assert tab.updates == [] and all(os.path.isfile(f) for f in tab.files)
+    assert tab.updates == [] and os.path.isfile(tab.files[1])
 
 
-def test_existing_files_with_same_mask_count_as_exported(tmp_path):
+def test_existing_file_with_same_mask_counts_as_exported(tmp_path):
     tab = _FakeRoiMask(tmp_path)
     tab.export_field_roi_masks(update_database=False, verbose=False)
-    mtimes = [os.path.getmtime(f) for f in tab.files]
+    mtime = os.path.getmtime(tab.files[1])
     result = tab.export_field_roi_masks(verbose=False)
     assert result['exported'] == [] and result['skipped'] == [] and result['linked'] == [dict(field=1)]
-    assert [os.path.getmtime(f) for f in tab.files] == mtimes
+    assert os.path.getmtime(tab.files[1]) == mtime
 
 
-def test_files_with_different_mask_are_kept_unless_overwritten(tmp_path):
+def test_file_with_different_mask_is_kept_unless_overwritten(tmp_path):
     tab = _FakeRoiMask(tmp_path)
     edited = _field_mask()
     edited[edited == 2] = 0  # e.g. reviewed and edited by hand
-    os.makedirs(os.path.dirname(tab.files[0]))
-    save_roi_mask_file(tab.files[0], edited, 'numpy')
+    os.makedirs(os.path.dirname(tab.files[1]))
+    save_roi_mask_file(tab.files[1], edited, 'numpy')
 
     result = tab.export_field_roi_masks(verbose=False)
     assert len(result['skipped']) == 1 and result['linked'] == [] and tab.updates == []
-    assert np.array_equal(load_roi_mask_file(tab.files[0]).astype(int), edited)
+    assert np.array_equal(load_roi_mask_file(tab.files[1]).astype(int), edited)
 
     result = tab.export_field_roi_masks(overwrite_files=True, verbose=False)
     assert result['exported'] == [dict(field=1)]
-    assert np.array_equal(load_roi_mask_file(tab.files[0]).astype(int), _field_mask())
+    assert np.array_equal(load_roi_mask_file(tab.files[1]).astype(int), _field_mask())
+
+
+def test_field_mask_file_of_another_presentation_is_never_overwritten(tmp_path):
+    tab = _FakeRoiMask(tmp_path)
+    os.makedirs(os.path.dirname(tab.files[2]))
+    save_roi_mask_file(tab.files[2], _field_mask(), 'numpy')
+    for overwrite in (False, True):
+        result = tab.export_field_roi_masks(overwrite_files=overwrite, verbose=False)
+        assert len(result['skipped']) == 1 and not os.path.isfile(tab.files[1]) and tab.updates == []
 
 
 def test_only_in_motion_mode(tmp_path):

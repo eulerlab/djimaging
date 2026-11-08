@@ -22,7 +22,7 @@ from djimaging.utils.mask_utils import (
     load_preferred_roi_mask_igor, load_preferred_roi_mask_file, compare_roi_masks,
     save_roi_mask_file, load_roi_mask_file, relabel_mask, clean_rois, shift_array, add_rois,
     generate_roi_suggestions, estimate_vessel_mask, remove_vessel_rois, select_field_roi_mask,
-    _ROI_FILE_FORMAT_HELP,
+    to_field_roi_mask_file, mask_fit_score, _ROI_FILE_FORMAT_HELP,
 )
 from djimaging.utils.mask_format_utils import to_igor_format, to_python_format
 from djimaging.utils.plot_utils import plot_field, field_extent_and_labels
@@ -43,6 +43,9 @@ class RoiMaskTemplate(dj.Manual):
     # presentation of the field mask is the motion reference.
     _select_field_mask: bool | None = None
     _field_mask_max_offset: int = 2  # maximum alignment offset [px] of the field mask
+    # Motion mode: a field mask file (`<stem>_FieldROIs.npy` in roi_mask_dir, see `to_field_roi_mask_file`) holds the
+    # one mask of a field and names the presentation it belongs to. It is preferred over presentation mask files and
+    # Igor masks, which are then only (copied) input for choosing and aligning the field mask.
 
     @property
     def _selects_field_mask(self) -> bool:
@@ -65,7 +68,7 @@ class RoiMaskTemplate(dj.Manual):
         align_dx : int32  # roi_mask = shift_array(mask in roi_mask_file, (align_dx, align_dy), cval=1)
         align_dy : int32
         mask_fit=null : float32  # fit of roi_mask to the mean image of its presentation (mask_fit_score)
-        mask_selection : enum('fit', 'alias')  # presentation chosen by the fit, or by mask_alias (no fit)
+        mask_selection : enum('fit', 'alias', 'file')  # presentation chosen by fit / mask_alias (no fit) / field mask file
         """
         return definition
 
@@ -202,6 +205,8 @@ class RoiMaskTemplate(dj.Manual):
             verbose: bool = True,
             roi_channel: str | None = None,
             roi_table: dj.Table | None = None,
+            motion_roi_mask_table: dj.Table | None = None,
+            motion_params_id: int | None = None,
             **kwargs,
     ):
         """Launch the interactive ROI-drawing GUI for a field.
@@ -234,13 +239,20 @@ class RoiMaskTemplate(dj.Manual):
             roi_table: The ROI table (``RoiTemplate``). If the field already has an ROI mask in the database, the GUI
                 can replace it ('Deploy to database', only in the dangerzone), see ``deploy_roi_mask``. The ROI table is
                 then repopulated for the field. Without it the GUI cannot deploy.
+            motion_roi_mask_table: Motion mode only: ``MotionRoiMask``. If it is populated for the field, the other
+                presentations show its presentation masks (view only).
+            motion_params_id: Motion mode only: parameter set of ``motion_roi_mask_table``. Only needed if the field
+                has several.
             **kwargs: Additional keyword arguments forwarded to
                 ``InteractiveRoiCanvas``.
 
-        In motion mode (no presentation masks) the canvas opens on the presentation the initial mask belongs to (the
-        presentation stored in the database, else the one of the mask file, else the ``mask_alias`` choice), and
-        shifts between presentations are disabled: the mask is saved unchanged for all presentations, the
-        presentation masks are computed by ``MotionRoiMask`` after deploying.
+        In motion mode (no presentation masks) the mask is drawn and edited on one presentation only: the canvas opens
+        on the presentation the initial mask belongs to (the presentation stored in the database, else the one of the
+        mask file, else the ``mask_alias`` choice). Shifts between presentations are disabled. The other presentations
+        are view only and show the presentation masks of ``MotionRoiMask`` (if populated and the mask was not edited),
+        else a preview: the mask moved by the global shift between the mean images (auto shift). 'Save all to file'
+        writes one field mask file (``<stem>_FieldROIs.npy``, see ``to_field_roi_mask_file``) instead of one file per
+        presentation; ``deploy_roi_mask`` loads it.
 
         Returns:
             An ``InteractiveRoiCanvas`` instance. Call ``.start_gui()`` on it
@@ -288,15 +300,23 @@ class RoiMaskTemplate(dj.Manual):
         # Load shifts if available
         shifts = self.init_shifts(field_key, pres_keys)
 
-        # Motion mode: draw on the presentation of the mask, no shifts between presentations
-        main_stim_idx = 0 if self._presentation_masks else self._main_presentation_idx(
-            field_key, pres_keys, field_data['filepaths'], output_files, initial_src)
+        # Motion mode: draw on the presentation of the mask, no shifts between presentations, one field mask file
+        main_stim_idx, view_masks = 0, None
+        if not self._presentation_masks:
+            filepaths = field_data['filepaths']
+            field_files = [to_field_roi_mask_file(f, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix,
+                                                  new_prefix=new_prefix) for f in filepaths]
+            main_stim_idx = self._main_presentation_idx(
+                field_key, pres_keys, filepaths, initial_src, mask_files=[field_files, output_files])
+            output_files = [field_files[main_stim_idx]] * len(pres_keys)
+            if motion_roi_mask_table is not None:
+                view_masks = self._motion_view_masks(field_key, pres_keys, motion_roi_mask_table, motion_params_id)
 
         roi_canvas = InteractiveRoiCanvas(
             pres_names=pres_names,
             stacks=stacks, primary_channel=roi_channel, n_artifact=n_artifact, bg_dict=high_res_bg_dict,
             main_stim_idx=main_stim_idx, initial_roi_mask=initial_roi_mask, shifts=shifts,
-            allow_shifts=self._presentation_masks,
+            allow_shifts=self._presentation_masks, view_masks=view_masks,
             canvas_width=canvas_width, autorois_models=autorois_models, output_files=output_files,
             pixel_size_um=pixel_size_d1_d2, show_diagnostics=show_diagnostics,
             max_shift=self._max_shift if max_shift is None else max_shift,
@@ -307,15 +327,16 @@ class RoiMaskTemplate(dj.Manual):
         )
         if verbose:
             if not self._presentation_masks:
-                print(f"Motion mode: draw on {pres_names[main_stim_idx]}; the mask is saved unchanged for all "
-                      f"presentations (no shifts).")
+                print(f"Motion mode: draw on {pres_names[main_stim_idx]} (other presentations are view only); "
+                      f"the mask is saved to {output_files[main_stim_idx]}")
             print(f"Returned InteractiveRoiCanvas object. To start GUI, call <enter_object_name>.start_gui().")
         return roi_canvas
 
-    def _main_presentation_idx(self, field_key: dict, pres_keys: list, filepaths: list, output_files: list,
-                               initial_src: str) -> int:
+    def _main_presentation_idx(self, field_key: dict, pres_keys: list, filepaths: list, initial_src: str,
+                               mask_files: list) -> int:
         """Index of the presentation an initial field mask belongs to: the presentation stored in the database,
-        else the presentation of the mask file (``initial_src``), else the first one in ``mask_alias`` order."""
+        else the presentation of the mask file ``initial_src`` (one of the per-presentation file lists in
+        ``mask_files``, or the h5 file for Igor masks), else the first one in ``mask_alias`` order."""
         def same_file(a, b):
             return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(os.path.abspath(str(b)))
 
@@ -326,7 +347,9 @@ class RoiMaskTemplate(dj.Manual):
             if len(idxs) == 1:
                 return idxs[0]
         elif initial_src not in (None, 'none'):
-            idxs = [i for i, f in enumerate(output_files) if same_file(f, initial_src)]
+            idxs = []
+            for files in mask_files:
+                idxs = idxs or [i for i, f in enumerate(files) if same_file(f, initial_src)]
             if len(idxs) == 0:  # Igor mask: stored in the h5 file of the presentation
                 raw_data_dir, pre_data_dir = (self.userinfo_table & field_key).fetch1('raw_data_dir', 'pre_data_dir')
                 idxs = [i for i, f in enumerate(filepaths) if same_file(
@@ -337,6 +360,47 @@ class RoiMaskTemplate(dj.Manual):
         mask_alias, highres_alias = (self.userinfo_table & field_key).fetch1("mask_alias", "highres_alias")
         return int(sort_roi_mask_files(
             files=list(filepaths), mask_alias=mask_alias, highres_alias=highres_alias, as_index=True)[0])
+
+    def _motion_view_masks(self, field_key: dict, pres_keys: list, motion_roi_mask_table,
+                           motion_params_id: int | None) -> list | None:
+        """Presentation masks of MotionRoiMask (python format, raw presentation coordinates) for the ROI canvas, or
+        None if MotionRoiMask is not populated for the field. Missing presentations are None."""
+        restr = dict() if motion_params_id is None else dict(motion_params_id=motion_params_id)
+        rows = motion_roi_mask_table & field_key & restr
+        if len(rows) == 0:
+            return None
+        param_ids = set(rows.to_arrays('motion_params_id'))
+        if len(param_ids) > 1:
+            raise ValueError(f'MotionRoiMask has several parameter sets {sorted(param_ids)} for the field, '
+                             f'choose one with motion_params_id.')
+        view_masks = []
+        for pres_key in pres_keys:
+            pres_rows = rows & pres_key
+            view_masks.append(to_python_format(load_array(pres_rows.fetch1('roi_mask')))
+                              if len(pres_rows) == 1 else None)
+        return view_masks
+
+    def _field_roi_mask_files(self, pres_keys: list, roi_mask_dir: str, old_prefix: str | None = None,
+                              new_prefix: str | None = None) -> list:
+        """Field mask file (``<stem>_FieldROIs.npy``) of each presentation, see ``to_field_roi_mask_file``."""
+        return [to_field_roi_mask_file(
+            local_file_path((self.presentation_table & pres_key).fetch1("pres_data_file"),
+                            self.presentation_table._filepath_store),
+            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix) for pres_key in pres_keys]
+
+    def _find_field_roi_mask_file(self, pres_keys: list, roi_mask_dir: str, old_prefix: str | None = None,
+                                  new_prefix: str | None = None) -> tuple:
+        """The existing field mask file of a field and its presentation: (pres_key, file) or (None, None).
+
+        Raises:
+            ValueError: If several presentations of the field have a field mask file.
+        """
+        files = self._field_roi_mask_files(pres_keys, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+        found = [(pres_key, f) for pres_key, f in zip(pres_keys, files) if os.path.isfile(f)]
+        if len(found) > 1:
+            raise ValueError(f'Several field ROI mask files for one field, delete all but one:\n'
+                             f'{[f for _, f in found]}')
+        return found[0] if len(found) == 1 else (None, None)
 
     def _load_field_stacks(
             self,
@@ -466,6 +530,7 @@ class RoiMaskTemplate(dj.Manual):
         """
         Load initial ROI mask for field.
         First try to load from database.
+        In motion mode then try the field mask file (``<stem>_FieldROIs.npy``).
         Second try filesystem file (numpy or pickle), unless ROI masks should be exclusively loaded from Igor.
         Last try to load from Igor file, unless ROI masks should never be loaded from Igor.
         """
@@ -474,6 +539,15 @@ class RoiMaskTemplate(dj.Manual):
 
         if roi_mask is not None:
             return roi_mask, 'database'
+
+        if not self._presentation_masks:  # Motion mode: field mask file
+            pres_keys = (self.presentation_table & field_key).proj().to_dicts()
+            _, field_file = self._find_field_roi_mask_file(
+                pres_keys, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            if field_file is not None:
+                if verbose:
+                    print(f'Loaded field ROI mask from file={field_file}')
+                return to_igor_format(load_roi_mask_file(field_file).astype(np.int32)), field_file
 
         if igor_roi_masks != 'yes':
             roi_mask, src_file = self.load_field_roi_mask_file(
@@ -930,6 +1004,11 @@ class RoiMaskTemplate(dj.Manual):
         if np.all((roi_mask_old > 0) == (roi_mask > 0)) and n_before == n_after:
             return dict(info, status='unchanged')
 
+        if not self._presentation_masks:  # Motion mode: one field mask file of the presentation of the mask
+            output_files = self._field_roi_mask_files(
+                [pres_keys[ref_idx]], roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            shifts = [(0, 0)]
+
         if not overwrite_files and all(os.path.isfile(f) for f in output_files):
             return dict(status='skipped', field_key=field_key, reason=f'corrected files exist in {roi_mask_dir}')
 
@@ -965,9 +1044,13 @@ class RoiMaskTemplate(dj.Manual):
 
         input_file = local_file_path(
             (self.presentation_table & pres_key).fetch1("pres_data_file"), self.presentation_table._filepath_store)
-        roi_mask_file = to_roi_mask_file(
-            input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
-            file_format=self._get_roi_file_format())
+        if self._presentation_masks:
+            roi_mask_file = to_roi_mask_file(
+                input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+                file_format=self._get_roi_file_format())
+        else:  # Motion mode: field mask file
+            roi_mask_file = to_field_roi_mask_file(
+                input_file, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
         if not os.path.isfile(roi_mask_file):
             raise FileNotFoundError(f'No corrected ROI mask file {roi_mask_file}')
 
@@ -1014,34 +1097,35 @@ class RoiMaskTemplate(dj.Manual):
             suppress_errors: bool = False,
             verbose: bool = True,
     ) -> dict:
-        """Motion mode: save the prepared field ROI masks (presentation chosen by fit, aligned) to files.
+        """Motion mode: save the prepared field ROI masks (presentation chosen by fit, aligned) to field mask files.
 
         In motion mode the field mask in the database can differ from its file: it is aligned to the mean image of
-        its presentation (``align_dx``, ``align_dy``), while the file keeps the mask as drawn. This writes the field
-        mask of the database to one file per presentation in ``roi_mask_dir`` (all presentations get the same mask;
-        presentation masks only come from ``MotionRoiMask``), like 'Save all to file' in the ROI canvas. The original
-        files are kept, so use a directory other than the one the masks were loaded from.
+        its presentation (``align_dx``, ``align_dy``), while the file keeps the mask as drawn, and with copied masks
+        the file does not tell which presentation it belongs to. This writes the field mask of the database to one
+        field mask file (``<stem>_FieldROIs.npy`` of its presentation, see ``to_field_roi_mask_file``) in
+        ``roi_mask_dir``. The original files are kept, so use a directory other than the one the masks were loaded
+        from. Presentation masks only come from ``MotionRoiMask``; no per-presentation copies are written.
 
-        With ``update_database``, the database entry then references the new file of its presentation
-        (``roi_mask_file``, ``roi_mask_source``) and ``align_dx = align_dy = 0``. The mask itself is unchanged, so
-        nothing downstream is deleted. Review or edit the files (e.g. ``draw_roi_mask(roi_mask_dir=...)``) and load
-        edited files with ``deploy_roi_mask(roi_mask_dir=...)``; deploying chooses the presentation of the field mask
-        again by fit.
+        With ``update_database``, the database entry then references the new file (``roi_mask_file``,
+        ``roi_mask_source``) and ``align_dx = align_dy = 0``. The mask itself is unchanged, so nothing downstream is
+        deleted. Review or edit the files (``draw_roi_mask(roi_mask_dir=...)``) and load edited files with
+        ``deploy_roi_mask(roi_mask_dir=...)``, which uses the presentation named by the file.
 
         Args:
             restrictions: Restrictions for the fields, e.g. ``dict(experimenter='Ran')``.
             roi_mask_dir: Sub-directory (next to the recording files) the mask files are written to.
             old_prefix: Path prefix to replace when resolving file paths.
             new_prefix: Replacement path prefix.
-            overwrite_files: If False, fields whose files exist with a different mask are skipped. Files with the
-                same mask count as exported.
+            overwrite_files: If False, fields whose file exists with a different mask are skipped. A file with the
+                same mask counts as exported. Fields with a field mask file of another presentation are always
+                skipped (delete it first).
             update_database: If True, let the database entry reference the new files (see above).
             suppress_errors: If True, continue with the next field if a field fails and report the error.
             verbose: If True, print progress.
 
         Returns:
-            A dict with the lists ``exported`` (field keys whose files were written), ``linked`` (field keys whose
-            database entry now references the files), ``skipped`` (dicts with field key and reason) and ``errors``
+            A dict with the lists ``exported`` (field keys whose file was written), ``linked`` (field keys whose
+            database entry now references the file), ``skipped`` (dicts with field key and reason) and ``errors``
             (tuples of field key and exception).
         """
         if self._presentation_masks:
@@ -1078,40 +1162,35 @@ class RoiMaskTemplate(dj.Manual):
                   f"in the database), {len(result['skipped'])} skipped, {len(result['errors'])} errors.")
         return result
 
-    def _presentation_roi_mask_files(self, pres_keys: list, roi_mask_dir: str, old_prefix: str | None,
-                                     new_prefix: str | None) -> list:
-        """Mask file of each presentation in ``roi_mask_dir``."""
-        return [to_roi_mask_file(
-            local_file_path((self.presentation_table & pres_key).fetch1("pres_data_file"),
-                            self.presentation_table._filepath_store),
-            roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
-            file_format=self._get_roi_file_format()) for pres_key in pres_keys]
-
     def _export_field_roi_mask(self, field_key: dict, roi_mask_dir: str, old_prefix: str | None,
                                new_prefix: str | None, overwrite_files: bool, update_database: bool) -> dict:
-        """Write the field mask of one field to files and optionally link it. Returns a dict with ``status``
-        ('exported', 'exists' or 'skipped') and ``linked``."""
+        """Write the field mask of one field to its field mask file and optionally link it. Returns a dict with
+        ``status`` ('exported', 'exists' or 'skipped') and ``linked``."""
         row = (self & field_key).fetch1()
         pres_primary_key = self.presentation_table.primary_key
         ref_pres_key = {k: row[k] for k in pres_primary_key}
         pres_keys = (self.presentation_table & field_key).proj().to_dicts()
-        output_files = self._presentation_roi_mask_files(pres_keys, roi_mask_dir, old_prefix, new_prefix)
         ref_idxs = [i for i, pk in enumerate(pres_keys) if all(pk[k] == ref_pres_key[k] for k in pres_primary_key)]
         if len(ref_idxs) != 1:
             raise ValueError(f'Could not find the presentation of the ROI mask of field_key={field_key}')
+        field_files = self._field_roi_mask_files(pres_keys, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+        ref_file = field_files[ref_idxs[0]]
+
+        others = [f for f in field_files if f != ref_file and os.path.isfile(f)]
+        if len(others) > 0:
+            return dict(status='skipped', linked=False,
+                        reason=f'field mask file of another presentation exists: {others}')
 
         roi_mask = to_python_format(load_array(row['roi_mask']))
-        existing = [f for f in output_files if os.path.isfile(f)]
-        same = [f for f in existing if np.array_equal(load_roi_mask_file(f).astype(int), roi_mask)]
-        if len(existing) > len(same) and not overwrite_files:
-            return dict(status='skipped', linked=False, reason=f'files with a different mask exist in {roi_mask_dir}')
+        status = 'exported'
+        if os.path.isfile(ref_file):
+            if np.array_equal(load_roi_mask_file(ref_file).astype(int), roi_mask):
+                status = 'exists'
+            elif not overwrite_files:
+                return dict(status='skipped', linked=False, reason=f'file with a different mask exists: {ref_file}')
+        if status == 'exported':
+            self._save_roi_mask_files([ref_file], [roi_mask])
 
-        status = 'exists'
-        if len(same) < len(output_files):
-            self._save_roi_mask_files(output_files, [roi_mask] * len(output_files))
-            status = 'exported'
-
-        ref_file = output_files[ref_idxs[0]]
         new_values = dict(roi_mask_file=relative_store_path(ref_file, self._filepath_store),
                           roi_mask_source=_roi_mask_source_from_path(ref_file))
         if self._selects_field_mask:
@@ -1206,14 +1285,22 @@ class RoiMaskTemplate(dj.Manual):
             max_shift: Maximum allowed pixel shift between presentations. Defaults to the table-level value.
             verbose: If True, print a summary.
 
+        In motion mode a field mask file (``<stem>_FieldROIs.npy``, written by the ROI canvas or
+        ``export_field_roi_masks``) is used if there is one; then no presentation mask files are needed.
+
         Raises:
             FileNotFoundError: If a presentation of the field has no mask file. Nothing is deleted then.
         """
         field_key = (self.field_table & field_key).proj().fetch1()
         pres_keys = (self.presentation_table & field_key).proj().to_dicts()
 
+        field_file = None
+        if not self._presentation_masks:
+            _, field_file = self._find_field_roi_mask_file(
+                pres_keys, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+
         missing_files = []
-        for pres_key in pres_keys:
+        for pres_key in (pres_keys if field_file is None else []):
             input_file = local_file_path(
                 (self.presentation_table & pres_key).fetch1("pres_data_file"), self.presentation_table._filepath_store)
             roimask_file = to_roi_mask_file(
@@ -1396,6 +1483,14 @@ class RoiMaskTemplate(dj.Manual):
                 print('pres_keys:', [k for k in pres_keys])
             return
 
+        if not self._presentation_masks:
+            # Motion mode: a field mask file names its presentation, no choice by fit and no alignment needed.
+            field_pres_key, field_file = self._find_field_roi_mask_file(
+                pres_keys, roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            if field_file is not None:
+                self._insert_field_roi_mask_file(field_key, field_pres_key, field_file, verboselvl=verboselvl)
+                return
+
         if source == 'infer' and (self.raw_params_table & field_key).fetch1('igor_roi_masks') == 'either':
             source = self._resolve_field_source(
                 field_key, pres_keys, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
@@ -1486,6 +1581,26 @@ class RoiMaskTemplate(dj.Manual):
                 roi_mask_pres_key = {**roi_mask_pres_key, **add_primary_keys}
 
             self.RoiMaskPresentation().insert1(roi_mask_pres_key, skip_duplicates=True)
+
+    def _insert_field_roi_mask_file(self, field_key: dict, pres_key: dict, field_file: str,
+                                    verboselvl: int = 0) -> None:
+        """Motion mode: insert the field mask of a field mask file for the presentation it belongs to. ``mask_fit`` is
+        stored for QC; the mask is not aligned (it was drawn or prepared on this presentation)."""
+        roi_mask = to_igor_format(load_roi_mask_file(field_file).astype(np.int32))
+        main_key = {**field_key, **{k: pres_key[k] for k in self.presentation_table.primary_key}, "roi_mask": roi_mask,
+                    "roi_mask_file": relative_store_path(field_file, self._filepath_store),
+                    "roi_mask_source": _roi_mask_source_from_path(field_file)}
+        if self._selects_field_mask:
+            _, roi_channel = self._get_stack_names(field_key)
+            data_file = local_file_path((self.presentation_table & pres_key).fetch1('pres_data_file'),
+                                        self.presentation_table._filepath_store)
+            img, _, n_artifact = self._presentation_mean_image(pres_key, data_file, roi_channel)
+            score = mask_fit_score(roi_mask, img, n_artifact=n_artifact)
+            main_key.update(align_dx=0, align_dy=0, mask_fit=float(score) if np.isfinite(score) else None,
+                            mask_selection='file')
+        if verboselvl > 0:
+            print(f'Adding field ROI mask from file={field_file} for field:', field_key)
+        self.insert1(main_key, skip_duplicates=True)
 
     def _select_field_mask_presentation(
             self,

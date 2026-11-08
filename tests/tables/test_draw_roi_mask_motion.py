@@ -37,7 +37,9 @@ class _FakeRoiMask:
         return _Rows(self._db_row)
 
     def idx(self, src):
-        return self._main_presentation_idx(dict(field=1), self.pres_keys, self.filepaths, self.output_files, src)
+        field_files = [f.replace('_ROIs.npy', '_FieldROIs.npy') for f in self.output_files]
+        return self._main_presentation_idx(dict(field=1), self.pres_keys, self.filepaths, src,
+                                           mask_files=[field_files, self.output_files])
 
 
 def test_database_mask_uses_its_presentation(tmp_path):
@@ -47,6 +49,11 @@ def test_database_mask_uses_its_presentation(tmp_path):
 def test_mask_file_uses_its_presentation(tmp_path):
     tab = _FakeRoiMask(tmp_path)
     assert tab.idx(tab.output_files[2]) == 2
+
+
+def test_field_mask_file_uses_its_presentation(tmp_path):
+    tab = _FakeRoiMask(tmp_path)
+    assert tab.idx(tab.output_files[0].replace('_ROIs.npy', '_FieldROIs.npy')) == 0
 
 
 def test_igor_mask_uses_presentation_of_h5_file(tmp_path):
