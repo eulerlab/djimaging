@@ -1571,32 +1571,6 @@ class InteractiveRoiCanvas(RoiCanvas):
         condition = stim_condition.split('(')[1].split(')')[0]
         return stim, condition
 
-    def insert_database(self, roi_mask_tab, field_key):
-        from djimaging.utils.mask_utils import compare_roi_masks
-        from djimaging.utils.mask_format_utils import to_igor_format
-
-        pres_and_roi_mask = []
-        for pres_key in self.pres_names:
-            self.set_selected_stim(pres_key)
-            roi_mask = self.prep_roi_mask_for_file()
-            pres_and_roi_mask.append((pres_key, to_igor_format(roi_mask)))
-
-        main_roi_mask = pres_and_roi_mask[self.main_stim_idx][1]
-        new_key = {**field_key, **self.pres_names[self.main_stim_idx], "roi_mask": main_roi_mask}
-
-        roi_mask_tab().insert1(new_key)
-        if not getattr(roi_mask_tab, '_presentation_masks', True):
-            return  # Motion mode: only the field mask, presentation masks are computed by the motion tables
-        for i, (pres_key, roi_mask) in enumerate(pres_and_roi_mask):
-            new_key = {**field_key, **pres_key, "roi_mask": roi_mask}
-
-            as_field_mask, (shift_dx, shift_dy) = compare_roi_masks(roi_mask, main_roi_mask, max_shift=self.max_shift)
-            new_key['as_field_mask'] = as_field_mask
-            new_key['shift_dx'] = shift_dx
-            new_key['shift_dy'] = shift_dy
-
-            roi_mask_tab().RoiMaskPresentation().insert1(new_key)
-
     def create_widget_roi_next(self):
         widget = Button(description='>>', disabled=False, button_style='success',
                         layout=Layout(width='50px'))
