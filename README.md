@@ -50,6 +50,9 @@ If you need them, install them yourself, preferably in a separate environment, e
 `uv pip install "cellpose>=3.1.1,<4"` or `uv pip install git+https://github.com/sarmueller/MEDIAR.git`
 (possibly with `monai>=1.5` and `--no-deps` to keep your `numpy`). The MEDIAR wrapper is untested with `monai>=1.5`.
 
+How ROI masks get into the database, the ROI canvas, corrections, shrink to fit and motion mode:
+see [ROI_MASKS.md](ROI_MASKS.md).
+
 > ❗ To test if the package was successfully installed, e.g.
 > open a jupyter notebook in your container and call <code>import djimaging</code>.
 
