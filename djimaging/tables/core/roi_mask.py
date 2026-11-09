@@ -1125,6 +1125,8 @@ class RoiMaskTemplate(dj.Manual):
         average = (average - np.nanmin(average)) / max(np.nanmax(average) - np.nanmin(average), 1e-12)
 
         # Same layout as `plot_field`, which is used by `plot1`
+        print(field_key)
+        
         extent, xlabel, ylabel = field_extent_and_labels(roi_mask_old.shape, scan_type)
         fig, axs = plt.subplots(1, 6, figsize=(22, 4), sharex='all', sharey='all')
         fig.suptitle(str(field_key))
@@ -1136,7 +1138,7 @@ class RoiMaskTemplate(dj.Manual):
             ax.imshow(np.where(img > 0, img, np.nan).T.astype(float), cmap='jet', origin='lower', extent=extent)
             ax.set(title=f'{title} ({len(np.unique(img[img > 0]))} ROIs)')
         axs[2].imshow(diff.T, vmin=-1, vmax=1, cmap=diff_cmap, origin='lower', extent=extent)
-        axs[2].set(title='Added (green) / removed (red) pixels')
+        axs[2].set(title='add (G) / rm (R) pixels')
         axs[3].imshow((average ** gamma).T, cmap='gray', origin='lower', extent=extent)
         axs[3].imshow(diff.T, vmin=-1, vmax=1, cmap=diff_cmap, alpha=0.5, origin='lower', extent=extent)
         axs[3].set(title='Stack average + difference')
@@ -1163,15 +1165,15 @@ class RoiMaskTemplate(dj.Manual):
 
         axs[4].imshow((average ** gamma).T, cmap='gray', origin='lower', extent=extent)
         _outlines(axs[4])
-        axs[4].set(title=f'New ({len(new_ids)}, green) / changed ({len(changed_ids)}, blue) / '
-                         f'removed ({len(removed_ids)}, red)')
+        axs[4].set(title=f'add ({len(new_ids)}, G) / changed ({len(changed_ids)}, B) / '
+                         f'rm ({len(removed_ids)}, R)')
 
         if corr_map is not None:
             axs[5].imshow(corr_map.T, cmap='gray', origin='lower', extent=extent)
         for roi_id in np.unique(roi_mask_new[roi_mask_new > 0]):
             axs[5].contour((roi_mask_new == roi_id).T.astype(float), levels=[0.5], colors='yellow', linewidths=1,
                            origin='lower', extent=extent)
-        axs[5].set(title='Correlation map + corrected ROIs')
+        axs[5].set(title='Correlation + corr. ROIs')
         plt.tight_layout()
         plt.show()
 
