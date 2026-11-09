@@ -118,8 +118,16 @@ def make_reference(ch0: np.ndarray, ch1: np.ndarray | None, npixartifact: int, a
                 comb=comb_of(m0, m1), npixartifact=int(npixartifact), art_mask=art_mask)
 
 
-def lowpass_disp(disp: np.ndarray, dt: float, tau_s: float | None) -> np.ndarray:
-    """Slow displacement: median filter (robust to outliers) followed by a Gaussian (sigma = ``tau_s`` seconds)."""
+def lowpass_disp(disp: np.ndarray, dt: float, tau_s: float | None, breaks=()) -> np.ndarray:
+    """Slow displacement: median filter (robust to outliers) followed by a Gaussian (sigma = ``tau_s`` seconds).
+
+    ``breaks``: bin indices where a new segment starts; segments are smoothed separately, so a jump at a break (e.g.
+    the focus adjusted before the stimulus started) is corrected as a step instead of being smeared into the other
+    segment.
+    """
+    cuts = sorted({int(b) for b in breaks if 0 < int(b) < len(disp)})
+    if cuts:
+        return np.concatenate([lowpass_disp(seg, dt, tau_s) for seg in np.split(disp, cuts, axis=0)], axis=0)
     if tau_s is None or tau_s <= 0 or len(disp) < 3:
         return disp.copy()
     k = max(3, int(round(2 * tau_s / dt)) | 1)
@@ -160,10 +168,11 @@ def union_masks(*masks):
 
 def estimate_motion(ch0: np.ndarray, ch1: np.ndarray | None, ref: dict, npixartifact: int, fs: float,
                     art_mask: np.ndarray | None = None, bin_frames: int = 4, tau_slow_s: float = 10.,
-                    **xcorr_kws) -> MotionEstimate:
+                    split_s: float | None = None, **xcorr_kws) -> MotionEstimate:
     """Displacement of a (cleaned) recording relative to the field reference, per bin of ``bin_frames`` frames.
 
-    The slow part (``tau_slow_s``) is what gets corrected; the remainder is reported as fast motion.
+    The slow part (``tau_slow_s``) is what gets corrected; the remainder is reported as fast motion. With ``split_s``
+    (e.g. the stimulus onset), the bins before and after it (by bin start) are smoothed separately.
     """
     if ref.get('ch1') is None:
         ch1 = None
@@ -171,6 +180,7 @@ def estimate_motion(ch0: np.ndarray, ch1: np.ndarray | None, ref: dict, npixarti
     npix = max(int(npixartifact), int(ref['npixartifact']))
     ref_comb = reg_image(ref['ch0'], ref.get('ch1'), npix, excl1=excl1)
     disp, centers = disp_bins(ch0, ch1, ref_comb, npix, bin_frames, excl1=excl1, **xcorr_kws)
-    slow = lowpass_disp(disp, bin_frames / fs, tau_slow_s)
+    breaks = () if split_s is None else [int(np.sum(centers - (bin_frames - 1) / 2. < np.floor(split_s * fs)))]
+    slow = lowpass_disp(disp, bin_frames / fs, tau_slow_s, breaks=breaks)
     return MotionEstimate(bin_frames=int(bin_frames), bin_centers=centers, disp_bins=disp, slow_bins=slow,
                           n_frames=int(ch0.shape[2]))

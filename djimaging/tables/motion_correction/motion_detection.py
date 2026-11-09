@@ -48,12 +48,14 @@ from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.motion import clean_channels, compute_zproxy, estimate_motion, estimate_roi_shifts, make_reference
 from djimaging.utils.motion.image_utils import register_stack
 from djimaging.utils.motion.registration import MotionEstimate
+from djimaging.utils.motion.trust import stim_bins
 from djimaging.utils.scanm import read_utils
 
 DEFAULT_MOTION_PARAMS = dict(
     # registration
     shift_bin_frames=4,  # frames per displacement estimate (~0.5 s at 7.8 Hz)
     tau_slow_s=10.,  # smoothing of the displacement; only the slow part is corrected
+    split_at_onset=True,  # smooth before / after the first trigger separately (focus adjusted before the stimulus)
     max_shift=8,  # search window of the rigid registration [px]
     whiten=0.5,  # spectral whitening exponent (0: cross-correlation, 1: phase correlation)
     smooth_sigma=1.,  # smoothing of the correlation surface [px]
@@ -264,9 +266,10 @@ class MotionDetectionTemplate(dj.Computed):
         disp_bins : <blob>  # (n_bins, 2) displacement vs. reference [px]; content at p is at p + disp
         slow_bins : <blob>  # (n_bins, 2) smoothed displacement, this part is corrected
         n_frames : int32  # number of frames
-        slow_range_px : float32  # max range of the slow displacement within the recording [px]
-        fast_rms_px : float32  # rms of the fast (uncorrected) displacement [px]
-        fast_frac : float32  # fraction of bins with |fast| > fast_thresh
+        stim_onset=null : float32  # first trigger [s]; the summaries below only use bins starting after it
+        slow_range_px : float32  # max range of the slow displacement after stimulus onset [px]
+        fast_rms_px : float32  # rms of the fast (uncorrected) displacement after stimulus onset [px]
+        fast_frac : float32  # fraction of bins after stimulus onset with |fast| > fast_thresh
         npixartifact_qc : int32  # light-artifact lines used for QC
         k_bleed : float32  # bleed-through of the functional into the structural channel
         z_bin_edges : <blob>  # (n_zbins + 1,) frame edges of the z-proxy bins
@@ -320,9 +323,10 @@ class MotionDetectionTemplate(dj.Computed):
         ch0, ch1, info = clean_channels(data['ch0'], data['ch1'], data['npixartifact']) \
             if params['clean_structural'] else _fill_only(data)
         npix = max(info['npixartifact'], ref['npixartifact'])
+        onset = stim_bins([], data['fs'], data['triggertimes'])[1]
         motion = estimate_motion(ch0, ch1, ref, npix, data['fs'], art_mask=info['art_mask'],
                                  bin_frames=params['shift_bin_frames'], tau_slow_s=params['tau_slow_s'],
-                                 **_xcorr_kws(params))
+                                 split_s=onset if params['split_at_onset'] else None, **_xcorr_kws(params))
         zp = compute_zproxy(ch0, ch1, ref, motion.disp_frames, npix, art_mask=info['art_mask'],
                             bin_frames=params['trust_bin_frames'])
         field_key = {k: key[k] for k in self.roi_mask_table.primary_key}  # field mask: not restricted by presentation
@@ -331,12 +335,14 @@ class MotionDetectionTemplate(dj.Computed):
         roi_shifts, quality = estimate_roi_shifts(np.nanmean(reg0, axis=2), ref['ch0'], field_mask,
                                                   max_shift=params['roi_max_shift'])
         fast_abs = np.linalg.norm(motion.fast_bins, axis=1)
+        sel, onset = stim_bins(motion.bin_centers - (motion.bin_frames - 1) / 2., data['fs'], data['triggertimes'])
         self.insert1(dict(
             key, bin_frames=motion.bin_frames, bin_centers=motion.bin_centers.astype(np.float32),
             disp_bins=motion.disp_bins.astype(np.float32), slow_bins=motion.slow_bins.astype(np.float32),
-            n_frames=motion.n_frames, slow_range_px=float(np.max(np.ptp(motion.slow_bins, axis=0))),
-            fast_rms_px=float(np.sqrt(np.mean(fast_abs ** 2))),
-            fast_frac=float(np.mean(fast_abs > params['fast_thresh'])),
+            n_frames=motion.n_frames, stim_onset=onset,
+            slow_range_px=float(np.max(np.ptp(motion.slow_bins[sel], axis=0))),
+            fast_rms_px=float(np.sqrt(np.mean(fast_abs[sel] ** 2))),
+            fast_frac=float(np.mean(fast_abs[sel] > params['fast_thresh'])),
             npixartifact_qc=npix, k_bleed=info['k_bleed'], z_bin_edges=zp['bin_edges'],
             z_self_ch0=zp['self_ch0'].astype(np.float32), z_ref_ch0=zp['ref_ch0'].astype(np.float32),
             z_rec_ref_ch0=zp['rec_ref_ch0'],
@@ -352,9 +358,47 @@ class MotionDetectionTemplate(dj.Computed):
                               disp_bins=load_array(disp).astype(float), slow_bins=load_array(slow).astype(float),
                               n_frames=int(n_frames))
 
-    def plot1(self, key: dict | None = None) -> None:
-        """Displacement (raw / slow), fast motion and z proxy of one presentation."""
+    def load_frames(self, key: dict) -> dict:
+        """Raw (artifact lines filled) and slow-registered functional stacks of a presentation, for plotting."""
+        from djimaging.utils.motion import fill_artifact_lines
+        npix = int((self & key).fetch1('npixartifact_qc'))
+        data = load_presentation_channels(self.presentation_table, self.userinfo_table, self.raw_params_table, key,
+                                          structural=False)
+        raw = fill_artifact_lines(data['ch0'], npix)
+        return dict(raw=raw, reg=register_stack(raw, self.get_motion(key).slow_frames), fs=data['fs'])
+
+    def plot_frames(self, fig, key: dict, edges: np.ndarray, score: np.ndarray, frame_times=None,
+                    n_spread: int = 3, n_worst: int = 4) -> tuple:
+        """Example frames (raw and registered means of the bins ``edges``) into ``fig``, see ``plot_motion_frames``.
+
+        Bins: those containing ``frame_times`` [s] if given, else ``n_spread`` evenly spaced bins plus the ``n_worst``
+        bins with the highest ``score``. Loads the recording. Returns (bin indices, picked-for-score flags, labels)
+        for ``mark_frames``.
+        """
+        from djimaging.utils.motion.plotting import bins_at_times, pick_frame_bins, plot_motion_frames
+        frames = self.load_frames(key)
+        if frame_times is not None:
+            idxs = np.unique(bins_at_times(frame_times, edges, frames['fs']))
+            is_worst = np.zeros(len(idxs), bool)
+        else:
+            idxs, is_worst = pick_frame_bins(score, n_spread=n_spread, n_worst=n_worst)
+        ref = self.motion_reference_table().get_reference(key)
+        field_key = {k: key[k] for k in self.roi_mask_table.primary_key}
+        roi_mask = load_array((self.roi_mask_table & field_key).fetch1('roi_mask'))
+        labels = plot_motion_frames(fig, frames['raw'], frames['reg'], ref['ch0'], edges, idxs, frames['fs'],
+                                    roi_mask=roi_mask, is_worst=is_worst, stim_onset=(self & key).fetch1('stim_onset'))
+        return idxs, is_worst, labels
+
+    def plot1(self, key: dict | None = None, show_frames: bool = True, frame_times=None, n_spread: int = 3,
+              n_worst: int = 4) -> None:
+        """Displacement (raw / slow), fast motion and z proxy of one presentation.
+
+        With ``show_frames``, example frames (raw and registered means of the z-proxy bins) are shown below: the bins
+        at ``frame_times`` [s], or ``n_spread`` evenly spaced bins plus the ``n_worst`` bins with the largest
+        displacement from the median displacement (red). This loads the recording.
+        """
         from matplotlib import pyplot as plt
+        from djimaging.utils.motion.plotting import mark_frames, mark_stimulus
         key = get_primary_key(self, key)
         motion = self.get_motion(key)
         row = (self & key).fetch1()
@@ -364,10 +408,13 @@ class MotionDetectionTemplate(dj.Computed):
         edges = load_array(row['z_bin_edges'])
         tz = 0.5 * (edges[1:] + edges[:-1]) / fs
 
-        fig, axs = plt.subplots(1, 3, figsize=(16, 3.5))
+        fig = plt.figure(figsize=(16, 9 if show_frames else 3.5), layout='constrained')
+        sfigs = fig.subfigures(2, 1, height_ratios=[1, 1.4]) if show_frames else [fig]
+        axs = sfigs[0].subplots(1, 3)
         for ax in axs:
             for tt in triggertimes[:300]:
                 ax.axvline(tt, c='0.85', lw=0.5, zorder=-5)
+            mark_stimulus(ax, triggertimes, label=ax is axs[0])
             ax.set_xlabel('time [s]')
         for k, (c, lab) in enumerate((('C0', 'x'), ('C3', 'y'))):
             axs[0].plot(t, motion.disp_bins[:, k], c=c, lw=0.6, alpha=0.5)
@@ -385,6 +432,13 @@ class MotionDetectionTemplate(dj.Computed):
         axs[2].axhline(1, c='k', lw=0.5)
         axs[2].set(ylim=(0.4, 1.1), ylabel='similarity', title='z proxy (noise-corrected)')
         axs[2].legend(fontsize=7, ncol=2)
+        if show_frames:
+            dev = np.linalg.norm(motion.disp_bins - np.median(motion.disp_bins, axis=0), axis=1)
+            score = np.array([dev[(motion.bin_centers >= edges[b]) & (motion.bin_centers < edges[b + 1])].max(
+                initial=0.) for b in range(len(edges) - 1)])
+            idxs, is_worst, labels = self.plot_frames(sfigs[1], key, edges, score, frame_times=frame_times,
+                                                      n_spread=n_spread, n_worst=n_worst)
+            for ax in axs:
+                mark_frames(ax, idxs, edges, fs, labels, is_worst)
         fig.suptitle(str(key), fontsize=8)
-        plt.tight_layout()
         plt.show()

@@ -9,8 +9,9 @@ from djimaging.utils.motion import (
     trust_per_repeat, xcorr_disp)
 from djimaging.utils.motion.image_utils import masked_pearson, pearson, reg_image
 from djimaging.utils.motion.refine import pooled_mean_image, refine_roi_mask
+from djimaging.utils.motion.registration import lowpass_disp
 from djimaging.utils.motion.roi_shifts import local_shifts_batch, roi_centroids
-from djimaging.utils.motion.trust import fast_per_bin
+from djimaging.utils.motion.trust import fast_per_bin, stim_bins
 
 NX = NY = 64
 FS = 7.8125
@@ -316,3 +317,56 @@ def test_pooled_mean_image_ignores_nan():
     b[0, 0] = np.nan
     p = pooled_mean_image([a, b], [1, 3])
     assert p[0, 0] == 1. and p[1, 1] == 2.5
+
+
+def test_stim_bins_excludes_pre_stimulus():
+    starts = np.arange(10) * 16
+    sel, onset = stim_bins(starts, FS, np.array([40 / FS, 100 / FS]))
+    assert onset == pytest.approx(40 / FS)
+    assert np.array_equal(sel, starts >= 40)
+    sel, onset = stim_bins(starts, FS, np.array([]))
+    assert onset is None and sel.all()
+    sel, _ = stim_bins(starts, FS, np.array([1000.]))  # no bin after onset: fall back to all bins
+    assert sel.all()
+
+
+def test_pick_frame_bins_and_plot_motion_frames():
+    import matplotlib
+    matplotlib.use('Agg')
+    from matplotlib import pyplot as plt
+    from djimaging.utils.motion.plotting import (
+        bins_at_times, mark_frames, mark_stimulus, pick_frame_bins, plot_motion_frames)
+    score = np.zeros(20)
+    score[[7, 8, 15]] = [3., 2.5, 1.]
+    idxs, worst = pick_frame_bins(score, n_spread=3, n_worst=2)
+    assert {0, 10, 19} <= set(idxs) and 7 in idxs and 15 in idxs and 8 not in idxs  # 8 too close to 7
+    assert set(idxs[worst]) == {7, 15}
+    edges = np.arange(21) * 4
+    assert np.array_equal(bins_at_times([0., 4.5 / FS, 1e3], edges, FS), [0, 1, 19])
+
+    rng = np.random.default_rng(0)
+    raw = rng.normal(size=(16, 12, 80)).astype(np.float32)
+    mask = np.zeros((16, 12), int)
+    mask[3:6, 3:6] = -1
+    mask[8:11, 5:9] = -2
+    fig = plt.figure(layout='constrained')
+    sf = fig.subfigures(2, 1)
+    labels = plot_motion_frames(sf[1], raw, raw, raw.mean(axis=2), edges, idxs, FS, roi_mask=mask, is_worst=worst,
+                                stim_onset=10.)
+    assert labels == list('ABCDE')
+    ax = sf[0].subplots()
+    mark_stimulus(ax, [2., 8.], label=True)
+    mark_frames(ax, idxs, edges, FS, labels, worst)
+    fig.canvas.draw()
+    plt.close(fig)
+
+
+def test_lowpass_disp_split_keeps_step_at_onset():
+    dt = 4 / FS
+    disp = np.zeros((200, 2))
+    disp[40:, 0] = 2.  # focus / position adjusted just before the stimulus starts at bin 40
+    fast_joint = np.abs(disp - lowpass_disp(disp, dt, 10.))[40:60, 0]
+    fast_split = np.abs(disp - lowpass_disp(disp, dt, 10., breaks=[40]))[40:, 0]
+    assert fast_joint.max() > 0.5
+    assert fast_split.max() < 1e-6
+    assert np.array_equal(lowpass_disp(disp, dt, 10., breaks=[0, 200]), lowpass_disp(disp, dt, 10.))

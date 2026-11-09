@@ -29,6 +29,24 @@ class TrustResult:
     reliability: np.ndarray  # (n_rois,) split-half reliability of the ROI patch in the recording mean
 
 
+def stim_bins(bin_starts: np.ndarray, fs: float, triggertimes) -> tuple[np.ndarray, float | None]:
+    """Bins that start at or after the stimulus onset (first trigger), and the onset [s].
+
+    Motion before the stimulus (e.g. the focus being adjusted after the recording was started) should not count in
+    summaries. Without triggers, or if no bin starts after the onset, all bins are used.
+    """
+    bin_starts = np.asarray(bin_starts, dtype=float)
+    tt = np.asarray(triggertimes if triggertimes is not None else [], dtype=float).ravel()
+    tt = tt[np.isfinite(tt)]
+    if tt.size == 0:
+        return np.ones(len(bin_starts), bool), None
+    onset = float(tt[0])
+    sel = bin_starts >= np.floor(onset * fs)
+    if not sel.any():
+        sel = np.ones(len(bin_starts), bool)
+    return sel, onset
+
+
 def fast_per_bin(fast_bins: np.ndarray, bin_centers: np.ndarray, edges: np.ndarray) -> np.ndarray:
     """Maximum |fast motion| of the shift bins within each trust bin."""
     fast_abs = np.linalg.norm(fast_bins, axis=1)

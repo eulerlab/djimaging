@@ -106,7 +106,10 @@ Good recordings are already stable; the goal is to get the most out of slightly 
   frames registered and averaged; even/odd-frame half means kept for noise correction. Coordinate frame = raw
   recording (median displacement 0), so Igor masks drawn on the raw image fit.
 - **slow** = median-filter + Gaussian (σ = 10 s) of the displacement → applied to the stack before trace extraction.
-  **fast** = raw − slow → not corrected, flagged (|fast| > 0.5 px; enters trust).
+  **fast** = raw − slow → not corrected, flagged (|fast| > 0.5 px; enters trust). Before and after the first trigger
+  are smoothed separately (`split_at_onset`), so a focus / position adjustment before the stimulus is corrected as a
+  step instead of being smeared into the stimulus period. Summary values (`MotionDetection` slow range / fast motion,
+  `MotionTrust` median trust / flagged ROIs) only use bins starting after the first trigger.
 - **z proxy** (2 s bins): Pearson corr of band-passed images after xy registration, *noise-corrected*
   (corr / sqrt(R_bin·R_target), R from split-half Spearman-Brown). Against the recording's own mean (within-recording
   change) and against the field reference (plane vs. reference); Ch1 = activity-independent.

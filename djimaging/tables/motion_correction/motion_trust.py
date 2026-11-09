@@ -22,7 +22,7 @@ from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.motion import compute_trust, fill_artifact_lines, roi_ids_from_mask, trust_per_repeat
 from djimaging.utils.motion.image_utils import register_stack
-from djimaging.utils.motion.trust import fast_per_bin
+from djimaging.utils.motion.trust import fast_per_bin, stim_bins
 from djimaging.tables.motion_correction.motion_detection import load_presentation_channels
 
 
@@ -40,9 +40,10 @@ class MotionTrustTemplate(dj.Computed):
         fast : <blob>  # (n_bins,) max |fast| (uncorrected) motion per bin [px]
         zfield : <blob>  # (n_bins,) z factor from the structural channel in [0, 1]
         rep_starts=null : <blob>  # start times of the stimulus repeats [s], if repeated
-        trust_median : float32  # median trust over ROIs and bins
-        frac_low : float32  # fraction of (ROI, bin) with trust < 0.5
-        n_rois_flagged : int32  # ROIs with median trust < 0.5
+        stim_onset=null : float32  # first trigger [s]; the summaries below only use bins starting after it
+        trust_median : float32  # median trust over ROIs and bins after stimulus onset
+        frac_low : float32  # fraction of (ROI, bin) after stimulus onset with trust < 0.5
+        n_rois_flagged : int32  # ROIs with median trust (after stimulus onset) < 0.5
         """
 
     class Roi(dj.Part):
@@ -53,9 +54,9 @@ class MotionTrustTemplate(dj.Computed):
             -> master
             -> self.motion_roi_mask_table.Roi
             ---
-            trust : <blob>  # (n_bins,) trust in [0, 1]
+            trust : <blob>  # (n_bins,) trust in [0, 1], all bins incl. the pre-stimulus period
             trust_rep=null : <blob>  # (n_repeats,) min trust per stimulus repeat
-            trust_median : float32
+            trust_median : float32  # median trust over the bins after stimulus onset
             corr_self : <blob>  # (n_bins,) noise-corrected patch similarity to the recording's own mean
             res_shift : <blob>  # (n_bins,) |local displacement vs. reference - applied shift| [px]
             coverage : <blob>  # (n_bins,) fraction of the ROI inside the FOV
@@ -114,10 +115,12 @@ class MotionTrustTemplate(dj.Computed):
         ntrigger_rep = (self.stimulus_table & key).fetch1('ntrigger_rep')
         trust_rep, rep_starts = trust_per_repeat(res.trust, edges, data['fs'], data['triggertimes'], ntrigger_rep)
 
-        roi_median = np.median(res.trust, axis=1)
+        sel, onset = stim_bins(edges[:-1], data['fs'], data['triggertimes'])
+        trust_stim = res.trust[:, sel]
+        roi_median = np.median(trust_stim, axis=1)
         self.insert1(dict(key, bin_edges=edges, fast=res.fast.astype(np.float32), zfield=res.zfield.astype(np.float32),
-                          rep_starts=rep_starts, trust_median=float(np.median(res.trust)),
-                          frac_low=float(np.mean(res.trust < 0.5)), n_rois_flagged=int(np.sum(roi_median < 0.5))))
+                          rep_starts=rep_starts, stim_onset=onset, trust_median=float(np.median(trust_stim)),
+                          frac_low=float(np.mean(trust_stim < 0.5)), n_rois_flagged=int(np.sum(roi_median < 0.5))))
         parts = []
         for i, rid in enumerate(res.roi_ids):
             parts.append(dict(
@@ -129,33 +132,51 @@ class MotionTrustTemplate(dj.Computed):
                 match_shift_y=float(res.match_shift[i, 1])))
         self.Roi().insert(parts)
 
-    def plot1(self, key: dict | None = None) -> None:
-        """Trust heatmap (ROI x time), median trust over time and per repeat, and the uncorrected fast motion."""
+    def plot1(self, key: dict | None = None, show_frames: bool = True, frame_times=None, n_spread: int = 3,
+              n_worst: int = 4) -> None:
+        """Trust heatmap (ROI x time), median trust over time and per repeat, and the uncorrected fast motion.
+
+        The pre-stimulus period (before the first trigger, greyed out) does not count in the summaries. With
+        ``show_frames``, example frames (raw and registered means of the trust bins) are shown below: the bins at
+        ``frame_times`` [s], or ``n_spread`` evenly spaced bins plus the ``n_worst`` bins with the lowest median ROI
+        trust (red). This loads the recording.
+        """
         from matplotlib import pyplot as plt
+        from djimaging.utils.motion.plotting import mark_frames, mark_stimulus
         key = get_primary_key(self, key)
         row = (self & key).fetch1()
-        fs = (self.motion_roi_mask_table.motion_detection_table.presentation_table.ScanInfo & key).fetch1(
-            'scan_frequency')
+        det = self.motion_roi_mask_table.motion_detection_table
+        fs = (det.presentation_table.ScanInfo & key).fetch1('scan_frequency')
+        triggertimes = load_array((det.presentation_table & key).fetch1('triggertimes'))
         rows = (self.Roi & key).to_dicts(order_by='roi_id')
         trust = np.stack([load_array(r['trust']) for r in rows])
         edges = load_array(row['bin_edges'])
         t = 0.5 * (edges[1:] + edges[:-1]) / fs
+        med = np.median(trust, axis=0)
 
-        fig, axs = plt.subplots(2, 1, figsize=(12, 7), sharex=True, gridspec_kw=dict(height_ratios=[2, 1]))
+        fig = plt.figure(figsize=(12, 13 if show_frames else 7), layout='constrained')
+        sfigs = fig.subfigures(2, 1, height_ratios=[1.5, 1]) if show_frames else [fig]
+        axs = sfigs[0].subplots(2, 1, sharex=True, gridspec_kw=dict(height_ratios=[2, 1]))
         im = axs[0].imshow(trust, aspect='auto', vmin=0, vmax=1, interpolation='nearest',
                            extent=[0, edges[-1] / fs, len(rows) + 0.5, 0.5])
-        fig.colorbar(im, ax=axs[0], label='trust')
-        axs[0].set(ylabel='ROI', title=f"{key}\nmedian trust {row['trust_median']:.2f}, "
+        sfigs[0].colorbar(im, ax=axs[0], label='trust')
+        axs[0].set(ylabel='ROI', title=f"{key}\nafter stimulus onset: median trust {row['trust_median']:.2f}, "
                                        f"{row['n_rois_flagged']} ROIs flagged")
         axs[1].fill_between(t, np.percentile(trust, 10, axis=0), np.percentile(trust, 90, axis=0), color='0.8')
-        axs[1].plot(t, np.median(trust, axis=0), c='k', label='median ROI trust (10-90 %)')
+        axs[1].plot(t, med, c='k', label='median ROI trust (10-90 %)')
         if row['rep_starts'] is not None and rows[0]['trust_rep'] is not None:
             rep = np.stack([load_array(r['trust_rep']) for r in rows])
             axs[1].step(load_array(row['rep_starts']), np.nanmedian(rep, axis=0), where='post', c='orange',
                         label='per repeat (median)')
         axs[1].plot(t, load_array(row['zfield']), c='m', lw=0.8, label='z factor (structural)')
         axs[1].plot(t, np.exp(-0.5 * (load_array(row['fast']) / 0.75) ** 2), c='C0', lw=0.8, label='fast-motion factor')
+        for ax in axs:
+            mark_stimulus(ax, triggertimes, label=ax is axs[1])
         axs[1].set(ylim=(0, 1.05), xlabel='time [s]', ylabel='trust')
-        axs[1].legend(fontsize=7, ncol=4, loc='lower left')
-        plt.tight_layout()
+        axs[1].legend(fontsize=7, ncol=5, loc='lower left')
+        if show_frames:
+            idxs, is_worst, labels = det().plot_frames(sfigs[1], key, edges, 1. - med, frame_times=frame_times,
+                                                       n_spread=n_spread, n_worst=n_worst)
+            for ax in axs:
+                mark_frames(ax, idxs, edges, fs, labels, is_worst)
         plt.show()
