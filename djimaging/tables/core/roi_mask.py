@@ -699,7 +699,8 @@ class RoiMaskTemplate(dj.Manual):
                 print('No ROI masks found for field:', field_key)
             return
 
-        if len(self & field_key) == 0:
+        main_exists = len(self & field_key) > 0
+        if not main_exists:
             # Find preferred file that should be used as main key.
             mask_alias, highres_alias = (self.userinfo_table & field_key).fetch1("mask_alias", "highres_alias")
             keys_masks_files = [
@@ -727,6 +728,11 @@ class RoiMaskTemplate(dj.Manual):
             main_roi_mask = load_array((self.RoiMaskPresentation & main_pres_key).fetch1('roi_mask'))
             main_file, main_source = (self.RoiMaskPresentation & main_pres_key).fetch1(
                 'roi_mask_file', 'roi_mask_source')
+            # A fetched <filepath> is an ObjectRef, which cannot be inserted again (e.g. via auto_fill_pres_keys)
+            main_file = relative_store_path(
+                local_file_path(main_file, self._filepath_store), self._filepath_store)
+            if verboselvl > 0:
+                print(f'Adding {len(data_pairs)} presentation ROI masks to existing field:', field_key)
 
         roi_mask_pres_keys = []
 
@@ -747,12 +753,13 @@ class RoiMaskTemplate(dj.Manual):
             else:
                 raise ValueError(f'No ROI mask found for key={pres_key} but `auto_fill_pres_keys` is False')
 
-        main_key = {**field_key, **main_pres_key, "roi_mask": main_roi_mask,
-                    "roi_mask_file": main_file, "roi_mask_source": main_source}
+        if not main_exists:
+            main_key = {**field_key, **main_pres_key, "roi_mask": main_roi_mask,
+                        "roi_mask_file": main_file, "roi_mask_source": main_source}
 
-        if add_primary_keys is not None:
-            main_key = {**main_key, **add_primary_keys}
-        self.insert1(main_key, skip_duplicates=True)
+            if add_primary_keys is not None:
+                main_key = {**main_key, **add_primary_keys}
+            self.insert1(main_key, skip_duplicates=True)
 
         for roi_mask_pres_key in roi_mask_pres_keys:
             if add_primary_keys is not None:

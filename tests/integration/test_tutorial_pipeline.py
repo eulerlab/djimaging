@@ -6,6 +6,7 @@ import pytest
 from sklearn.dummy import DummyClassifier
 
 from djimaging.tables.classifier_v2.rgc_classifier_v2 import save_classifier_to_file
+from djimaging.utils.dj_storage import load_array
 from tests.fixtures.random_utils import numpy_seed
 
 
@@ -13,6 +14,30 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("DJ_TEST_MYSQL") != "1",
     reason="requires the MySQL integration-test service",
 )
+
+
+def _check_rescan_adds_presentations_to_existing_field(tutorial_schema, key):
+    """Rescanning with only_new_fields=False adds new presentations of fields that already have a RoiMask.
+
+    Simulates a newly added stimulus by removing one non-main presentation mask. The existing main entry
+    must not be re-inserted from fetched values (a fetched <filepath> is an ObjectRef and cannot be inserted).
+    """
+    roi_mask = tutorial_schema.RoiMask()
+    main_before = (roi_mask & key).proj("roi_mask_source").fetch1()
+    main_mask_before = load_array((roi_mask & key).fetch1("roi_mask"))
+    main_pres_key = (roi_mask.RoiMaskPresentation.proj() & (roi_mask & key)).fetch1()
+    pres_keys = (roi_mask.RoiMaskPresentation & key).keys()
+    new_pres_key = next(pres_key for pres_key in pres_keys if pres_key != main_pres_key)
+    new_pres_mask = load_array((roi_mask.RoiMaskPresentation & new_pres_key).fetch1("roi_mask"))
+    (roi_mask.RoiMaskPresentation & new_pres_key).delete_quick()
+
+    roi_mask.rescan_filesystem(restrictions=key, verboselvl=0, roi_mask_dir="AutoROIs", only_new_fields=False)
+
+    assert len(roi_mask.RoiMaskPresentation & key) == len(pres_keys)
+    np.testing.assert_array_equal(
+        load_array((roi_mask.RoiMaskPresentation & new_pres_key).fetch1("roi_mask")), new_pres_mask)
+    assert (roi_mask & key).proj("roi_mask_source").fetch1() == main_before
+    np.testing.assert_array_equal(load_array((roi_mask & key).fetch1("roi_mask")), main_mask_before)
 
 
 def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
@@ -78,6 +103,7 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
         verboselvl=0,
         roi_mask_dir="AutoROIs",
     )
+    _check_rescan_adds_presentations_to_existing_field(tutorial_schema, experiment_key)
     tutorial_schema.Roi().populate(experiment_key, display_progress=False)
 
     tutorial_schema.Traces().populate(experiment_key, display_progress=False)
