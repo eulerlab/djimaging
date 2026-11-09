@@ -325,7 +325,8 @@ class MotionDetectionTemplate(dj.Computed):
                                  **_xcorr_kws(params))
         zp = compute_zproxy(ch0, ch1, ref, motion.disp_frames, npix, art_mask=info['art_mask'],
                             bin_frames=params['trust_bin_frames'])
-        field_mask = load_array((self.roi_mask_table & key).fetch1('roi_mask'))
+        field_key = {k: key[k] for k in self.roi_mask_table.primary_key}  # field mask: not restricted by presentation
+        field_mask = load_array((self.roi_mask_table & field_key).fetch1('roi_mask'))
         reg0 = register_stack(ch0, motion.slow_frames)
         roi_shifts, quality = estimate_roi_shifts(np.nanmean(reg0, axis=2), ref['ch0'], field_mask,
                                                   max_shift=params['roi_max_shift'])

@@ -5,6 +5,7 @@ found at p + disp in the recording. Registering a frame means shifting it by -di
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -98,9 +99,11 @@ def make_reference(ch0: np.ndarray, ch1: np.ndarray | None, npixartifact: int, a
         disp -= np.median(disp, axis=0)
         corrs = np.array([pearson(ref_comb.ravel(), shift_image(c, -d, cval=0).ravel()) for c, d in zip(combs, disp)])
         idx = np.argsort(corrs)[::-1][:max(3, int(frac * n))]
-        ref0 = fill_nan(np.nanmean([shift_image(b0[:, :, i], -disp[i]) for i in idx], axis=0))
-        if b1 is not None:
-            ref1 = fill_nan(np.nanmean([shift_image(b1[:, :, i], -disp[i]) for i in idx], axis=0))
+        with warnings.catch_warnings():  # pixels shifted out of view in all bins are NaN, filled below
+            warnings.simplefilter('ignore', RuntimeWarning)
+            ref0 = fill_nan(np.nanmean([shift_image(b0[:, :, i], -disp[i]) for i in idx], axis=0))
+            if b1 is not None:
+                ref1 = fill_nan(np.nanmean([shift_image(b1[:, :, i], -disp[i]) for i in idx], axis=0))
 
     disp, centers = disp_bins(ch0, ch1, comb_of(ref0, ref1), npixartifact, shift_bin_frames, excl1=art_mask,
                               **xcorr_kws)
