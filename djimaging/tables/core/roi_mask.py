@@ -973,13 +973,30 @@ class RoiMaskTemplate(dj.Manual):
         if self._presentation_masks and len(self.RoiMaskPresentation & field_key & "as_field_mask='different'") > 0:
             return dict(status='skipped', field_key=field_key, reason="has presentations with 'different' masks")
 
+        main_row = (self & field_key).fetch1()
+
+        # Cheap early skip, before loading any stacks: if all corrected files exist there is nothing to do.
+        if not overwrite_files:
+            ref_pres_key = {k: main_row[k] for k in self.presentation_table.primary_key}
+            if self._presentation_masks:
+                pres_files = [
+                    local_file_path(f, self.presentation_table._filepath_store)
+                    for f in (self.presentation_table & field_key).to_arrays('pres_data_file')]
+                early_files = [to_roi_mask_file(
+                    f, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+                    file_format=self._get_roi_file_format()) for f in pres_files]
+            else:
+                early_files = self._field_roi_mask_files(
+                    [ref_pres_key], roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            if len(early_files) > 0 and all(os.path.isfile(f) for f in early_files):
+                return dict(status='skipped', field_key=field_key, reason=f'corrected files exist in {roi_mask_dir}')
+
         data = self._load_field_stacks(
             field_key, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
             old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset)
         pres_keys, output_files, n_artifact = data['pres_keys'], data['output_files'], data['n_artifact']
 
         # The field mask is the mask of the presentation stored with it, which is the reference for the shifts.
-        main_row = (self & field_key).fetch1()
         ref_idxs = [i for i, pres_key in enumerate(pres_keys)
                     if all(pres_key[k] == main_row[k] for k in self.presentation_table.primary_key)]
         if len(ref_idxs) != 1:
