@@ -50,7 +50,7 @@ class MotionRoiMaskTemplate(dj.Computed):
         is_reference : bool  # presentation of the field ROI mask (no shifts)
         pooling : varchar(16)  # 'cond1' or 'presentation'
         n_pooled : int32  # number of presentations the per-ROI shifts were pooled over
-        lam : float32  # shrinkage of per-ROI deviations from the smooth displacement field (0: field only, 1: per ROI)
+        lam=null : float32  # shrinkage of per-ROI deviations from the smooth displacement field (0: field only, 1: per ROI); NULL for the reference
         """
 
     class Roi(dj.Part):
@@ -174,7 +174,7 @@ class MotionRoiMaskTemplate(dj.Computed):
 
         self.insert1(dict(key, roi_mask=label_raw, shift_dx=int(-glob[0]), shift_dy=int(-glob[1]),
                           is_reference=is_reference, pooling=params['pooling'], n_pooled=int(n_pooled),
-                          lam=float(lam) if np.isfinite(lam) else np.nan))
+                          lam=float(lam) if np.isfinite(lam) else None))
         parts = []
         for i, rid in enumerate(roi_ids):
             cropped, x0, y0 = crop_weights(weights[i])
