@@ -335,7 +335,7 @@ def test_pick_frame_bins_and_plot_motion_frames():
     matplotlib.use('Agg')
     from matplotlib import pyplot as plt
     from djimaging.utils.motion.plotting import (
-        bins_at_times, mark_frames, mark_stimulus, pick_frame_bins, plot_motion_frames)
+        bins_at_times, mark_frames, mark_stimulus, pick_frame_bins, plot_motion_frames, roi_outline_segments)
     score = np.zeros(20)
     score[[7, 8, 15]] = [3., 2.5, 1.]
     idxs, worst = pick_frame_bins(score, n_spread=3, n_worst=2)
@@ -352,8 +352,12 @@ def test_pick_frame_bins_and_plot_motion_frames():
     fig = plt.figure(layout='constrained')
     sf = fig.subfigures(2, 1)
     labels = plot_motion_frames(sf[1], raw, raw, raw.mean(axis=2), edges, idxs, FS, roi_mask=mask, is_worst=worst,
-                                stim_onset=10.)
+                                stim_onset=10., disp=np.zeros((len(idxs), 2)), gamma=0.6)
     assert labels == list('ABCDE')
+    segs = roi_outline_segments(mask)
+    assert len(segs) == 2 * (3 + 3) + 2 * (3 + 4)  # pixel edges around the two rectangular ROIs only (not background)
+    idxs_c, worst_c = pick_frame_bins(score, n_spread=3, n_worst=2, candidates=np.arange(20) >= 10)
+    assert set(idxs_c[worst_c]) == {15, 12}  # 7 (highest score) is before the candidate range
     ax = sf[0].subplots()
     mark_stimulus(ax, [2., 8.], label=True)
     mark_frames(ax, idxs, edges, FS, labels, worst)

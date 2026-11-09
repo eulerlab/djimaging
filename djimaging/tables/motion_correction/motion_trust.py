@@ -133,13 +133,14 @@ class MotionTrustTemplate(dj.Computed):
         self.Roi().insert(parts)
 
     def plot1(self, key: dict | None = None, show_frames: bool = True, frame_times=None, n_spread: int = 3,
-              n_worst: int = 4) -> None:
+              n_worst: int = 4, gamma: float = 0.6) -> None:
         """Trust heatmap (ROI x time), median trust over time and per repeat, and the uncorrected fast motion.
 
         The pre-stimulus period (before the first trigger, greyed out) does not count in the summaries. With
-        ``show_frames``, example frames (raw and registered means of the trust bins) are shown below: the bins at
-        ``frame_times`` [s], or ``n_spread`` evenly spaced bins plus the ``n_worst`` bins with the lowest median ROI
-        trust (red). This loads the recording.
+        ``show_frames``, example frames (raw and registered means of the trust bins, overlaid on the field reference in
+        green / magenta, gamma-corrected) are shown below: the bins at ``frame_times`` [s], or ``n_spread`` evenly
+        spaced bins plus the ``n_worst`` bins after stimulus onset with the lowest median ROI trust (red). This loads
+        the recording.
         """
         from matplotlib import pyplot as plt
         from djimaging.utils.motion.plotting import mark_frames, mark_stimulus
@@ -154,7 +155,7 @@ class MotionTrustTemplate(dj.Computed):
         t = 0.5 * (edges[1:] + edges[:-1]) / fs
         med = np.median(trust, axis=0)
 
-        fig = plt.figure(figsize=(12, 13 if show_frames else 7), layout='constrained')
+        fig = plt.figure(figsize=(16 if show_frames else 12, 11 if show_frames else 7), layout='constrained')
         sfigs = fig.subfigures(2, 1, height_ratios=[1.5, 1]) if show_frames else [fig]
         axs = sfigs[0].subplots(2, 1, sharex=True, gridspec_kw=dict(height_ratios=[2, 1]))
         im = axs[0].imshow(trust, aspect='auto', vmin=0, vmax=1, interpolation='nearest',
@@ -176,7 +177,7 @@ class MotionTrustTemplate(dj.Computed):
         axs[1].legend(fontsize=7, ncol=5, loc='lower left')
         if show_frames:
             idxs, is_worst, labels = det().plot_frames(sfigs[1], key, edges, 1. - med, frame_times=frame_times,
-                                                       n_spread=n_spread, n_worst=n_worst)
+                                                       n_spread=n_spread, n_worst=n_worst, gamma=gamma)
             for ax in axs:
                 mark_frames(ax, idxs, edges, fs, labels, is_worst)
         plt.show()

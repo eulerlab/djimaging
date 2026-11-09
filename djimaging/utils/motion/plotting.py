@@ -1,4 +1,4 @@
-"""Plot helpers for motion QC: example frames (bin means) of the raw and the registered recording."""
+"""Plot helpers for motion QC: example frames (bin means) of the raw and the registered recording vs. the reference."""
 from __future__ import annotations
 
 import string
@@ -7,13 +7,17 @@ import warnings
 import numpy as np
 
 
-def pick_frame_bins(score: np.ndarray, n_spread: int = 3, n_worst: int = 4, min_sep: int = 2) -> tuple:
+def pick_frame_bins(score: np.ndarray, n_spread: int = 3, n_worst: int = 4, min_sep: int = 2,
+                    candidates: np.ndarray | None = None) -> tuple:
     """Bins to show as example frames: ``n_spread`` evenly spaced bins plus the ``n_worst`` bins with the highest
-    ``score`` (at least ``min_sep`` bins away from bins already picked).
+    ``score`` among ``candidates`` (bool, default all; e.g. only bins after stimulus onset), at least ``min_sep`` bins
+    away from bins already picked.
 
     Returns the sorted bin indices and a boolean array marking the ones picked for their score.
     """
     score = np.nan_to_num(np.asarray(score, dtype=float), nan=-np.inf)
+    if candidates is not None:
+        score = np.where(np.asarray(candidates, bool), score, -np.inf)
     nb = len(score)
     picked = [int(i) for i in np.unique(np.round(np.linspace(0, nb - 1, n_spread)).astype(int))] if n_spread > 0 else []
     worst = []
@@ -32,29 +36,67 @@ def bins_at_times(times, edges: np.ndarray, fs: float) -> np.ndarray:
     return np.clip(np.searchsorted(edges, frames, side='right') - 1, 0, len(edges) - 2)
 
 
-def _bin_mean(stack: np.ndarray, i0: int, i1: int) -> np.ndarray:
+def bin_mean(stack: np.ndarray, i0: int, i1: int) -> np.ndarray:
     with warnings.catch_warnings():
         warnings.simplefilter('ignore', RuntimeWarning)
         return np.nanmean(stack[:, :, int(i0):int(i1)], axis=2)
 
 
-def _show(ax, img: np.ndarray, roi_mask: np.ndarray | None) -> None:
+def norm_gamma(img: np.ndarray, gamma: float = 0.6) -> np.ndarray:
+    """Normalized to [0, 1] (1st / 99.5th percentile), then gamma-corrected (``img ** gamma``); NaN -> 0."""
     finite = np.isfinite(img)
-    vmin, vmax = np.percentile(img[finite], [1, 99.5]) if finite.any() else (0, 1)
-    ax.imshow(img.T, cmap='gray', origin='lower', vmin=vmin, vmax=vmax, interpolation='nearest')
-    if roi_mask is not None:
-        lab = np.abs(roi_mask.astype(int))
-        edge = np.zeros(lab.shape, bool)
-        edge[1:] |= lab[1:] != lab[:-1]
-        edge[:-1] |= lab[1:] != lab[:-1]
-        edge[:, 1:] |= lab[:, 1:] != lab[:, :-1]
-        edge[:, :-1] |= lab[:, 1:] != lab[:, :-1]
-        edge &= lab > 0
-        overlay = np.zeros(lab.shape + (4,))
-        overlay[edge] = (1., 0.3, 0.1, 0.6)
-        ax.imshow(overlay.transpose(1, 0, 2), origin='lower', interpolation='nearest')
+    lo, hi = np.percentile(img[finite], [1, 99.5]) if finite.any() else (0., 1.)
+    return np.nan_to_num(np.clip((img - lo) / max(hi - lo, 1e-12), 0, 1)) ** gamma
+
+
+def roi_outline_segments(roi_mask: np.ndarray) -> list:
+    """Pixel-edge line segments around the ROIs of an Igor mask (ROIs < 0, background >= 0), in the (x, y)
+    coordinates of ``imshow(img.T, origin='lower')``."""
+    lab = np.pad(np.where(roi_mask < 0, -roi_mask, 0).astype(int), 1)
+    segs = []
+    dx = (lab[1:, :] != lab[:-1, :]) & ((lab[1:, :] > 0) | (lab[:-1, :] > 0))  # between (x - 1, y) and (x, y)
+    for x, y in zip(*np.nonzero(dx)):
+        segs.append([(x - 0.5, y - 1.5), (x - 0.5, y - 0.5)])
+    dy = (lab[:, 1:] != lab[:, :-1]) & ((lab[:, 1:] > 0) | (lab[:, :-1] > 0))
+    for x, y in zip(*np.nonzero(dy)):
+        segs.append([(x - 1.5, y - 0.5), (x - 0.5, y - 0.5)])
+    return segs
+
+
+def _outline(ax, segs, color: str, lw: float, alpha: float) -> None:
+    from matplotlib.collections import LineCollection
+    if segs:
+        ax.add_collection(LineCollection(segs, colors=color, linewidths=lw, alpha=alpha))
+
+
+def _clean(ax) -> None:
     ax.set_xticks([])
     ax.set_yticks([])
+
+
+def show_gray(ax, img: np.ndarray, segs: list | None = None, gamma: float = 0.6) -> None:
+    ax.imshow(norm_gamma(img, gamma).T, cmap='gray', origin='lower', interpolation='nearest', vmin=0, vmax=1)
+    _outline(ax, segs, 'yellow', 0.6, 0.7)
+    _clean(ax)
+
+
+def show_overlay(ax, img: np.ndarray, ref_img: np.ndarray, segs: list | None = None, gamma: float = 0.6) -> None:
+    """Reference in green, ``img`` in magenta: aligned structure is grey / white, displaced structure gets a green
+    fringe on one side and a magenta fringe on the other; brightness changes (activity) tint a whole cell."""
+    r, m = norm_gamma(ref_img, gamma), norm_gamma(img, gamma)
+    ax.imshow(np.stack([m, r, m], axis=-1).transpose(1, 0, 2), origin='lower', interpolation='nearest')
+    _outline(ax, segs, 'w', 0.4, 0.5)
+    _clean(ax)
+
+
+def overlay_colorbar(fig, axs) -> None:
+    """Colorbar explaining the green / magenta code of ``show_overlay``, right of ``axs``."""
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import LinearSegmentedColormap, Normalize
+    cmap = LinearSegmentedColormap.from_list('ref_frame', [(0, 1, 0), (1, 1, 1), (1, 0, 1)])
+    cb = fig.colorbar(ScalarMappable(Normalize(0, 1), cmap), ax=axs, location='right', shrink=0.8, aspect=20,
+                      ticks=[0, 0.5, 1])
+    cb.ax.set_yticklabels(['reference\nonly', 'both\n(aligned)', 'frame\nonly'], fontsize=7)
 
 
 def frame_labels(n: int) -> list:
@@ -63,32 +105,38 @@ def frame_labels(n: int) -> list:
 
 def plot_motion_frames(fig, raw: np.ndarray, reg: np.ndarray, ref_img: np.ndarray, edges: np.ndarray,
                        idxs: np.ndarray, fs: float, roi_mask: np.ndarray | None = None,
-                       is_worst: np.ndarray | None = None, stim_onset: float | None = None) -> list:
-    """Example frames as a 2-row grid in ``fig`` (a figure or subfigure).
+                       is_worst: np.ndarray | None = None, stim_onset: float | None = None,
+                       disp: np.ndarray | None = None, gamma: float = 0.6) -> list:
+    """Example frames vs. the field reference as a 2-row grid in ``fig`` (a figure or subfigure).
 
-    Top row: field reference, then the raw (uncorrected) bin means; bottom row: registered recording mean, then the
-    slow-registered bin means (what the traces see). ROI contours are drawn at the field-mask (reference) position,
-    so misalignment is visible in the raw row. Frames picked for their score are titled in red.
+    Rows: raw (uncorrected) bin means and slow-registered bin means (what the traces see), each overlaid on the field
+    reference (green: reference, magenta: frame; see ``show_overlay``). First column: the reference with the ROI
+    outlines, and the registered recording mean. ``disp`` (n_frames, 2): mean displacement per frame for the titles.
+    Frames picked for their score are titled in red.
 
     Returns the labels of the frames (to mark them on time axes with ``mark_frames``).
     """
     n = len(idxs)
     axs = fig.subplots(2, n + 1, squeeze=False)
     labels = frame_labels(n)
-    _show(axs[0, 0], ref_img, roi_mask)
-    axs[0, 0].set_title('field reference', fontsize=8)
-    _show(axs[1, 0], _bin_mean(reg, 0, reg.shape[2]), roi_mask)
+    segs = None if roi_mask is None else roi_outline_segments(roi_mask)
+    show_gray(axs[0, 0], ref_img, segs, gamma)
+    axs[0, 0].set_title('field reference + ROIs', fontsize=8)
+    show_overlay(axs[1, 0], bin_mean(reg, 0, reg.shape[2]), ref_img, segs, gamma)
     axs[1, 0].set_title('registered mean', fontsize=8)
-    axs[0, 0].set_ylabel('raw', fontsize=8)
-    axs[1, 0].set_ylabel('registered', fontsize=8)
+    axs[0, 0].set_ylabel('raw vs. reference', fontsize=8)
+    axs[1, 0].set_ylabel('registered vs. reference', fontsize=8)
     for k, b in enumerate(idxs):
         i0, i1 = int(edges[b]), int(edges[b + 1])
-        _show(axs[0, k + 1], _bin_mean(raw, i0, i1), roi_mask)
-        _show(axs[1, k + 1], _bin_mean(reg, i0, i1), roi_mask)
-        t0, t1 = i0 / fs, i1 / fs
-        pre = ' (pre-stim)' if stim_onset is not None and t0 < stim_onset else ''
+        show_overlay(axs[0, k + 1], bin_mean(raw, i0, i1), ref_img, segs, gamma)
+        show_overlay(axs[1, k + 1], bin_mean(reg, i0, i1), ref_img, segs, gamma)
+        pre = ' (pre-stim)' if stim_onset is not None and i0 / fs < stim_onset else ''
+        title = f'{labels[k]}: {i0 / fs:.1f}-{i1 / fs:.1f} s{pre}'
+        if disp is not None:
+            title += f'\nd=({disp[k][0]:+.2f}, {disp[k][1]:+.2f}) px'
         worst = is_worst is not None and is_worst[k]
-        axs[0, k + 1].set_title(f'{labels[k]}: {t0:.1f}-{t1:.1f} s{pre}', fontsize=8, color='r' if worst else 'k')
+        axs[0, k + 1].set_title(title, fontsize=8, color='r' if worst else 'k')
+    overlay_colorbar(fig, axs[:, 1:])
     return labels
 
 
@@ -101,6 +149,8 @@ def mark_frames(ax, idxs: np.ndarray, edges: np.ndarray, fs: float, labels: list
         ax.axvspan(t0, t1, color=c, alpha=0.2, lw=0, zorder=-4)
         ax.text(0.5 * (t0 + t1), 1.0, labels[k], transform=ax.get_xaxis_transform(), ha='center', va='bottom',
                 fontsize=7, color=c)
+    if ax.get_title():  # keep the title clear of the frame labels
+        ax.set_title(ax.get_title(), pad=14)
 
 
 def mark_stimulus(ax, triggertimes, label: bool = False) -> None:

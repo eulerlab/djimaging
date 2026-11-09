@@ -368,34 +368,41 @@ class MotionDetectionTemplate(dj.Computed):
         return dict(raw=raw, reg=register_stack(raw, self.get_motion(key).slow_frames), fs=data['fs'])
 
     def plot_frames(self, fig, key: dict, edges: np.ndarray, score: np.ndarray, frame_times=None,
-                    n_spread: int = 3, n_worst: int = 4) -> tuple:
-        """Example frames (raw and registered means of the bins ``edges``) into ``fig``, see ``plot_motion_frames``.
+                    n_spread: int = 3, n_worst: int = 4, gamma: float = 0.6) -> tuple:
+        """Example frames (raw and registered means of the bins ``edges``) vs. the field reference into ``fig``, see
+        ``plot_motion_frames``.
 
         Bins: those containing ``frame_times`` [s] if given, else ``n_spread`` evenly spaced bins plus the ``n_worst``
-        bins with the highest ``score``. Loads the recording. Returns (bin indices, picked-for-score flags, labels)
-        for ``mark_frames``.
+        bins after stimulus onset with the highest ``score``. Loads the recording. Returns (bin indices,
+        picked-for-score flags, labels) for ``mark_frames``.
         """
         from djimaging.utils.motion.plotting import bins_at_times, pick_frame_bins, plot_motion_frames
         frames = self.load_frames(key)
+        stim_onset = (self & key).fetch1('stim_onset')
         if frame_times is not None:
             idxs = np.unique(bins_at_times(frame_times, edges, frames['fs']))
             is_worst = np.zeros(len(idxs), bool)
         else:
-            idxs, is_worst = pick_frame_bins(score, n_spread=n_spread, n_worst=n_worst)
+            candidates = None if stim_onset is None else stim_bins(edges[:-1], frames['fs'], [stim_onset])[0]
+            idxs, is_worst = pick_frame_bins(score, n_spread=n_spread, n_worst=n_worst, candidates=candidates)
+        motion = self.get_motion(key)
+        disp = np.array([motion.disp_frames[int(edges[b]):int(edges[b + 1])].mean(axis=0) for b in idxs])
         ref = self.motion_reference_table().get_reference(key)
         field_key = {k: key[k] for k in self.roi_mask_table.primary_key}
         roi_mask = load_array((self.roi_mask_table & field_key).fetch1('roi_mask'))
         labels = plot_motion_frames(fig, frames['raw'], frames['reg'], ref['ch0'], edges, idxs, frames['fs'],
-                                    roi_mask=roi_mask, is_worst=is_worst, stim_onset=(self & key).fetch1('stim_onset'))
+                                    roi_mask=roi_mask, is_worst=is_worst, stim_onset=stim_onset, disp=disp,
+                                    gamma=gamma)
         return idxs, is_worst, labels
 
     def plot1(self, key: dict | None = None, show_frames: bool = True, frame_times=None, n_spread: int = 3,
-              n_worst: int = 4) -> None:
+              n_worst: int = 4, gamma: float = 0.6) -> None:
         """Displacement (raw / slow), fast motion and z proxy of one presentation.
 
-        With ``show_frames``, example frames (raw and registered means of the z-proxy bins) are shown below: the bins
-        at ``frame_times`` [s], or ``n_spread`` evenly spaced bins plus the ``n_worst`` bins with the largest
-        displacement from the median displacement (red). This loads the recording.
+        With ``show_frames``, example frames (raw and registered means of the z-proxy bins, overlaid on the field
+        reference in green / magenta, gamma-corrected) are shown below: the bins at ``frame_times`` [s], or
+        ``n_spread`` evenly spaced bins plus the ``n_worst`` bins after stimulus onset with the most motion
+        (|fast| + distance from the median displacement; red). This loads the recording.
         """
         from matplotlib import pyplot as plt
         from djimaging.utils.motion.plotting import mark_frames, mark_stimulus
@@ -408,8 +415,8 @@ class MotionDetectionTemplate(dj.Computed):
         edges = load_array(row['z_bin_edges'])
         tz = 0.5 * (edges[1:] + edges[:-1]) / fs
 
-        fig = plt.figure(figsize=(16, 9 if show_frames else 3.5), layout='constrained')
-        sfigs = fig.subfigures(2, 1, height_ratios=[1, 1.4]) if show_frames else [fig]
+        fig = plt.figure(figsize=(16, 8 if show_frames else 3.5), layout='constrained')
+        sfigs = fig.subfigures(2, 1, height_ratios=[1, 1.25]) if show_frames else [fig]
         axs = sfigs[0].subplots(1, 3)
         for ax in axs:
             for tt in triggertimes[:300]:
@@ -433,11 +440,13 @@ class MotionDetectionTemplate(dj.Computed):
         axs[2].set(ylim=(0.4, 1.1), ylabel='similarity', title='z proxy (noise-corrected)')
         axs[2].legend(fontsize=7, ncol=2)
         if show_frames:
-            dev = np.linalg.norm(motion.disp_bins - np.median(motion.disp_bins, axis=0), axis=1)
-            score = np.array([dev[(motion.bin_centers >= edges[b]) & (motion.bin_centers < edges[b + 1])].max(
+            sel = stim_bins(motion.bin_centers - (motion.bin_frames - 1) / 2., fs, triggertimes)[0]
+            dev = np.linalg.norm(motion.disp_bins - np.median(motion.disp_bins[sel], axis=0), axis=1)
+            amount = dev + np.linalg.norm(motion.fast_bins, axis=1)
+            score = np.array([amount[(motion.bin_centers >= edges[b]) & (motion.bin_centers < edges[b + 1])].max(
                 initial=0.) for b in range(len(edges) - 1)])
             idxs, is_worst, labels = self.plot_frames(sfigs[1], key, edges, score, frame_times=frame_times,
-                                                      n_spread=n_spread, n_worst=n_worst)
+                                                      n_spread=n_spread, n_worst=n_worst, gamma=gamma)
             for ax in axs:
                 mark_frames(ax, idxs, edges, fs, labels, is_worst)
         fig.suptitle(str(key), fontsize=8)
