@@ -342,6 +342,37 @@ print(f"{len(missing_fields)} fields without ROI mask")
 # canvas and the models before loading the next ones (see `free_memory()` below).
 
 # %% [markdown]
+# ## Check the size of the light artifact
+#
+# The top rows of every field are corrupted by the stimulus light (the *light artifact*). ROIs must not extend into
+# them, so the cleaning steps below remove these rows from the masks, and the AutoROIs models ignore them. How many
+# rows that are is taken from the setup (`npixartifact`), but the real artifact can be **larger than expected**, e.g.
+# with a different laser power or after a change of the setup. **Check it once for your data**, before you create or
+# correct masks.
+#
+# `RoiMask().plot_light_artifact(...)` shows the rows at the top of a field: the stack average and three row
+# profiles (mean, temporal standard deviation, and correlation with the next row). Inside the artifact the rows are
+# far stronger and more correlated than the tissue below, and the profiles step at its edge. The gray dashed line is
+# the setup value, the red line your candidate `n_artifact`. Choose the first row after the step. With
+# `restrictions=...`, the profiles of several fields are overlaid, so you can pick one value for all of them. If the
+# value differs from the setup value, pass it as `n_artifact` to `create_missing_roi_masks` and
+# `correct_roi_masks`.
+#
+# **Note:** the plot loads the recording of each field, so a large `restrictions` takes a while.
+
+# %%
+# Check the light artifact of one field (first field if no field_key is given)
+RoiMask().plot_light_artifact(field_key=None, n_max=15, n_artifact=None)
+
+# %%
+# Check several fields at once, to choose one value for all of them
+# RoiMask().plot_light_artifact(restrictions=dict(experimenter='Ran'), n_max=15, n_artifact=None, max_fields=20)
+
+# %%
+# Number of light artifact rows for all following steps. None: use the setup value.
+n_artifact = None
+
+# %% [markdown]
 # ## Generate the missing ROI masks with AutoROIs
 #
 # `RoiMask().create_missing_roi_masks(...)` runs an AutoROIs model on every field that has no ROI mask yet, without
@@ -375,6 +406,7 @@ print(f"{len(missing_fields)} fields without ROI mask")
 # | `max_vessel_overlap` | A ROI is removed if more than this fraction of its pixels is on a vessel. |
 # | `auto_shift` | `True`: estimate the shift of the other presentations from their correlation maps. `False`: no shift, all presentations get the same mask. |
 # | `max_shift` | Largest shift in pixels that auto shift searches for. Default: `_max_shift` of the table (5). |
+# | `n_artifact` | Number of light artifact rows at the top of the field. `None`: setup value. See *Check the size of the light artifact* above. |
 # | `overwrite_files` | `False`: skip fields whose mask files all exist. `True`: overwrite the files, **including masks you corrected by hand**. |
 # | `suppress_errors` | `True`: continue with the next field if one fails, and report the errors in the result. |
 # | `verbose` | Print progress. |
@@ -414,6 +446,7 @@ result = RoiMask().create_missing_roi_masks(
     max_vessel_overlap=0.2,
     auto_shift=True,
     max_shift=None,
+    n_artifact=n_artifact,
     overwrite_files=False,
     suppress_errors=True,
     verbose=True,
@@ -453,6 +486,7 @@ RoiMask().rescan_filesystem(verboselvl=2, roi_mask_dir='AutoROIs')
 # | `add_missing` | `True`: add the ROIs that the model finds but the mask misses. `False`: only clean the masks (no model is loaded). |
 # | `vessel_filter_existing` | `True`: also remove vessel ROIs (see `vessel_threshold` above) from the existing mask. Default `False`: only new ROIs are filtered, since the existing mask may be curated. |
 # | `shrink` | `True`: also remove border pixels that do not fit the activity of their ROI (e.g. drawn one pixel into a neighbour or a dark gap), see `mask_utils.shrink_rois_to_fit`. Strict: most fields stay unchanged. In the ROI canvas: 'Shrink ROI' (selected ROI, more sensitive) and 'Shrink all ROIs' (dangerzone). |
+# | `n_artifact` | Number of light artifact rows at the top of the field (see above). `None`: setup value. |
 # | `iou_threshold` | A ROI of the model counts as missing if its overlap (intersection over union) with every existing ROI is below this value. Lower values add fewer ROIs. |
 # | `deploy` | `True`: replace the database entries of the corrected fields right away. Requires `roi_table`. **Deletes the downstream tables of these fields.** |
 # | `roi_table` | The ROI table, populated for the deployed fields. |
@@ -480,6 +514,7 @@ correction = RoiMask().correct_roi_masks(
     add_missing=True,
     iou_threshold=0.1,
     shrink=False,
+    n_artifact=n_artifact,
     overwrite_files=False,
     deploy=False,
     roi_table=None,
@@ -489,7 +524,8 @@ correction = RoiMask().correct_roi_masks(
 
 # %%
 # Review a correction (red: added, blue: removed)
-# RoiMask().plot_roi_mask_correction(field_key=correction['corrected'][0]['field_key'], roi_mask_dir='CorrectedROIs')
+# RoiMask().plot_roi_mask_correction(
+#     field_key=correction['corrected'][0]['field_key'], roi_mask_dir='CorrectedROIs', n_artifact=n_artifact)
 
 # %%
 # Replace the database entry of an accepted field. Deletes everything downstream of the ROI mask of this field!

@@ -674,6 +674,7 @@ class RoiMaskTemplate(dj.Manual):
             max_vessel_overlap: float = 0.2,
             auto_shift: bool = True,
             max_shift: int | None = None,
+            n_artifact: int | None = None,
             overwrite_files: bool = False,
             suppress_errors: bool = False,
             verbose: bool = True,
@@ -720,6 +721,9 @@ class RoiMaskTemplate(dj.Manual):
             auto_shift: If True, estimate the shift of every other presentation relative to the first one from
                 the correlation maps. Otherwise all presentations get the same mask without shift.
             max_shift: Largest shift in pixels that auto shift searches for. Defaults to the table-level value.
+            n_artifact: Number of rows at the top of the field that are treated as light artifact, for all fields.
+                If None, the value of the setup is used (``npixartifact`` of the presentation). Use
+                ``plot_light_artifact`` to check the actual size.
             overwrite_files: If False, fields for which the mask files of all presentations already exist are
                 skipped (load them with ``rescan_filesystem`` instead). If True, existing files are overwritten.
             suppress_errors: If True, continue with the next field if a field fails and report the error.
@@ -755,7 +759,8 @@ class RoiMaskTemplate(dj.Manual):
                         old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset,
                         use_all_stacks=use_all_stacks, clean=clean, min_size=min_size, connectivity=connectivity,
                         vessel_threshold=vessel_threshold, max_vessel_overlap=max_vessel_overlap,
-                        auto_shift=auto_shift, max_shift=max_shift, overwrite_files=overwrite_files)
+                        auto_shift=auto_shift, max_shift=max_shift, overwrite_files=overwrite_files,
+                        n_artifact_override=n_artifact)
                     result['created' if created else 'skipped'].append(field_key)
                     if verbose and not created:
                         print('  Mask files already exist, skipped. Load them with `rescan_filesystem`.')
@@ -777,12 +782,14 @@ class RoiMaskTemplate(dj.Manual):
     def _create_field_roi_mask_files(
             self, field_key: dict, autorois_model, roi_channel, roi_mask_dir, old_prefix, new_prefix,
             use_stim_onset, use_all_stacks, clean, min_size, connectivity, auto_shift, max_shift, overwrite_files,
-            vessel_threshold=None, max_vessel_overlap=0.2,
+            vessel_threshold=None, max_vessel_overlap=0.2, n_artifact_override=None,
     ) -> bool:
         """Create the mask files of all presentations of one field. Returns False if skipped because files exist."""
         data = self._load_field_stacks(
             field_key, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
             old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset)
+        if n_artifact_override is not None:
+            data['n_artifact'] = int(n_artifact_override)
         output_files, stacks, n_artifact = data['output_files'], data['stacks'], data['n_artifact']
 
         if not overwrite_files and all(os.path.isfile(f) for f in output_files):
