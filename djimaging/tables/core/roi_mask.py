@@ -1059,10 +1059,11 @@ class RoiMaskTemplate(dj.Manual):
     ) -> None:
         """Plot the ROI mask in the database against its correction from ``correct_roi_masks``.
 
-        Shows the current mask, the corrected mask, the pixels that were added (red) or removed (blue), and the
-        stack average with these differences, and the stack average with the outlines of the ROIs that changed.
-        Red: corrected ROIs (final version) that are new or differ from the current mask in any pixel. Blue: current
-        ROIs that were removed, i.e. that do not overlap any corrected ROI.
+        Shows the current mask, the corrected mask, the pixels that were added (green) or removed (red), the
+        stack average with these differences, the stack average with the outlines of the ROIs that changed, and the
+        correlation map (response after the stimulus onset) with the outlines of all corrected ROIs.
+        Green: corrected ROIs that are new (do not overlap any current ROI). Blue: corrected ROIs that differ from
+        the current mask in any pixel. Red: current ROIs that were removed, i.e. that do not overlap any corrected ROI.
 
         Args:
             field_key: Primary key identifying the field. If None, the first available key is used.
@@ -1072,6 +1073,7 @@ class RoiMaskTemplate(dj.Manual):
             gamma: Gamma correction value for the stack average.
         """
         from matplotlib import pyplot as plt
+        from matplotlib.colors import ListedColormap
 
         field_key = get_primary_key(table=self.proj(), key=field_key)
         main_row = (self & field_key).fetch1()
@@ -1097,14 +1099,34 @@ class RoiMaskTemplate(dj.Manual):
         ch_average = load_array(
             (self.presentation_table.StackAverages & pres_key & dict(ch_name=data_name)).fetch1('ch_average'))
 
+        # Correlation map of the presentation of the field mask
+        from_raw_data = (self.raw_params_table & field_key).fetch1("from_raw_data")
+        pres_path = (self.presentation_table & pres_key).fetch1("pres_data_file")
+        pres_store_path = relative_store_path(
+            local_file_path(pres_path, self.presentation_table._filepath_store), self.presentation_table._filepath_store)
+        info_df = self.load_field_file_info_df(field_key)
+        stack_files = [f for f in info_df[info_df['kind'] == 'response']['filepath'].values
+                       if relative_store_path(f, self.presentation_table._filepath_store) == pres_store_path]
+        corr_map = None
+        if len(stack_files) == 1:
+            ch_stacks, _ = read_utils.load_stacks(stack_files[0], from_raw_data=from_raw_data, ch_names=(data_name,))
+            stack = ch_stacks[data_name]
+            triggertimes = (self.presentation_table & pres_key).fetch1('triggertimes')
+            scan_frequency = (self.presentation_table.ScanInfo() & pres_key).fetch1('scan_frequency')
+            onset_idx = int(np.floor(triggertimes[0] * scan_frequency)) if len(triggertimes) > 0 else 0
+            corr_map = compute_corr_map(stack[:, :, onset_idx:])  # only the response after the stimulus onset
+        else:
+            warnings.warn(f'Could not find the recording file of the field mask, no correlation map: {stack_files}')
+
         diff = (roi_mask_new > 0).astype(float) - (roi_mask_old > 0).astype(float)
         diff[diff == 0] = np.nan
+        diff_cmap = ListedColormap(['red', 'lime'])  # -1 (removed) -> red, +1 (added) -> green
         average = ch_average.astype(float)
         average = (average - np.nanmin(average)) / max(np.nanmax(average) - np.nanmin(average), 1e-12)
 
         # Same layout as `plot_field`, which is used by `plot1`
         extent, xlabel, ylabel = field_extent_and_labels(roi_mask_old.shape, scan_type)
-        fig, axs = plt.subplots(1, 5, figsize=(22, 4), sharex='all', sharey='all')
+        fig, axs = plt.subplots(1, 6, figsize=(22, 4), sharex='all', sharey='all')
         fig.suptitle(str(field_key))
         for ax in axs:
             ax.set(xlabel=xlabel)
@@ -1113,25 +1135,43 @@ class RoiMaskTemplate(dj.Manual):
         for ax, img, title in zip(axs[:2], (roi_mask_old, roi_mask_new), ('Current', 'Corrected')):
             ax.imshow(np.where(img > 0, img, np.nan).T.astype(float), cmap='jet', origin='lower', extent=extent)
             ax.set(title=f'{title} ({len(np.unique(img[img > 0]))} ROIs)')
-        axs[2].imshow(diff.T, vmin=-1, vmax=1, cmap='bwr', origin='lower', extent=extent)
-        axs[2].set(title='Added (red) / removed (blue)')
+        axs[2].imshow(diff.T, vmin=-1, vmax=1, cmap=diff_cmap, origin='lower', extent=extent)
+        axs[2].set(title='Added (green) / removed (red) pixels')
         axs[3].imshow((average ** gamma).T, cmap='gray', origin='lower', extent=extent)
-        axs[3].imshow(diff.T, vmin=-1, vmax=1, cmap='bwr', alpha=0.5, origin='lower', extent=extent)
+        axs[3].imshow(diff.T, vmin=-1, vmax=1, cmap=diff_cmap, alpha=0.5, origin='lower', extent=extent)
         axs[3].set(title='Stack average + difference')
 
-        def _changed(i):
+        def _differs(i):
             old_ids = np.unique(roi_mask_old[(roi_mask_new == i) & (roi_mask_old > 0)])
             return len(old_ids) != 1 or not np.array_equal(roi_mask_old == old_ids[0], roi_mask_new == i)
 
-        added_ids = [i for i in np.unique(roi_mask_new[roi_mask_new > 0]) if _changed(i)]
+        new_ids, changed_ids = [], []
+        for i in np.unique(roi_mask_new[roi_mask_new > 0]):
+            if not np.any(roi_mask_old[roi_mask_new == i] > 0):
+                new_ids.append(i)
+            elif _differs(i):
+                changed_ids.append(i)
         removed_ids = [i for i in np.unique(roi_mask_old[roi_mask_old > 0])
                        if not np.any(roi_mask_new[roi_mask_old == i] > 0)]
-        axs[4].imshow((average ** gamma).T, cmap='gray', origin='lower', extent=extent)
-        for mask, ids, color in ((roi_mask_new, added_ids, 'red'), (roi_mask_old, removed_ids, 'blue')):
-            for roi_id in ids:
-                axs[4].contour((mask == roi_id).T.astype(float), levels=[0.5], colors=color, linewidths=1.5,
+
+        def _outlines(ax):
+            for mask, ids, color in ((roi_mask_new, new_ids, 'lime'), (roi_mask_new, changed_ids, 'blue'),
+                                     (roi_mask_old, removed_ids, 'red')):
+                for roi_id in ids:
+                    ax.contour((mask == roi_id).T.astype(float), levels=[0.5], colors=color, linewidths=1.5,
                                origin='lower', extent=extent)
-        axs[4].set(title=f'Changed ({len(added_ids)}, red) / removed ({len(removed_ids)}, blue) ROIs')
+
+        axs[4].imshow((average ** gamma).T, cmap='gray', origin='lower', extent=extent)
+        _outlines(axs[4])
+        axs[4].set(title=f'New ({len(new_ids)}, green) / changed ({len(changed_ids)}, blue) / '
+                         f'removed ({len(removed_ids)}, red)')
+
+        if corr_map is not None:
+            axs[5].imshow(corr_map.T, cmap='gray', origin='lower', extent=extent)
+        for roi_id in np.unique(roi_mask_new[roi_mask_new > 0]):
+            axs[5].contour((roi_mask_new == roi_id).T.astype(float), levels=[0.5], colors='yellow', linewidths=1,
+                           origin='lower', extent=extent)
+        axs[5].set(title='Correlation map + corrected ROIs')
         plt.tight_layout()
         plt.show()
 
