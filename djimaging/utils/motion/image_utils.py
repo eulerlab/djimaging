@@ -4,6 +4,8 @@ Conventions: stacks are (x, y, t) as in ScanM files; the first ``npixartifact`` 
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from scipy import ndimage
 
@@ -136,10 +138,18 @@ def bp_fill_stack(stack: np.ndarray) -> np.ndarray:
     return bandpass(np.where(np.isfinite(stack), stack, med[None, None, :]))
 
 
+def _nanmean_quiet(s: np.ndarray) -> np.ndarray:
+    """NaN-aware mean over the last axis of a stack; pixels that are NaN in all frames (shifted out of view) stay NaN
+    without the 'Mean of empty slice' warning."""
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)
+        return np.nanmean(s, axis=2)
+
+
 def half_means(stack: np.ndarray, i0: int = 0, i1: int | None = None) -> tuple:
     """Mean, even-frame mean and odd-frame mean of ``stack[..., i0:i1]`` (NaN-aware)."""
     s = stack[:, :, i0:i1]
-    return np.nanmean(s, axis=2), np.nanmean(s[:, :, 0::2], axis=2), np.nanmean(s[:, :, 1::2], axis=2)
+    return _nanmean_quiet(s), _nanmean_quiet(s[:, :, 0::2]), _nanmean_quiet(s[:, :, 1::2])
 
 
 def bin_half_stacks(stack: np.ndarray, edges: np.ndarray) -> tuple:
@@ -149,9 +159,9 @@ def bin_half_stacks(stack: np.ndarray, edges: np.ndarray) -> tuple:
     M, A, B = np.empty(shp, np.float32), np.empty(shp, np.float32), np.empty(shp, np.float32)
     for b in range(nb):
         s = stack[:, :, edges[b]:edges[b + 1]]
-        M[:, :, b] = np.nanmean(s, axis=2)
-        A[:, :, b] = np.nanmean(s[:, :, 0::2], axis=2)
-        B[:, :, b] = np.nanmean(s[:, :, 1::2], axis=2)
+        M[:, :, b] = _nanmean_quiet(s)
+        A[:, :, b] = _nanmean_quiet(s[:, :, 0::2])
+        B[:, :, b] = _nanmean_quiet(s[:, :, 1::2])
     return M, A, B
 
 
