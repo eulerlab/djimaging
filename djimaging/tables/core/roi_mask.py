@@ -11,7 +11,7 @@ import numpy as np
 from djimaging.utils.scanm import read_h5_utils, read_utils
 
 from djimaging.autorois import default_models
-from djimaging.autorois.autoshift_utils import compute_corr_map, compute_corr_map_match_indexes, extract_best_shift
+from djimaging.autorois.autoshift_utils import compute_corr_map, correlation_on_centered, compute_corr_map_match_indexes, extract_best_shift
 from djimaging.autorois.roi_canvas import InteractiveRoiCanvas
 
 from djimaging.utils.filesystem_utils import as_pre_filepath
@@ -845,6 +845,7 @@ class RoiMaskTemplate(dj.Manual):
             iou_threshold: float = 0.1,
             shrink: bool = False,
             shrink_kws: dict | None = None,
+            n_artifact: int | None = None,
             overwrite_files: bool = False,
             deploy: bool = False,
             roi_table: dj.Table | None = None,
@@ -890,6 +891,9 @@ class RoiMaskTemplate(dj.Manual):
                 presentation of the field mask, see ``mask_utils.shrink_rois_to_fit``. Strict: most ROIs and most
                 fields stay unchanged.
             shrink_kws: Parameters of ``shrink_rois_to_fit``.
+            n_artifact: Number of rows at the top of the field that are treated as light artifact, for all fields.
+                If None, the value of the setup is used (``npixartifact`` of the presentation). Use this if the
+                artifact is larger than expected; ``plot_light_artifact`` helps to choose the value.
             overwrite_files: If False, fields for which the corrected files exist are skipped. If True, they are
                 overwritten.
             deploy: If True, replace the database entry of every corrected field with the corrected masks right
@@ -934,7 +938,7 @@ class RoiMaskTemplate(dj.Manual):
                         min_size=min_size, connectivity=connectivity, iou_threshold=iou_threshold,
                         overwrite_files=overwrite_files, vessel_threshold=vessel_threshold,
                         max_vessel_overlap=max_vessel_overlap, vessel_filter_existing=vessel_filter_existing,
-                        shrink=shrink, shrink_kws=shrink_kws)
+                        shrink=shrink, shrink_kws=shrink_kws, n_artifact_override=n_artifact)
                     status = info.pop('status')
                     result[status].append(info if status in ('corrected', 'skipped') else info['field_key'])
                     if verbose:
@@ -961,11 +965,23 @@ class RoiMaskTemplate(dj.Manual):
                   f"{len(result['errors'])} errors.")
         return result
 
+    def _expected_corrected_files(self, field_key: dict, main_row: dict, roi_mask_dir: str,
+                                  old_prefix: str | None, new_prefix: str | None) -> list:
+        """Corrected mask files of a field, from the database only (without loading any stacks)."""
+        if self._presentation_masks:
+            pres_files = [local_file_path(f, self.presentation_table._filepath_store)
+                          for f in (self.presentation_table & field_key).to_arrays('pres_data_file')]
+            return [to_roi_mask_file(
+                f, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
+                file_format=self._get_roi_file_format()) for f in pres_files]
+        ref_pres_key = {k: main_row[k] for k in self.presentation_table.primary_key}
+        return self._field_roi_mask_files([ref_pres_key], roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+
     def _correct_field_roi_mask(
             self, field_key: dict, autorois_model, roi_channel, roi_mask_dir, old_prefix, new_prefix,
             use_stim_onset, clean, min_size, connectivity, iou_threshold, overwrite_files,
             vessel_threshold=None, max_vessel_overlap=0.2, vessel_filter_existing=False, shrink=False,
-            shrink_kws=None,
+            shrink_kws=None, n_artifact_override=None,
     ) -> dict:
         """Correct the mask of one field and save it. Returns a dict with ``status`` and information."""
         field_key = (self.field_table & field_key).proj().fetch1()
@@ -977,23 +993,16 @@ class RoiMaskTemplate(dj.Manual):
 
         # Cheap early skip, before loading any stacks: if all corrected files exist there is nothing to do.
         if not overwrite_files:
-            ref_pres_key = {k: main_row[k] for k in self.presentation_table.primary_key}
-            if self._presentation_masks:
-                pres_files = [
-                    local_file_path(f, self.presentation_table._filepath_store)
-                    for f in (self.presentation_table & field_key).to_arrays('pres_data_file')]
-                early_files = [to_roi_mask_file(
-                    f, roi_mask_dir=roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix,
-                    file_format=self._get_roi_file_format()) for f in pres_files]
-            else:
-                early_files = self._field_roi_mask_files(
-                    [ref_pres_key], roi_mask_dir, old_prefix=old_prefix, new_prefix=new_prefix)
+            early_files = self._expected_corrected_files(
+                field_key, main_row, roi_mask_dir, old_prefix, new_prefix)
             if len(early_files) > 0 and all(os.path.isfile(f) for f in early_files):
                 return dict(status='skipped', field_key=field_key, reason=f'corrected files exist in {roi_mask_dir}')
 
         data = self._load_field_stacks(
             field_key, roi_channel=roi_channel, roi_mask_dir=roi_mask_dir,
             old_prefix=old_prefix, new_prefix=new_prefix, use_stim_onset=use_stim_onset)
+        if n_artifact_override is not None:
+            data['n_artifact'] = int(n_artifact_override)
         pres_keys, output_files, n_artifact = data['pres_keys'], data['output_files'], data['n_artifact']
 
         # The field mask is the mask of the presentation stored with it, which is the reference for the shifts.
@@ -1049,6 +1058,135 @@ class RoiMaskTemplate(dj.Manual):
             shift_array(roi_mask, shift=(-shift[0], -shift[1]), cval=0) for shift in shifts])
         return dict(info, status='corrected')
 
+    def _field_stack(self, field_key: dict, pres_key: dict, data_name: str):
+        """Stack of a presentation after the stimulus onset (x, y, t). None if no file is found."""
+        from_raw_data = (self.raw_params_table & field_key).fetch1("from_raw_data")
+        pres_path = (self.presentation_table & pres_key).fetch1("pres_data_file")
+        store = self.presentation_table._filepath_store
+        pres_store_path = relative_store_path(local_file_path(pres_path, store), store)
+        info_df = self.load_field_file_info_df(field_key)
+        stack_files = [f for f in info_df[info_df['kind'] == 'response']['filepath'].values
+                       if relative_store_path(f, store) == pres_store_path]
+        if len(stack_files) != 1:
+            warnings.warn(f'Could not find the recording file of the field mask, no correlation map: {stack_files}')
+            return None
+        ch_stacks, _ = read_utils.load_stacks(stack_files[0], from_raw_data=from_raw_data, ch_names=(data_name,))
+        triggertimes = (self.presentation_table & pres_key).fetch1('triggertimes')
+        scan_frequency = (self.presentation_table.ScanInfo() & pres_key).fetch1('scan_frequency')
+        onset_idx = int(np.floor(triggertimes[0] * scan_frequency)) if len(triggertimes) > 0 else 0
+        return ch_stacks[data_name][:, :, onset_idx:]
+
+    def _field_corr_map(self, field_key: dict, pres_key: dict, data_name: str):
+        """Correlation map of a presentation, from the response after the stimulus onset. None if no file is found."""
+        stack = self._field_stack(field_key, pres_key, data_name)
+        return None if stack is None else compute_corr_map(stack)
+
+    def plot_light_artifact(
+            self,
+            field_key: dict | None = None,
+            restrictions: dict | None = None,
+            n_max: int = 15,
+            n_artifact: int | None = None,
+            gamma: float = 0.5,
+            max_fields: int = 20,
+    ) -> None:
+        """Plot row profiles to choose ``n_artifact``, the number of light artifact rows at the top of a field.
+
+        The light artifact is at the top rows of a field (first image axis). Its rows are driven by the stimulus light
+        and are far stronger and more correlated than the tissue below: whole rows move together. It shows up as a
+        step at the artifact edge in three row profiles (mean over the other image axis), computed on the response
+        after the stimulus onset: the mean of the stack average (relative to the median of the rows below ``n_max``),
+        the temporal standard deviation (relative to the same median, log scale; usually the clearest step), and the
+        correlation over time between a row and the next row (close to 1 inside the artifact). Pick ``n_artifact`` as
+        the first row after the step; a partial row has an intermediate value.
+
+        Panels: the stack average of the first field with the edge lines, and the three profiles of all fields
+        (thin) with their median (thick). Only the field mask presentation of each field is used.
+
+        Args:
+            field_key: Primary key identifying the field. If None, the first available key is used. Ignored if
+                ``restrictions`` is given.
+            restrictions: Restrictions for the fields, e.g. ``dict(experimenter='Ran')``, to overlay the profiles of
+                several fields and choose one value for all of them.
+            n_max: Number of rows from the top that are shown in the profiles.
+            n_artifact: Candidate value, drawn as red line (rows 0 to ``n_artifact - 1`` would be removed). The
+                gray dashed line is the setup value ``npixartifact``.
+            gamma: Gamma correction value for the stack average.
+            max_fields: Maximum number of fields if ``restrictions`` is given.
+        """
+        from matplotlib import pyplot as plt
+
+        if restrictions is None:
+            field_keys = [get_primary_key(table=self.proj(), key=field_key)]
+        else:
+            field_keys = (self & restrictions).proj().to_dicts()[:max_fields]
+            if len(field_keys) == 0:
+                raise ValueError('No ROI masks found.')
+
+        rows = np.arange(n_max)
+        mean_profiles, std_profiles, corr_profiles, npixs, first = [], [], [], set(), None
+
+        def _pad(profile):
+            return np.pad(np.asarray(profile, dtype=float)[:n_max], (0, max(n_max - len(profile), 0)),
+                          constant_values=np.nan)
+
+        for fk in field_keys:
+            main_row = (self & fk).fetch1()
+            pres_key = {k: main_row[k] for k in self.presentation_table.primary_key}
+            data_name, _ = self.userinfo_table().get_stack_names(fk)
+            average = load_array((self.presentation_table.StackAverages & pres_key & dict(
+                ch_name=data_name)).fetch1('ch_average')).astype(float)
+            npixs.add(int((self.presentation_table & pres_key).fetch1('npixartifact')))
+            if first is None:
+                first = (fk, average, (self.field_table & fk).fetch1('scan_type'))
+
+            stack = self._field_stack(fk, pres_key, data_name)
+            if stack is None:
+                mean_profiles.append(_pad([]))
+                std_profiles.append(_pad([]))
+                corr_profiles.append(_pad([]))
+                continue
+            stack = stack.astype(float)
+            profiles = (np.nanmean(stack.mean(axis=2), axis=1), np.nanmean(stack.std(axis=2), axis=1))
+            refs = [np.nanmedian(p[n_max:]) if len(p) > n_max else np.nanmedian(p) for p in profiles]
+            mean_profiles.append(_pad(profiles[0] / refs[0] if refs[0] else profiles[0]))
+            std_profiles.append(_pad(profiles[1] / refs[1] if refs[1] else profiles[1]))
+            centered = stack - stack.mean(axis=2, keepdims=True)
+            n_pairs = min(n_max, centered.shape[0] - 1)
+            corr_profiles.append(_pad(np.nanmean(
+                correlation_on_centered(centered[1:n_pairs + 1], centered[:n_pairs], axis=2), axis=1)))
+
+        def _edges(ax, to_x=lambda n: n - 0.5):
+            for n in sorted(npixs):
+                ax.axvline(to_x(n), color='gray', ls='--', lw=1)
+            if n_artifact is not None:
+                ax.axvline(to_x(n_artifact), color='red', lw=1.5)
+
+        fk, average, scan_type = first
+        norm = (average - np.nanmin(average)) / max(np.nanmax(average) - np.nanmin(average), 1e-12)
+        extent, xlabel, ylabel = field_extent_and_labels(average.shape, scan_type)
+        fig, axs = plt.subplots(1, 4, figsize=(22, 4), gridspec_kw=dict(width_ratios=[1, 1.2, 1.2, 1.2]))
+        fig.suptitle(str(fk) if len(field_keys) == 1 else f'{len(field_keys)} fields, image of {fk}')
+        axs[0].imshow((norm ** gamma).T, cmap='gray', origin='lower', extent=extent)
+        _edges(axs[0], to_x=lambda n: extent[0] - n)  # the first axis is flipped in the image
+        axs[0].set(xlabel=xlabel, ylabel=ylabel, title='Stack average')
+
+        for ax, profiles, title, x in (
+                (axs[1], mean_profiles, 'Mean (rel. to median)', rows),
+                (axs[2], std_profiles, 'Temporal std (rel. to median)', rows),
+                (axs[3], corr_profiles, 'Correlation of row i with row i+1', rows + 0.5)):
+            for profile in profiles:
+                ax.plot(x, profile, '.-', lw=0.8, alpha=0.4 if len(profiles) > 1 else 1., color='C0')
+            if len(profiles) > 1:
+                ax.plot(x, np.nanmedian(np.array(profiles), axis=0), 'k.-', lw=2, label='median')
+                ax.legend()
+            _edges(ax)
+            ax.set(xlabel='row (top = 0)', title=title)
+            ax.set_xticks(rows)
+        axs[2].set_yscale('log')
+        plt.tight_layout()
+        plt.show()
+
     def plot_roi_mask_correction(
             self,
             field_key: dict | None = None,
@@ -1056,6 +1194,7 @@ class RoiMaskTemplate(dj.Manual):
             old_prefix: str | None = None,
             new_prefix: str | None = None,
             gamma: float = 0.5,
+            n_artifact: int | None = None,
     ) -> None:
         """Plot the ROI mask in the database against its correction from ``correct_roi_masks``.
 
@@ -1071,6 +1210,8 @@ class RoiMaskTemplate(dj.Manual):
             old_prefix: Path prefix to replace when resolving file paths.
             new_prefix: Replacement path prefix.
             gamma: Gamma correction value for the stack average.
+            n_artifact: Number of artifact rows used in ``correct_roi_masks``, drawn as red line (the edge of the
+                light artifact). If None, the setup value ``npixartifact`` of the presentation is drawn.
         """
         from matplotlib import pyplot as plt
         from matplotlib.colors import ListedColormap
@@ -1099,24 +1240,7 @@ class RoiMaskTemplate(dj.Manual):
         ch_average = load_array(
             (self.presentation_table.StackAverages & pres_key & dict(ch_name=data_name)).fetch1('ch_average'))
 
-        # Correlation map of the presentation of the field mask
-        from_raw_data = (self.raw_params_table & field_key).fetch1("from_raw_data")
-        pres_path = (self.presentation_table & pres_key).fetch1("pres_data_file")
-        pres_store_path = relative_store_path(
-            local_file_path(pres_path, self.presentation_table._filepath_store), self.presentation_table._filepath_store)
-        info_df = self.load_field_file_info_df(field_key)
-        stack_files = [f for f in info_df[info_df['kind'] == 'response']['filepath'].values
-                       if relative_store_path(f, self.presentation_table._filepath_store) == pres_store_path]
-        corr_map = None
-        if len(stack_files) == 1:
-            ch_stacks, _ = read_utils.load_stacks(stack_files[0], from_raw_data=from_raw_data, ch_names=(data_name,))
-            stack = ch_stacks[data_name]
-            triggertimes = (self.presentation_table & pres_key).fetch1('triggertimes')
-            scan_frequency = (self.presentation_table.ScanInfo() & pres_key).fetch1('scan_frequency')
-            onset_idx = int(np.floor(triggertimes[0] * scan_frequency)) if len(triggertimes) > 0 else 0
-            corr_map = compute_corr_map(stack[:, :, onset_idx:])  # only the response after the stimulus onset
-        else:
-            warnings.warn(f'Could not find the recording file of the field mask, no correlation map: {stack_files}')
+        corr_map = self._field_corr_map(field_key, pres_key, data_name)
 
         diff = (roi_mask_new > 0).astype(float) - (roi_mask_old > 0).astype(float)
         diff[diff == 0] = np.nan
@@ -1174,6 +1298,11 @@ class RoiMaskTemplate(dj.Manual):
             axs[5].contour((roi_mask_new == roi_id).T.astype(float), levels=[0.5], colors='yellow', linewidths=1,
                            origin='lower', extent=extent)
         axs[5].set(title='Correlation + corr. ROIs')
+        if n_artifact is None:
+            n_artifact = int((self.presentation_table & pres_key).fetch1('npixartifact'))
+        for ax in axs:
+            if n_artifact > 0:
+                ax.axvline(extent[0] - n_artifact, color='red', ls='--', lw=1)  # edge of the light artifact
         plt.tight_layout()
         plt.show()
 

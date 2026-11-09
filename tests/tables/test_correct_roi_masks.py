@@ -89,6 +89,9 @@ class _FakeRoiMask:
     def init_shifts(self, field_key, pres_keys):
         return self._shifts
 
+    def _expected_corrected_files(self, *args):
+        return self.output_files
+
 
 def _run(fake, model, **kwargs):
     params = dict(roi_channel=None, roi_mask_dir='Corrected', old_prefix=None, new_prefix=None, use_stim_onset=True,
