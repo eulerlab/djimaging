@@ -20,7 +20,8 @@ BLOCKS = {
     'motion_refine': dict(
         description='Optional for motion mode: RefinedRoiMask, refines the ROI borders (+-1 px) of the field mask on the '
                     'registered reference condition before MotionRoiMask (no measurable gain on tested data)',
-        requires=['motion']),
+        requires=['motion'],
+        default=False),  # Not asked, not in --all: only with --refined-roi-mask or explicitly in --blocks
     'basic': dict(
         description='ChirpQI, ChirpFeatures, OsDsIndexes',
         requires=['core']),
@@ -75,7 +76,12 @@ def parse_args(argv=None):
         '--blocks', type=str, default=None,
         help=f'Comma-separated list of table blocks, e.g. "basic,rf_sta". Required blocks are added automatically. '
              f'Available: {", ".join(BLOCKS)}. Default: ask interactively.')
-    parser.add_argument('--all', action='store_true', help='Use all table blocks.')
+    parser.add_argument('--all', action='store_true',
+                        help='Use all table blocks, except those that are not selected by default (motion_refine).')
+    parser.add_argument(
+        '--refined-roi-mask', action='store_true',
+        help='Also add the optional motion_refine block (RefinedRoiMask, requires and adds the motion block). '
+             'Not asked interactively and not part of --all, as it made no measurable difference to the traces.')
     parser.add_argument(
         '--n-functional', type=int, default=None,
         help='Number of functional (imaging) channels (wDataCh0, ...), traces are extracted for these channels. '
@@ -129,22 +135,23 @@ def validate_project_name(project):
 
 def select_blocks(args):
     """Get requested blocks from the arguments or by asking the user."""
+    extra = ['motion_refine'] if args.refined_roi_mask else []
     if args.all:
-        return list(BLOCKS)
+        return [name for name, info in BLOCKS.items() if info.get('default', True)] + extra
     if args.blocks is not None:
-        return [b.strip() for b in args.blocks.split(',') if b.strip()]
+        return [b.strip() for b in args.blocks.split(',') if b.strip()] + extra
     if not sys.stdin.isatty():
-        return ['core']
+        return ['core'] + extra
 
     print('Select the table blocks for your schema (core is always included):')
     selected = []
     for name, info in BLOCKS.items():
-        if name == 'core':
+        if name == 'core' or not info.get('default', True):
             continue
         answer = input(f"  Include '{name}' ({info['description']})? [y/N] ")
         if answer.strip().lower() in ('y', 'yes'):
             selected.append(name)
-    return selected
+    return selected + extra
 
 
 def validate_channels(channels):

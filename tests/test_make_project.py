@@ -93,6 +93,24 @@ def test_motion_refine_schema_and_notebook(channels):
         < nb.index('MotionRoiMask().populate') < nb.index('Traces().populate')
 
 
+def test_motion_refine_only_with_flag_or_explicit_block(monkeypatch):
+    """motion_refine is not asked, not in --all, but can be forced with --refined-roi-mask or --blocks."""
+    def select(*argv):
+        return make_project.resolve_blocks(make_project.select_blocks(make_project.parse_args(['proj', *argv])))
+
+    assert 'motion_refine' not in select('--all')
+    assert 'motion_refine' in select('--all', '--refined-roi-mask')
+    assert select('--refined-roi-mask') == ['core', 'motion', 'motion_refine']  # motion is added as requirement
+    assert select('--blocks', 'basic', '--refined-roi-mask') == ['core', 'motion', 'motion_refine', 'basic']
+    assert 'motion_refine' in select('--blocks', 'motion_refine')
+
+    asked = []
+    monkeypatch.setattr(make_project.sys.stdin, 'isatty', lambda: True)
+    monkeypatch.setattr('builtins.input', lambda q: asked.append(q) or 'n')
+    assert select() == ['core']
+    assert not any("'motion_refine'" in q for q in asked) and any("'motion'" in q for q in asked)
+
+
 def test_generated_schema_has_no_duplicate_tables():
     text = make_project.build_schema_text(ROOT, make_project.resolve_blocks(OPTIONAL_BLOCKS))
     names = [n.name for n in ast.parse(text).body if isinstance(n, ast.ClassDef)]
