@@ -1043,7 +1043,9 @@ class RoiMaskTemplate(dj.Manual):
         """Plot the ROI mask in the database against its correction from ``correct_roi_masks``.
 
         Shows the current mask, the corrected mask, the pixels that were added (red) or removed (blue), and the
-        stack average with these differences.
+        stack average with these differences, and the stack average with the outlines of the ROIs that changed.
+        Red: corrected ROIs (final version) that are new or differ from the current mask in any pixel. Blue: current
+        ROIs that were removed, i.e. that do not overlap any corrected ROI.
 
         Args:
             field_key: Primary key identifying the field. If None, the first available key is used.
@@ -1085,7 +1087,7 @@ class RoiMaskTemplate(dj.Manual):
 
         # Same layout as `plot_field`, which is used by `plot1`
         extent, xlabel, ylabel = field_extent_and_labels(roi_mask_old.shape, scan_type)
-        fig, axs = plt.subplots(1, 4, figsize=(18, 4), sharex='all', sharey='all')
+        fig, axs = plt.subplots(1, 5, figsize=(22, 4), sharex='all', sharey='all')
         fig.suptitle(str(field_key))
         for ax in axs:
             ax.set(xlabel=xlabel)
@@ -1099,6 +1101,20 @@ class RoiMaskTemplate(dj.Manual):
         axs[3].imshow((average ** gamma).T, cmap='gray', origin='lower', extent=extent)
         axs[3].imshow(diff.T, vmin=-1, vmax=1, cmap='bwr', alpha=0.5, origin='lower', extent=extent)
         axs[3].set(title='Stack average + difference')
+
+        def _changed(i):
+            old_ids = np.unique(roi_mask_old[(roi_mask_new == i) & (roi_mask_old > 0)])
+            return len(old_ids) != 1 or not np.array_equal(roi_mask_old == old_ids[0], roi_mask_new == i)
+
+        added_ids = [i for i in np.unique(roi_mask_new[roi_mask_new > 0]) if _changed(i)]
+        removed_ids = [i for i in np.unique(roi_mask_old[roi_mask_old > 0])
+                       if not np.any(roi_mask_new[roi_mask_old == i] > 0)]
+        axs[4].imshow((average ** gamma).T, cmap='gray', origin='lower', extent=extent)
+        for mask, ids, color in ((roi_mask_new, added_ids, 'red'), (roi_mask_old, removed_ids, 'blue')):
+            for roi_id in ids:
+                axs[4].contour((mask == roi_id).T.astype(float), levels=[0.5], colors=color, linewidths=1.5,
+                               origin='lower', extent=extent)
+        axs[4].set(title=f'Changed ({len(added_ids)}, red) / removed ({len(removed_ids)}, blue) ROIs')
         plt.tight_layout()
         plt.show()
 
