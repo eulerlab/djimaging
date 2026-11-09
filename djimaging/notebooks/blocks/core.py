@@ -147,8 +147,26 @@ UserInfo()
 # Plot the data files in the selected folder
 UserInfo().plot1(key=None, show_pre=False, show_raw=False, show_header=True)
 
+# %% [markdown]
+# ### Raw data parameters
+#
+# `RawDataParams` defines how your recordings are read. There is no default that fits all data, so set these two:
+#
+# - `from_raw_data`: Which files to read the imaging stacks from.
+#   `True`: the raw ScanM files (`.smp`, in the `raw_data_dir` of `UserInfo`).
+#   `False`: the preprocessed Igor files (`.h5`, in the `pre_data_dir` of `UserInfo`).
+# - `igor_roi_masks`: Where the ROI masks come from.
+#   `'yes'`: the masks drawn in Igor and stored in the `.h5` files.
+#   `'no'`: ignore Igor masks, use mask files only (e.g. from AutoROIs or the ROI canvas).
+#   `'either'`: per field, the mask file if there is one, else the Igor mask.
+#   `'init'`: the database is filled from mask files, Igor masks only serve as starting mask in the ROI canvas.
+#   See the ROI section below for details.
+
 # %%
-RawDataParams().add_default()
+from_raw_data = __FROM_RAW_DATA__
+igor_roi_masks = __IGOR_ROI_MASKS__
+
+RawDataParams().add_params(from_raw_data=from_raw_data, igor_roi_masks=igor_roi_masks)
 RawDataParams()
 
 # %% [markdown]

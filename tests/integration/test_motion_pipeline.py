@@ -54,7 +54,8 @@ def test_motion_pipeline(motion_schema, tutorial_data_dir):
     s.UserInfo().upload_user({**experiment_key, "data_dir": str(tutorial_data_dir), "datatype_loc": 0,
                               "animal_loc": 1, "region_loc": 2, "field_loc": 3, "stimulus_loc": 4, "cond1_loc": 5,
                               "cond2_loc": 6, "cond3_loc": 7}, verbose=0)
-    s.RawDataParams().add_default(experimenter_list=["synthetic"])
+    s.RawDataParams().add_params(
+        from_raw_data=False, igor_roi_masks="yes", experimenter_list=["synthetic"])
     s.Experiment().rescan_filesystem(restrictions=experiment_key, verboselvl=0)
     s.Field().rescan_filesystem(restrictions=experiment_key, verboselvl=0)
     s.Stimulus().add_nostim(skip_duplicates=True)

@@ -36,7 +36,8 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
         },
         verbose=0,
     )
-    tutorial_schema.RawDataParams().add_default(experimenter_list=["synthetic"])
+    tutorial_schema.RawDataParams().add_params(
+        from_raw_data=False, igor_roi_masks="yes", experimenter_list=["synthetic"])
 
     tutorial_schema.Experiment().rescan_filesystem(restrictions=experiment_key, verboselvl=0)
 

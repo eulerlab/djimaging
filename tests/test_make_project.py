@@ -164,7 +164,7 @@ def test_default_schema_uses_channel_table_with_one_functional_channel():
     ast.parse(text)
     assert ("Channel().add_channels([('wDataCh0', 0), ('wDataCh1', 1)], functional=['wDataCh0'], "
             "roi_channel='wDataCh0', skip_duplicates=True)") in text
-    assert text.index('Channel().add_channels') > text.index('RawDataParams().add_default()')
+    assert text.index('Channel().add_channels') > text.index('RawDataParams().add_params(')
 
 
 @pytest.mark.parametrize('blocks', [['core'], OPTIONAL_BLOCKS])
@@ -226,3 +226,36 @@ def test_channels_are_asked_interactively(monkeypatch):
     answers = iter(['2', ''])
     monkeypatch.setattr('builtins.input', lambda prompt: next(answers))
     assert select() == (2, 1)
+
+
+def test_raw_params_in_notebook():
+    blocks = make_project.resolve_blocks(['core'])
+    text = make_project.build_notebook_text(
+        ROOT, blocks, schema_module='my.schema', project='tester',
+        raw_params=dict(from_raw_data=True, igor_roi_masks='either'))
+    ast.parse(text)
+    assert "from_raw_data = True\nigor_roi_masks = 'either'\n" in text
+    assert 'RawDataParams().add_params(from_raw_data=from_raw_data, igor_roi_masks=igor_roi_masks)' in text
+    assert 'RawDataParams().add_default' not in text and '__FROM_RAW_DATA__' not in text and '__IGOR_ROI_MASKS__' not in text
+
+
+def test_raw_params_arguments(monkeypatch):
+    monkeypatch.setattr('sys.stdin.isatty', lambda: False, raising=False)
+    args = make_project.parse_args(['proj', '--from-raw-data', 'yes', '--igor-roi-masks', 'no'])
+    assert make_project.select_raw_params(args) == dict(from_raw_data=True, igor_roi_masks='no')
+    args = make_project.parse_args(['proj'])
+    assert make_project.select_raw_params(args) == make_project.DEFAULT_RAW_PARAMS
+
+
+def test_add_default_raw_data_params_is_deprecated():
+    from djimaging.tables.core.raw_data import RawDataParamsTemplate
+
+    calls = []
+
+    class Params(RawDataParamsTemplate):
+        def add_params(self, **kwargs):
+            calls.append(kwargs)
+
+    with pytest.warns(DeprecationWarning, match='add_default'):
+        Params.add_default(Params.__new__(Params))
+    assert calls[0]['igor_roi_masks'] == 'yes'

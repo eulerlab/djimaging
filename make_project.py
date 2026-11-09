@@ -49,7 +49,13 @@ DEFAULT_CHANNELS = (1, 1)
 # Anchors in the core blocks that are extended by the Channel table.
 USER_INFO_CLASS_HEADER = "@schema\nclass UserInfo(core.UserInfoTemplate):\n"
 TRACES_CLASS_HEADER = "@schema\nclass Traces(core.TracesTemplate):\n"
-NOTEBOOK_RAW_PARAMS_CELL = "RawDataParams().add_default()\nRawDataParams()\n"
+NOTEBOOK_RAW_PARAMS_CELL = "RawDataParams()\n"
+FROM_RAW_DATA_PLACEHOLDER = '__FROM_RAW_DATA__'
+IGOR_ROI_MASKS_PLACEHOLDER = '__IGOR_ROI_MASKS__'
+
+# RawDataParams of new notebooks if they are not given and not asked (e.g. without a terminal).
+DEFAULT_RAW_PARAMS = dict(from_raw_data=False, igor_roi_masks='yes')
+IGOR_ROI_MASKS_OPTIONS = ('yes', 'no', 'either', 'init')
 
 # Anchors in the core blocks that are changed by the motion block (motion mode).
 ROI_MASK_PRESENTATION_CLASS = ("    class RoiMaskPresentation(core.RoiMaskTemplate.RoiMaskPresentation):\n"
@@ -79,6 +85,15 @@ def parse_args(argv=None):
         help='Number of background channels (e.g. 1 for SR-101, a marker for blood vessels) that are recorded after '
              'the functional channels, but no traces are extracted from. Default: ask interactively, or 1.')
     parser.add_argument(
+        '--from-raw-data', choices=['yes', 'no'], default=None,
+        help="RawDataParams.from_raw_data: read the raw ScanM files (.smp, 'yes') or the preprocessed Igor files "
+             "(.h5, 'no'). Default: ask interactively, or 'no'.")
+    parser.add_argument(
+        '--igor-roi-masks', choices=list(IGOR_ROI_MASKS_OPTIONS), default=None,
+        help="RawDataParams.igor_roi_masks: 'yes': ROI masks from the Igor .h5 files, 'no': from mask files only, "
+             "'either': per field mask file if available, else Igor, 'init': Igor masks only as starting mask in "
+             "the ROI canvas. Default: ask interactively, or 'yes'.")
+    parser.add_argument(
         '--legacy-userinfo-stacks', action='store_true',
         help='Use the old design without Channel table: the stacks are defined by data_stack_name and alt_stack_name '
              'in UserInfo (functional channel and alternative channel) and one trace per ROI is extracted.')
@@ -96,12 +111,15 @@ def main(argv=None):
     channels = select_channels(args)
     print(describe_channels(channels))
 
+    raw_params = select_raw_params(args)
+    print(describe_raw_params(raw_params))
+
     djimaging_dir = os.path.split(os.path.abspath(__file__))[0]
     project_dir = create_project_dir(djimaging_dir, project)
     copy_notebooks(djimaging_dir, project_dir, project)
     copy_table(djimaging_dir, project_dir)
     copy_schema(djimaging_dir, project_dir, project, blocks, channels)
-    copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels)
+    copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels, raw_params)
 
 
 def validate_project_name(project):
@@ -164,6 +182,48 @@ def select_channels(args):
 
     return validate_channels((1 if n_functional is None else n_functional,
                               1 if n_background is None else n_background))
+
+
+def ask_choice(question, options, default):
+    while True:
+        answer = input(f"{question} ({'/'.join(options)}) [{default}]: ").strip().lower()
+        if not answer:
+            return default
+        if answer in options:
+            return answer
+        print(f"Please answer one of: {', '.join(options)}")
+
+
+def select_raw_params(args):
+    """Get the RawDataParams (from_raw_data, igor_roi_masks) from the arguments or by asking the user."""
+    from_raw_data, igor_roi_masks = args.from_raw_data, args.igor_roi_masks
+    if sys.stdin.isatty():
+        if from_raw_data is None:
+            from_raw_data = ask_choice(
+                'Read the raw ScanM files (.smp) instead of the preprocessed Igor files (.h5)?',
+                ('yes', 'no'), 'yes' if DEFAULT_RAW_PARAMS['from_raw_data'] else 'no')
+        if igor_roi_masks is None:
+            print("ROI masks: 'yes' = from the Igor .h5 files, 'no' = from mask files only (e.g. AutoROIs, ROI canvas), "
+                  "'either' = per field mask file if available, else Igor, "
+                  "'init' = Igor masks only as starting mask in the ROI canvas.")
+            igor_roi_masks = ask_choice('Where do the ROI masks come from?', IGOR_ROI_MASKS_OPTIONS,
+                                        DEFAULT_RAW_PARAMS['igor_roi_masks'])
+
+    return validate_raw_params(dict(
+        from_raw_data=DEFAULT_RAW_PARAMS['from_raw_data'] if from_raw_data is None else from_raw_data == 'yes',
+        igor_roi_masks=DEFAULT_RAW_PARAMS['igor_roi_masks'] if igor_roi_masks is None else igor_roi_masks))
+
+
+def validate_raw_params(raw_params):
+    assert isinstance(raw_params['from_raw_data'], bool), \
+        f"from_raw_data must be bool, got {raw_params['from_raw_data']!r}"
+    assert raw_params['igor_roi_masks'] in IGOR_ROI_MASKS_OPTIONS, \
+        f"igor_roi_masks must be one of {IGOR_ROI_MASKS_OPTIONS}, got {raw_params['igor_roi_masks']!r}"
+    return raw_params
+
+
+def describe_raw_params(raw_params):
+    return f"RawDataParams: from_raw_data={raw_params['from_raw_data']}, igor_roi_masks={raw_params['igor_roi_masks']!r}"
 
 
 def describe_channels(channels):
@@ -382,7 +442,7 @@ def build_schema_text(djimaging_dir, blocks, channels=DEFAULT_CHANNELS):
     return "\n".join(imports) + "\n\n\n" + add_channels_to_schema(code, channels) + "\n"
 
 
-def build_notebook_text(djimaging_dir, blocks, schema_module, project, channels=DEFAULT_CHANNELS):
+def build_notebook_text(djimaging_dir, blocks, schema_module, project, channels=DEFAULT_CHANNELS, raw_params=None):
     """Combine the notebook blocks in the order of the blocks, followed by the clean-up section."""
     parts = [read_block(djimaging_dir, 'notebooks', name).strip("\n") for name in blocks
              if name not in ('motion', 'motion_refine')]
@@ -394,7 +454,10 @@ def build_notebook_text(djimaging_dir, blocks, schema_module, project, channels=
             motion_text = add_refine_to_motion_notebook(
                 motion_text, read_block(djimaging_dir, 'notebooks', 'motion_refine'))
         text = add_motion_to_notebook(text, motion_text)
+    raw_params = validate_raw_params(dict(DEFAULT_RAW_PARAMS if raw_params is None else raw_params))
     text = add_channels_to_notebook(text, channels)
+    text = text.replace(FROM_RAW_DATA_PLACEHOLDER, repr(raw_params['from_raw_data'])) \
+        .replace(IGOR_ROI_MASKS_PLACEHOLDER, repr(raw_params['igor_roi_masks']))
     return text.replace(SCHEMA_MODULE_PLACEHOLDER, schema_module).replace(BLOCKS_PLACEHOLDER, ", ".join(blocks))         .replace(PROJECT_PLACEHOLDER, project)
 
 
@@ -422,7 +485,7 @@ def copy_schema(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CH
         f.write(header + new_import + build_schema_text(djimaging_dir, blocks, channels) + new_table)
 
 
-def copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS):
+def copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS, raw_params=None):
     dst = os.path.join(project_dir, 'notebooks', f'populate_{project}_schema.ipynb')
 
     if os.path.isfile(dst):
@@ -431,7 +494,7 @@ def copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels
 
     text = build_notebook_text(
         djimaging_dir, blocks, schema_module=f'djimaging.user.{project}.schemas.{project}_schema',
-        project=project, channels=channels)
+        project=project, channels=channels, raw_params=raw_params)
 
     try:
         import jupytext
