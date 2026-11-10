@@ -325,6 +325,7 @@ def as_pre_filepath(filepath: str, raw_data_dir: str = 'Raw', pre_data_dir: str 
         a pre-processed file is not located in `pre_data_dir`, or if a raw
         file is not located in `raw_data_dir`.
     """
+    filepath = str(filepath)  # may be a Path
     fpath, fname = os.path.split(filepath)
     froot, fdir = os.path.split(fpath)
 

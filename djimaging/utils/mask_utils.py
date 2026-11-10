@@ -1136,6 +1136,7 @@ def load_preferred_roi_mask_igor(files: list, mask_alias: str = '',
     """
     sorted_files = sort_roi_mask_files(files, mask_alias=mask_alias, highres_alias=highres_alias)
     for file in sorted_files:
+        file = str(file)  # may be a Path
         if os.path.isfile(file) and file.endswith('.h5'):
             roi_mask = read_h5_utils.load_roi_mask(filepath=file, ignore_not_found=True)
             if roi_mask is not None:
