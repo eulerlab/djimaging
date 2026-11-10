@@ -46,7 +46,7 @@ import numpy as np
 from djimaging.utils.dj_storage import load_array, local_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.motion import clean_channels, compute_zproxy, estimate_motion, estimate_roi_shifts, make_reference
-from djimaging.utils.motion.image_utils import register_stack
+from djimaging.utils.motion.image_utils import _nanmean_quiet, register_stack
 from djimaging.utils.motion.registration import MotionEstimate
 from djimaging.utils.motion.trust import stim_bins
 from djimaging.utils.scanm import read_utils
@@ -332,7 +332,7 @@ class MotionDetectionTemplate(dj.Computed):
         field_key = {k: key[k] for k in self.roi_mask_table.primary_key}  # field mask: not restricted by presentation
         field_mask = load_array((self.roi_mask_table & field_key).fetch1('roi_mask'))
         reg0 = register_stack(ch0, motion.slow_frames)
-        roi_shifts, quality = estimate_roi_shifts(np.nanmean(reg0, axis=2), ref['ch0'], field_mask,
+        roi_shifts, quality = estimate_roi_shifts(_nanmean_quiet(reg0), ref['ch0'], field_mask,
                                                   max_shift=params['roi_max_shift'])
         fast_abs = np.linalg.norm(motion.fast_bins, axis=1)
         sel, onset = stim_bins(motion.bin_centers - (motion.bin_frames - 1) / 2., data['fs'], data['triggertimes'])

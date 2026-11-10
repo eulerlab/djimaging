@@ -28,7 +28,7 @@ from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.mask_utils import shift_array
 from djimaging.utils.motion import fill_artifact_lines, pool_roi_shifts, presentation_roi_weights, roi_ids_from_mask
-from djimaging.utils.motion.image_utils import register_stack
+from djimaging.utils.motion.image_utils import _nanmean_quiet, register_stack
 from djimaging.utils.motion.roi_shifts import crop_weights, roi_centroids, uncrop_weights, weights_to_label
 from djimaging.tables.motion_correction.motion_detection import load_presentation_channels, reference_pres_key
 
@@ -165,7 +165,7 @@ class MotionRoiMaskTemplate(dj.Computed):
         motion = det().get_motion(key)
         reg0 = register_stack(fill_artifact_lines(data['ch0'], npix), motion.slow_frames)
         weights, winfo = presentation_roi_weights(
-            np.nanmean(reg0, axis=2), np.mean(np.isfinite(reg0), axis=2), ref['ch0'], field_mask, shifts, npix,
+            _nanmean_quiet(reg0), np.mean(np.isfinite(reg0), axis=2), ref['ch0'], field_mask, shifts, npix,
             rel_thresh=params['rel_thresh'], rel_drop=params['rel_drop'], min_valid_frac=params['min_valid_frac'],
             min_contrast_frac=params['min_contrast_frac'])
 
@@ -204,7 +204,7 @@ class MotionRoiMaskTemplate(dj.Computed):
         field_mask = self.get_field_mask(key)
         data = load_presentation_channels(det.presentation_table, det.userinfo_table, det.raw_params_table, key,
                                           structural=False)
-        img = np.nanmean(register_stack(data['ch0'], det().get_motion(key).slow_frames), axis=2)
+        img = _nanmean_quiet(register_stack(data['ch0'], det().get_motion(key).slow_frames))
         img = (img - np.nanmin(img)) / max(np.nanmax(img) - np.nanmin(img), 1e-12)
         label = weights_to_label(weights, -roi_ids)
         flagged = (self.Roi & key & 'low_contrast OR at_limit OR inconsistent').to_arrays('roi_id')

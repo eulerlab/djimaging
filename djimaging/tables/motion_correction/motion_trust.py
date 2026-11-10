@@ -26,6 +26,12 @@ from djimaging.utils.motion.trust import fast_per_bin, stim_bins
 from djimaging.tables.motion_correction.motion_detection import load_presentation_channels
 
 
+def _none_if_nan(x) -> float | None:
+    """NaN (not measurable, e.g. no valid pixels around the ROI) as NULL; DataJoint would otherwise omit it."""
+    x = float(x)
+    return None if np.isnan(x) else x
+
+
 class MotionTrustTemplate(dj.Computed):
     """Per-ROI trust per time bin and per stimulus repeat (structure only, not confounded by drugs)."""
     database = ""
@@ -60,9 +66,9 @@ class MotionTrustTemplate(dj.Computed):
             corr_self : <blob>  # (n_bins,) noise-corrected patch similarity to the recording's own mean
             res_shift : <blob>  # (n_bins,) |local displacement vs. reference - applied shift| [px]
             coverage : <blob>  # (n_bins,) fraction of the ROI inside the FOV
-            match_corr : float32  # noise-corrected similarity of the ROI patch to the field reference (not in trust)
-            match_shift_x : float32  # remaining displacement of the recording mean vs. reference [px]
-            match_shift_y : float32
+            match_corr=null : float32  # noise-corrected similarity of the ROI patch to the field reference (not in trust)
+            match_shift_x=null : float32  # remaining displacement of the recording mean vs. reference [px]
+            match_shift_y=null : float32
             """
 
         @property
@@ -128,8 +134,8 @@ class MotionTrustTemplate(dj.Computed):
                 trust_rep=None if trust_rep is None else trust_rep[i].astype(np.float32),
                 trust_median=float(roi_median[i]), corr_self=res.corr_self[i].astype(np.float32),
                 res_shift=res.res_shift[i].astype(np.float32), coverage=res.coverage[i].astype(np.float32),
-                match_corr=float(res.match_corr[i]), match_shift_x=float(res.match_shift[i, 0]),
-                match_shift_y=float(res.match_shift[i, 1])))
+                match_corr=_none_if_nan(res.match_corr[i]), match_shift_x=_none_if_nan(res.match_shift[i, 0]),
+                match_shift_y=_none_if_nan(res.match_shift[i, 1])))
         self.Roi().insert(parts)
 
     def plot1(self, key: dict | None = None, show_frames: bool = True, frame_times=None, n_spread: int = 3,

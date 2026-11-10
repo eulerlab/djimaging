@@ -24,7 +24,7 @@ import numpy as np
 from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.motion import fill_artifact_lines, roi_ids_from_mask
-from djimaging.utils.motion.image_utils import register_stack
+from djimaging.utils.motion.image_utils import _nanmean_quiet, register_stack
 from djimaging.utils.motion.refine import REFINE_STATUS, pooled_mean_image, refine_roi_mask
 from djimaging.tables.motion_correction.motion_detection import load_presentation_channels, reference_pres_key
 
@@ -114,7 +114,7 @@ class RefinedRoiMaskTemplate(dj.Computed):
             data = load_presentation_channels(det.presentation_table, det.userinfo_table, det.raw_params_table, g,
                                               structural=False)
             reg0 = register_stack(fill_artifact_lines(data['ch0'], npix), det().get_motion(g).slow_frames)
-            means.append(np.nanmean(reg0, axis=2))
+            means.append(_nanmean_quiet(reg0))
             n_frames.append(reg0.shape[2])
             npix_field = max(npix_field, npix)
         ref_img = pooled_mean_image(means, n_frames).astype(np.float32)

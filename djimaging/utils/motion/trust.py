@@ -4,6 +4,7 @@ All components are structural (gain / offset invariant), so drug-induced brightn
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -116,7 +117,9 @@ def compute_trust(reg0: np.ndarray, ref: dict, roi_mask: np.ndarray, edges: np.n
     res = np.linalg.norm(local_shifts_batch(ref_patches, gather_patches(img_pad, cx, cy, pad, h))
                          - roi_shifts[None], axis=-1).T
 
-    r_bin = spearman_brown(np.nanmedian(r_half, axis=1))
+    with warnings.catch_warnings():  # ROIs without any valid bin yield NaN, handled below (min_rel)
+        warnings.simplefilter('ignore', RuntimeWarning)
+        r_bin = spearman_brown(np.nanmedian(r_half, axis=1))
     corr_self = c_self / np.sqrt(np.maximum(r_bin, min_rel) * np.maximum(r_self, min_rel))[:, None]
     zfield = np.ones(nb) if zself_ch1 is None else soft(zself_ch1, z_lo, z_hi)
     trust = (soft(corr_self, corr_lo, corr_hi) * np.exp(-0.5 * (res / res_scale) ** 2)
