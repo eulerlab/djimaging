@@ -1202,6 +1202,8 @@ class RoiMaskTemplate(dj.Manual):
             new_prefix: str | None = None,
             gamma: float = 0.5,
             n_artifact: int | None = None,
+            vessel_threshold: float | None = 50.,
+            max_vessel_overlap: float = 0.2,
     ) -> None:
         """Plot the ROI mask in the database against its correction from ``correct_roi_masks``.
 
@@ -1219,6 +1221,11 @@ class RoiMaskTemplate(dj.Manual):
             gamma: Gamma correction value for the stack average.
             n_artifact: Number of artifact rows used in ``correct_roi_masks``, drawn as red line (the edge of the
                 light artifact). If None, the setup value ``npixartifact`` of the presentation is drawn.
+            vessel_threshold: Same as in ``correct_roi_masks``. If not None and the presentation has a second
+                (non-ROI) channel, an extra panel shows that channel with the detected vessel pixels (cyan) and the
+                outlines of the corrected ROIs; ROIs that would be removed as vessel ROIs are drawn in red.
+                None hides the panel.
+            max_vessel_overlap: Same as in ``correct_roi_masks``.
         """
         from matplotlib import pyplot as plt
         from matplotlib.colors import ListedColormap
@@ -1249,6 +1256,23 @@ class RoiMaskTemplate(dj.Manual):
 
         corr_map = self._field_corr_map(field_key, pres_key, data_name)
 
+        if n_artifact is None:
+            n_artifact = int((self.presentation_table & pres_key).fetch1('npixartifact'))
+
+        alt_average, vessel_mask, vessel_ids, alt_name = None, None, [], None
+        if vessel_threshold is not None:
+            alt_names = [n for n in (self.presentation_table.StackAverages & pres_key).fetch('ch_name')
+                         if n != data_name]
+            if len(alt_names) > 0:
+                from djimaging.utils.mask_utils import estimate_vessel_mask
+                alt_name = alt_names[0]
+                alt_average = load_array((self.presentation_table.StackAverages & pres_key & dict(
+                    ch_name=alt_name)).fetch1('ch_average')).astype(float)
+                vessel_mask = estimate_vessel_mask(alt_average, ch_average.astype(float), n_artifact=n_artifact,
+                                                   alt_z=vessel_threshold)
+                vessel_ids = [i for i in np.unique(roi_mask_old[roi_mask_old > 0])
+                              if np.mean(vessel_mask[roi_mask_old == i]) > max_vessel_overlap]
+
         diff = (roi_mask_new > 0).astype(float) - (roi_mask_old > 0).astype(float)
         diff[diff == 0] = np.nan
         diff_cmap = ListedColormap(['red', 'lime'])  # -1 (removed) -> red, +1 (added) -> green
@@ -1259,7 +1283,8 @@ class RoiMaskTemplate(dj.Manual):
         print(field_key)
         
         extent, xlabel, ylabel = field_extent_and_labels(roi_mask_old.shape, scan_type)
-        fig, axs = plt.subplots(1, 6, figsize=(22, 4), sharex='all', sharey='all')
+        n_cols = 7 if alt_average is not None else 6
+        fig, axs = plt.subplots(1, n_cols, figsize=(22 * n_cols / 6, 4), sharex='all', sharey='all')
         fig.suptitle(str(field_key))
         for ax in axs:
             ax.set(xlabel=xlabel)
@@ -1305,8 +1330,18 @@ class RoiMaskTemplate(dj.Manual):
             axs[5].contour((roi_mask_new == roi_id).T.astype(float), levels=[0.5], colors='yellow', linewidths=1,
                            origin='lower', extent=extent)
         axs[5].set(title='Correlation + corr. ROIs')
-        if n_artifact is None:
-            n_artifact = int((self.presentation_table & pres_key).fetch1('npixartifact'))
+
+        if alt_average is not None:
+            alt = (alt_average - np.nanmin(alt_average)) / max(np.nanmax(alt_average) - np.nanmin(alt_average), 1e-12)
+            axs[6].imshow((alt ** gamma).T, cmap='gray', origin='lower', extent=extent)
+            if np.any(vessel_mask):
+                axs[6].imshow(np.where(vessel_mask, 1., np.nan).T, cmap=ListedColormap(['cyan']), vmin=0, vmax=1,
+                              alpha=0.4, origin='lower', extent=extent)
+            for roi_id in np.unique(roi_mask_old[roi_mask_old > 0]):
+                axs[6].contour((roi_mask_old == roi_id).T.astype(float), levels=[0.5],
+                               colors='red' if roi_id in vessel_ids else 'yellow', linewidths=1,
+                               origin='lower', extent=extent)
+            axs[6].set(title=f'{alt_name}: vessels (cyan), vessel ROIs ({len(vessel_ids)}, R) of current mask')
         for ax in axs:
             if n_artifact > 0:
                 ax.axvline(extent[0] - n_artifact, color='red', ls='--', lw=1)  # edge of the light artifact
