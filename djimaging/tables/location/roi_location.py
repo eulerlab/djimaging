@@ -87,7 +87,7 @@ class RelativeRoiLocationWrtFieldTemplate(dj.Computed):
     def make(self, key):
         roi_id = (self.roi_table & key).fetch1('roi_id')
         roi_mask = load_array((self.roi_mask_table & key).fetch1('roi_mask'))
-        pixel_size_um, z_step_um, scan_type = (self.field_table & key).to_arrays('pixel_size_um', 'z_step_um', 'scan_type')
+        pixel_size_um, z_step_um, scan_type = (self.field_table & key).fetch1('pixel_size_um', 'z_step_um', 'scan_type')
 
         ang_deg_list = (self.presentation_table.ScanInfo() & (self.field_table & key)).to_arrays('angle_deg')
         assert np.unique(ang_deg_list).size == 1, f'Found different angles for different presentations: {ang_deg_list}'
@@ -179,7 +179,7 @@ class RelativeRoiLocationTemplate(dj.Computed):
         pass
 
     def make(self, key):
-        pixel_size_um, scan_type = (self.field_table & key).to_arrays('pixel_size_um', 'scan_type')
+        pixel_size_um, scan_type = (self.field_table & key).fetch1('pixel_size_um', 'scan_type')
         relx_wrt_field, rely_wrt_field = (self.relative_field_location_wrt_field_table & key).fetch1(
             'relx_wrt_field', 'rely_wrt_field')
 
