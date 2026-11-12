@@ -50,6 +50,9 @@ If you need them, install them yourself, preferably in a separate environment, e
 `uv pip install "cellpose>=3.1.1,<4"` or `uv pip install git+https://github.com/sarmueller/MEDIAR.git`
 (possibly with `monai>=1.5` and `--no-deps` to keep your `numpy`). The MEDIAR wrapper is untested with `monai>=1.5`.
 
+How ROI masks get into the database, the ROI canvas, corrections, shrink to fit and motion mode:
+see [ROI_MASKS.md](ROI_MASKS.md).
+
 > ❗ To test if the package was successfully installed, e.g.
 > open a jupyter notebook in your container and call <code>import djimaging</code>.
 
@@ -119,8 +122,13 @@ The notebook uses <code>ageuler_&lt;login name&gt;_&lt;project&gt;</code> as the
 ```bash
 python3 make_project.py your_project_name                         # interactive: asks y/N for each block
 python3 make_project.py your_project_name --blocks basic,rf_sta   # explicit list (core is added for you)
-python3 make_project.py your_project_name --all                   # every block
+python3 make_project.py your_project_name --all                   # every block (except motion_refine, see below)
+python3 make_project.py your_project_name --blocks basic --refined-roi-mask   # also the optional motion_refine block
 ```
+
+`motion_refine` (`RefinedRoiMask`, refines the field ROI mask borders in motion mode) is not asked interactively and not part
+of `--all`, because it made no measurable difference to the traces. Force it with `--refined-roi-mask` (or by
+listing it in `--blocks`); it requires, and thereby adds, the `motion` block.
 
 Without `--blocks`/`--all`, the script asks interactively; when there is no terminal (e.g. in a script or CI)
 it falls back to `core` only. Unknown block names raise an error that lists the available blocks.

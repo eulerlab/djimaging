@@ -16,8 +16,12 @@ class RfRoiOffset(receptivefield.RfRoiOffsetTemplate):
     experiment_tab = Experiment
     stimulus_tab = Stimulus
     pres_tab = Presentation
-    roimask_tab = RoiMask.RoiMaskPresentation
+    roimask_tab = RoiMask.RoiMaskPresentation  # motion mode: MotionRoiMask
     rf_fit_tab = FitGauss2DRF
+
+`roimask_tab` provides the presentation ROI mask (`roi_mask`, Igor format) and its integer shift relative to the field
+mask (`shift_dx`, `shift_dy`). In motion mode (RoiMask without presentation masks) use `MotionRoiMask`, which provides
+the same attributes (label mask in raw presentation coordinates and the rounded global shift).
 """
 
 import warnings
@@ -360,7 +364,12 @@ class RfRoiOffsetTemplate(dj.Computed):
         from matplotlib.patches import Ellipse
         import seaborn as sns
 
-        roi_mask = load_array((self.roimask_tab & key).fetch1("roi_mask"))
+        mask_rows = (self.roimask_tab & key).to_dicts()
+        if len(mask_rows) != 1:
+            raise ValueError(f'Expected one presentation ROI mask for key={key}, found {len(mask_rows)}. '
+                             f'With several motion parameter sets, add motion_params_id to the key.')
+        roi_mask = load_array(mask_rows[0]['roi_mask'])
+        shift_dx, shift_dy = mask_rows[0]['shift_dx'], mask_rows[0]['shift_dy']
         pixel_size_um, npixartifact, scan_type = (self.pres_tab & key).to_arrays(
             'pixel_size_um', 'npixartifact', 'scan_type')
 
@@ -369,8 +378,6 @@ class RfRoiOffsetTemplate(dj.Computed):
             (self.pres_tab.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         stim_dict = (self.stimulus_tab & key).fetch1('stim_dict')
         pix_scale_x_um, pix_scale_y_um = stim_dict['pix_scale_x_um'], stim_dict['pix_scale_y_um']
-
-        shift_dx, shift_dy = (self.roimask_tab & key).fetch1('shift_dx', 'shift_dy')
 
         if scan_type == 'xy':
             extent = np.array([

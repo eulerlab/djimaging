@@ -8,7 +8,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from djimaging.tables.core.preprocesstraces import gui_clip_trace
-from djimaging.utils.scanm.traces_and_triggers_utils import roi2trace_from_stack, check_valid_triggers_rel_to_tracetime
+from djimaging.utils.scanm.traces_and_triggers_utils import (
+    roi2trace_from_stack, roi2trace_from_stack_motion, check_valid_triggers_rel_to_tracetime)
 from djimaging.utils.scanm.read_h5_utils import load_roi2trace
 from djimaging.utils import plot_utils, math_utils, trace_utils
 from djimaging.utils.dj_storage import load_array, local_path
@@ -24,10 +25,10 @@ class TracesTemplate(dj.Computed):
     # If False, there has to be exactly one functional channel (see `UserInfoTemplate.get_functional_ch_names`).
     _use_channels = False
 
-    # Motion correction parameters
+    # Motion mode (see djimaging.tables.motion_correction): traces are extracted from the slowly registered stack with
+    # the presentation ROI weights of `motion_roi_mask_table` (which replaces RoiMask.RoiMaskPresentation), and the
+    # motion parameter set becomes part of the primary key.
     _include_motion_correction = False
-    _mc_fupsample = 10
-    _mc_f_cutoff = 3
 
     @property
     def definition(self):
@@ -39,7 +40,7 @@ class TracesTemplate(dj.Computed):
         """
         if self._include_motion_correction:
             definition += """
-        -> self.motion_detection_table
+        -> self.motion_roi_mask_table
         """
         if self._use_channels:
             definition += """
@@ -91,22 +92,18 @@ class TracesTemplate(dj.Computed):
         raise NotImplementedError("Set `channel_table` (a ChannelTemplate) when using `_use_channels=True`")
 
     @property
-    def motion_detection_table(self) -> None:
-        """Return the motion detection table, or None if not used."""
-        return None
+    def motion_roi_mask_table(self) -> dj.Table:
+        """Return the motion ROI mask table (``MotionRoiMaskTemplate``). Required when `_include_motion_correction`."""
+        raise NotImplementedError("Set `motion_roi_mask_table` when using `_include_motion_correction=True`")
 
     @property
     def key_source(self):
         """Return the key source combining presentation, ROI, params, and mask tables."""
         try:
-            key_source = (self.presentation_table.proj() & self.roi_table.proj()) \
-                         * self.raw_params_table.proj() \
-                         * self.roi_mask_table.RoiMaskPresentation.proj()
-
+            key_source = (self.presentation_table.proj() & self.roi_table.proj()) * self.raw_params_table.proj()
             if self._include_motion_correction:
-                key_source *= self.motion_detection_table.proj()
-
-            return key_source
+                return key_source * self.motion_roi_mask_table.proj()
+            return key_source * self.roi_mask_table.RoiMaskPresentation.proj()
         except (AttributeError, TypeError):
             pass
 
@@ -203,25 +200,25 @@ class TracesTemplate(dj.Computed):
             mapping roi_id to a dict of trace data, and frame_dt is the
             inter-frame interval in seconds.
         """
-        roi_mask, as_field_mask = (self.roi_mask_table.RoiMaskPresentation & key).fetch1("roi_mask", "as_field_mask")
-        roi_mask = load_array(roi_mask)
         n_artifact = (self.presentation_table & key).fetch1("npixartifact")
 
-        if as_field_mask == 'different':
-            raise ValueError(f'Tried to populate traces with inconsistent roi mask for key=\n{key}\n' +
-                             'Compare ROI mask of Field and Presentation.')
-
-        if self._include_motion_correction and (self.motion_detection_table is not None):
-            shifts_x, shifts_y = (self.motion_detection_table & key).fetch1('shifts_x', 'shifts_y')
-            shifts_x, shifts_y = load_array(shifts_x), load_array(shifts_y)
-            fs = (self.presentation_table.ScanInfo & key).fetch1('scan_frequency')
-            roi2trace, frame_dt = roi2trace_from_stack(
-                filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
-                data_stack_name=data_stack_name, precision=trace_precision, from_raw_data=from_raw_data,
-                shifts_x=shifts_x, shifts_y=shifts_y,
-                shift_kws=dict(fs=fs, fupsample=self._mc_fupsample, f_cutoff=self._mc_f_cutoff)
-            )
+        if self._include_motion_correction:
+            # Registered stack (slow displacement) + presentation ROI weights (per-ROI shift + mild reshape)
+            mask_tab = self.motion_roi_mask_table
+            roi_mask = load_array((mask_tab & key).fetch1('roi_mask'))
+            weight_roi_ids, roi_weights, _ = mask_tab().get_weights(key)
+            disp_frames = mask_tab.motion_detection_table().get_motion(key).slow_frames
+            roi2trace, frame_dt = roi2trace_from_stack_motion(
+                filepath=filepath, roi_ids=roi_ids, roi_weights=roi_weights, weight_roi_ids=weight_roi_ids,
+                disp_frames=disp_frames, data_stack_name=data_stack_name, precision=trace_precision,
+                from_raw_data=from_raw_data)
         else:
+            roi_mask, as_field_mask = (self.roi_mask_table.RoiMaskPresentation & key).fetch1(
+                "roi_mask", "as_field_mask")
+            roi_mask = load_array(roi_mask)
+            if as_field_mask == 'different':
+                raise ValueError(f'Tried to populate traces with inconsistent roi mask for key=\n{key}\n' +
+                                 'Compare ROI mask of Field and Presentation.')
             roi2trace, frame_dt = roi2trace_from_stack(
                 filepath=filepath, roi_ids=roi_ids, roi_mask=roi_mask,
                 data_stack_name=data_stack_name, precision=trace_precision, from_raw_data=from_raw_data,

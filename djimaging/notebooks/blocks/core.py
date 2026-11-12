@@ -147,8 +147,26 @@ UserInfo()
 # Plot the data files in the selected folder
 UserInfo().plot1(key=None, show_pre=False, show_raw=False, show_header=True)
 
+# %% [markdown]
+# ### Raw data parameters
+#
+# `RawDataParams` defines how your recordings are read. There is no default that fits all data, so set these two:
+#
+# - `from_raw_data`: Which files to read the imaging stacks from.
+#   `True`: the raw ScanM files (`.smp`, in the `raw_data_dir` of `UserInfo`).
+#   `False`: the preprocessed Igor files (`.h5`, in the `pre_data_dir` of `UserInfo`).
+# - `igor_roi_masks`: Where the ROI masks come from.
+#   `'yes'`: the masks drawn in Igor and stored in the `.h5` files.
+#   `'no'`: ignore Igor masks, use mask files only (e.g. from AutoROIs or the ROI canvas).
+#   `'either'`: per field, the mask file if there is one, else the Igor mask.
+#   `'init'`: the database is filled from mask files, Igor masks only serve as starting mask in the ROI canvas.
+#   See the ROI section below for details.
+
 # %%
-RawDataParams().add_default()
+from_raw_data = __FROM_RAW_DATA__
+igor_roi_masks = __IGOR_ROI_MASKS__
+
+RawDataParams().add_params(from_raw_data=from_raw_data, igor_roi_masks=igor_roi_masks)
 RawDataParams()
 
 # %% [markdown]
@@ -243,11 +261,14 @@ plot_if_data(Presentation(), key=None)
 # `RoiMask` is a manual table, and ROI masks are never computed inside the database. A mask always originates
 # from a **file**, and the table then reads that file in:
 #
-# 1. **Draw a mask** with `RoiMask().draw_roi_mask(...)`. It opens an interactive canvas (`start_gui()`) on the
-#    recording stacks of one field. You can start from an AutoROIs proposal (see below) or from an existing mask,
-#    clean it up by hand, and, if the field has several presentations, shift the mask to match each of them.
-# 2. **Save to a file.** Saving in the canvas writes one mask file per presentation, next to the recording file, in
-#    the sub-directory `roi_mask_dir` (here `AutoROIs`). The format is set by `_roi_file_format` of the table:
+# 1. **Create a mask.** Either let AutoROIs propose masks for all fields without one with
+#    `RoiMask().create_missing_roi_masks(...)` (no GUI, see below), or draw a mask with
+#    `RoiMask().draw_roi_mask(...)`. The latter opens an interactive canvas (`start_gui()`) on the recording stacks
+#    of one field. You can start from an AutoROIs proposal or from an existing mask, clean it up by hand, and, if
+#    the field has several presentations, shift the mask to match each of them.
+# 2. **Save to a file.** `create_missing_roi_masks` and saving in the canvas write one mask file per presentation,
+#    next to the recording file, in the sub-directory `roi_mask_dir` (here `AutoROIs`). The format is set by
+#    `_roi_file_format` of the table:
 #    `'numpy'` (`.npy`, recommended) or `'pickle'` (`.pkl`, for older masks). Nothing is written to the database yet.
 # 3. **Load the files into the database** with `RoiMask().rescan_filesystem(roi_mask_dir=...)`. For each new field,
 #    this reads the mask of every presentation, uses the mask of the preferred presentation (see `mask_alias` and
@@ -256,7 +277,9 @@ plot_if_data(Presentation(), key=None)
 #    `shifted` by `shift_dx`/`shift_dy`, or `different`).
 #
 # Masks drawn in Igor are an alternative source: if `igor_roi_masks` in `RawDataParams` allows it, the mask is read
-# from the `.h5` recording file instead of a mask file.
+# from the `.h5` recording file instead of a mask file. With `igor_roi_masks='either'` this is decided per field: a mask
+# file is used if one exists, otherwise the Igor mask. (Tables created before `'either'` existed need
+# `RawDataParams().alter()` before they accept this value.)
 #
 # Each entry records where its mask came from in `roi_mask_file` (path relative to the `reference` store) and
 # `roi_mask_source` (`igor_h5`, `numpy`, `pickle` or `other`). Masks that are already in the database are not
@@ -277,8 +300,8 @@ print(f"{len(missing_fields)} fields without ROI mask")
 #
 # AutoROIs proposes a ROI mask for a field, which you can then clean and correct by hand in the ROI canvas.
 # Several models are available. They differ in how they work, what they need (extras of the `djimaging` package),
-# and how much memory they use. Select them by name in `load_default_autorois_models(models=[...])` or
-# `RoiMask().draw_roi_mask(autorois_models=[...])`.
+# and how much memory they use. Select them by name in `RoiMask().create_missing_roi_masks(model=...)`,
+# `load_default_autorois_models(models=[...])` or `RoiMask().draw_roi_mask(autorois_models=[...])`.
 #
 # | Name | Type | Input | Extra | Memory |
 # |---|---|---|---|---|
@@ -312,13 +335,213 @@ print(f"{len(missing_fields)} fields without ROI mask")
 # `cellpose` 3.x needs `numpy<2.1`). You have to install them yourself, preferably in a separate environment
 # (see the README). `UNet`, `UNet_v1` and `CorrRoiMask` only need the extra `autorois`.
 #
-# By default only `UNet` and `CorrRoiMask` are loaded. All loaded models stay in memory (the neural networks
-# may also occupy GPU memory) for as long as they are referenced, and the ROI canvas keeps a reference to the models it
-# was given. To keep memory low, therefore:
+# `create_missing_roi_masks` loads only the model you ask for and releases it when it is done. The default
+# `load_default_autorois_models()` loads `UNet` and `CorrRoiMask`. Loaded models stay in memory (the neural
+# networks may also occupy GPU memory) for as long as they are referenced, and the ROI canvas keeps a reference to
+# the models it was given. To keep memory low, therefore, only load the models you want to use, and release the
+# canvas and the models before loading the next ones (see `free_memory()` below).
+
+# %% [markdown]
+# ## Check the size of the light artifact
 #
-# 1. Only load the models you want to use.
-# 2. When comparing several models, load them one at a time (see below), and release them before the next one.
-# 3. When you are done with AutoROIs, delete the canvas and the models and call `free_memory()`.
+# The top rows of every field are corrupted by the stimulus light (the *light artifact*). ROIs must not extend into
+# them, so the cleaning steps below remove these rows from the masks, and the AutoROIs models ignore them. How many
+# rows that are is taken from the setup (`npixartifact`), but the real artifact can be **larger than expected**, e.g.
+# with a different laser power or after a change of the setup. **Check it once for your data**, before you create or
+# correct masks.
+#
+# `RoiMask().plot_light_artifact(...)` shows the rows at the top of a field: the stack average and three row
+# profiles (mean, temporal standard deviation, and correlation with the next row). Inside the artifact the rows are
+# far stronger and more correlated than the tissue below, and the profiles step at its edge. The gray dashed line is
+# the setup value, the red line your candidate `n_artifact`. Choose the first row after the step. With
+# `restrictions=...`, the profiles of several fields are overlaid, so you can pick one value for all of them. If the
+# value differs from the setup value, pass it as `n_artifact` to `create_missing_roi_masks` and
+# `correct_roi_masks`.
+#
+# **Note:** the plot loads the recording of each field, so a large `restrictions` takes a while.
+
+# %%
+# Check the light artifact of one field (first field if no field_key is given)
+RoiMask().plot_light_artifact(field_key=None, n_max=15, n_artifact=None)
+
+# %%
+# Check several fields at once, to choose one value for all of them
+# RoiMask().plot_light_artifact(restrictions=dict(experimenter='Ran'), n_max=15, n_artifact=None, max_fields=20)
+
+# %%
+# Number of light artifact rows for all following steps. None: use the setup value.
+n_artifact = None
+
+# %% [markdown]
+# ## Generate the missing ROI masks with AutoROIs
+#
+# `RoiMask().create_missing_roi_masks(...)` runs an AutoROIs model on every field that has no ROI mask yet, without
+# the ROI canvas. For each field it
+#
+# 1. loads the recordings of all presentations of the field (only after the stimulus onset),
+# 2. lets the model propose a mask on the first presentation (the reference),
+# 3. cleans the mask (removes the light artifact rows, splits disconnected ROIs, removes tiny ROIs),
+# 4. estimates the shift of every other presentation relative to the reference ("auto shift"), and
+# 5. saves one mask file per presentation to `roi_mask_dir`, exactly like *Save all to file* in the ROI canvas.
+#
+# Nothing is written to the database by this step. The following `rescan_filesystem` loads the new files.
+# Fields for which the files already exist are skipped, so it is safe to run the cell again, e.g. after an
+# interruption.
+#
+# | Parameter | Meaning |
+# |---|---|
+# | `model` | Name of the model (see the table above). Default: `'UNet'` (`'CorrRoiMask'` if `kind` is not `'default_rgc'`). |
+# | `kind` | Cell type: `'default_rgc'`, `'default_bc'`, `'default_ac'`, `'default_pr'` or `'default_pr_watershed'`. Only `CorrRoiMask` exists for other cells than RGCs. |
+# | `autorois_models` | Optional, already loaded models (dict from `load_default_autorois_models`). By default only `model` is loaded and released again at the end. |
+# | `restrictions` | Restrict the fields, e.g. `dict(experimenter='Ran')`. `None`: all fields without ROI mask. |
+# | `roi_mask_dir` | Sub-directory next to the recording files where the mask files are saved. Use different directories to keep the masks of different models. |
+# | `old_prefix`, `new_prefix` | Replace a path prefix when resolving the file paths, e.g. if the data was moved. |
+# | `roi_channel` | Which recording channel the model is applied to. Default: the ROI channel of the user info. The first other channel is the second input of `UNet_v1`. |
+# | `use_stim_onset` | `True`: ignore the recording before the first stimulus trigger. |
+# | `use_all_stacks` | `False`: the model sees only the first presentation. `True`: all presentations of a field, concatenated in time (only useful if they are aligned). |
+# | `clean` | Clean the mask after the model (artifact rows, disconnected ROIs, tiny ROIs). |
+# | `min_size` | Smallest ROI in pixels that survives cleaning. |
+# | `connectivity` | `1`: only horizontal/vertical neighbours belong to the same ROI. `2`: diagonal neighbours too. |
+# | `vessel_threshold` | Remove ROIs on blood vessels, which the model sometimes mistakes for cells (default `50`, `None`: off). Needs a second recording channel (e.g. SR101), otherwise it is ignored. See below. |
+# | `max_vessel_overlap` | A ROI is removed if more than this fraction of its pixels is on a vessel. |
+# | `auto_shift` | `True`: estimate the shift of the other presentations from their correlation maps. `False`: no shift, all presentations get the same mask. |
+# | `max_shift` | Largest shift in pixels that auto shift searches for. Default: `_max_shift` of the table (5). |
+# | `n_artifact` | Number of light artifact rows at the top of the field. `None`: setup value. See *Check the size of the light artifact* above. |
+# | `overwrite_files` | `False`: skip fields whose mask files all exist. `True`: overwrite the files, **including masks you corrected by hand**. |
+# | `suppress_errors` | `True`: continue with the next field if one fails, and report the errors in the result. |
+# | `verbose` | Print progress. |
+#
+# **Blood vessels.** Vessels are bright in the second recording channel (e.g. SR101) and the model sometimes proposes
+# ROIs on them. Cells can be bright in both channels (bleed-through), so the second channel is not simply
+# thresholded. Instead, both average images are z-scored (median and MAD, ignoring the light artifact rows), the
+# second channel is predicted from the ROI channel, and pixels that stand out from this prediction are vessels.
+# `vessel_threshold` is the distance in robust standard deviations: it is relative to each field and does not depend on
+# absolute brightness. Lower values find more vessel pixels. A ROI is removed if more than `max_vessel_overlap` of its
+# pixels are on vessels. Fields without vessels are not affected. To choose the value, plot
+# `djimaging.utils.mask_utils.estimate_vessel_mask(alt_img, main_img, n_artifact, alt_z=...)`.
+#
+# The function returns a dict with the fields that got new files (`'created'`), were skipped (`'skipped'`) and
+# failed (`'errors'`).
+#
+# The proposals are only as good as the model. Check them (next cells) and correct fields where they are wrong in
+# the ROI canvas, see the end of this section. To compare several models, run the cell once per model with a
+# different `roi_mask_dir`. Because only the requested model is loaded and released afterwards, memory stays low.
+
+# %%
+result = RoiMask().create_missing_roi_masks(
+    model='UNet',
+    kind='default_rgc',
+    autorois_models=None,
+    restrictions=None,
+    roi_mask_dir='AutoROIs',
+    old_prefix=None,
+    new_prefix=None,
+    roi_channel=None,
+    use_stim_onset=True,
+    use_all_stacks=False,
+    clean=True,
+    min_size=3,
+    connectivity=2,
+    vessel_threshold=50,
+    max_vessel_overlap=0.2,
+    auto_shift=True,
+    max_shift=None,
+    n_artifact=n_artifact,
+    overwrite_files=False,
+    suppress_errors=True,
+    verbose=True,
+)
+
+# %%
+for failed_key, error in result['errors']:
+    print(failed_key, repr(error))
+
+# %%
+# Load the just created ROI masks into the database
+RoiMask().rescan_filesystem(verboselvl=2, roi_mask_dir='AutoROIs')
+
+# %% [markdown]
+# ### Correct existing ROI masks
+#
+# Masks in the database, e.g. drawn in Igor, may miss cells that are inactive or contain artifacts.
+# `RoiMask().correct_roi_masks(...)` proposes corrections without a GUI. For each field with a mask it
+#
+# 1. cleans the mask (removes the light artifact rows, splits disconnected ROIs, removes tiny ROIs),
+# 2. lets an AutoROIs model propose a mask and adds the ROIs of the model that are **missing** in the mask. Added ROIs
+#    never overlap or touch existing ROIs, and existing ROIs are never changed, and
+# 3. if the mask changed, saves the corrected mask to one file per presentation in `roi_mask_dir`.
+#
+# The database is **not** changed by this step. Review the corrections with `plot_roi_mask_correction` and replace
+# the entry of a field you accept with `deploy_roi_mask`. This deletes everything downstream of the ROI mask of that
+# field (traces, snippets, analyses, ...) and only repopulates `Roi`. With `deploy=True` all corrected fields are
+# replaced right away, so only use it if you do not want to review them.
+#
+# The parameters `model`, `kind`, `autorois_models`, `restrictions`, `old_prefix`, `new_prefix`, `roi_channel`,
+# `use_stim_onset`, `clean`, `min_size`, `connectivity`, `vessel_threshold`, `max_vessel_overlap`, `overwrite_files`, `suppress_errors` and `verbose` are
+# the same as above. In addition:
+#
+# | Parameter | Meaning |
+# |---|---|
+# | `roi_mask_dir` | Sub-directory for the corrected files. Use another one than `AutoROIs`, so the originals are kept. |
+# | `add_missing` | `True`: add the ROIs that the model finds but the mask misses. `False`: only clean the masks (no model is loaded). |
+# | `vessel_filter_existing` | `True`: also remove vessel ROIs (see `vessel_threshold` above) from the existing mask. Default `False`: only new ROIs are filtered, since the existing mask may be curated. |
+# | `shrink` | `True`: also remove border pixels that do not fit the activity of their ROI (e.g. drawn one pixel into a neighbour or a dark gap), see `mask_utils.shrink_rois_to_fit`. Strict: most fields stay unchanged. In the ROI canvas: 'Shrink ROI' (selected ROI, more sensitive) and 'Shrink all ROIs' (dangerzone). |
+# | `n_artifact` | Number of light artifact rows at the top of the field (see above). `None`: setup value. |
+# | `iou_threshold` | A ROI of the model counts as missing if its overlap (intersection over union) with every existing ROI is below this value. Lower values add fewer ROIs. |
+# | `deploy` | `True`: replace the database entries of the corrected fields right away. Requires `roi_table`. **Deletes the downstream tables of these fields.** |
+# | `roi_table` | The ROI table, populated for the deployed fields. |
+#
+# Fields whose presentations have different (not just shifted) masks are skipped.
+
+# %%
+# Only writes files and does not touch the database
+correction = RoiMask().correct_roi_masks(
+    model='UNet',
+    kind='default_rgc',
+    autorois_models=None,
+    restrictions=None,
+    roi_mask_dir='CorrectedROIs',
+    old_prefix=None,
+    new_prefix=None,
+    roi_channel=None,
+    use_stim_onset=True,
+    clean=True,
+    min_size=3,
+    connectivity=2,
+    vessel_threshold=50,
+    max_vessel_overlap=0.2,
+    vessel_filter_existing=False,
+    add_missing=True,
+    iou_threshold=0.1,
+    shrink=False,
+    n_artifact=n_artifact,
+    overwrite_files=False,
+    deploy=False,
+    roi_table=None,
+    suppress_errors=True,
+    verbose=True,
+)
+
+# %%
+# Review a correction (red: added, blue: removed)
+# RoiMask().plot_roi_mask_correction(
+#     field_key=correction['corrected'][0]['field_key'], roi_mask_dir='CorrectedROIs', n_artifact=n_artifact)
+
+# %%
+# Replace the database entry of an accepted field. Deletes everything downstream of the ROI mask of this field!
+# RoiMask().deploy_roi_mask(correction['corrected'][0]['field_key'], roi_table=Roi, roi_mask_dir='CorrectedROIs')
+
+# %% [markdown]
+# ### Correct single fields in the ROI canvas
+#
+# To check or correct a mask by hand, open the canvas on a field. It starts from the mask in the database.
+# Edit it and save it to file (*Save all to file*), or, if you pass the `Roi` table, replace the database entry with
+# *Deploy to database* (only enabled in the *Dangerzone*). Deploying **deletes everything downstream of the ROI
+# mask of this field** (traces, snippets, analyses, ...), and only repopulates `Roi`.
+#
+# The canvas can also run the AutoROIs models itself (`autorois_models=['UNet', 'Cellpose3_cyto3']`, loaded when
+# the canvas is created). Each loaded model needs memory, so only load the ones you use, and release the canvas
+# and the models with `free_memory()` when you are done.
 
 # %%
 import gc
@@ -336,79 +559,15 @@ def free_memory():
 
 
 # %%
-# Preload models so you only have to do it once.
-# Can also be None for all-manual ROIs. Default: UNet and CorrRoiMask.
-try:
-    from djimaging.tables.core.roi_mask import load_default_autorois_models
-    autorois_models = load_default_autorois_models()
-    # Other selections (each loaded model needs memory):
-    # autorois_models = load_default_autorois_models(models=['UNet', 'Cellpose3_cyto3'])
-    # autorois_models = load_default_autorois_models(models=['UNet_v1', 'Cellpose3_cyto2', 'MEDIAR'])
-    # Photoreceptors (only CorrRoiMask is available, 'default_pr_watershed' for the watershed variant):
-    # autorois_models = load_default_autorois_models(kind='default_pr', models=['CorrRoiMask'])
-except ImportError:
-    print("AutoROIs dependencies are not installed (extra 'autorois'), use manual ROIs only.")
-    autorois_models = None
-
-# %%
-if len(missing_fields) == 0:
-    # Just pick the first field
-    field_key = Field().keys()[0]
-else:
-    field_key = missing_fields.pop()  # Pick one field
-
-# Load ROI canvas, draw the ROI mask, clean it if you want, shift if you want.
-# You can then save it to a file to be able to load it again later.
-roi_canvas = RoiMask().draw_roi_mask(field_key=field_key, canvas_width=30, autorois_models=autorois_models, roi_mask_dir='AutoROIs')
-roi_canvas.start_gui()
-
-# %%
-# Fully automated:
-
-# from IPython.display import clear_output
-#
-#
-# while(len(missing_fields) > 0):
-#     field_key = missing_fields.pop()
-#
-#     roi_canvas = RoiMask().draw_roi_mask(field_key=field_key, canvas_width=30, roi_mask_dir='AutoROIs', autorois_models=autorois_models, show_diagnostics=False)
-#     display(roi_canvas.start_gui())
-#     roi_canvas.set_dangerzone(True)
-#     roi_canvas.exec_autorois_all()
-#
-#     for pres_name in roi_canvas.pres_names:
-#         if roi_canvas._selected_stim_idx != roi_canvas.main_stim_idx:
-#             roi_canvas.set_selected_stim(pres_name)
-#             roi_canvas.exec_auto_shift()
-#
-#     roi_canvas.exec_clean()
-#     roi_canvas.exec_save_all_to_file()
-#
-#     clear_output()
-
-# %%
-# Compare models one at a time to keep memory low: load only one model, use it in the canvas, and release it
-# before loading the next one. Run this cell once per model (the canvas keeps a reference to its model, so it has to
-# be deleted too). Save the masks under different names if you want to keep several of them.
-
+# field_key = Field().keys()[0]  # Pick the field you want to look at
 # roi_canvas = RoiMask().draw_roi_mask(
-#     field_key=field_key, canvas_width=30, autorois_models=['Cellpose3_cyto3'], roi_mask_dir='AutoROIs')
+#     field_key=field_key, canvas_width=30, roi_mask_dir='AutoROIs', roi_table=Roi, autorois_models=None)
 # roi_canvas.start_gui()
 
 # %%
-# Release the canvas and its model, then continue with the next model
+# Release the canvas when you are done
 # roi_canvas = None
 # free_memory()
-
-# %%
-# Release the models when you are done with AutoROIs
-autorois_models = None
-roi_canvas = None
-free_memory()
-
-# %%
-# Load the just saved ROI mask
-RoiMask().rescan_filesystem(verboselvl=2, roi_mask_dir='AutoROIs')
 
 # %%
 plot_if_data(RoiMask())

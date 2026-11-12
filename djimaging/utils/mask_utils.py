@@ -450,7 +450,7 @@ def remove_small_rois(mask: np.ndarray, min_size: int = 3, verbose: bool = True)
     min_size : int, optional
         Minimum number of pixels required to keep an ROI. Default is 3.
     verbose : bool, optional
-        If True, a warning is issued listing removed ROIs. Default is True.
+        If True, the number of removed ROIs is printed. Default is True.
 
     Returns
     -------
@@ -462,7 +462,7 @@ def remove_small_rois(mask: np.ndarray, min_size: int = 3, verbose: bool = True)
     small_roi_ids = roi_ids[roi_sizes < min_size]
     small_roi_locations = np.isin(mask, small_roi_ids)
     if verbose and small_roi_ids.size > 0:
-        warnings.warn(f'{len(small_roi_ids)} ROIs <{min_size}px removed.')
+        print(f'{len(small_roi_ids)} ROIs <{min_size}px removed.')
     mask[small_roi_locations] = 0
 
     return mask
@@ -496,6 +496,142 @@ def shrink_light_artifact_rois(mask: np.ndarray, n_artifact: int, verbose: bool 
                   f'Setting all artifact region pixel labels to background.')
     mask[:n_artifact, :] = 0
     return mask
+
+
+SHRINK_STATUS = ('unchanged', 'shrunk', 'low_signal', 'too_small', 'too_many', 'split')
+# Sensitive parameters of shrink_rois_to_fit for one ROI the user picked as suspicious (ROI canvas, 'Shrink ROI'). The
+# defaults are strict (batch use: changes ~2 % of the ROIs of the xy-RGCs test data, most fields none).
+SHRINK_SENSITIVE = dict(margin=0.15, min_rel_corr=0.2, min_group=1)
+
+
+def _zscored_highpass(traces: np.ndarray, highpass_frames: float) -> np.ndarray:
+    """High-pass (minus a Gaussian-smoothed copy) and z-score traces (n, t) along time."""
+    from scipy import ndimage
+    traces = np.asarray(traces, dtype=np.float64)
+    if highpass_frames is not None and highpass_frames > 0:
+        traces = traces - ndimage.gaussian_filter1d(traces, highpass_frames, axis=1, mode='nearest')
+    traces = traces - traces.mean(axis=1, keepdims=True)
+    sd = traces.std(axis=1, keepdims=True)
+    return np.divide(traces, sd, out=np.zeros_like(traces), where=sd > 0)
+
+
+def _corr_with(z: np.ndarray, others: np.ndarray) -> np.ndarray:
+    """Pearson correlation of z-scored rows ``z`` (n, t) with the rows of ``others`` (n, t), row by row."""
+    others = others - others.mean(axis=1, keepdims=True)
+    norm = np.linalg.norm(others, axis=1) * np.sqrt(z.shape[1])
+    return np.divide(np.sum(z * others, axis=1), norm, out=np.zeros(z.shape[0]), where=norm > 0)
+
+
+def shrink_rois_to_fit(
+        roi_mask: np.ndarray, stack: np.ndarray, n_artifact: int = 0, roi_ids=None, highpass_frames: float = 40.,
+        margin: float = 0.3, min_rel_corr: float = 0.0, min_ref_corr: float = 0.2, min_size: int = 6,
+        min_keep_frac: float = 0.6, local_px: int = 2, min_group: int = 2) -> tuple[np.ndarray, dict]:
+    """Remove border pixels whose activity does not belong to the ROI, e.g. of an ROI drawn one pixel too large.
+
+    Conservative by design: most ROIs are left unchanged. Per ROI (python format, labels > 0):
+
+    1. Traces of all pixels are high-passed (``highpass_frames``, removes bleaching / slow drift) and z-scored.
+    2. Each pixel is correlated with the mean of the other pixels of the ROI (``corr_in``, leave one out) and with
+       the mean of the pixels outside the ROI within ``local_px`` of it (``corr_out``: neighbouring cell or
+       neuropil; light artifact rows excluded).
+    3. The reference is the median ``corr_in`` of the core (pixels without a 4-neighbour outside the ROI; all pixels
+       if the core has fewer than 3). ROIs with a reference below ``min_ref_corr`` have too little signal to judge and
+       are left unchanged (``low_signal``), as are ROIs with fewer than ``min_size`` pixels (``too_small``).
+    4. A *border* pixel does not fit if it belongs to its surround, ``corr_out > corr_in + margin`` (e.g. part of a
+       neighbouring cell), or has no signal of the ROI at all, ``corr_in < min_rel_corr * reference`` (e.g. a dark
+       gap or vessel). Border pixels of the cell itself keep part of its signal (optical blur), also when dim, and are
+       kept: pixels just outside a cell still correlate with it, so a ROI that is one pixel too large is only changed
+       where that pixel clearly belongs elsewhere. Only connected groups (8-neighbourhood) of at least ``min_group``
+       such pixels are removed: an ROI drawn too large has a whole edge that does not fit, single pixels are mostly
+       noise. Defaults are strict, so that most ROIs and most fields are left unchanged (validation: 1.7 % of 1340
+       ROIs changed, 6 of 16 fields none; ``docs/motion_qc.md``). ``SHRINK_SENSITIVE`` is for a single ROI that looks
+       wrong. Pixels exactly between two touching cells are mixed (optical blur) and often not detected.
+    5. The ROI is left unchanged if it would keep fewer than ``min_keep_frac`` of its pixels (``too_many``) or split
+       into several parts (``split``). Pixels are never added, ROI labels are kept, only one border layer is checked.
+
+    Args:
+        roi_mask: Label mask in python format (0 background, ROI labels > 0), shape (x, y).
+        stack: Recording (x, y, t) the mask belongs to (e.g. the presentation the mask was drawn on).
+        n_artifact: Number of light artifact rows (excluded from the surround).
+        roi_ids: Labels of the ROIs to check. Default: all.
+
+    Returns:
+        The shrunk mask (python format) and a dict label -> dict(status, n_px, n_removed, ref_corr, removed (list of
+        (x, y))).
+    """
+    from scipy import ndimage
+
+    roi_mask = np.asarray(roi_mask).astype(int)
+    if np.any(roi_mask < 0):
+        raise ValueError('roi_mask must be in python format (labels > 0), see to_python_format')
+    if stack.shape[:2] != roi_mask.shape:
+        raise ValueError(f'stack shape {stack.shape[:2]} does not match roi_mask shape {roi_mask.shape}')
+
+    nx, ny = roi_mask.shape
+    valid = np.ones_like(roi_mask, dtype=bool)
+    valid[:n_artifact, :] = False  # light artifact rows, see shrink_light_artifact_rois
+    labels = np.unique(roi_mask[roi_mask > 0]) if roi_ids is None else np.asarray(roi_ids, dtype=int)
+    out_mask, info = roi_mask.copy(), dict()
+    four = ndimage.generate_binary_structure(2, 1)
+    # High-passed, z-scored traces of all pixels that can be used (ROIs to check and their surround)
+    used = ndimage.binary_dilation(np.isin(roi_mask, labels), iterations=local_px) if len(labels) else roi_mask > 0
+    zs = np.zeros(roi_mask.shape + (stack.shape[2],))
+    zs[used] = _zscored_highpass(stack[used], highpass_frames)
+
+    for label in labels:
+        roi = roi_mask == label
+        n_px = int(roi.sum())
+        d = dict(status='unchanged', n_px=n_px, n_removed=0, ref_corr=np.nan, removed=[])
+        info[int(label)] = d
+        if n_px < min_size:
+            d['status'] = 'too_small'
+            continue
+
+        xs, ys = np.nonzero(roi)
+        z = zs[xs, ys]
+        corr_in = _corr_with(z, z.sum(axis=0, keepdims=True) - z)
+        border = (roi & ~ndimage.binary_erosion(roi, structure=four, border_value=0))[xs, ys]
+        core = ~border
+        ref = float(np.median(corr_in[core] if core.sum() >= 3 else corr_in))
+        d['ref_corr'] = ref
+        if not ref >= min_ref_corr:
+            d['status'] = 'low_signal'
+            continue
+
+        remove = []
+        for i in np.flatnonzero(border):
+            if corr_in[i] < min_rel_corr * ref:
+                remove.append(i)
+                continue
+            x0, x1 = max(xs[i] - local_px, 0), min(xs[i] + local_px + 1, nx)
+            y0, y1 = max(ys[i] - local_px, 0), min(ys[i] + local_px + 1, ny)
+            surround = ~roi[x0:x1, y0:y1] & valid[x0:x1, y0:y1]
+            if surround.sum() < 2:
+                continue
+            out_mean = zs[x0:x1, y0:y1][surround].mean(axis=0, keepdims=True)
+            if _corr_with(z[i:i + 1], out_mean)[0] > corr_in[i] + margin:
+                remove.append(i)
+
+        if len(remove) > 0 and min_group > 1:
+            flagged = np.zeros_like(roi)
+            flagged[xs[remove], ys[remove]] = True
+            groups, _ = ndimage.label(flagged, structure=np.ones((3, 3)))
+            sizes = np.bincount(groups.ravel())
+            remove = [i for i in remove if sizes[groups[xs[i], ys[i]]] >= min_group]
+        if len(remove) == 0:
+            continue
+        new_roi = roi.copy()
+        new_roi[xs[remove], ys[remove]] = False
+        if new_roi.sum() < min_keep_frac * n_px:
+            d['status'] = 'too_many'
+            continue
+        if ndimage.label(new_roi, structure=np.ones((3, 3)))[1] > 1:
+            d['status'] = 'split'
+            continue
+        out_mask[roi & ~new_roi] = 0
+        d.update(status='shrunk', n_removed=len(remove), removed=[(int(xs[i]), int(ys[i])) for i in remove])
+
+    return out_mask, info
 
 
 def clean_rois(mask: np.ndarray, n_artifact: int, min_size: int = 3,
@@ -533,6 +669,113 @@ def clean_rois(mask: np.ndarray, n_artifact: int, min_size: int = 3,
     mask_new = relabel_mask(mask_new, connectivity=connectivity)  # re-label to fix ROI numbering after cleaning
 
     return mask_new
+
+
+def _robust_z(img: np.ndarray, n_artifact: int = 0) -> np.ndarray:
+    """Z-score an image with the median and MAD of the pixels outside the light artifact."""
+    valid = img[n_artifact:]
+    med = np.nanmedian(valid)
+    mad = 1.4826 * np.nanmedian(np.abs(valid - med))
+    if not mad > 0:
+        mad = np.nanstd(valid)
+    if not mad > 0:
+        return np.zeros_like(img, dtype=float)
+    return (img - med) / mad
+
+
+def estimate_vessel_mask(alt_img: np.ndarray, main_img: np.ndarray, n_artifact: int = 0,
+                         alt_z: float = 50., smooth_sigma: float = 0.7) -> np.ndarray:
+    """Estimate blood vessel pixels by comparing the alternative channel (e.g. SR101) to the main channel.
+
+    Cells can be bright in both channels (bleed-through), but only vessels (and astrocytes) stand out in the
+    alternative channel alone. Both images are z-scored robustly (median and MAD outside the light artifact), the
+    alternative channel is predicted from the main channel with one non-negative slope (fitted with iterative
+    outlier clipping, so vessels do not bias it), and pixels whose robust z-score of the remaining residual exceeds
+    `alt_z` are vessels. Fields without vessels yield (almost) no vessel pixels.
+
+    Parameters
+    ----------
+    alt_img : np.ndarray
+        2-D time-average of the alternative channel.
+    main_img : np.ndarray
+        2-D time-average of the main (ROI) channel, same shape.
+    n_artifact : int, optional
+        Number of rows at the top that form the light-artifact region, ignored for the statistics and never vessel.
+    alt_z : float, optional
+        Robust z-score of the residual above which a pixel is a vessel. Lower values find more. Default is 50.
+    smooth_sigma : float, optional
+        Sigma in pixels of the Gaussian smoothing applied before thresholding. Default is 0.7.
+
+    Returns
+    -------
+    np.ndarray
+        2-D boolean array, True for vessel pixels.
+    """
+    from scipy import ndimage
+
+    alt_img = np.asarray(alt_img, dtype=float)
+    main_img = np.asarray(main_img, dtype=float)
+    if alt_img.shape != main_img.shape:
+        raise ValueError(f'alt_img {alt_img.shape} and main_img {main_img.shape} must have the same shape')
+
+    if smooth_sigma > 0:
+        alt_img = ndimage.gaussian_filter(alt_img, smooth_sigma)
+        main_img = ndimage.gaussian_filter(main_img, smooth_sigma)
+
+    alt_zs, main_zs = _robust_z(alt_img, n_artifact), _robust_z(main_img, n_artifact)
+    valid = np.zeros(alt_img.shape, dtype=bool)
+    valid[n_artifact:] = True
+
+    fit = valid.copy()
+    slope = 0.
+    for _ in range(5):
+        denom = np.sum(main_zs[fit] ** 2)
+        slope = float(np.clip(np.sum(alt_zs[fit] * main_zs[fit]) / denom, 0., 1.)) if denom > 0 else 0.
+        residual = alt_zs - slope * main_zs
+        residual_z = _robust_z(residual, n_artifact)
+        fit = valid & (residual_z < 3.)
+
+    return valid & (residual_z > alt_z)
+
+
+def remove_vessel_rois(mask: np.ndarray, vessel_mask: np.ndarray, max_overlap: float = 0.2,
+                       connectivity: int = 2, verbose: bool = True) -> np.ndarray:
+    """Remove ROIs that overlap with blood vessels, see `estimate_vessel_mask`.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        2-D integer ROI mask in Python format (background 0, ROIs positive).
+    vessel_mask : np.ndarray
+        2-D boolean array of vessel pixels, same shape as `mask`.
+    max_overlap : float, optional
+        Largest allowed fraction of a ROI's pixels on vessel pixels. Default is 0.2.
+    connectivity : int, optional
+        Pixel connectivity used for relabelling. Default is 2.
+    verbose : bool, optional
+        If True, print the number of removed ROIs. Default is True.
+
+    Returns
+    -------
+    np.ndarray
+        Relabelled ROI mask without the vessel ROIs.
+    """
+    mask = np.asarray(mask)
+    vessel_mask = np.asarray(vessel_mask, dtype=bool)
+    if vessel_mask.shape != mask.shape:
+        raise ValueError(f'vessel_mask {vessel_mask.shape} and mask {mask.shape} must have the same shape')
+
+    mask_new = mask.copy()
+    n_removed = 0
+    for roi_id in np.unique(mask[mask > 0]):
+        roi_pixels = mask == roi_id
+        if vessel_mask[roi_pixels].mean() > max_overlap:
+            mask_new[roi_pixels] = 0
+            n_removed += 1
+
+    if verbose and n_removed:
+        print(f'Removed {n_removed} ROIs that overlap with blood vessels.')
+    return relabel_mask(mask_new, connectivity=connectivity)
 
 
 def find_neighbor_labels(x: int, y: int, labels: np.ndarray) -> np.ndarray:
@@ -656,7 +899,7 @@ def add_rois(rois_to_add: np.ndarray, rois: np.ndarray, connectivity: int = 2,
         connected_comps, n_comps = fix_disconnected_rois(suggested_roi.astype(int) * new_roi_id,
                                                          connectivity=connectivity, return_num=True)
         # filter small ROIs
-        connected_large_comps = remove_small_rois(connected_comps)
+        connected_large_comps = remove_small_rois(connected_comps, verbose=False)
         comp_ids = np.unique(connected_large_comps)
         comp_ids = comp_ids[comp_ids > 0]  # ignore background
         for comp_id in comp_ids:
@@ -744,6 +987,18 @@ def generate_roi_suggestions(mask_pred: np.ndarray, mask_true: np.ndarray, n_art
     # rois_to_add = clean_rois(rois_to_add,n_artifact)
 
     return rois_to_add
+
+
+FIELD_ROI_MASK_SUFFIX = '_FieldROIs.npy'
+
+
+def to_field_roi_mask_file(data_file: str, roi_mask_dir: str | None = None, old_prefix: str | None = None,
+                           new_prefix: str | None = None) -> str:
+    """File of a field ROI mask (motion mode): one mask per field, named after the data file of the presentation it
+    belongs to (``<stem>_FieldROIs.npy``). Unlike presentation mask files (``<stem>_ROIs.npy``), it is not loaded as
+    the mask of that presentation, see ``RoiMaskTemplate``."""
+    return to_roi_mask_file(data_file, new_suffix=FIELD_ROI_MASK_SUFFIX, roi_mask_dir=roi_mask_dir,
+                            old_prefix=old_prefix, new_prefix=new_prefix)
 
 
 def to_roi_mask_file(data_file: str, old_suffix: str | None = None, new_suffix: str = '_ROIs.npy',
@@ -881,6 +1136,7 @@ def load_preferred_roi_mask_igor(files: list, mask_alias: str = '',
     """
     sorted_files = sort_roi_mask_files(files, mask_alias=mask_alias, highres_alias=highres_alias)
     for file in sorted_files:
+        file = str(file)  # may be a Path
         if os.path.isfile(file) and file.endswith('.h5'):
             roi_mask = read_h5_utils.load_roi_mask(filepath=file, ignore_not_found=True)
             if roi_mask is not None:
@@ -1040,3 +1296,153 @@ def compare_roi_masks(roi_mask: np.ndarray, ref_roi_mask: np.ndarray,
                 return 'shifted', (dx, dy)
 
     return 'different', (0, 0)
+
+
+def _fit_image(img: np.ndarray, n_artifact: int = 0, highpass_sigma: float = 6.) -> np.ndarray:
+    """High-passed, robustly z-scored mean image; light artifact rows are NaN.
+
+    Pixel noise is negligible in mean images of typical recordings (< 0.1 % of the variance of the high-passed image
+    even for 40 frames), so fits of short and long recordings are comparable without noise correction.
+    """
+    from scipy.ndimage import gaussian_filter
+    img = np.asarray(img, dtype=float)
+    hp = _robust_z(img - gaussian_filter(img, highpass_sigma, mode='nearest'), n_artifact=n_artifact)
+    hp[:n_artifact] = np.nan
+    return hp
+
+
+def _roi_and_ring_indices(roi_mask: np.ndarray, ring_px: int = 2) -> list:
+    """Flat pixel indices of each ROI (Igor format) and of the ring of background pixels around it."""
+    from scipy.ndimage import binary_dilation
+    occupied = roi_mask < 0
+    out = []
+    for roi_id in np.unique(roi_mask[occupied]):
+        inner = roi_mask == roi_id
+        ring = binary_dilation(inner, iterations=ring_px) & ~occupied
+        if ring.sum() > 3:
+            out.append((np.flatnonzero(inner), np.flatnonzero(ring)))
+    return out
+
+
+def _offset_image(img: np.ndarray, offset: tuple) -> np.ndarray:
+    """``out[p] = img[p - offset]`` with NaN outside: scoring a mask on ``out`` equals scoring the mask shifted by
+    ``offset`` (``shift_array(mask, offset)``) on ``img``, inverted."""
+    dx, dy = int(offset[0]), int(offset[1])
+    out = np.full_like(img, np.nan)
+    nx, ny = img.shape
+    out[max(dx, 0):nx + min(dx, 0), max(dy, 0):ny + min(dy, 0)] = \
+        img[max(-dx, 0):nx + min(-dx, 0), max(-dy, 0):ny + min(-dy, 0)]
+    return out
+
+
+def _fit_score(indices: list, fit_img: np.ndarray) -> float:
+    flat = fit_img.ravel()
+    vals = []
+    for inner, ring in indices:
+        vi, vr = flat[inner], flat[ring]
+        if np.mean(np.isfinite(vi)) < 0.5 or np.mean(np.isfinite(vr)) < 0.5:
+            continue
+        vals.append(np.nanmean(vi) - np.nanmean(vr))
+    return float(np.median(vals)) if len(vals) > 0 else np.nan
+
+
+def mask_fit_score(roi_mask: np.ndarray, img: np.ndarray, n_artifact: int = 0, ring_px: int = 2,
+                   highpass_sigma: float = 6.) -> float:
+    """How well an ROI mask (Igor format) fits a mean image.
+
+    Median over ROIs of the mean of the high-passed, robustly z-scored image inside the ROI minus the mean in a ring
+    of ``ring_px`` background pixels around it. ROIs drawn on cell bodies give positive values; a mask that is
+    misaligned or belongs to a different image gives values close to zero.
+    """
+    assert_igor_format(roi_mask)
+    return _fit_score(_roi_and_ring_indices(roi_mask, ring_px=ring_px),
+                      _fit_image(img, n_artifact=n_artifact, highpass_sigma=highpass_sigma))
+
+
+def best_mask_offset(roi_mask: np.ndarray, img: np.ndarray, max_offset: int = 2, n_artifact: int = 0,
+                     min_gain: float = 0.1, ring_px: int = 2, highpass_sigma: float = 6.) -> dict:
+    """Integer offset that aligns an ROI mask (Igor format) to a mean image.
+
+    All offsets within ``max_offset`` px are scored with ``mask_fit_score``. The best one is only accepted if it
+    improves the score by more than ``min_gain`` (relative to the score without offset), so that noise alone does
+    not shift a mask. Apply it with ``shift_array(roi_mask, offset, cval=1)``.
+
+    Returns:
+        dict with ``offset`` (accepted offset), ``score`` (score at the accepted offset), ``score0`` (score without
+        offset), and ``best_offset`` / ``best_score`` (best offset before the ``min_gain`` check).
+    """
+    assert_igor_format(roi_mask)
+    indices = _roi_and_ring_indices(roi_mask, ring_px=ring_px)
+    fit_img = _fit_image(img, n_artifact=n_artifact, highpass_sigma=highpass_sigma)
+    scores = {}
+    for dx in range(-max_offset, max_offset + 1):
+        for dy in range(-max_offset, max_offset + 1):
+            # Shifting the mask by (dx, dy) is equivalent to shifting the image by (-dx, -dy)
+            scores[(dx, dy)] = _fit_score(indices, _offset_image(fit_img, (-dx, -dy)))
+    score0 = scores[(0, 0)]
+    finite = {k: v for k, v in scores.items() if np.isfinite(v)}
+    if len(finite) == 0:
+        return dict(offset=(0, 0), score=score0, score0=score0, best_offset=(0, 0), best_score=score0)
+    best_offset = max(finite, key=lambda k: (finite[k], -abs(k[0]) - abs(k[1])))
+    best_score = finite[best_offset]
+    accept = best_offset != (0, 0) and (not np.isfinite(score0) or best_score > score0 + min_gain * abs(score0))
+    offset = best_offset if accept else (0, 0)
+    return dict(offset=offset, score=scores[offset], score0=score0, best_offset=best_offset, best_score=best_score)
+
+
+def select_field_roi_mask(roi_masks: list, images: list, preferred_idx: int = 0, has_stack_ave: list | None = None,
+                          n_artifact: int = 0, max_offset: int = 2, max_copy_shift: int = 5, tol: float = 0.05,
+                          min_gain: float = 0.1) -> dict:
+    """Choose the presentation an ROI mask was drawn on, and align the mask to its mean image.
+
+    In Igor, the ROI mask is drawn on one presentation of a field and copied (possibly with an integer shift) to the
+    other presentations. Which presentation it was drawn on is not stored. Here every presentation whose mask is a
+    copy of the preferred mask (``compare_roi_masks``: same or shifted) is a candidate. Its own mask is aligned to its
+    own mean image (``best_mask_offset``), and the candidate with the best fit is chosen. Candidates within ``tol``
+    (relative) of the best fit count as equally good; among those, a presentation with a ``Stack_ave`` (written by
+    Igor's ROI drawing) is preferred, then the preferred presentation (``mask_alias`` order), then the best fit.
+
+    Args:
+        roi_masks: ROI mask (Igor format) of each presentation.
+        images: Mean image of the ROI channel of each presentation (same shape as the masks).
+        preferred_idx: Index of the presentation preferred by ``mask_alias``.
+        has_stack_ave: Whether each presentation file contains a ``Stack_ave``.
+        n_artifact: Number of light artifact rows.
+        max_offset: Maximum offset [px] for aligning the mask to the chosen presentation.
+        max_copy_shift: Maximum shift for detecting copied masks, see ``compare_roi_masks``.
+        tol: Relative tolerance for treating fits as equal.
+        min_gain: See ``best_mask_offset``.
+
+    Returns:
+        dict with ``idx`` (chosen presentation), ``roi_mask`` (its mask, aligned), ``offset`` (alignment offset
+        applied with ``shift_array(roi_masks[idx], offset, cval=1)``), ``score`` (fit of the aligned mask),
+        ``selection`` ('fit', or 'alias' if no candidate fits, i.e. no positive score), ``scores`` (best fit per
+        presentation, NaN for non-candidates) and ``n_different`` (presentations with a different, not copied mask).
+    """
+    n = len(roi_masks)
+    if len(images) != n:
+        raise ValueError(f'Got {n} ROI masks but {len(images)} images.')
+    has_stack_ave = [False] * n if has_stack_ave is None else list(has_stack_ave)
+
+    ref = roi_masks[preferred_idx]
+    is_copy = [i == preferred_idx or compare_roi_masks(m, ref, max_shift=max_copy_shift)[0] != 'different'
+               for i, m in enumerate(roi_masks)]
+
+    fits = [best_mask_offset(m, img, max_offset=max_offset, n_artifact=n_artifact, min_gain=min_gain)
+            if c else None for m, img, c in zip(roi_masks, images, is_copy)]
+    scores = np.array([f['score'] if f is not None else np.nan for f in fits], dtype=float)
+
+    finite = np.isfinite(scores)
+    if not np.any(finite) or np.nanmax(scores) <= 0:
+        idx, selection = preferred_idx, 'alias'
+    else:
+        best = np.nanmax(scores)
+        close = [i for i in range(n) if finite[i] and scores[i] >= best - tol * abs(best)]
+        idx = max(close, key=lambda i: (has_stack_ave[i], i == preferred_idx, scores[i]))
+        selection = 'fit'
+
+    fit = fits[idx]
+    offset = tuple(int(v) for v in fit['offset'])
+    roi_mask = roi_masks[idx] if offset == (0, 0) else shift_array(roi_masks[idx], offset, cval=1)
+    return dict(idx=int(idx), roi_mask=roi_mask, offset=offset, score=float(fit['score']), selection=selection,
+                scores=scores, n_different=int(n - np.sum(is_copy)))

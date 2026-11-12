@@ -1,8 +1,7 @@
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 
-from djimaging.tables.motion_correction import motion_utils
 from djimaging.utils.mask_format_utils import assert_igor_format
 from djimaging.utils.scanm import roi_utils, wparams_utils, read_utils
 
@@ -213,9 +212,8 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, preci
 def roi2trace_from_stack(
         filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray,
         data_stack_name: str, precision: str, from_raw_data: bool = False,
-        shifts_x: Optional[np.ndarray] = None, shifts_y: Optional[np.ndarray] = None,
-        shift_kws: Optional[dict] = None, accept_missing_rois: bool = False) -> Tuple[dict, float]:
-    """Load a stack from disk and extract per-ROI traces, optionally after motion correction.
+        accept_missing_rois: bool = False) -> Tuple[dict, float]:
+    """Load a stack from disk and extract per-ROI traces.
 
     Parameters
     ----------
@@ -233,16 +231,6 @@ def roi2trace_from_stack(
     from_raw_data : bool, optional
         If True, load from a raw .smp file; otherwise load from an .h5 file.
         Default is False.
-    shifts_x : np.ndarray, optional
-        Per-frame shift values along x for motion correction. If None, no
-        motion correction is applied.
-    shifts_y : np.ndarray, optional
-        Per-frame shift values along y for motion correction. If None, no
-        motion correction is applied.
-    shift_kws : dict, optional
-        Additional keyword arguments passed to
-        :func:`motion_utils.correct_shifts_in_stack`. Ignored if both
-        ``shifts_x`` and ``shifts_y`` are None.
     accept_missing_rois : bool, optional
         If True, silently skip ROI IDs that are present in ``roi_ids`` but
         absent from the mask. Default is False.
@@ -264,12 +252,6 @@ def roi2trace_from_stack(
     ch_stacks, wparams = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_stack_name,))
     stack = ch_stacks[data_stack_name]
 
-    if (shifts_x is not None) or (shifts_y is not None):
-        if shift_kws is None:
-            shift_kws = dict()
-        stack = motion_utils.correct_shifts_in_stack(
-            stack=stack, shifts_x=shifts_x, shifts_y=shifts_y, cval=np.min, **shift_kws)
-
     roi_ids_from_mask, traces, traces_times, frame_dt = compute_traces(
         stack=stack, roi_mask=roi_mask, wparams=wparams, precision=precision)
 
@@ -282,6 +264,60 @@ def roi2trace_from_stack(
     roi2trace = roi_utils.get_roi2trace(traces=traces, traces_times=traces_times,
                                         roi_ids_traces=abs(roi_ids_from_mask), roi_ids_subset=abs(roi_ids))
 
+    return roi2trace, frame_dt
+
+
+def roi2trace_from_stack_motion(
+        filepath: str, roi_ids: np.ndarray, roi_weights: np.ndarray, weight_roi_ids: np.ndarray,
+        disp_frames: np.ndarray, data_stack_name: str, precision: str, from_raw_data: bool = False,
+) -> Tuple[dict, float]:
+    """Motion-corrected traces: the stack is registered with ``disp_frames`` (shifted by -disp, bilinear) and the
+    traces are weighted means with the presentation ROI weights (see ``djimaging.tables.motion_correction``).
+
+    Parameters
+    ----------
+    filepath : str
+        Path to the recording file (.h5 or .smp).
+    roi_ids : np.ndarray
+        Positive ROI IDs to extract traces for (subset of ``weight_roi_ids``).
+    roi_weights : np.ndarray
+        (n_rois, x, y) weights in the frame of the registered stack.
+    weight_roi_ids : np.ndarray
+        Positive ROI IDs of ``roi_weights``.
+    disp_frames : np.ndarray
+        (n_frames, 2) displacement of every frame relative to the reference [px].
+    data_stack_name, precision, from_raw_data :
+        See :func:`roi2trace_from_stack`.
+
+    Returns
+    -------
+    roi2trace : dict
+        As :func:`roi2trace_from_stack`. Pixels outside the FOV after registration are ignored.
+    frame_dt : float
+        Duration of one frame in seconds.
+    """
+    from djimaging.utils.motion import extract_traces_weighted, register_stack
+
+    ch_stacks, wparams = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_stack_name,))
+    stack = np.asarray(ch_stacks[data_stack_name], dtype=np.float32)
+    if stack.shape[2] != len(disp_frames):
+        raise ValueError(f"Stack has {stack.shape[2]} frames but motion has {len(disp_frames)}.")
+
+    frame_times, frame_dt_offset, frame_dt = wparams_utils.compute_frame_times(
+        wparams=wparams, n_frames=stack.shape[2], precision=precision)
+
+    weight_roi_ids = np.abs(np.asarray(weight_roi_ids, dtype=int))
+    missing = sorted(set(np.abs(roi_ids)) - set(weight_roi_ids))
+    if missing:
+        raise ValueError(f"No ROI weights for ROIs {missing}.")
+
+    traces = extract_traces_weighted(register_stack(stack, disp_frames), roi_weights)
+    t0s = np.array([np.median(frame_dt_offset[w > 0]) if np.any(w > 0) else np.median(frame_dt_offset)
+                    for w in roi_weights])
+    traces_times = frame_times[:, None] + t0s[None, :]
+
+    roi2trace = roi_utils.get_roi2trace(traces=traces, traces_times=traces_times,
+                                        roi_ids_traces=weight_roi_ids, roi_ids_subset=np.abs(roi_ids))
     return roi2trace, frame_dt
 
 

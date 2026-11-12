@@ -47,6 +47,68 @@ def test_generated_schema_defines_tables_of_blocks(blocks):
     assert ('OsDsIndexes' in namespace) == ('basic' in blocks)
     assert ('OpticDisk' in namespace) == ('location' in blocks)
     assert ('CelltypeAssignmentV2' in namespace) == ('classifier' in blocks)
+    assert ('MotionRoiMask' in namespace) == ('motion' in blocks)
+    assert ('RefinedRoiMask' in namespace) == ('motion_refine' in blocks)
+    # Motion mode: one presentation mask format only
+    assert (namespace['RoiMask'].RoiMaskPresentation is None) == ('motion' in blocks)
+    assert namespace['RoiMask']._presentation_masks == ('motion' not in blocks)
+    # Motion mode: the presentation of the field mask is chosen by fit and the mask aligned to it
+    assert namespace['RoiMask']()._selects_field_mask == ('motion' in blocks)
+    assert ('mask_selection' in namespace['RoiMask']().definition) == ('motion' in blocks)
+    assert namespace['Traces']._include_motion_correction == ('motion' in blocks)
+
+
+@pytest.mark.parametrize('channels', [None, (1, 1), (2, 1)])
+def test_motion_mode_schema_and_notebook(channels):
+    blocks = make_project.resolve_blocks(['motion', 'rf_sta'])
+    text = make_project.build_schema_text(ROOT, blocks, channels=channels)
+    namespace = exec_schema(text)
+    assert namespace['Traces'].motion_roi_mask_table is namespace['MotionRoiMask']
+    assert text.index('class MotionRoiMask(') < text.index('class Traces(')
+    assert text.index('class Roi(core.RoiTemplate)') < text.index('class MotionRoiMask(')
+    assert namespace['MotionTrust'].Roi.motion_roi_mask_table is namespace['MotionRoiMask']
+    # RefinedRoiMask is optional (motion_refine block) and off by default
+    assert 'RefinedRoiMask' not in namespace
+    assert namespace['MotionRoiMask'].refined_roi_mask_table is None
+    assert '-> self.refined_roi_mask_table' not in namespace['MotionRoiMask']().definition
+    nb = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester', channels=channels)
+    ast.parse(nb)
+    assert nb.index('MotionRoiMask().populate') < nb.index('Traces().populate')
+    assert nb.index('Roi().populate') < nb.index('MotionReference().populate')
+    assert 'RefinedRoiMask' not in nb
+
+
+@pytest.mark.parametrize('channels', [None, (1, 1)])
+def test_motion_refine_schema_and_notebook(channels):
+    blocks = make_project.resolve_blocks(['motion_refine'])
+    assert blocks == ['core', 'motion', 'motion_refine']
+    text = make_project.build_schema_text(ROOT, blocks, channels=channels)
+    namespace = exec_schema(text)
+    assert namespace['MotionRoiMask'].refined_roi_mask_table is namespace['RefinedRoiMask']
+    assert '-> self.refined_roi_mask_table' in namespace['MotionRoiMask']().definition
+    assert text.index('class MotionDetection(') < text.index('class RefinedRoiMask(') < text.index('class MotionRoiMask(')
+    nb = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester', channels=channels)
+    ast.parse(nb)
+    assert nb.index('MotionDetection().populate') < nb.index('RefinedRoiMask().populate') \
+        < nb.index('MotionRoiMask().populate') < nb.index('Traces().populate')
+
+
+def test_motion_refine_only_with_flag_or_explicit_block(monkeypatch):
+    """motion_refine is not asked, not in --all, but can be forced with --refined-roi-mask or --blocks."""
+    def select(*argv):
+        return make_project.resolve_blocks(make_project.select_blocks(make_project.parse_args(['proj', *argv])))
+
+    assert 'motion_refine' not in select('--all')
+    assert 'motion_refine' in select('--all', '--refined-roi-mask')
+    assert select('--refined-roi-mask') == ['core', 'motion', 'motion_refine']  # motion is added as requirement
+    assert select('--blocks', 'basic', '--refined-roi-mask') == ['core', 'motion', 'motion_refine', 'basic']
+    assert 'motion_refine' in select('--blocks', 'motion_refine')
+
+    asked = []
+    monkeypatch.setattr(make_project.sys.stdin, 'isatty', lambda: True)
+    monkeypatch.setattr('builtins.input', lambda q: asked.append(q) or 'n')
+    assert select() == ['core']
+    assert not any("'motion_refine'" in q for q in asked) and any("'motion'" in q for q in asked)
 
 
 def test_generated_schema_has_no_duplicate_tables():
@@ -120,7 +182,7 @@ def test_default_schema_uses_channel_table_with_one_functional_channel():
     ast.parse(text)
     assert ("Channel().add_channels([('wDataCh0', 0), ('wDataCh1', 1)], functional=['wDataCh0'], "
             "roi_channel='wDataCh0', skip_duplicates=True)") in text
-    assert text.index('Channel().add_channels') > text.index('RawDataParams().add_default()')
+    assert text.index('Channel().add_channels') > text.index('RawDataParams().add_params(')
 
 
 @pytest.mark.parametrize('blocks', [['core'], OPTIONAL_BLOCKS])
@@ -182,3 +244,36 @@ def test_channels_are_asked_interactively(monkeypatch):
     answers = iter(['2', ''])
     monkeypatch.setattr('builtins.input', lambda prompt: next(answers))
     assert select() == (2, 1)
+
+
+def test_raw_params_in_notebook():
+    blocks = make_project.resolve_blocks(['core'])
+    text = make_project.build_notebook_text(
+        ROOT, blocks, schema_module='my.schema', project='tester',
+        raw_params=dict(from_raw_data=True, igor_roi_masks='either'))
+    ast.parse(text)
+    assert "from_raw_data = True\nigor_roi_masks = 'either'\n" in text
+    assert 'RawDataParams().add_params(from_raw_data=from_raw_data, igor_roi_masks=igor_roi_masks)' in text
+    assert 'RawDataParams().add_default' not in text and '__FROM_RAW_DATA__' not in text and '__IGOR_ROI_MASKS__' not in text
+
+
+def test_raw_params_arguments(monkeypatch):
+    monkeypatch.setattr('sys.stdin.isatty', lambda: False, raising=False)
+    args = make_project.parse_args(['proj', '--from-raw-data', 'yes', '--igor-roi-masks', 'no'])
+    assert make_project.select_raw_params(args) == dict(from_raw_data=True, igor_roi_masks='no')
+    args = make_project.parse_args(['proj'])
+    assert make_project.select_raw_params(args) == make_project.DEFAULT_RAW_PARAMS
+
+
+def test_add_default_raw_data_params_is_deprecated():
+    from djimaging.tables.core.raw_data import RawDataParamsTemplate
+
+    calls = []
+
+    class Params(RawDataParamsTemplate):
+        def add_params(self, **kwargs):
+            calls.append(kwargs)
+
+    with pytest.warns(DeprecationWarning, match='add_default'):
+        Params.add_default(Params.__new__(Params))
+    assert calls[0]['igor_roi_masks'] == 'yes'
