@@ -311,13 +311,20 @@ def roi2trace_from_stack_motion(
     if missing:
         raise ValueError(f"No ROI weights for ROIs {missing}.")
 
-    traces = extract_traces_weighted(register_stack(stack, disp_frames), roi_weights)
+    traces, valid_frac = extract_traces_weighted(register_stack(stack, disp_frames), roi_weights,
+                                                 return_valid_frac=True)
     t0s = np.array([np.median(frame_dt_offset[w > 0]) if np.any(w > 0) else np.median(frame_dt_offset)
                     for w in roi_weights])
     traces_times = frame_times[:, None] + t0s[None, :]
 
     roi2trace = roi_utils.get_roi2trace(traces=traces, traces_times=traces_times,
                                         roi_ids_traces=weight_roi_ids, roi_ids_subset=np.abs(roi_ids))
+    # ROIs without any pixel in the presentation mask (e.g. moved out of the FOV or into the light artifact), or with
+    # frames without any valid pixel, have no (complete) trace: NaN there, and trace_valid = 0, so that downstream
+    # tables (PreprocessTraces, ...) skip them.
+    for i, roi_id in enumerate(weight_roi_ids):
+        if int(roi_id) in roi2trace and np.any(valid_frac[:, i] <= 0):
+            roi2trace[int(roi_id)]['trace_valid'] = 0
     return roi2trace, frame_dt
 
 

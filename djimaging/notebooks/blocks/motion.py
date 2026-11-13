@@ -29,8 +29,13 @@
 # - `MotionRoiMask`: ROI masks of each presentation: the field mask with a per-ROI shift (pooled over the
 #   presentations of the same condition, `pooling='cond1'`) and a mild border reshape, as subpixel weights.
 #   Flags ROIs with low contrast, inconsistent shifts or shifts at the search limit.
-# - `MotionTrust`: Trust of each ROI trace per time bin (~2 s) and per stimulus repeat, from structure only
-#   (local shape similarity, residual displacement, uncorrected fast motion, z drift, coverage).
+# - `MotionTrust`: Trust of each ROI trace per time bin (~2 s) and per stimulus repeat: the fraction of the ROI that
+#   is on its cell (from the residual displacement of the ROI, the uncorrected fast motion and the FOV coverage), and
+#   per time bin the approximate z change of the field in um (`dz_um`, structural channel). Exclude ROIs with
+#   `trust_median < trust_thresh`, or single repeats with `MotionTrust().valid_repeats(key)`.
+#
+# Motion detection and QC are **experimental**: validated on a limited set of recordings (docs/motion_qc.md); check
+# the plots of your data before relying on them.
 #
 # Populate `MotionDetection` for all presentations before `MotionRoiMask`, because the per-ROI shifts are pooled over
 # the presentations of a condition. If presentations are added later, repopulate `MotionRoiMask` (and downstream) for
@@ -83,3 +88,7 @@ MotionTrust()
 
 # %%
 plot_if_data(MotionTrust())
+
+# %%
+# Repeats to keep per ROI (thresholds: MotionParams trust_thresh / dz_thresh_um, or pass them explicitly)
+# MotionTrust().valid_repeats(key, trust_thresh=0.7, dz_thresh_um=3.)

@@ -205,7 +205,9 @@ class TracesTemplate(dj.Computed):
         if self._include_motion_correction:
             # Registered stack (slow displacement) + presentation ROI weights (per-ROI shift + mild reshape)
             mask_tab = self.motion_roi_mask_table
-            roi_mask = load_array((mask_tab & key).fetch1('roi_mask'))
+            # Light artifact: decided on the field mask as drawn (as without motion mode). The presentation label mask
+            # never contains artifact pixels (they are dropped from the weights), so it would never flag an ROI.
+            roi_mask = mask_tab().get_field_mask(key)
             weight_roi_ids, roi_weights, _ = mask_tab().get_weights(key)
             disp_frames = mask_tab.motion_detection_table().get_motion(key).slow_frames
             roi2trace, frame_dt = roi2trace_from_stack_motion(
