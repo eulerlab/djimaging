@@ -107,6 +107,7 @@ Instead of copying a fixed schema, <code>make_project.py</code> assembles the sc
 | Block        | Tables                                                                                  | Requires |
 |--------------|-----------------------------------------------------------------------------------------|----------|
 | `core`       | UserInfo, Experiment, Field, Stimulus, Presentation, RoiMask, Roi, Traces, Snippets, Averages | –        |
+| `history`    | ExpHistory, ExpHistoryField, ExpHistoryStimLog, QdsPyLogFile, QdsPyLog (see below)     | `core`   |
 | `basic`      | ChirpQI, ChirpFeatures, OsDsIndexes                                                     | `core`   |
 | `location`   | OpticDisk, RelativeFieldLocation, RetinalFieldLocation                                  | `core`   |
 | `classifier` | Baden16TracesV2, ClassifierV2, CelltypeAssignmentV2                                     | `core`   |
@@ -138,6 +139,24 @@ message and skips it. To regenerate them with a different selection, move or del
 If `jupytext` is not installed (<code>pip install jupytext</code>), the notebook is written as a percent-format
 <code>.py</code> file instead of an <code>.ipynb</code>; it can be converted later with
 <code>jupytext --to ipynb</code>.
+
+#### Experiment history and listed stimuli (`history` block)
+
+`ExpHistory` registers every ScanM recording of every experiment, independent of stimuli and fields: z-stacks, high
+resolution, optic disk and blood vessel recordings, test recordings, recordings that were stopped early and recordings
+of stimuli that are not in the `Stimulus` table. It scans the `pre_data_dir` and `raw_data_dir` of `UserInfo` and
+the folders in `ExpHistory.extra_data_dirs`, links `.smp`/`.smh` and `.h5` files of the same recording (by the
+original file name stored in the `.h5`, the file name, or the time stamp; see `link_method`), and stores the scan
+parameters needed for the light exposure history (start, duration, zoom, pixel size, pixel dwell time, stage position,
+setup, number of triggers). Laser power and stimulus intensity are not stored digitally. `ExpHistoryField` links
+recordings to fields, `ExpHistoryStimLog` assigns the QDSpy stimuli (log entries) to the recordings during which they
+were shown (the clock offset between the QDSpy and ScanM computers is estimated).
+
+A recording is **listed** if the stimulus part of its file name is one of the `_`-separated aliases of a stimulus in
+`Stimulus` (`djimaging.utils.stimulus_listing`). Only listed recordings become `Presentation`s, and everything with
+stimulus-specific data (`Traces`, `Snippets`, `Averages`, analyses) depends on `Presentation`. So unlisted (e.g.
+unpublished) stimuli are visible in the history with their names, but never get traces.
+`ExpHistory().listed(Stimulus)` shows the status of every recording.
 
 #### Imaging channels (functional and background)
 

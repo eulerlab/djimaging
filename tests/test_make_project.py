@@ -48,6 +48,8 @@ def test_generated_schema_defines_tables_of_blocks(blocks):
     assert ('OpticDisk' in namespace) == ('location' in blocks)
     assert ('CelltypeAssignmentV2' in namespace) == ('classifier' in blocks)
     assert ('MotionRoiMask' in namespace) == ('motion' in blocks)
+    assert ('ExpHistory' in namespace) == ('history' in blocks)
+    assert ('ExpHistoryStimLog' in namespace) == ('history' in blocks)
     assert ('RefinedRoiMask' in namespace) == ('motion_refine' in blocks)
     # Motion mode: one presentation mask format only
     assert (namespace['RoiMask'].RoiMaskPresentation is None) == ('motion' in blocks)

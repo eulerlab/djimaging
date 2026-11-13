@@ -13,6 +13,10 @@ BLOCKS = {
     'core': dict(
         description='UserInfo, Experiment, Field, Stimulus, Presentation, RoiMask, Roi, Traces, Snippets, Averages',
         requires=[]),
+    'history': dict(
+        description='Experiment history, independent of stimuli: ExpHistory (every recording of every experiment), '
+                    'ExpHistoryField, ExpHistoryStimLog, QdsPyLogFile, QdsPyLog',
+        requires=['core']),
     'motion': dict(
         description='Motion correction and motion QC (motion mode): MotionParams, MotionReference, MotionDetection, '
                     'MotionRoiMask, MotionTrust. RoiMask then has no presentation masks and Traces are motion corrected',

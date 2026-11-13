@@ -12,6 +12,16 @@ from djimaging.utils.dj_storage import load_array, local_path, relative_store_pa
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm.recording import ScanMRecording
+from djimaging.utils.stimulus_listing import is_listed_for
+
+
+def check_listed_for_presentation(file_info: dict, stim_name: str, alias: str) -> None:
+    """Raise a ValueError if the recording described by `file_info` (a row of the file info DataFrame, with
+    'stimulus', 'kind' and 'filepath') is not listed for stimulus `stim_name`. Last check before a Presentation
+    is inserted, see djimaging.utils.stimulus_listing."""
+    if not is_listed_for(file_info.get('stimulus'), stim_name, alias, kind=file_info.get('kind', 'response')):
+        raise ValueError(f"Recording {file_info.get('filepath')} with stimulus `{file_info.get('stimulus')}` is not "
+                         f"listed for stimulus `{stim_name}` (aliases: {alias}). Not added to Presentation.")
 
 
 class PresentationTemplate(dj.Computed):
@@ -159,9 +169,12 @@ class PresentationTemplate(dj.Computed):
         for new_key in self.field_table().new_primary_keys:
             file_info_df = file_info_df[file_info_df[new_key] == field_stim_key[new_key]]
 
-        # Filter wrong stimuli
-        trg_stim_aliases = (self.stimulus_table & field_stim_key).fetch1('alias').split('_')
-        file_info_df = file_info_df[file_info_df['stimulus'].apply(lambda x: x.lower() in trg_stim_aliases)]
+        # Keep only recordings listed for this stimulus (the "listed" rule, see djimaging.utils.stimulus_listing)
+        alias = (self.stimulus_table & field_stim_key).fetch1('alias')
+        if len(file_info_df) > 0:
+            file_info_df = file_info_df[[
+                is_listed_for(stim, field_stim_key['stim_name'], alias, kind=kind)
+                for stim, kind in zip(file_info_df['stimulus'], file_info_df['kind'])]].copy()
         file_info_df['stim_name'] = field_stim_key['stim_name']
 
         # Set defaults
@@ -269,6 +282,10 @@ class PresentationTemplate(dj.Computed):
                 if verboselvl > 1:
                     print(f"\tSkipping presentation `{pres_key}` because it already exists")
                 continue
+
+            # Gate: never insert a recording that is not listed for this stimulus
+            check_listed_for_presentation(pres_df.iloc[0], pres_key['stim_name'],
+                                          (self.stimulus_table & pres_key).fetch1('alias'))
 
             if verboselvl > 0:
                 print(f"\tAdding presentation: `{pres_key}`")
