@@ -1,2 +1,2 @@
 [flake8]
-exclude = .git,__pycache__,.venv,djimaging/notebooks/blocks
+exclude = .git,__pycache__,.venv,djimaging/notebooks/blocks,djimaging/user

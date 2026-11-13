@@ -1,4 +1,4 @@
-from djimaging.tables import classifier_v2, response, location, receptivefield
+from djimaging.tables import classifier_v2, response, location, receptivefield, motion_correction
 from djimaging.utils.dj_utils import get_input_tables, get_class_attributes
 
 
@@ -69,3 +69,41 @@ def test_definition_RfGlmTemplate():
 
 def test_definition_RfGlmQualityTemplate():
     _test_definition(receptivefield.RfGlmQualityTemplate)
+
+
+# motion correction
+def test_definition_MotionParamsTemplate():
+    _test_definition(motion_correction.MotionParamsTemplate)
+
+
+def test_definition_MotionReferenceTemplate():
+    _test_definition(motion_correction.MotionReferenceTemplate)
+
+
+def test_definition_MotionDetectionTemplate():
+    _test_definition(motion_correction.MotionDetectionTemplate)
+
+
+def test_definition_MotionRoiMaskTemplate():
+    _test_definition(motion_correction.MotionRoiMaskTemplate)
+    _test_definition(motion_correction.MotionRoiMaskTemplate.Roi)
+
+
+def test_definition_MotionTrustTemplate():
+    _test_definition(motion_correction.MotionTrustTemplate)
+    _test_definition(motion_correction.MotionTrustTemplate.Roi)
+
+
+def test_motion_params_reject_unknown_and_fill_defaults(monkeypatch):
+    inserted = []
+    table = motion_correction.MotionParamsTemplate.__new__(motion_correction.MotionParamsTemplate)
+    monkeypatch.setattr(type(table), 'insert1', lambda self, row, skip_duplicates=False: inserted.append(row),
+                        raising=False)
+    table.add(motion_params_id=2, tau_slow_s=5.)
+    assert inserted[0]['motion_params']['tau_slow_s'] == 5.
+    assert inserted[0]['motion_params']['pooling'] == motion_correction.DEFAULT_MOTION_PARAMS['pooling']
+    import pytest
+    with pytest.raises(ValueError):
+        table.add(motion_params_id=3, not_a_param=1)
+    with pytest.raises(ValueError):
+        table.add(motion_params_id=4, pooling='field')

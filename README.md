@@ -50,6 +50,9 @@ If you need them, install them yourself, preferably in a separate environment, e
 `uv pip install "cellpose>=3.1.1,<4"` or `uv pip install git+https://github.com/sarmueller/MEDIAR.git`
 (possibly with `monai>=1.5` and `--no-deps` to keep your `numpy`). The MEDIAR wrapper is untested with `monai>=1.5`.
 
+How ROI masks get into the database, the ROI canvas, corrections, shrink to fit and motion mode:
+see [ROI_MASKS.md](ROI_MASKS.md).
+
 > ❗ To test if the package was successfully installed, e.g.
 > open a jupyter notebook in your container and call <code>import djimaging</code>.
 
@@ -104,11 +107,25 @@ Instead of copying a fixed schema, <code>make_project.py</code> assembles the sc
 | Block        | Tables                                                                                  | Requires |
 |--------------|-----------------------------------------------------------------------------------------|----------|
 | `core`       | UserInfo, Experiment, Field, Stimulus, Presentation, RoiMask, Roi, Traces, Snippets, Averages | –        |
+| `history`    | ExpHistory, ExpHistoryField, ExpHistoryStimLog, QdsPyLogFile, QdsPyLog, PresentationLog (see below) | `core`   |
 | `basic`      | ChirpQI, ChirpFeatures, OsDsIndexes                                                     | `core`   |
 | `location`   | OpticDisk, RelativeFieldLocation, RetinalFieldLocation                                  | `core`   |
 | `classifier` | Baden16TracesV2, ClassifierV2, CelltypeAssignmentV2                                     | `core`   |
 | `rf_sta`     | FastSta, SplitRF, FitGauss2DRF, FitDoG2DRF                                              | `core`   |
 | `rf_glm`     | RfGlm, SplitRfGlm, FitGauss2DRfGlm, FitDoG2DRfGlm                                       | `core`   |
+| `stimulator` | Stimulator, ExperimentStimulator, ImagingSetup, ExperimentImagingSetup (before Field)  | `core`   |
+| `mouse_cam`  | MouseCamGeometry                                                                        | `stimulator` |
+| `mb_direction` | MovingBarVersion, MbDirectionMap, MbRetinalPrefDir                                   | `basic`, `stimulator` |
+| `rf_offset`  | RelativeRoiLocationWrtField, RfOffset, RfRoiOffset                                      | `location`, `rf_sta`, `stimulator` |
+
+The `stimulator` blocks hold all setup-dependent parameters, per setup and period and assigned to each experiment:
+stimulus geometry (how the QDSpy screen is projected onto the retina, used for moving bar directions on the retina,
+RF positions relative to ROIs and mouse cam orientation) and stimulator delay (`Stimulator`), and scan width and
+light artifact rows (`ImagingSetup`). `make_project.py` inserts the `stimulator` tables before `Field` and binds them
+in `Field`, `Presentation` and `HighRes`, which then take delay, pixel size and artifact rows from them (without the
+block, the `setupid` constants of `setup_utils` are used as before). Every assignment has a confidence (`high`,
+`medium`, `low`) and a reason; conventions are documented in `djimaging/utils/stimulator.py`. With the `history`
+block, moving bar and mouse cam versions are read from the QDSpy logs (`PresentationLog`).
 
 The project name becomes part of the import path <code>djimaging.user.&lt;project&gt;</code>, so it may only contain
 letters, digits and underscores and must not start with a digit; anything else is rejected.
@@ -119,8 +136,13 @@ The notebook uses <code>ageuler_&lt;login name&gt;_&lt;project&gt;</code> as the
 ```bash
 python3 make_project.py your_project_name                         # interactive: asks y/N for each block
 python3 make_project.py your_project_name --blocks basic,rf_sta   # explicit list (core is added for you)
-python3 make_project.py your_project_name --all                   # every block
+python3 make_project.py your_project_name --all                   # every block (except motion_refine, see below)
+python3 make_project.py your_project_name --blocks basic --refined-roi-mask   # also the optional motion_refine block
 ```
+
+`motion_refine` (`RefinedRoiMask`, refines the field ROI mask borders in motion mode) is not asked interactively and not part
+of `--all`, because it made no measurable difference to the traces. Force it with `--refined-roi-mask` (or by
+listing it in `--blocks`); it requires, and thereby adds, the `motion` block.
 
 Without `--blocks`/`--all`, the script asks interactively; when there is no terminal (e.g. in a script or CI)
 it falls back to `core` only. Unknown block names raise an error that lists the available blocks.
@@ -130,6 +152,27 @@ message and skips it. To regenerate them with a different selection, move or del
 If `jupytext` is not installed (<code>pip install jupytext</code>), the notebook is written as a percent-format
 <code>.py</code> file instead of an <code>.ipynb</code>; it can be converted later with
 <code>jupytext --to ipynb</code>.
+
+#### Experiment history and listed stimuli (`history` block)
+
+`ExpHistory` registers every ScanM recording of every experiment, independent of stimuli and fields: z-stacks, high
+resolution, optic disk and blood vessel recordings, test recordings, recordings that were stopped early and recordings
+of stimuli that are not in the `Stimulus` table. It scans the `pre_data_dir` and `raw_data_dir` of `UserInfo` and
+the folders in `ExpHistory.extra_data_dirs`, links `.smp`/`.smh` and `.h5` files of the same recording (by the
+original file name stored in the `.h5`, the file name, or the time stamp; see `link_method`), and stores the scan
+parameters needed for the light exposure history (start, duration, zoom, pixel size, pixel dwell time, stage position,
+setup, number of triggers). Laser power and stimulus intensity are not stored digitally. The pixel size is computed
+from the dated scan width of `ExperimentImagingSetup` if `ExpHistory.experiment_imaging_setup_table` is bound
+(as for Field, Presentation and HighRes), otherwise from the setupid constant; the scan width used is stored in
+`scan_width_um`. `ExpHistoryField` links
+recordings to fields, `ExpHistoryStimLog` assigns the QDSpy stimuli (log entries) to the recordings during which they
+were shown (the clock offset between the QDSpy and ScanM computers is estimated).
+
+A recording is **listed** if the stimulus part of its file name is one of the `_`-separated aliases of a stimulus in
+`Stimulus` (`djimaging.utils.stimulus_listing`). Only listed recordings become `Presentation`s, and everything with
+stimulus-specific data (`Traces`, `Snippets`, `Averages`, analyses) depends on `Presentation`. So unlisted (e.g.
+unpublished) stimuli are visible in the history with their names, but never get traces.
+`ExpHistory().listed(Stimulus)` shows the status of every recording.
 
 #### Imaging channels (functional and background)
 

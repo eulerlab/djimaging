@@ -4,7 +4,8 @@ from typing import Optional, Tuple
 import h5py
 import numpy as np
 
-from djimaging.utils.scanm.wparams_utils import check_dims_ch_stack_wparams
+# Module import (not `from ... import name`): wparams_utils indirectly imports this module, see test_scanm_import_order
+from djimaging.utils.scanm import wparams_utils
 from djimaging.utils.scanm.roi_utils import get_roi2trace, extract_roi_ids
 
 
@@ -41,7 +42,7 @@ def load_stacks_and_wparams(filepath: str, ch_names: tuple = ('wDataCh0', 'wData
         raise OSError(f"Error loading file {filepath}: {e}")
 
     for name, stack in ch_stacks.items():
-        check_dims_ch_stack_wparams(ch_stack=stack, wparams=wparams)
+        wparams_utils.check_dims_ch_stack_wparams(ch_stack=stack, wparams=wparams)
 
     return ch_stacks, wparams
 

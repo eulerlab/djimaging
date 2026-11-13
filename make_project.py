@@ -13,6 +13,19 @@ BLOCKS = {
     'core': dict(
         description='UserInfo, Experiment, Field, Stimulus, Presentation, RoiMask, Roi, Traces, Snippets, Averages',
         requires=[]),
+    'history': dict(
+        description='Experiment history, independent of stimuli: ExpHistory (every recording of every experiment), '
+                    'ExpHistoryField, ExpHistoryStimLog, QdsPyLogFile, QdsPyLog',
+        requires=['core']),
+    'motion': dict(
+        description='Motion correction and motion QC (motion mode): MotionParams, MotionReference, MotionDetection, '
+                    'MotionRoiMask, MotionTrust. RoiMask then has no presentation masks and Traces are motion corrected',
+        requires=['core']),
+    'motion_refine': dict(
+        description='Optional for motion mode: RefinedRoiMask, refines the ROI borders (+-1 px) of the field mask on the '
+                    'registered reference condition before MotionRoiMask (no measurable gain on tested data)',
+        requires=['motion'],
+        default=False),  # Not asked, not in --all: only with --refined-roi-mask or explicitly in --blocks
     'basic': dict(
         description='ChirpQI, ChirpFeatures, OsDsIndexes',
         requires=['core']),
@@ -28,6 +41,19 @@ BLOCKS = {
     'rf_glm': dict(
         description='Receptive fields from GLM: RfGlm, SplitRfGlm, FitGauss2DRfGlm, FitDoG2DRfGlm',
         requires=['core']),
+    'stimulator': dict(
+        description='Setup tables: Stimulator (geometry, delay), ImagingSetup (scan width, light artifact), '
+                    'ExperimentStimulator, ExperimentImagingSetup. Inserted before Field, which uses them',
+        requires=['core']),
+    'mouse_cam': dict(
+        description='Mouse cam (natural movie) orientation: MouseCamGeometry',
+        requires=['stimulator']),
+    'mb_direction': dict(
+        description='Moving bar directions on the retina: MovingBarVersion, MbDirectionMap, MbRetinalPrefDir',
+        requires=['basic', 'stimulator']),
+    'rf_offset': dict(
+        description='RF position relative to the ROI: RelativeRoiLocationWrtField, RfOffset, RfRoiOffset',
+        requires=['location', 'rf_sta', 'stimulator']),
 }
 
 SCHEMA_MODULE_PLACEHOLDER = '__SCHEMA_MODULE__'
@@ -41,7 +67,36 @@ DEFAULT_CHANNELS = (1, 1)
 # Anchors in the core blocks that are extended by the Channel table.
 USER_INFO_CLASS_HEADER = "@schema\nclass UserInfo(core.UserInfoTemplate):\n"
 TRACES_CLASS_HEADER = "@schema\nclass Traces(core.TracesTemplate):\n"
-NOTEBOOK_RAW_PARAMS_CELL = "RawDataParams().add_default()\nRawDataParams()\n"
+NOTEBOOK_RAW_PARAMS_CELL = "RawDataParams()\n"
+FROM_RAW_DATA_PLACEHOLDER = '__FROM_RAW_DATA__'
+IGOR_ROI_MASKS_PLACEHOLDER = '__IGOR_ROI_MASKS__'
+
+# RawDataParams of new notebooks if they are not given and not asked (e.g. without a terminal).
+DEFAULT_RAW_PARAMS = dict(from_raw_data=False, igor_roi_masks='yes')
+IGOR_ROI_MASKS_OPTIONS = ('yes', 'no', 'either', 'init')
+
+# Anchors in the core blocks that are changed by the motion block (motion mode).
+ROI_MASK_PRESENTATION_CLASS = ("    class RoiMaskPresentation(core.RoiMaskTemplate.RoiMaskPresentation):\n"
+                               "        presentation_table = Presentation\n")
+NOTEBOOK_TRACES_SECTION = "# %% [markdown]\n# # Core: Traces and responses\n"
+
+# Anchors in the motion block that are changed by the motion_refine block.
+MOTION_ROI_MASK_CLASS_HEADER = "@schema\nclass MotionRoiMask(motion_correction.MotionRoiMaskTemplate):\n"
+NOTEBOOK_MOTION_ROI_MASK_CELL = "# %%\nMotionRoiMask().populate("
+
+# Anchors in the stimulator blocks that are linked to tables of other blocks.
+RF_ROI_OFFSET_ROI_MASK = "    roimask_tab = RoiMask.RoiMaskPresentation\n"
+MB_RETINAL_FIELD_LOCATION = "    retinal_field_location_table = None  # RetinalFieldLocation"
+PRESENTATION_LOG_ANCHOR = "    presentation_log_table = None  # PresentationLog"
+STIM_LOG_ANCHOR = "    stim_log_table = None  # QdsPyLog.StimLog"
+
+# Anchors in the core blocks for the setup tables of the stimulator block (inserted before Field, bound in the
+# tables that load recordings).
+FIELD_CLASS_HEADER = "@schema\nclass Field(core.FieldTemplate):\n"
+SETUP_TABLE_USERS = (FIELD_CLASS_HEADER, "@schema\nclass Presentation(core.PresentationTemplate):\n",
+                     "@schema\nclass HighRes(misc.HighResTemplate):\n",
+                     "@schema\nclass ExpHistory(history.ExpHistoryTemplate):\n")  # history block: scan width
+NOTEBOOK_FIELD_CELL = "# %%\nField().rescan_filesystem("
 
 
 def parse_args(argv=None):
@@ -52,7 +107,12 @@ def parse_args(argv=None):
         '--blocks', type=str, default=None,
         help=f'Comma-separated list of table blocks, e.g. "basic,rf_sta". Required blocks are added automatically. '
              f'Available: {", ".join(BLOCKS)}. Default: ask interactively.')
-    parser.add_argument('--all', action='store_true', help='Use all table blocks.')
+    parser.add_argument('--all', action='store_true',
+                        help='Use all table blocks, except those that are not selected by default (motion_refine).')
+    parser.add_argument(
+        '--refined-roi-mask', action='store_true',
+        help='Also add the optional motion_refine block (RefinedRoiMask, requires and adds the motion block). '
+             'Not asked interactively and not part of --all, as it made no measurable difference to the traces.')
     parser.add_argument(
         '--n-functional', type=int, default=None,
         help='Number of functional (imaging) channels (wDataCh0, ...), traces are extracted for these channels. '
@@ -61,6 +121,15 @@ def parse_args(argv=None):
         '--n-background', type=int, default=None,
         help='Number of background channels (e.g. 1 for SR-101, a marker for blood vessels) that are recorded after '
              'the functional channels, but no traces are extracted from. Default: ask interactively, or 1.')
+    parser.add_argument(
+        '--from-raw-data', choices=['yes', 'no'], default=None,
+        help="RawDataParams.from_raw_data: read the raw ScanM files (.smp, 'yes') or the preprocessed Igor files "
+             "(.h5, 'no'). Default: ask interactively, or 'no'.")
+    parser.add_argument(
+        '--igor-roi-masks', choices=list(IGOR_ROI_MASKS_OPTIONS), default=None,
+        help="RawDataParams.igor_roi_masks: 'yes': ROI masks from the Igor .h5 files, 'no': from mask files only, "
+             "'either': per field mask file if available, else Igor, 'init': Igor masks only as starting mask in "
+             "the ROI canvas. Default: ask interactively, or 'yes'.")
     parser.add_argument(
         '--legacy-userinfo-stacks', action='store_true',
         help='Use the old design without Channel table: the stacks are defined by data_stack_name and alt_stack_name '
@@ -79,12 +148,15 @@ def main(argv=None):
     channels = select_channels(args)
     print(describe_channels(channels))
 
+    raw_params = select_raw_params(args)
+    print(describe_raw_params(raw_params))
+
     djimaging_dir = os.path.split(os.path.abspath(__file__))[0]
     project_dir = create_project_dir(djimaging_dir, project)
     copy_notebooks(djimaging_dir, project_dir, project)
     copy_table(djimaging_dir, project_dir)
     copy_schema(djimaging_dir, project_dir, project, blocks, channels)
-    copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels)
+    copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels, raw_params)
 
 
 def validate_project_name(project):
@@ -94,22 +166,23 @@ def validate_project_name(project):
 
 def select_blocks(args):
     """Get requested blocks from the arguments or by asking the user."""
+    extra = ['motion_refine'] if args.refined_roi_mask else []
     if args.all:
-        return list(BLOCKS)
+        return [name for name, info in BLOCKS.items() if info.get('default', True)] + extra
     if args.blocks is not None:
-        return [b.strip() for b in args.blocks.split(',') if b.strip()]
+        return [b.strip() for b in args.blocks.split(',') if b.strip()] + extra
     if not sys.stdin.isatty():
-        return ['core']
+        return ['core'] + extra
 
     print('Select the table blocks for your schema (core is always included):')
     selected = []
     for name, info in BLOCKS.items():
-        if name == 'core':
+        if name == 'core' or not info.get('default', True):
             continue
         answer = input(f"  Include '{name}' ({info['description']})? [y/N] ")
         if answer.strip().lower() in ('y', 'yes'):
             selected.append(name)
-    return selected
+    return selected + extra
 
 
 def validate_channels(channels):
@@ -149,6 +222,48 @@ def select_channels(args):
                               1 if n_background is None else n_background))
 
 
+def ask_choice(question, options, default):
+    while True:
+        answer = input(f"{question} ({'/'.join(options)}) [{default}]: ").strip().lower()
+        if not answer:
+            return default
+        if answer in options:
+            return answer
+        print(f"Please answer one of: {', '.join(options)}")
+
+
+def select_raw_params(args):
+    """Get the RawDataParams (from_raw_data, igor_roi_masks) from the arguments or by asking the user."""
+    from_raw_data, igor_roi_masks = args.from_raw_data, args.igor_roi_masks
+    if sys.stdin.isatty():
+        if from_raw_data is None:
+            from_raw_data = ask_choice(
+                'Read the raw ScanM files (.smp) instead of the preprocessed Igor files (.h5)?',
+                ('yes', 'no'), 'yes' if DEFAULT_RAW_PARAMS['from_raw_data'] else 'no')
+        if igor_roi_masks is None:
+            print("ROI masks: 'yes' = from the Igor .h5 files, 'no' = from mask files only (e.g. AutoROIs, ROI canvas), "
+                  "'either' = per field mask file if available, else Igor, "
+                  "'init' = Igor masks only as starting mask in the ROI canvas.")
+            igor_roi_masks = ask_choice('Where do the ROI masks come from?', IGOR_ROI_MASKS_OPTIONS,
+                                        DEFAULT_RAW_PARAMS['igor_roi_masks'])
+
+    return validate_raw_params(dict(
+        from_raw_data=DEFAULT_RAW_PARAMS['from_raw_data'] if from_raw_data is None else from_raw_data == 'yes',
+        igor_roi_masks=DEFAULT_RAW_PARAMS['igor_roi_masks'] if igor_roi_masks is None else igor_roi_masks))
+
+
+def validate_raw_params(raw_params):
+    assert isinstance(raw_params['from_raw_data'], bool), \
+        f"from_raw_data must be bool, got {raw_params['from_raw_data']!r}"
+    assert raw_params['igor_roi_masks'] in IGOR_ROI_MASKS_OPTIONS, \
+        f"igor_roi_masks must be one of {IGOR_ROI_MASKS_OPTIONS}, got {raw_params['igor_roi_masks']!r}"
+    return raw_params
+
+
+def describe_raw_params(raw_params):
+    return f"RawDataParams: from_raw_data={raw_params['from_raw_data']}, igor_roi_masks={raw_params['igor_roi_masks']!r}"
+
+
 def describe_channels(channels):
     if channels is None:
         return "Legacy design: stacks are defined by data_stack_name and alt_stack_name in UserInfo."
@@ -185,6 +300,82 @@ def add_channels_to_schema(code, channels):
         + "    _use_channels = True  # Traces for every functional channel in Channel, adds ch_id to the primary key\n"
         + "    channel_table = Channel\n",
         1)
+
+
+def add_motion_to_schema(code, motion_code):
+    """Motion mode: insert the motion tables before Traces (Traces depends on MotionRoiMask), let RoiMask only store
+    the field mask (no RoiMaskPresentation, MotionRoiMask replaces it) and extract motion-corrected Traces."""
+    assert ROI_MASK_PRESENTATION_CLASS in code, "RoiMaskPresentation not found in the schema blocks."
+    assert TRACES_CLASS_HEADER in code, "Traces table not found in the schema blocks."
+    code = code.replace(
+        ROI_MASK_PRESENTATION_CLASS,
+        "    # Motion mode: only the field mask, the presentation masks are computed by MotionRoiMask\n"
+        "    _presentation_masks = False\n"
+        "    RoiMaskPresentation = None\n",
+        1)
+    code = code.replace(TRACES_CLASS_HEADER, motion_code.strip("\n") + "\n\n\n" + TRACES_CLASS_HEADER, 1)
+    code = code.replace(RF_ROI_OFFSET_ROI_MASK, "    roimask_tab = MotionRoiMask  # Motion mode\n", 1)
+    return code.replace(
+        TRACES_CLASS_HEADER,
+        TRACES_CLASS_HEADER
+        + "    _include_motion_correction = True  # Registered stack + presentation ROI weights of MotionRoiMask\n"
+        + "    motion_roi_mask_table = MotionRoiMask\n",
+        1)
+
+
+def link_optional_tables(code, blocks):
+    """Bind optional table attributes to tables of other selected blocks."""
+    if 'location' in blocks:
+        code = code.replace(MB_RETINAL_FIELD_LOCATION, "    retinal_field_location_table = RetinalFieldLocation  #", 1)
+    if 'history' in blocks:
+        code = code.replace(PRESENTATION_LOG_ANCHOR, "    presentation_log_table = PresentationLog  #")
+        code = code.replace(STIM_LOG_ANCHOR, "    stim_log_table = QdsPyLog.StimLog  #")
+    return code
+
+
+def add_setup_tables_to_schema(code, stimulator_code):
+    """Insert the setup tables (stimulator block) before Field and let Field, Presentation and HighRes take the
+    stimulator delay, scan width and light artifact rows from them."""
+    assert FIELD_CLASS_HEADER in code, "Field table not found in the schema blocks."
+    code = code.replace(FIELD_CLASS_HEADER, stimulator_code.strip("\n") + "\n\n\n" + FIELD_CLASS_HEADER, 1)
+    for header in SETUP_TABLE_USERS:
+        if header in code:
+            code = code.replace(
+                header,
+                header
+                + "    experiment_stimulator_table = ExperimentStimulator  # Stimulator delay\n"
+                + "    experiment_imaging_setup_table = ExperimentImagingSetup  # Scan width, light artifact rows\n",
+                1)
+    return code
+
+
+def add_setup_tables_to_notebook(text, stimulator_text):
+    """Insert the setup table cells before Field (Field needs them)."""
+    assert NOTEBOOK_FIELD_CELL in text, "Field cell not found in the notebook blocks."
+    return text.replace(NOTEBOOK_FIELD_CELL, stimulator_text.strip("\n") + "\n\n" + NOTEBOOK_FIELD_CELL, 1)
+
+
+def add_refine_to_motion_schema(motion_code, refine_code):
+    """Insert RefinedRoiMask before MotionRoiMask and let MotionRoiMask start from the refined field mask."""
+    assert MOTION_ROI_MASK_CLASS_HEADER in motion_code, "MotionRoiMask table not found in the motion block."
+    return motion_code.replace(
+        MOTION_ROI_MASK_CLASS_HEADER,
+        refine_code.strip("\n") + "\n\n\n" + MOTION_ROI_MASK_CLASS_HEADER
+        + "    refined_roi_mask_table = RefinedRoiMask  # Presentation masks start from the refined field mask\n",
+        1)
+
+
+def add_refine_to_motion_notebook(motion_text, refine_text):
+    """Insert the RefinedRoiMask cells before the MotionRoiMask cells."""
+    assert NOTEBOOK_MOTION_ROI_MASK_CELL in motion_text, "MotionRoiMask cell not found in the motion notebook block."
+    return motion_text.replace(
+        NOTEBOOK_MOTION_ROI_MASK_CELL, refine_text.strip("\n") + "\n\n" + NOTEBOOK_MOTION_ROI_MASK_CELL, 1)
+
+
+def add_motion_to_notebook(text, motion_text):
+    """Insert the motion section before the Traces section (Traces need MotionRoiMask)."""
+    assert NOTEBOOK_TRACES_SECTION in text, "Traces section not found in the notebook blocks."
+    return text.replace(NOTEBOOK_TRACES_SECTION, motion_text.strip("\n") + "\n\n" + NOTEBOOK_TRACES_SECTION, 1)
 
 
 def add_channels_to_notebook(text, channels):
@@ -300,22 +491,51 @@ def split_imports(source):
 
 def build_schema_text(djimaging_dir, blocks, channels=DEFAULT_CHANNELS):
     """Combine the schema blocks to one schema file. Imports between blocks are replaced by the block's code."""
-    imports, codes = [], []
+    imports, codes, motion_code, refine_code, stimulator_code = [], [], None, None, None
     for name in blocks:
         block_imports, code = split_imports(read_block(djimaging_dir, 'schemas', name))
         for line in block_imports:
             if 'djimaging.schemas.blocks' not in line and line not in imports:
                 imports.append(line)
-        codes.append(code)
+        if name == 'motion':
+            motion_code = code
+        elif name == 'motion_refine':
+            refine_code = code
+        elif name == 'stimulator':
+            stimulator_code = code
+        else:
+            codes.append(code)
 
-    return "\n".join(imports) + "\n\n\n" + add_channels_to_schema("\n\n\n".join(codes), channels) + "\n"
+    code = "\n\n\n".join(codes)
+    if refine_code is not None:
+        assert motion_code is not None, "The motion_refine block requires the motion block."
+        motion_code = add_refine_to_motion_schema(motion_code, refine_code)
+    if motion_code is not None:
+        code = add_motion_to_schema(code, motion_code)
+    if stimulator_code is not None:
+        code = add_setup_tables_to_schema(code, stimulator_code)
+    code = link_optional_tables(code, blocks)
+    return "\n".join(imports) + "\n\n\n" + add_channels_to_schema(code, channels) + "\n"
 
 
-def build_notebook_text(djimaging_dir, blocks, schema_module, project, channels=DEFAULT_CHANNELS):
+def build_notebook_text(djimaging_dir, blocks, schema_module, project, channels=DEFAULT_CHANNELS, raw_params=None):
     """Combine the notebook blocks in the order of the blocks, followed by the clean-up section."""
-    parts = [read_block(djimaging_dir, 'notebooks', name).strip("\n") for name in blocks]
+    parts = [read_block(djimaging_dir, 'notebooks', name).strip("\n") for name in blocks
+             if name not in ('motion', 'motion_refine', 'stimulator')]
     parts.append(read_block(djimaging_dir, 'notebooks', 'cleanup').strip("\n"))
-    text = add_channels_to_notebook("\n\n".join(parts) + "\n", channels)
+    text = "\n\n".join(parts) + "\n"
+    if 'stimulator' in blocks:
+        text = add_setup_tables_to_notebook(text, read_block(djimaging_dir, 'notebooks', 'stimulator'))
+    if 'motion' in blocks:
+        motion_text = read_block(djimaging_dir, 'notebooks', 'motion')
+        if 'motion_refine' in blocks:
+            motion_text = add_refine_to_motion_notebook(
+                motion_text, read_block(djimaging_dir, 'notebooks', 'motion_refine'))
+        text = add_motion_to_notebook(text, motion_text)
+    raw_params = validate_raw_params(dict(DEFAULT_RAW_PARAMS if raw_params is None else raw_params))
+    text = add_channels_to_notebook(text, channels)
+    text = text.replace(FROM_RAW_DATA_PLACEHOLDER, repr(raw_params['from_raw_data'])) \
+        .replace(IGOR_ROI_MASKS_PLACEHOLDER, repr(raw_params['igor_roi_masks']))
     return text.replace(SCHEMA_MODULE_PLACEHOLDER, schema_module).replace(BLOCKS_PLACEHOLDER, ", ".join(blocks))         .replace(PROJECT_PLACEHOLDER, project)
 
 
@@ -343,7 +563,7 @@ def copy_schema(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CH
         f.write(header + new_import + build_schema_text(djimaging_dir, blocks, channels) + new_table)
 
 
-def copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS):
+def copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS, raw_params=None):
     dst = os.path.join(project_dir, 'notebooks', f'populate_{project}_schema.ipynb')
 
     if os.path.isfile(dst):
@@ -352,7 +572,7 @@ def copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels
 
     text = build_notebook_text(
         djimaging_dir, blocks, schema_module=f'djimaging.user.{project}.schemas.{project}_schema',
-        project=project, channels=channels)
+        project=project, channels=channels, raw_params=raw_params)
 
     try:
         import jupytext

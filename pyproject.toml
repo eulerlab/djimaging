@@ -46,6 +46,7 @@ notebooks = [
 dev = [
     "pytest>=9.0.3",
     "jupytext>=1.16.0",
+    "flake8>=7.4.1",
 ]
 
 [tool.setuptools.packages.find]
