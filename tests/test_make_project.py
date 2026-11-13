@@ -153,7 +153,9 @@ def test_generated_ipynb(tmp_path):
     make_project.create_project(ROOT, str(project_dir), 'tester', make_project.resolve_blocks(['rf_glm']))
 
     nb = jupytext.read(project_dir / 'dji_tester' / 'notebooks' / '04_rf_glm.ipynb')
-    assert nb.metadata['kernelspec']['name'] == 'python3'
+    assert nb.metadata['kernelspec'] == dict(display_name='tester', language='python', name='tester')
+    static = json.loads((project_dir / 'dji_tester' / 'notebooks' / 'connect_to_schema.ipynb').read_text('utf8'))
+    assert static['metadata']['kernelspec']['name'] == 'tester'
     code = "\n".join(c.source for c in nb.cells if c.cell_type == 'code')
     assert 'from dji_tester.schemas.tester_schema import *' in code
     assert 'from dji_tester import settings' in code

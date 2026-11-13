@@ -869,9 +869,23 @@ def test_schema_defines_tables():
 '''
 
 
+def kernel_name(project):
+    """Name of the project's Jupyter kernel (Jupyter stores kernel names in lower case)."""
+    return project.lower()
+
+
+def kernelspec(project):
+    """Kernel of the generated notebooks: the project's own kernel, see `kernel_install_command`."""
+    return dict(display_name=project, language='python', name=kernel_name(project))
+
+
+def kernel_install_command(project):
+    return f"python -m ipykernel install --user --name={kernel_name(project)} --display-name={project}"
+
+
 def kernel_setup_commands(project):
     """Shell commands that install the project and register its environment as a Jupyter kernel."""
-    return ["uv sync", "source .venv/bin/activate", f"python -m ipykernel install --user --name={project}"]
+    return ["uv sync", "source .venv/bin/activate", kernel_install_command(project)]
 
 
 def next_steps(project, project_dir):
@@ -881,7 +895,7 @@ def next_steps(project, project_dir):
             f"1. Install the project and register its Jupyter kernel:\n{commands}\n"
             f"2. Restart Jupyter by refreshing the page in the browser.\n"
             f"3. Check {package_name(project)}/settings.py (DataJoint config file and schema name).\n"
-            f"4. Open the notebooks in {package_name(project)}/notebooks and select the kernel '{project}'.\n")
+            f"4. Open the notebooks in {package_name(project)}/notebooks. They use the kernel '{project}'.\n")
 
 
 def build_readme(djimaging_dir, project_dir, project, blocks, notebook_titles, command):
@@ -918,10 +932,11 @@ Or with pip, djimaging first (editable), in an environment of your choice:
 ```bash
 pip install -e {pip_target}
 pip install -e ".[dev]"
-python -m ipykernel install --user --name={project}
+{kernel_install_command(project)}
 ```
 
-Then restart Jupyter by refreshing the page in the browser, open a notebook and select the kernel `{project}`.
+Then restart Jupyter by refreshing the page in the browser and open a notebook: the notebooks use the kernel `{project}`
+(select it if Jupyter asks).
 
 ## Configuration
 
@@ -958,14 +973,14 @@ pytest -v tests
 """
 
 
-def percent_to_ipynb(text):
+def percent_to_ipynb(text, project):
     import jupytext
     nb = jupytext.reads(text, fmt='py:percent')
-    nb.metadata['kernelspec'] = dict(display_name='Python 3 (ipykernel)', language='python', name='python3')
+    nb.metadata['kernelspec'] = kernelspec(project)
     return jupytext.writes(nb, fmt='ipynb')
 
 
-def build_static_notebook(djimaging_dir, name, package):
+def build_static_notebook(djimaging_dir, name, package, project):
     """A static example notebook, with the schema name taken from the settings of the project."""
     with open(os.path.join(djimaging_dir, 'djimaging', 'notebooks', name), 'r', encoding='utf8') as f:
         nb = json.load(f)
@@ -975,6 +990,7 @@ def build_static_notebook(djimaging_dir, name, package):
             source = source.replace(STATIC_NOTEBOOK_SCHEMA_NAME,
                                     f"from {package} import settings\n\nschema_name = settings.SCHEMA_NAME")
             cell['source'] = source.splitlines(keepends=True)
+    nb.setdefault('metadata', {})['kernelspec'] = kernelspec(project)
     return json.dumps(nb, indent=1, ensure_ascii=False) + "\n"
 
 
@@ -1013,11 +1029,11 @@ def build_project_files(djimaging_dir, project_dir, project, blocks, channels=DE
         print("jupytext is not installed (pip install jupytext), the notebooks are written as percent-format .py files.")
     for stem, text in notebooks.items():
         if has_jupytext:
-            files[f'{package}/notebooks/{stem}.ipynb'] = percent_to_ipynb(text)
+            files[f'{package}/notebooks/{stem}.ipynb'] = percent_to_ipynb(text, project)
         else:
             files[f'{package}/notebooks/{stem}.py'] = text
     for name in STATIC_NOTEBOOKS:
-        files[f'{package}/notebooks/{name}'] = build_static_notebook(djimaging_dir, name, package)
+        files[f'{package}/notebooks/{name}'] = build_static_notebook(djimaging_dir, name, package, project)
     return files
 
 
