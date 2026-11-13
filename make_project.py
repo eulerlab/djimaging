@@ -1,30 +1,47 @@
+"""Create a standalone djimaging project from table blocks: an installable, git-ready package with the project schema
+and numbered notebooks that populate it.
+
+By default the project is created in <parent folder of the djimaging repo>/djimaging-projects/<project>, see README.md.
+"""
 import argparse
 import ast
+import datetime
+import json
 import keyword
 import os
 import re
-import shutil
+import shlex
+import subprocess
 import sys
 
-# Table blocks that can be combined to a personal schema and a matching tutorial notebook.
+# Table blocks that can be combined to a project schema and matching notebooks.
 # Schema parts live in djimaging/schemas/blocks/<name>.py, notebook parts in djimaging/notebooks/blocks/<name>.py.
 # The order of this dict is the order of the blocks in the generated files.
+# `notebook`: where the notebook part goes. 'own' (default): a numbered notebook of its own, titled by the first
+#   heading of the part. 'setup', 'rois' or 'traces': appended to the 01_setup, 02_roi_masks or 03_traces notebook
+#   (stimulator, motion and motion_refine are inserted at fixed places instead, see `build_notebooks`).
+# `extras`: extras of the djimaging package that the generated project depends on.
 BLOCKS = {
     'core': dict(
         description='UserInfo, Experiment, Field, Stimulus, Presentation, RoiMask, Roi, Traces, Snippets, Averages',
-        requires=[]),
+        requires=[],
+        notebook='core',  # Split into 01_setup, 02_roi_masks and 03_traces
+        extras=['autorois']),  # AutoROIs and the ROI canvas in 02_roi_masks
     'history': dict(
         description='Experiment history, independent of stimuli: ExpHistory (every recording of every experiment), '
                     'ExpHistoryField, ExpHistoryStimLog, QdsPyLogFile, QdsPyLog',
-        requires=['core']),
+        requires=['core'],
+        notebook='setup'),
     'motion': dict(
         description='Motion correction and motion QC (motion mode): MotionParams, MotionReference, MotionDetection, '
                     'MotionRoiMask, MotionTrust. RoiMask then has no presentation masks and Traces are motion corrected',
-        requires=['core']),
+        requires=['core'],
+        notebook='traces'),
     'motion_refine': dict(
         description='Optional for motion mode: RefinedRoiMask, refines the ROI borders (+-1 px) of the field mask on the '
                     'registered reference condition before MotionRoiMask (no measurable gain on tested data)',
         requires=['motion'],
+        notebook='traces',
         default=False),  # Not asked, not in --all: only with --refined-roi-mask or explicitly in --blocks
     'basic': dict(
         description='ChirpQI, ChirpFeatures, OsDsIndexes',
@@ -40,11 +57,13 @@ BLOCKS = {
         requires=['core']),
     'rf_glm': dict(
         description='Receptive fields from GLM: RfGlm, SplitRfGlm, FitGauss2DRfGlm, FitDoG2DRfGlm',
-        requires=['core']),
+        requires=['core'],
+        extras=['rf']),
     'stimulator': dict(
         description='Setup tables: Stimulator (geometry, delay), ImagingSetup (scan width, light artifact), '
                     'ExperimentStimulator, ExperimentImagingSetup. Inserted before Field, which uses them',
-        requires=['core']),
+        requires=['core'],
+        notebook='setup'),
     'mouse_cam': dict(
         description='Mouse cam (natural movie) orientation: MouseCamGeometry',
         requires=['stimulator']),
@@ -59,7 +78,21 @@ BLOCKS = {
 SCHEMA_MODULE_PLACEHOLDER = '__SCHEMA_MODULE__'
 BLOCKS_PLACEHOLDER = '__BLOCKS__'
 PROJECT_PLACEHOLDER = '__PROJECT__'
-NOTEBOOK_TEMPLATE_NAME = 'populate_my_schema'  # Replaced by populate_<project>_schema
+PACKAGE_PLACEHOLDER = '__PACKAGE__'
+NOTEBOOK_TITLE_PLACEHOLDER = '__NOTEBOOK_TITLE__'
+NOTEBOOK_LIST_PLACEHOLDER = '__NOTEBOOK_LIST__'
+CREATE_SCHEMA_PLACEHOLDER = '__CREATE_SCHEMA__'
+
+# Generated projects: <parent folder of the djimaging repo>/PROJECTS_DIR_NAME/<project>, package PACKAGE_PREFIX<project>
+PROJECTS_DIR_NAME = 'djimaging-projects'
+PACKAGE_PREFIX = 'dji_'
+
+# Static example notebooks that are copied to every project (the numbered notebooks are generated from blocks).
+STATIC_NOTEBOOKS = ('connect_to_schema.ipynb', 'scan_for_corrupted_recordings.ipynb')
+STATIC_NOTEBOOK_SCHEMA_NAME = 'schema_name = "ageuler_ENTER_SCHEMA_NAME_HERE"'
+
+# First heading of the parts of the core notebook block that start the 02_roi_masks and 03_traces notebooks.
+NOTEBOOK_ROIS_SECTION = "# %% [markdown]\n# # Core: ROIs\n"
 
 # Channels (n_functional, n_background) of new schemas. None is the legacy design without Channel table.
 DEFAULT_CHANNELS = (1, 1)
@@ -101,8 +134,15 @@ NOTEBOOK_FIELD_CELL = "# %%\nField().rescan_filesystem("
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description='Create a project folder with a schema and a notebook from table blocks.')
-    parser.add_argument('project', help='Project name, used for the folder, schema module and schema name.')
+        description='Create a standalone project (installable package with a schema and numbered notebooks) from '
+                    'table blocks. Existing files are never overwritten.')
+    parser.add_argument(
+        'project', help=f'Project name, used for the folder, the package ({PACKAGE_PREFIX}<project>), the schema module '
+                        f'and the default schema name.')
+    parser.add_argument(
+        '--target-dir', type=str, default=None,
+        help=f'Folder of the new project. Default: <parent folder of the djimaging repo>/{PROJECTS_DIR_NAME}/<project>. '
+             f'Must be outside the djimaging repo.')
     parser.add_argument(
         '--blocks', type=str, default=None,
         help=f'Comma-separated list of table blocks, e.g. "basic,rf_sta". Required blocks are added automatically. '
@@ -151,17 +191,18 @@ def main(argv=None):
     raw_params = select_raw_params(args)
     print(describe_raw_params(raw_params))
 
-    djimaging_dir = os.path.split(os.path.abspath(__file__))[0]
-    project_dir = create_project_dir(djimaging_dir, project)
-    copy_notebooks(djimaging_dir, project_dir, project)
-    copy_table(djimaging_dir, project_dir)
-    copy_schema(djimaging_dir, project_dir, project, blocks, channels)
-    copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels, raw_params)
+    djimaging_dir = os.path.dirname(os.path.abspath(__file__))
+    project_dir = os.path.abspath(args.target_dir) if args.target_dir else default_project_dir(djimaging_dir, project)
+    command = make_command(project, blocks, channels, raw_params, target_dir=args.target_dir)
+    create_project(djimaging_dir, project_dir, project, blocks, channels, raw_params, command=command)
 
 
 def validate_project_name(project):
-    """The project name is used in the import path djimaging.user.<project>, so it must be a valid python identifier."""
-    assert re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', project) and not keyword.iskeyword(project),         f"Invalid project name '{project}': use only letters, digits and underscores, and do not start with a digit "         f"(it is used in the python import path djimaging.user.<project>)."
+    """The project name is used in the package name dji_<project> and the schema module <project>_schema, so it must be
+    a valid python identifier."""
+    assert re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', project) and not keyword.iskeyword(project), \
+        f"Invalid project name '{project}': use only letters, digits and underscores, and do not start with a digit " \
+        f"(it is used in the python package {PACKAGE_PREFIX}<project> and the module <project>_schema)."
 
 
 def select_blocks(args):
@@ -427,49 +468,6 @@ def resolve_blocks(blocks):
     return [b for b in BLOCKS if b in resolved]
 
 
-def create_project_dir(djimaging_dir, project):
-    assert os.path.isdir(os.path.join(djimaging_dir, 'djimaging'))
-    all_user_dir = os.path.join(djimaging_dir, 'djimaging', 'user')
-    make_dir_if_new(all_user_dir)  # Make if not exists
-    open(os.path.join(all_user_dir, '__init__.py'), 'a').close()
-    project_dir = os.path.join(all_user_dir, project)
-    make_dir_if_new(project_dir)
-    open(os.path.join(project_dir, '__init__.py'), 'a').close()
-    make_dir_if_new(os.path.join(project_dir, 'schemas'))
-    open(os.path.join(project_dir, 'schemas', '__init__.py'), 'a').close()
-    make_dir_if_new(os.path.join(project_dir, 'tables'))
-    open(os.path.join(project_dir, 'tables', '__init__.py'), 'a').close()
-    make_dir_if_new(os.path.join(project_dir, 'notebooks'))
-
-    return project_dir
-
-
-def copy_notebooks(djimaging_dir, project_dir, project):
-    """Copy the static example notebooks. The populate notebook is generated from blocks, see below."""
-    files = os.listdir(os.path.join(djimaging_dir, 'djimaging/notebooks'))
-    notebooks = [nb for nb in files
-                 if os.path.isfile(os.path.join(djimaging_dir, 'djimaging/notebooks', nb)) and nb.endswith('.ipynb')
-                 and nb != f'{NOTEBOOK_TEMPLATE_NAME}.ipynb']
-    for nb in notebooks:
-        src = os.path.join(djimaging_dir, 'djimaging/notebooks', nb)
-        dst = os.path.join(project_dir, 'notebooks', nb.replace('my_schema', f'{project}_schema'))
-
-        if not os.path.isfile(dst):
-            shutil.copy(src, dst)
-            replace_schema_name(dst, project)
-
-
-def replace_schema_name(filepath, project):
-    with open(filepath, 'r') as file:
-        filedata = file.read()
-
-    filedata = filedata.replace('djimaging.schemas.tutorial_schema',
-                                f'djimaging.user.{project}.schemas.{project}_schema')
-
-    with open(filepath, 'w') as file:
-        file.write(filedata)
-
-
 def read_block(djimaging_dir, kind, name):
     path = os.path.join(djimaging_dir, 'djimaging', kind, 'blocks', f'{name}.py')
     with open(path, 'r', encoding='utf8') as f:
@@ -515,93 +513,513 @@ def build_schema_text(djimaging_dir, blocks, channels=DEFAULT_CHANNELS):
     if stimulator_code is not None:
         code = add_setup_tables_to_schema(code, stimulator_code)
     code = link_optional_tables(code, blocks)
-    return "\n".join(imports) + "\n\n\n" + add_channels_to_schema(code, channels) + "\n"
+    return "\n".join(merge_imports(imports)) + "\n\n\n" + add_channels_to_schema(code, channels) + "\n"
 
 
-def build_notebook_text(djimaging_dir, blocks, schema_module, project, channels=DEFAULT_CHANNELS, raw_params=None):
-    """Combine the notebook blocks in the order of the blocks, followed by the clean-up section."""
-    parts = [read_block(djimaging_dir, 'notebooks', name).strip("\n") for name in blocks
-             if name not in ('motion', 'motion_refine', 'stimulator')]
-    parts.append(read_block(djimaging_dir, 'notebooks', 'cleanup').strip("\n"))
-    text = "\n\n".join(parts) + "\n"
+def merge_imports(lines, max_length=120):
+    """Merge single-line `from x import a, b` imports of the same module (blocks import e.g. `core` each), in the order
+    of their first occurrence. Long imports are wrapped in parentheses."""
+    merged, names = [], {}
+    for line in lines:
+        match = re.fullmatch(r'from (\S+) import ([\w ,]+)', line.strip())
+        if match is None:
+            merged.append(line)
+            continue
+        module = match.group(1)
+        if module not in names:
+            names[module] = []
+            merged.append(module)  # Placeholder, replaced below
+        names[module] += [n.strip() for n in match.group(2).split(',') if n.strip() not in names[module]]
+
+    result = []
+    for item in merged:
+        if item not in names:
+            result.append(item)
+            continue
+        line = f"from {item} import {', '.join(names[item])}"
+        if len(line) > max_length:
+            line = f"from {item} import (\n    " + ",\n    ".join(names[item]) + ",\n)"
+        result.append(line)
+    return result
+
+
+def split_core_notebook(core_text):
+    """Split the core notebook block into the parts of 01_setup (data import), 02_roi_masks and 03_traces."""
+    assert NOTEBOOK_ROIS_SECTION in core_text, "ROI section not found in the core notebook block."
+    assert NOTEBOOK_TRACES_SECTION in core_text, "Traces section not found in the core notebook block."
+    i_rois, i_traces = core_text.index(NOTEBOOK_ROIS_SECTION), core_text.index(NOTEBOOK_TRACES_SECTION)
+    assert i_rois < i_traces, "The ROI section must come before the traces section in the core notebook block."
+    return core_text[:i_rois], core_text[i_rois:i_traces], core_text[i_traces:]
+
+
+def notebook_title(text):
+    """Title of a notebook part: its first top-level markdown heading."""
+    match = re.search(r'^# # (.+)$', text, flags=re.MULTILINE)
+    assert match is not None, "A notebook part must start with a top-level heading (# # Title)."
+    return match.group(1).strip()
+
+
+def notebook_parts(djimaging_dir, blocks, channels=DEFAULT_CHANNELS, raw_params=None):
+    """Bodies of the numbered notebooks as a list of (name, title, percent-format text), in the order they are run:
+    setup (data import of core, setup tables before Field, Channel, blocks with notebook='setup'), roi_masks,
+    traces (motion before the traces of core), then one per block with its own notebook, in the order of BLOCKS."""
+    setup, rois, traces = split_core_notebook(read_block(djimaging_dir, 'notebooks', 'core'))
+
     if 'stimulator' in blocks:
-        text = add_setup_tables_to_notebook(text, read_block(djimaging_dir, 'notebooks', 'stimulator'))
+        setup = add_setup_tables_to_notebook(setup, read_block(djimaging_dir, 'notebooks', 'stimulator'))
+    raw_params = validate_raw_params(dict(DEFAULT_RAW_PARAMS if raw_params is None else raw_params))
+    setup = add_channels_to_notebook(setup, channels)
+    setup = setup.replace(FROM_RAW_DATA_PLACEHOLDER, repr(raw_params['from_raw_data'])) \
+        .replace(IGOR_ROI_MASKS_PLACEHOLDER, repr(raw_params['igor_roi_masks']))
+
     if 'motion' in blocks:
         motion_text = read_block(djimaging_dir, 'notebooks', 'motion')
         if 'motion_refine' in blocks:
             motion_text = add_refine_to_motion_notebook(
                 motion_text, read_block(djimaging_dir, 'notebooks', 'motion_refine'))
-        text = add_motion_to_notebook(text, motion_text)
-    raw_params = validate_raw_params(dict(DEFAULT_RAW_PARAMS if raw_params is None else raw_params))
-    text = add_channels_to_notebook(text, channels)
-    text = text.replace(FROM_RAW_DATA_PLACEHOLDER, repr(raw_params['from_raw_data'])) \
-        .replace(IGOR_ROI_MASKS_PLACEHOLDER, repr(raw_params['igor_roi_masks']))
-    return text.replace(SCHEMA_MODULE_PLACEHOLDER, schema_module).replace(BLOCKS_PLACEHOLDER, ", ".join(blocks))         .replace(PROJECT_PLACEHOLDER, project)
+        traces = add_motion_to_notebook(traces, motion_text)
+
+    shared = dict(setup=setup, rois=rois, traces=traces)
+    own = []
+    for name in blocks:
+        if name in ('core', 'stimulator', 'motion', 'motion_refine'):  # Inserted above
+            continue
+        text = read_block(djimaging_dir, 'notebooks', name).strip("\n")
+        where = BLOCKS[name].get('notebook', 'own')
+        if where == 'own':
+            own.append((name, notebook_title(text), text))
+        else:
+            assert where in shared, f"Unknown notebook '{where}' of block '{name}'."
+            shared[where] = shared[where].strip("\n") + "\n\n" + text
+
+    traces_title = 'Motion correction, traces and responses' if 'motion' in blocks else 'Traces and responses'
+    return [('setup', 'Setup and data import', shared['setup'].strip("\n")),
+            ('roi_masks', 'ROI masks', shared['rois'].strip("\n")),
+            ('traces', traces_title, shared['traces'].strip("\n"))] + own
 
 
-def copy_schema(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS):
-    dst = os.path.join(project_dir, f'schemas/{project}_schema.py')
-
-    if os.path.isfile(dst):
-        print(f"Schema {dst} already exists, skip.")
-        return
-
-    new_import = \
-        f"# Remove comments to import templates that listed in user/{project}/tables/__init__.py \n" + \
-        f"# from djimaging.user.{project} import tables as user_tables\n"
-
-    new_table = \
-        "\n\n" + \
-        "# Remove comments to add table to schema\n" + \
-        "# @schema\n" + \
-        "# class ExampleTable(ExampleTableTemplate):\n" + \
-        "#     field_table = Field\n"
-
-    header = f"# Generated by make_project.py. Blocks: {', '.join(blocks)}. {describe_channels(channels)}\n"
-
-    with open(dst, 'w', encoding='utf8') as f:
-        f.write(header + new_import + build_schema_text(djimaging_dir, blocks, channels) + new_table)
+def numbered_notebooks(parts):
+    """[(name, title, body)] -> [(file name without extension, e.g. 01_setup, title, body)]"""
+    return [(f'{i:02d}_{name}', title, body) for i, (name, title, body) in enumerate(parts, 1)]
 
 
-def copy_populate_notebook(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS, raw_params=None):
-    dst = os.path.join(project_dir, 'notebooks', f'populate_{project}_schema.ipynb')
+def build_notebooks(djimaging_dir, blocks, project, package=None, schema_module=None, channels=DEFAULT_CHANNELS,
+                    raw_params=None):
+    """Combine the notebook blocks to the notebooks of a project: {file name without extension: percent-format text}.
 
-    if os.path.isfile(dst):
-        print(f"Notebook {dst} already exists, skip.")
-        return
+    The numbered notebooks (01_setup, 02_roi_masks, 03_traces, then one per further block, see `notebook_parts`) start
+    with the same preamble (load config, import and activate the schema); only 01_setup creates the schema and shows
+    the diagram. `drop_schema` (the clean-up section) is not numbered, so that it is never run by accident.
+    """
+    package = package_name(project) if package is None else package
+    schema_module = f'{package}.schemas.{project}_schema' if schema_module is None else schema_module
+    preamble = read_block(djimaging_dir, 'notebooks', 'preamble').strip("\n")
+    overview = read_block(djimaging_dir, 'notebooks', 'overview').strip("\n")
 
-    text = build_notebook_text(
-        djimaging_dir, blocks, schema_module=f'djimaging.user.{project}.schemas.{project}_schema',
-        project=project, channels=channels, raw_params=raw_params)
+    numbered = numbered_notebooks(notebook_parts(djimaging_dir, blocks, channels, raw_params))
 
+    def notebook_list(current):
+        return "\n".join(f"# {i}. `{stem}`: {title}" + (" (this notebook)" if stem == current else "")
+                         for i, (stem, title, _) in enumerate(numbered, 1))
+
+    def head(title, current, create_schema):
+        return preamble.replace(NOTEBOOK_TITLE_PLACEHOLDER, title) \
+            .replace(NOTEBOOK_LIST_PLACEHOLDER, notebook_list(current)) \
+            .replace(CREATE_SCHEMA_PLACEHOLDER, repr(create_schema))
+
+    notebooks = {}
+    for i, (stem, title, body) in enumerate(numbered):
+        first = i == 0
+        parts = [head(f"{stem[:2]}: {title}", stem, create_schema=first)] + ([overview] if first else []) + [body]
+        notebooks[stem] = "\n\n".join(parts) + "\n"
+    notebooks['drop_schema'] = "\n\n".join(
+        [head('Drop schema', None, create_schema=False),
+         read_block(djimaging_dir, 'notebooks', 'cleanup').strip("\n")]) + "\n"
+
+    return {stem: text.replace(SCHEMA_MODULE_PLACEHOLDER, schema_module).replace(PACKAGE_PLACEHOLDER, package)
+            .replace(BLOCKS_PLACEHOLDER, ", ".join(blocks)).replace(PROJECT_PLACEHOLDER, project)
+            for stem, text in notebooks.items()}
+
+
+def build_notebook_text(djimaging_dir, blocks, schema_module, project, channels=DEFAULT_CHANNELS, raw_params=None):
+    """All notebooks of `build_notebooks` in one text (the numbered ones in order, then drop_schema)."""
+    notebooks = build_notebooks(djimaging_dir, blocks, project, package=schema_module.split('.')[0],
+                                schema_module=schema_module, channels=channels, raw_params=raw_params)
+    return "\n\n".join(text.strip("\n") for text in notebooks.values()) + "\n"
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Standalone project
+# ----------------------------------------------------------------------------------------------------------------------
+def package_name(project):
+    return f'{PACKAGE_PREFIX}{project}'
+
+
+def default_project_dir(djimaging_dir, project):
+    """<parent folder of the djimaging repo>/djimaging-projects/<project>"""
+    return os.path.join(os.path.dirname(os.path.abspath(djimaging_dir)), PROJECTS_DIR_NAME, project)
+
+
+def is_inside(path, folder):
+    path, folder = os.path.normcase(os.path.abspath(path)), os.path.normcase(os.path.abspath(folder))
     try:
-        import jupytext
-    except ImportError:
-        dst_py = dst.replace('.ipynb', '.py')
-        with open(dst_py, 'w', encoding='utf8') as f:
-            f.write(text)
-        print(f"jupytext is not installed (pip install jupytext), wrote {dst_py} instead of a .ipynb file.")
-        return
+        return os.path.commonpath([path, folder]) == folder
+    except ValueError:  # E.g. different drives on Windows
+        return False
 
+
+def make_command(project, blocks, channels=DEFAULT_CHANNELS, raw_params=None, target_dir=None):
+    """The make_project command with every option given explicitly, so that it creates the same project again without
+    asking (it is recorded in the README of the project)."""
+    raw_params = validate_raw_params(dict(DEFAULT_RAW_PARAMS if raw_params is None else raw_params))
+    selected = [b for b in blocks if b != 'core'] or ['core']
+    argv = ['python', 'make_project.py', project, '--blocks', ','.join(selected)]
+    if validate_channels(channels) is None:
+        argv += ['--legacy-userinfo-stacks']
+    else:
+        argv += ['--n-functional', str(channels[0]), '--n-background', str(channels[1])]
+    argv += ['--from-raw-data', 'yes' if raw_params['from_raw_data'] else 'no',
+             '--igor-roi-masks', raw_params['igor_roi_masks']]
+    if target_dir is not None:
+        argv += ['--target-dir', target_dir]
+    return shlex.join(argv)
+
+
+def format_command(command, prefix=''):
+    """The command on several lines (one option per line, shell line continuations), each line starting with
+    `prefix`, e.g. '# ' for comments."""
+    return prefix + f" \\\n{prefix}    ".join(re.split(r' (?=--)', command))
+
+
+def djimaging_version(djimaging_dir):
+    """Commit (and branch) of the djimaging repo, '-dirty' if it has uncommitted changes."""
+    def git(*args):
+        return subprocess.run(['git', '-C', str(djimaging_dir), *args], capture_output=True, text=True,
+                              check=True, timeout=10).stdout.strip()
+    try:
+        return f"commit {git('describe', '--always', '--dirty')} on branch {git('rev-parse', '--abbrev-ref', 'HEAD')}"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown commit"
+
+
+def djimaging_extras(blocks):
+    extras = []
+    for name in blocks:
+        extras += [e for e in BLOCKS[name].get('extras', []) if e not in extras]
+    return extras
+
+
+def djimaging_source_path(djimaging_dir, project_dir, max_up=3):
+    """Path to the djimaging repo for [tool.uv.sources]: relative to the project if it is close (at most `max_up`
+    folders up, e.g. ../../djimaging for the default folder), else absolute."""
+    djimaging_dir, project_dir = os.path.realpath(djimaging_dir), os.path.realpath(project_dir)  # realpath: long names
+    try:
+        path = os.path.relpath(djimaging_dir, project_dir)
+    except ValueError:  # Different drives on Windows
+        path = djimaging_dir
+    if path.split(os.sep).count(os.pardir) > max_up:
+        path = djimaging_dir
+    return path.replace(os.sep, '/')
+
+
+def toml_str(value):
+    return json.dumps(value)  # A JSON string is a valid TOML basic string
+
+
+def build_pyproject(project, blocks, djimaging_path):
+    package = package_name(project)
+    extras = djimaging_extras(blocks)
+    djimaging_dep = f"djimaging[{','.join(extras)}]" if extras else 'djimaging'
+    return f"""[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = {toml_str(package)}
+version = "0.0.1"
+description = {toml_str(f'djimaging project {project}: DataJoint schema, tables and notebooks')}
+requires-python = ">=3.10"
+dependencies = [
+    {toml_str(djimaging_dep)},
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.3",
+    "flake8>=7.4.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [{toml_str(package + '*')}]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "error:fetch\\\\(\\\\) is deprecated.*:DeprecationWarning",
+    "error:ERD is deprecated.*:DeprecationWarning",
+]
+
+[tool.uv.sources]
+# The local djimaging repo, editable. Remove this to install djimaging from the package index instead.
+djimaging = {{ path = {toml_str(djimaging_path)}, editable = true }}
+"""
+
+
+GITIGNORE = """\
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+venv/
+env/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# DataJoint config files contain credentials: never commit them
+djconfig/
+dj_*conf*.json
+*_conf.json
+
+# Large or derived data: keep it in the DataJoint stores, not in git
+*.pkl
+*.pickle
+*.h5
+*.npy
+*.npz
+
+# IDEs and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+"""
+
+GITATTRIBUTES = "* text=auto\n"
+
+FLAKE8 = """\
+[flake8]
+max-line-length = 127
+exclude = .git,__pycache__,.venv,build
+"""
+
+
+def build_settings(project):
+    return f'''"""Settings shared by all notebooks of the project {project}."""
+import getpass
+import os
+
+# DataJoint config file, made from djimaging/djconfig/djconf_template.json. It contains credentials: never commit it.
+CONFIG_FILE = os.path.join(os.path.expanduser('~'), 'datajoint', f'dj_{{getpass.getuser()}}_conf.json')
+
+# Name of the database schema, it should start with 'ageuler_'. The default contains your login name, so that every
+# user gets their own schema. For a schema that several users populate together, use a fixed name instead, e.g.
+# 'ageuler_{project}'. All notebooks of this project use this name.
+SCHEMA_NAME = f'ageuler_{{getpass.getuser()}}_{project}'
+'''
+
+
+def build_schema_file(djimaging_dir, project, blocks, channels=DEFAULT_CHANNELS, command=None):
+    package = package_name(project)
+    command_lines = [line + ("  # noqa: E501" if len(line) > 120 else "")  # E.g. a long --target-dir
+                     for line in format_command(command, prefix='#   ').splitlines()] if command else []
+    header = (f"# Schema of the djimaging project {project}, generated by make_project.py.\n"
+              f"# Blocks: {', '.join(blocks)}.\n"
+              f"# {describe_channels(channels)}\n"
+              + ("# Command:\n" + "\n".join(command_lines) + "\n" if command else "")
+              + f"# Remove the comment to use the table templates of {package}/tables/__init__.py\n"
+              + f"# from {package} import tables as project_tables\n")
+    example_table = (
+        "\n\n"
+        "# Remove the comments to add the example table (project_tables.ExampleTableTemplate) to the schema\n"
+        "# @schema\n"
+        "# class ExampleTable(project_tables.ExampleTableTemplate):\n"
+        "#     field_table = Field\n")
+    return header + build_schema_text(djimaging_dir, blocks, channels) + example_table
+
+
+def build_schema_test(project):
+    package = package_name(project)
+    return f'''"""The schema can be imported and defines its tables. No database connection is needed."""
+import datajoint as dj
+
+from {package}.schemas import {project}_schema
+
+
+def test_schema_defines_tables():
+    assert isinstance({project}_schema.schema, dj.Schema)
+    for name in ('UserInfo', 'Experiment', 'Field', 'Presentation', 'RoiMask', 'Roi', 'Traces'):
+        assert isinstance(getattr({project}_schema, name), type), name
+'''
+
+
+def build_readme(djimaging_dir, project_dir, project, blocks, notebook_titles, command):
+    """README of the project. `notebook_titles`: [(file name without extension, title)] of the numbered notebooks."""
+    package = package_name(project)
+    djimaging_path = djimaging_source_path(djimaging_dir, project_dir)
+    extras = djimaging_extras(blocks)
+    pip_target = f'"{djimaging_path}[{",".join(extras)}]"' if extras else f'"{djimaging_path}"'
+    block_rows = "\n".join(f"| `{name}` | {BLOCKS[name]['description']} |" for name in blocks)
+    notebook_rows = "\n".join(f"| `{stem}` | {title} |" for stem, title in notebook_titles)
+    return f"""# {project}
+
+TODO: describe the project.
+
+Created on {datetime.date.today().isoformat()} with `make_project.py` of djimaging ({djimaging_version(djimaging_dir)}):
+
+```bash
+{format_command(command)}
+```
+
+## Install
+
+With [uv](https://docs.astral.sh/uv/), using the local djimaging repo (`{djimaging_path}`, see `[tool.uv.sources]` in
+`pyproject.toml`):
+
+```bash
+uv sync --extra dev
+```
+
+or with pip, djimaging first (editable):
+
+```bash
+pip install -e {pip_target}
+pip install -e ".[dev]"
+```
+
+## Configuration
+
+`{package}/settings.py` sets the DataJoint config file (`CONFIG_FILE`, made from
+`djimaging/djconfig/djconf_template.json`) and the schema name (`SCHEMA_NAME`) for all notebooks. Config files contain
+credentials: never commit them (they are in `.gitignore`).
+
+## Schema
+
+`{package}/schemas/{project}_schema.py`, built from these table blocks of djimaging:
+
+| Block | Tables |
+|---|---|
+{block_rows}
+
+Own table templates go to `{package}/tables/` (see the example `my_table.py`) and are bound in the schema.
+
+## Notebooks
+
+The notebooks are in `{package}/notebooks/`. Run them in this order:
+
+| Notebook | Content |
+|---|---|
+{notebook_rows}
+
+`drop_schema` drops the schema with all its data. `connect_to_schema` connects to a schema without its definition and
+`scan_for_corrupted_recordings` finds recordings that turned into noise.
+
+## Tests
+
+```bash
+pytest -v tests
+```
+"""
+
+
+def percent_to_ipynb(text):
+    import jupytext
     nb = jupytext.reads(text, fmt='py:percent')
     nb.metadata['kernelspec'] = dict(display_name='Python 3 (ipykernel)', language='python', name='python3')
-    jupytext.write(nb, dst, fmt='ipynb')
+    return jupytext.writes(nb, fmt='ipynb')
 
 
-def copy_table(djimaging_dir, project_dir):
-    src = os.path.join(djimaging_dir, 'djimaging/tables/_new_table_example.py')
-    dst = os.path.join(project_dir, 'tables/my_table.py')
+def build_static_notebook(djimaging_dir, name, package):
+    """A static example notebook, with the schema name taken from the settings of the project."""
+    with open(os.path.join(djimaging_dir, 'djimaging', 'notebooks', name), 'r', encoding='utf8') as f:
+        nb = json.load(f)
+    for cell in nb['cells']:
+        source = ''.join(cell['source'])
+        if STATIC_NOTEBOOK_SCHEMA_NAME in source:
+            source = source.replace(STATIC_NOTEBOOK_SCHEMA_NAME,
+                                    f"from {package} import settings\n\nschema_name = settings.SCHEMA_NAME")
+            cell['source'] = source.splitlines(keepends=True)
+    return json.dumps(nb, indent=1, ensure_ascii=False) + "\n"
 
-    if not os.path.isfile(dst):
-        shutil.copy(src, dst)
 
-        with open(os.path.join(project_dir, 'tables/__init__.py'), "a") as f:
-            f.write("from .my_table import ExampleTableTemplate\n")
+def build_project_files(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS, raw_params=None,
+                        command=None):
+    """All files of a new project: {path relative to the project folder (with /): text}."""
+    package = package_name(project)
+    command = make_command(project, blocks, channels, raw_params) if command is None else command
+    notebooks = build_notebooks(djimaging_dir, blocks, project, package=package, channels=channels,
+                                raw_params=raw_params)
+    notebook_titles = [(stem, title) for stem, title, _ in numbered_notebooks(
+        notebook_parts(djimaging_dir, blocks, channels, raw_params))]
+    with open(os.path.join(djimaging_dir, 'djimaging', 'tables', '_new_table_example.py'), 'r', encoding='utf8') as f:
+        example_table = f.read()
+
+    files = {
+        'README.md': build_readme(djimaging_dir, project_dir, project, blocks, notebook_titles, command),
+        'pyproject.toml': build_pyproject(project, blocks, djimaging_source_path(djimaging_dir, project_dir)),
+        '.gitignore': GITIGNORE,
+        '.gitattributes': GITATTRIBUTES,
+        '.flake8': FLAKE8,
+        f'{package}/__init__.py': f'"""djimaging project {project}."""\n',
+        f'{package}/settings.py': build_settings(project),
+        f'{package}/schemas/__init__.py': '',
+        f'{package}/schemas/{project}_schema.py': build_schema_file(djimaging_dir, project, blocks, channels, command),
+        f'{package}/tables/__init__.py': 'from .my_table import ExampleTableTemplate  # noqa: F401\n',
+        f'{package}/tables/my_table.py': example_table,
+        'tests/test_schema.py': build_schema_test(project),
+    }
+
+    try:
+        import jupytext  # noqa: F401
+        has_jupytext = True
+    except ImportError:
+        has_jupytext = False
+        print("jupytext is not installed (pip install jupytext), the notebooks are written as percent-format .py files.")
+    for stem, text in notebooks.items():
+        if has_jupytext:
+            files[f'{package}/notebooks/{stem}.ipynb'] = percent_to_ipynb(text)
+        else:
+            files[f'{package}/notebooks/{stem}.py'] = text
+    for name in STATIC_NOTEBOOKS:
+        files[f'{package}/notebooks/{name}'] = build_static_notebook(djimaging_dir, name, package)
+    return files
 
 
-def make_dir_if_new(path):
-    if not os.path.exists(path):
-        os.mkdir(path)
+def create_project(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS, raw_params=None,
+                   command=None):
+    """Write the files of a new project to `project_dir`. Existing files are never overwritten, they are skipped.
+    Returns the created and the skipped files (relative paths)."""
+    assert not is_inside(project_dir, djimaging_dir), \
+        f"The project folder {project_dir} must be outside the djimaging repo {djimaging_dir}."
+    files = build_project_files(djimaging_dir, project_dir, project, blocks, channels, raw_params, command)
+
+    created, skipped = [], []
+    for relpath, text in files.items():
+        path = os.path.join(project_dir, *relpath.split('/'))
+        if os.path.exists(path):
+            print(f"{path} already exists, skip.")
+            skipped.append(relpath)
+            continue
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf8', newline='') as f:
+            f.write(text)
+        created.append(relpath)
+
+    print(f"Project {project}: created {len(created)} files, skipped {len(skipped)} existing files in {project_dir}")
+    print("Next steps (see README.md there): git init (optional), install the project (uv sync or pip install -e .), "
+          f"check {package_name(project)}/settings.py and run the notebooks in {package_name(project)}/notebooks.")
+    return created, skipped
 
 
 if __name__ == '__main__':

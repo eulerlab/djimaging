@@ -1,6 +1,9 @@
 import ast
+import builtins
 import importlib.util
 import itertools
+import json
+import shlex
 from pathlib import Path
 
 import pytest
@@ -144,13 +147,14 @@ def test_notebook_only_uses_tables_of_schema():
 
 def test_generated_ipynb(tmp_path):
     jupytext = pytest.importorskip('jupytext')
-    project_dir = tmp_path / 'user'
-    (project_dir / 'notebooks').mkdir(parents=True)
-    make_project.copy_populate_notebook(ROOT, str(project_dir), 'tester', make_project.resolve_blocks(['rf_glm']))
+    project_dir = tmp_path / 'tester'
+    make_project.create_project(ROOT, str(project_dir), 'tester', make_project.resolve_blocks(['rf_glm']))
 
-    nb = jupytext.read(project_dir / 'notebooks' / 'populate_tester_schema.ipynb')
+    nb = jupytext.read(project_dir / 'dji_tester' / 'notebooks' / '04_rf_glm.ipynb')
+    assert nb.metadata['kernelspec']['name'] == 'python3'
     code = "\n".join(c.source for c in nb.cells if c.cell_type == 'code')
-    assert 'djimaging.user.tester.schemas.tester_schema' in code
+    assert 'from dji_tester.schemas.tester_schema import *' in code
+    assert 'from dji_tester import settings' in code
     assert 'RfGlm()' in code
 
 
@@ -165,9 +169,16 @@ def test_validate_project_name_rejects(project):
         make_project.validate_project_name(project)
 
 
-def test_notebook_schema_name_uses_project():
-    text = make_project.build_notebook_text(ROOT, ['core'], schema_module='my.schema', project='tester')
-    assert 'schema_name = f"ageuler_{username}_tester"' in text
+def test_notebook_schema_name_from_settings():
+    """All notebooks take the schema name from the settings of the project, which default to the project name."""
+    notebooks = make_project.build_notebooks(ROOT, ['core'], project='tester')
+    for text in notebooks.values():
+        assert 'from dji_tester import settings' in text
+        assert 'schema_name=settings.SCHEMA_NAME' in text
+    namespace = {}
+    exec(make_project.build_settings('tester'), namespace)
+    assert namespace['SCHEMA_NAME'].startswith('ageuler_') and namespace['SCHEMA_NAME'].endswith('_tester')
+    assert namespace['CONFIG_FILE'].endswith('_conf.json')
 
 
 def test_default_schema_uses_channel_table_with_one_functional_channel():
@@ -328,3 +339,200 @@ def test_mb_direction_without_location():
     assert 'location' not in blocks
     namespace = exec_schema(make_project.build_schema_text(ROOT, blocks))
     assert namespace['MbRetinalPrefDir'].retinal_field_location_table is None
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Standalone project
+# ----------------------------------------------------------------------------------------------------------------------
+def undefined_names(text, provided=()):
+    """Names that a notebook loads but neither defines, imports nor gets from `provided` (the star import of the
+    schema) or the builtins. Notebooks must not depend on each other."""
+    tree = ast.parse(text)
+    defined = set(provided) | set(dir(builtins)) | {'display'}  # display: IPython
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            defined.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            defined.add(node.name)
+        elif isinstance(node, ast.arg):
+            defined.add(node.arg)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            defined.update((alias.asname or alias.name).split('.')[0] for alias in node.names)
+    used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+    return used - defined
+
+
+@pytest.mark.parametrize('blocks', [['core'], ['motion', 'basic', 'classifier', 'rf_sta'], OPTIONAL_BLOCKS])
+def test_notebooks_are_numbered_and_self_contained(blocks):
+    blocks = make_project.resolve_blocks(blocks)
+    namespace = exec_schema(make_project.build_schema_text(ROOT, blocks))
+    notebooks = make_project.build_notebooks(ROOT, blocks, project='tester')
+
+    own = [b for b in blocks if make_project.BLOCKS[b].get('notebook', 'own') == 'own']
+    expected = ['01_setup', '02_roi_masks', '03_traces'] + [f'{i:02d}_{b}' for i, b in enumerate(own, 4)]
+    assert list(notebooks) == expected + ['drop_schema']
+
+    for stem, text in notebooks.items():
+        assert undefined_names(text, provided=namespace) == set(), stem
+        for placeholder in ('__SCHEMA_MODULE__', '__PACKAGE__', '__PROJECT__', '__BLOCKS__', '__NOTEBOOK_TITLE__',
+                            '__NOTEBOOK_LIST__', '__CREATE_SCHEMA__', '__FROM_RAW_DATA__', '__IGOR_ROI_MASKS__'):
+            assert placeholder not in text, (stem, placeholder)
+        # Only the first notebook creates the schema
+        assert ('create_schema=True' in text) == (stem == '01_setup'), stem
+        # The list of notebooks is in every notebook
+        assert all(f'`{s}`' in text for s in expected), stem
+
+    assert 'DROP_SCHEMA' in notebooks['drop_schema'] and all(
+        'DROP_SCHEMA' not in text for stem, text in notebooks.items() if stem != 'drop_schema')
+
+
+def test_notebooks_place_blocks():
+    blocks = make_project.resolve_blocks(['motion_refine', 'history', 'stimulator', 'rf_sta'])
+    notebooks = make_project.build_notebooks(ROOT, blocks, project='tester')
+    setup, rois, traces = notebooks['01_setup'], notebooks['02_roi_masks'], notebooks['03_traces']
+    assert setup.index('Channel().add_channels') > setup.index('RawDataParams().add_params(')
+    assert setup.index('ExperimentImagingSetup().populate') < setup.index('Field().rescan_filesystem')
+    assert setup.index('Presentation().populate') < setup.index('ExpHistory().populate')
+    assert 'Roi().populate' in rois and 'Traces().populate' not in rois
+    assert traces.index('MotionDetection().populate') < traces.index('RefinedRoiMask().populate') \
+        < traces.index('MotionRoiMask().populate') < traces.index('Traces().populate')
+    assert 'Motion correction, traces and responses' in traces
+    assert 'FastSta().populate' in notebooks['04_rf_sta']
+    assert 'dj.Diagram(schema)' in setup and 'dj.Diagram(schema)' not in rois
+
+
+def test_notebook_title_is_first_heading():
+    assert make_project.notebook_title("# %% [markdown]\n# # Receptive fields: STA\n#\n# ## Sub\n") == \
+        'Receptive fields: STA'
+
+
+def test_default_project_dir_is_next_to_the_repo():
+    project_dir = Path(make_project.default_project_dir(ROOT, 'tester'))
+    assert project_dir == ROOT.parent / 'djimaging-projects' / 'tester'
+
+
+def test_make_command_recreates_the_selection():
+    blocks = make_project.resolve_blocks(['motion', 'classifier'])
+    raw_params = dict(from_raw_data=True, igor_roi_masks='either')
+    command = make_project.make_command('tester', blocks, (2, 0), raw_params, target_dir='some dir/tester')
+    argv = shlex.split(command)
+    assert argv[:2] == ['python', 'make_project.py']
+    args = make_project.parse_args(argv[2:])
+    assert args.project == 'tester' and args.target_dir == 'some dir/tester'
+    assert make_project.resolve_blocks(make_project.select_blocks(args)) == blocks
+    assert make_project.select_channels(args) == (2, 0)
+    assert make_project.select_raw_params(args) == raw_params
+
+    legacy = make_project.parse_args(shlex.split(make_project.make_command('tester', ['core'], None))[2:])
+    assert legacy.legacy_userinfo_stacks and make_project.select_blocks(legacy) == ['core']
+
+
+def test_create_project(tmp_path):
+    pytest.importorskip('jupytext')
+    tomllib = pytest.importorskip('tomllib')  # Python >= 3.11
+    project_dir = tmp_path / 'projects' / 'tester'
+    blocks = make_project.resolve_blocks(['motion', 'basic', 'classifier', 'rf_sta', 'rf_glm'])
+    command = make_project.make_command('tester', blocks)
+    created, skipped = make_project.create_project(ROOT, str(project_dir), 'tester', blocks, command=command)
+    assert skipped == []
+
+    pkg = project_dir / 'dji_tester'
+    for relpath in ('README.md', 'pyproject.toml', '.gitignore', '.gitattributes', '.flake8', 'tests/test_schema.py',
+                    'dji_tester/__init__.py', 'dji_tester/settings.py', 'dji_tester/schemas/__init__.py',
+                    'dji_tester/schemas/tester_schema.py', 'dji_tester/tables/__init__.py',
+                    'dji_tester/tables/my_table.py'):
+        assert (project_dir / relpath).is_file(), relpath
+    notebooks = sorted(p.name for p in (pkg / 'notebooks').iterdir())
+    assert notebooks == ['01_setup.ipynb', '02_roi_masks.ipynb', '03_traces.ipynb', '04_basic.ipynb',
+                         '05_classifier.ipynb', '06_rf_sta.ipynb', '07_rf_glm.ipynb', 'connect_to_schema.ipynb',
+                         'drop_schema.ipynb', 'scan_for_corrupted_recordings.ipynb']
+    for nb in notebooks:
+        json.loads((pkg / 'notebooks' / nb).read_text(encoding='utf8'))
+
+    # Installable package that depends on the local djimaging repo
+    pyproject = tomllib.loads((project_dir / 'pyproject.toml').read_text(encoding='utf8'))
+    assert pyproject['project']['name'] == 'dji_tester'
+    assert pyproject['project']['dependencies'] == ['djimaging[autorois,rf]']
+    assert pyproject['tool']['setuptools']['packages']['find']['include'] == ['dji_tester*']
+    source = pyproject['tool']['uv']['sources']['djimaging']
+    assert source['editable'] and (project_dir / source['path']).resolve() == ROOT.resolve()
+    assert any('fetch' in f for f in pyproject['tool']['pytest']['ini_options']['filterwarnings'])
+
+    # The README records the command, blocks and notebooks
+    readme = (project_dir / 'README.md').read_text(encoding='utf8')
+    assert make_project.format_command(command) in readme
+    assert '| `05_classifier` | RGC classifier |' in readme and '| `motion` |' in readme
+
+    # The schema works, its header records the command
+    schema_text = (pkg / 'schemas' / 'tester_schema.py').read_text(encoding='utf8')
+    assert make_project.format_command(command, prefix='#   ') in schema_text  # Short command: no noqa
+    namespace = exec_schema(schema_text)
+    assert namespace['Traces']._include_motion_correction and 'CelltypeAssignmentV2' in namespace
+    exec_schema((pkg / 'tables' / 'my_table.py').read_text(encoding='utf8'))
+
+    # Static notebooks use the schema name of the settings
+    connect = json.loads((pkg / 'notebooks' / 'connect_to_schema.ipynb').read_text(encoding='utf8'))
+    source = "".join("".join(c['source']) for c in connect['cells'])
+    assert 'schema_name = settings.SCHEMA_NAME' in source and 'ENTER_SCHEMA_NAME_HERE' not in source
+
+    gitignore = (project_dir / '.gitignore').read_text(encoding='utf8')
+    assert '.ipynb_checkpoints/' in gitignore and 'dj_*conf*.json' in gitignore
+
+
+def test_create_project_never_overwrites(tmp_path):
+    project_dir = tmp_path / 'tester'
+    (project_dir / 'dji_tester').mkdir(parents=True)
+    (project_dir / 'README.md').write_text('my readme', encoding='utf8')
+    (project_dir / 'dji_tester' / 'settings.py').write_text('SCHEMA_NAME = "mine"\n', encoding='utf8')
+    created, skipped = make_project.create_project(ROOT, str(project_dir), 'tester', ['core'])
+    assert set(skipped) == {'README.md', 'dji_tester/settings.py'}
+    assert (project_dir / 'README.md').read_text(encoding='utf8') == 'my readme'
+    assert (project_dir / 'dji_tester' / 'settings.py').read_text(encoding='utf8') == 'SCHEMA_NAME = "mine"\n'
+
+    created_again, skipped_again = make_project.create_project(ROOT, str(project_dir), 'tester', ['core'])
+    assert created_again == [] and set(skipped_again) == set(created) | set(skipped)
+
+
+def test_create_project_rejects_folder_inside_repo():
+    with pytest.raises(AssertionError, match='outside the djimaging repo'):
+        make_project.create_project(ROOT, str(ROOT / 'djimaging' / 'user' / 'tester'), 'tester', ['core'])
+
+
+def test_main_creates_project(tmp_path, monkeypatch):
+    monkeypatch.setattr(make_project.sys.stdin, 'isatty', lambda: False)
+    project_dir = tmp_path / 'tester'
+    make_project.main(['tester', '--blocks', 'location', '--target-dir', str(project_dir)])
+    assert (project_dir / 'dji_tester' / 'schemas' / 'tester_schema.py').is_file()
+    readme = (project_dir / 'README.md').read_text(encoding='utf8')
+    assert ' \\\n    --blocks location \\\n    --n-functional 1 \\\n    --n-background 1 \\\n    --from-raw-data no ' \
+           '\\\n    --igor-roi-masks yes \\\n    --target-dir ' in readme
+
+
+def test_format_command_is_the_same_shell_command():
+    command = make_project.make_command('tester', ['core', 'basic'], target_dir='a b/--c')
+    lines = make_project.format_command(command, prefix='#   ').splitlines()
+    assert all(line.startswith('#   ') for line in lines) and len(lines) == 7
+    assert shlex.split(" ".join(line[4:].rstrip('\\') for line in lines)) == shlex.split(command)
+
+
+def test_merge_imports():
+    lines = ['import datajoint as dj', 'from djimaging.tables import core, misc', 'from djimaging.tables import core, history',
+             'import numpy as np', 'from djimaging.tables import location']
+    assert make_project.merge_imports(lines) == [
+        'import datajoint as dj', 'from djimaging.tables import core, misc, history, location', 'import numpy as np']
+    long = make_project.merge_imports([f'from m import name_{i}' for i in range(20)], max_length=120)
+    assert len(long) == 1 and long[0].startswith('from m import (\n    name_0,\n') and long[0].endswith(',\n)')
+    ast.parse(long[0])
+
+
+def test_generated_schema_has_no_duplicate_imports():
+    text = make_project.build_schema_text(ROOT, make_project.resolve_blocks(OPTIONAL_BLOCKS))
+    modules = [n.module for n in ast.parse(text).body if isinstance(n, ast.ImportFrom)]
+    assert len(modules) == len(set(modules))
+
+
+def test_djimaging_source_path():
+    default = make_project.default_project_dir(ROOT, 'tester')
+    assert make_project.djimaging_source_path(ROOT, default) == f'../../{ROOT.name}'
+    far = ROOT.parent / 'a' / 'b' / 'c' / 'd' / 'tester'
+    assert make_project.djimaging_source_path(ROOT, far) == str(ROOT.resolve()).replace('\\', '/')
