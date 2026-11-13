@@ -94,7 +94,8 @@ STIM_LOG_ANCHOR = "    stim_log_table = None  # QdsPyLog.StimLog"
 # tables that load recordings).
 FIELD_CLASS_HEADER = "@schema\nclass Field(core.FieldTemplate):\n"
 SETUP_TABLE_USERS = (FIELD_CLASS_HEADER, "@schema\nclass Presentation(core.PresentationTemplate):\n",
-                     "@schema\nclass HighRes(misc.HighResTemplate):\n")
+                     "@schema\nclass HighRes(misc.HighResTemplate):\n",
+                     "@schema\nclass ExpHistory(history.ExpHistoryTemplate):\n")  # history block: scan width
 NOTEBOOK_FIELD_CELL = "# %%\nField().rescan_filesystem("
 
 

@@ -288,7 +288,7 @@ def test_setup_tables_before_field(extra):
     text = make_project.build_schema_text(ROOT, blocks)
     namespace = exec_schema(text)
     assert text.index('class ExperimentImagingSetup(') < text.index('class Field(core.FieldTemplate)')
-    for name in ('Field', 'Presentation', 'HighRes'):
+    for name in ('Field', 'Presentation', 'HighRes') + (('ExpHistory',) if 'history' in extra else ()):
         assert namespace[name].experiment_stimulator_table is namespace['ExperimentStimulator']
         assert namespace[name].experiment_imaging_setup_table is namespace['ExperimentImagingSetup']
     log = namespace['PresentationLog'] if 'history' in extra else None
