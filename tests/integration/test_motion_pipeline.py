@@ -2,12 +2,12 @@
 synthetic tutorial data."""
 import importlib.util
 import os
-import uuid
 from pathlib import Path
 
-import datajoint as dj
 import numpy as np
 import pytest
+
+from tests.fixtures.dj_test_db import new_test_schema
 
 from djimaging.utils.dj_storage import load_array
 
@@ -20,14 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(scope="module", params=[['motion'], ['motion_refine']], ids=['motion', 'motion_refine'])
-def motion_schema(request, dj_test_stores, tmp_path_factory):
-    dj.config["database.host"] = os.environ.get("DJ_HOST", "127.0.0.1")
-    dj.config["database.port"] = int(os.environ.get("DJ_PORT", "3306"))
-    dj.config["database.user"] = os.environ.get("DJ_USER", "root")
-    dj.config["database.password"] = os.environ.get("DJ_PASS", "datajoint")
-    connection = dj.conn()
-    schema_name = f"djimaging_ci_motion_{uuid.uuid4().hex[:8]}"
-
+def motion_schema(request, dj_test_connection, dj_test_stores, tmp_path_factory):
     spec = importlib.util.spec_from_file_location('make_project', ROOT / 'make_project.py')
     make_project = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(make_project)
@@ -39,12 +32,8 @@ def motion_schema(request, dj_test_stores, tmp_path_factory):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    from djimaging.utils.dj_utils import activate_schema
-    try:
-        activate_schema(module.schema, schema_name=schema_name)
+    with new_test_schema(dj_test_connection, module.schema, request.param[0]):
         yield module
-    finally:
-        connection.query(f"DROP DATABASE IF EXISTS `{schema_name}`")
 
 
 def test_motion_pipeline(motion_schema, tutorial_data_dir):
