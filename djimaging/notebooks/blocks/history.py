@@ -74,3 +74,30 @@ ExpHistoryStimLog()
 PresentationLog().populate(make_kwargs=dict(verbose=0, skip_if_no_log=True), suppress_errors=True,
                            display_progress=True)
 print(f"{len(PresentationLog())} of {len(Presentation())} presentations have a log entry")
+
+# %% [markdown]
+# ## Light exposure history report
+#
+# Per experiment, every laser scan and every stimulus in time order: where and how long the retina was exposed, which
+# stimulus (unlisted stimuli only by name, never with results), setup and stimulator, and the processing status.
+# Unknown values are written as `unknown`, gaps are listed at the top of the report. Writes CSV, JSON and HTML to one
+# folder per experiment. Run again at the end of the pipeline to include traces and motion QC.
+
+# %%
+from djimaging.utils import exposure_history as eh
+from djimaging.utils.exposure_history_dj import fetch_exposure_history
+
+exposure_dir = os.path.expanduser('~/exposure_history')  # One sub-folder per experiment
+exposure_tables = dict(
+    stimulus_table=Stimulus, exp_history_field_table=ExpHistoryField, stim_log_table=ExpHistoryStimLog,
+    presentation_table=Presentation, traces_table=Traces,
+    # Optional tables (None if the block is not part of the schema)
+    motion_detection_table=globals().get('MotionDetection'), motion_trust_table=globals().get('MotionTrust'),
+    experiment_stimulator_table=globals().get('ExperimentStimulator'),
+    experiment_imaging_setup_table=globals().get('ExperimentImagingSetup'),
+)
+
+for exp_key in ExpHistory().proj().to_dicts():
+    events, meta = fetch_exposure_history(exp_key, ExpHistory, **exposure_tables)
+    files = eh.export_experiment(os.path.join(exposure_dir, eh.experiment_folder_name(exp_key)), events, meta)
+print(f"Last report: {files['html']}")

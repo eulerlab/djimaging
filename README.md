@@ -219,6 +219,12 @@ stimulus-specific data (`Traces`, `Snippets`, `Averages`, analyses) depends on `
 unpublished) stimuli are visible in the history with their names, but never get traces.
 `ExpHistory().listed(Stimulus)` shows the status of every recording.
 
+The **light exposure history** of an experiment (`djimaging.utils.exposure_history`, fetched with
+`exposure_history_dj.fetch_exposure_history`) lists every laser scan and stimulus in time order with position,
+duration, setup, stimulator and processing status, and writes it as CSV, JSON and HTML (`export_experiment`). Unknown
+values are written as `unknown` and gaps are listed explicitly; unlisted stimuli appear by name only, never with
+results. The `history` notebook part ends with a cell that exports it for every experiment.
+
 #### Imaging channels (functional and background)
 
 The imaging channels are defined in a `Channel` table (`ch_id`, `ch_name`, `is_functional`, `roi_default`), which every
