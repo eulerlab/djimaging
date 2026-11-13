@@ -82,6 +82,23 @@ plot_if_data(Field(), key=None)
 #   and how many triggers belong to one repetition.
 # - `Presentation`: One entry per presentation of a stimulus in a field, with trigger times and scan info.
 #   Contains the data that is shared by all ROIs of the field.
+#
+# ### QDSpy identifiers of the stimuli (`stim_hash_list`, `stim_name_list`)
+#
+# **Why it matters**: recordings are assigned to a `Stimulus` by the stimulus part of their file name (`alias`).
+# Which QDSpy script was actually shown is only known from the QDSpy logs. `PresentationLog` (history block) links
+# each presentation to its log entry, first by the md5 hash of the QDSpy script (`stim_hash_list`), then by its file
+# name (`stim_name_list`). Without them, no presentation is linked to its log, so e.g. the moving bar version (which
+# decides the bar directions on the retina, `MovingBarVersion`) and the exact stimulus timing are unknown.
+#
+# **Where to find them**: every stimulus start in a QDSpy log file (`Resources/__Setup_<id>/log files` in the
+# reference store) lists the script file name and its md5 hash. After `QdsPyLog` is populated (history block),
+# the cell "Logged QDSpy stimuli" there lists all logged scripts of your experiments and whether a `Stimulus` below
+# claims them. Script versions and their conventions are documented in the QDSpy-stimuli-Documentation repo.
+# You can add identifiers later: update the `stim_dict` of the `Stimulus` entry and populate `PresentationLog` again.
+#
+# The lists below are the versions of the Euler lab's standard RGC stimuli (as in all_gcl_v2). Remove what you did
+# not use and add your own versions; an empty list means the stimulus is not matched to the logs.
 
 # %%
 # To compute receptive fields, the noise stimulus trace must be loaded and set!
@@ -93,9 +110,34 @@ with h5py.File(noise_file, "r") as f:
     noise_stimulus = f['stimulusarray'][:].T.astype(int)
 
 # %%
+# Global chirp, 1000 um. Versions:
+# - f124bb886d58ff93a1e1d4448d76e979: standard (setup 1: Dominic, Tom, Ryan, Nadine; setup 3: Katrin)
+# - a54b9cb714cb964bbec150c6b2205929: as f124bb88, but resets the background to black at the beginning (Flo)
+# Not included: 2259330f4015ea49d3dc2d7241d4b43d (800 um; Chenchen, Klaudia, Tom), add it here if you pool 800 um.
+GCHIRP_HASHES = ["f124bb886d58ff93a1e1d4448d76e979", "a54b9cb714cb964bbec150c6b2205929"]
+GCHIRP_NAMES = ["Chirp", "RGC_Chirp"]
+
+# Local chirp, 300 um: no standard versions known, add the ones of your logs
+LCHIRP_HASHES = []
+LCHIRP_NAMES = []
+
+# Moving bar (RGC_MovingBar and DS scripts); versions and their directions: Stimulus.add_movingbar and MovingBarVersion
+MOVINGBAR_HASHES = ["a574d90497d97ff9b93381f6b2eb207d", "31ca3c0d0ce464357ee7a7f5b57849c5",
+                    "bc083a0411701c4141e7b55f6a9c898b"]
+MOVINGBAR_NAMES = ["RGC_MovingBar", "RGC_MovingBar_2", "DS"]
+
+# Dense noise. The standard RGC noise of the lab (Noise_RGC, DN) has 40 um pixels:
+#   hashes 193b854eefc34b8d606b3b9ff20be394, 04ffdaff3608c3fd9c753dd9ff0eca82, 521d77a52eff75053da309ada99d1156.
+# They only belong here if your noise below has the same geometry (pix_scale 40 um, offset -20 um), so they are not set.
+NOISE_HASHES = []
+NOISE_NAMES = []
+
+# %%
 Stimulus().add_nostim(skip_duplicates=True)
-Stimulus().add_chirp(spatialextent=1000, stim_name='gChirp', alias="chirp_gchirp_globalchirp", skip_duplicates=True)
-Stimulus().add_chirp(spatialextent=300, stim_name='lChirp', alias="lchirp_localchirp", skip_duplicates=True)
+Stimulus().add_chirp(spatialextent=1000, stim_name='gChirp', alias="chirp_gchirp_globalchirp",
+                     stim_hash_list=GCHIRP_HASHES, stim_name_list=GCHIRP_NAMES, skip_duplicates=True)
+Stimulus().add_chirp(spatialextent=300, stim_name='lChirp', alias="lchirp_localchirp",
+                     stim_hash_list=LCHIRP_HASHES, stim_name_list=LCHIRP_NAMES, skip_duplicates=True)
 Stimulus().add_noise(
     stim_name='noise',
     pix_n_x=20,
@@ -107,6 +149,8 @@ Stimulus().add_noise(
     stim_path=noise_file,
     stim_trace=noise_stimulus,
     array_to_screen={'x': '+y', 'y': '+x'},  # Axes of noise.h5 (transposed) on the QDSpy screen, used by RfRoiOffset
+    stim_hash_list=NOISE_HASHES,
+    stim_name_list=NOISE_NAMES,
     skip_duplicates=True,
 )
 Stimulus().add_movingbar(
@@ -116,13 +160,17 @@ Stimulus().add_movingbar(
     bardy=1000,
     velumsec=1000,
     tmovedurs=4.0,
+    stim_hash_list=MOVINGBAR_HASHES,
+    stim_name_list=MOVINGBAR_NAMES,
     skip_duplicates=True,
 )
 
 # %%
-# Add custom stimulus if needed
+# Add custom stimulus if needed, with its QDSpy identifiers (see above)
 # Stimulus().add_stimulus(stim_name='my_stimulus', alias="stimname_stimnameabbr_alternativename", isrepeated=True, ntrigger_rep=6,
-#                         trial_info=[dict(name=d, ntrigger=1) for d in range(1, 7)], skip_duplicates=True)
+#                         trial_info=[dict(name=d, ntrigger=1) for d in range(1, 7)],
+#                         stim_dict=dict(stim_hash_list=["<md5 from the QDSpy log>"], stim_name_list=["<QDSpy file name>"]),
+#                         skip_duplicates=True)
 
 # %%
 Stimulus()

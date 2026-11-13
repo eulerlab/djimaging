@@ -15,6 +15,21 @@ CHIRP_SNIPPET_BASE_DT = 8 * 0.128
 MOVINGBAR_SNIPPET_BASE_DT = 5 * 0.128
 
 
+def log_identifiers(stim_hash_list=None, stim_name_list=None) -> dict:
+    """`stim_dict` entries that identify a stimulus in the QDSpy logs (used by `PresentationLog`).
+
+    stim_hash_list: md5 hashes of the QDSpy stimulus scripts, stim_name_list: QDSpy stimulus file names (without
+    extension). Both as written in the QDSpy log files.
+    """
+    out = {}
+    for k, v in (('stim_hash_list', stim_hash_list), ('stim_name_list', stim_name_list)):
+        if v is not None:
+            if isinstance(v, str):
+                raise TypeError(f"{k} must be a list of strings, not a string.")
+            out[k] = [str(x) for x in v]
+    return out
+
+
 def check_trial_info(trial_info: list, ntrigger_rep: int) -> list:
     """Validate canonical trial dictionaries and their trigger counts.
 
@@ -181,6 +196,8 @@ class StimulusTemplate(dj.Manual):
             offset_x_um: float = None,
             offset_y_um: float = None,
             array_to_screen: dict | None = None,
+            stim_hash_list: list[str] | None = None,
+            stim_name_list: list[str] | None = None,
             skip_duplicates: bool = False,
     ) -> None:
         """Add a dense noise stimulus entry to the table.
@@ -211,6 +228,10 @@ class StimulusTemplate(dj.Manual):
             array_to_screen: QDSpy screen axis of the stimulus array x (column) and y (row) axes, e.g.
                 {'x': '+y', 'y': '+x'} for the standard dense noise (`NOISE_ARRAY_TO_SCREEN` in
                 djimaging.utils.stimulator). Required to align RFs with ROIs (RfRoiOffset).
+            stim_hash_list: md5 hashes of the QDSpy stimulus scripts of this stimulus, as in the QDSpy logs.
+                Used by `PresentationLog` to match presentations with their log entries.
+            stim_name_list: QDSpy stimulus file names (without extension) of this stimulus, as in the QDSpy logs.
+                Fallback of `PresentationLog` if no hash matches.
             skip_duplicates: If True, silently skip duplicate entries.
                 Default is False.
         """
@@ -255,6 +276,8 @@ class StimulusTemplate(dj.Manual):
             axes_to_matrix(array_to_screen['x'], array_to_screen['y'])  # validate
             stim_dict["array_to_screen"] = dict(array_to_screen)
 
+        stim_dict.update(log_identifiers(stim_hash_list, stim_name_list))
+
         self.add_stimulus(
             stim_name=stim_name,
             stim_family=stim_family,
@@ -282,6 +305,8 @@ class StimulusTemplate(dj.Manual):
             stim_trace: np.ndarray = None,
             stim_path: str | Path | None = None,
             alias: str = None,
+            stim_hash_list: list[str] | None = None,
+            stim_name_list: list[str] | None = None,
             skip_duplicates: bool = False,
     ) -> None:
         """Add a chirp stimulus entry to the table.
@@ -299,6 +324,10 @@ class StimulusTemplate(dj.Manual):
             stim_path: Optional source stimulus file in the configured reference store.
             alias: Custom alias string; defaults to a standard chirp alias if
                 None.
+            stim_hash_list: md5 hashes of the QDSpy stimulus scripts of this stimulus, as in the QDSpy logs.
+                Used by `PresentationLog` to match presentations with their log entries.
+            stim_name_list: QDSpy stimulus file names (without extension) of this stimulus, as in the QDSpy logs.
+                Fallback of `PresentationLog` if no hash matches.
             skip_duplicates: If True, silently skip duplicate entries.
                 Default is False.
         """
@@ -309,6 +338,8 @@ class StimulusTemplate(dj.Manual):
         stim_dict = {
             "spatialextent": spatialextent,
         }
+
+        stim_dict.update(log_identifiers(stim_hash_list, stim_name_list))
 
         self.add_stimulus(
             stim_name=stim_name,
@@ -341,6 +372,8 @@ class StimulusTemplate(dj.Manual):
             stim_dict_other: dict = None,
             stim_path: str | Path | None = None,
             alias: str = None,
+            stim_hash_list: list[str] | None = None,
+            stim_name_list: list[str] | None = None,
             skip_duplicates: bool = False,
     ) -> None:
         """Add a moving bar stimulus entry to the table.
@@ -366,6 +399,10 @@ class StimulusTemplate(dj.Manual):
             stim_path: Optional source stimulus file in the configured reference store.
             alias: Custom alias string; defaults to a standard moving-bar alias
                 if None.
+            stim_hash_list: md5 hashes of the QDSpy stimulus scripts of this stimulus, as in the QDSpy logs.
+                Used by `PresentationLog` to match presentations with their log entries.
+            stim_name_list: QDSpy stimulus file names (without extension) of this stimulus, as in the QDSpy logs.
+                Fallback of `PresentationLog` if no hash matches.
             skip_duplicates: If True, silently skip duplicate entries.
                 Default is False.
         """
@@ -425,6 +462,8 @@ class StimulusTemplate(dj.Manual):
         }
         if stim_dict_other is not None:
             stim_dict.update(stim_dict_other)
+
+        stim_dict.update(log_identifiers(stim_hash_list, stim_name_list))
 
         self.add_stimulus(
             stim_name=stim_name,

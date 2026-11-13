@@ -65,6 +65,33 @@ for setupid, log_dir in qdspy_log_dirs.items():
 
 QdsPyLog().populate(display_progress=True)
 
+# %% [markdown]
+# ### Logged QDSpy stimuli
+#
+# Every QDSpy script in the logs of your experiments: file name, md5 hash, how often it was shown, and the `Stimulus`
+# that claims it, by the same rule as `PresentationLog` (md5 in `stim_hash_list`, or the file name starts with an
+# entry of `stim_name_list` or with the `stim_name`). Scripts of stimuli you analyse but without a claiming `Stimulus`
+# need their hash added in the stimulus cell (core part); then populate `PresentationLog` (below) again.
+
+# %%
+stim_claims = []
+for stim_name, stim_dict in zip(*Stimulus().to_arrays('stim_name', 'stim_dict')):
+    stim_claims.append((stim_name, set(stim_dict.get('stim_hash_list', [])),
+                        {n.lower() for n in list(stim_dict.get('stim_name_list', [])) + [stim_name]}))
+
+
+def claiming_stimuli(file_name, md5):
+    by_md5 = [s for s, hashes, _ in stim_claims if md5 in hashes]
+    by_name = [s for s, _, names in stim_claims if any(file_name.lower().startswith(n) for n in names)]
+    return ', '.join(by_md5) + (' (md5)' if by_md5 else '') or ', '.join(by_name) + (' (name)' if by_name else '')
+
+
+df_logged = QdsPyLog.StimLog().proj('stim_file_name', 'stim_md5').to_pandas().reset_index()
+if len(df_logged) > 0:
+    df_logged = df_logged.groupby(['stim_file_name', 'stim_md5']).size().rename('n_logged').reset_index()
+    df_logged['claimed_by'] = [claiming_stimuli(f, h) for f, h in zip(df_logged.stim_file_name, df_logged.stim_md5)]
+df_logged
+
 # %%
 ExpHistoryStimLog().populate(display_progress=True)
 ExpHistoryStimLog()
