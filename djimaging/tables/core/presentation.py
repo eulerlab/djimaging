@@ -13,6 +13,7 @@ from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm.recording import ScanMRecording
 from djimaging.utils.stimulus_listing import is_listed_for
+from djimaging.tables.core.setup_params import RecordingSetupMixin
 
 
 def check_listed_for_presentation(file_info: dict, stim_name: str, alias: str) -> None:
@@ -24,7 +25,7 @@ def check_listed_for_presentation(file_info: dict, stim_name: str, alias: str) -
                          f"listed for stimulus `{stim_name}` (aliases: {alias}). Not added to Presentation.")
 
 
-class PresentationTemplate(dj.Computed):
+class PresentationTemplate(RecordingSetupMixin, dj.Computed):
     database = ""
     _filepath_store = "reference"
     incl_region = True  # Include region as primary key?
@@ -313,12 +314,12 @@ class PresentationTemplate(dj.Computed):
         if verboselvl > 4:
             print('\t\tAdd presentation with file:', filepath)
 
-        setupid = (self.experiment_table().ExpInfo & pres_key).fetch1("setupid")
+        setup_kwargs = self.recording_setup_kwargs(pres_key)
         from_raw_data, trigger_precision, compute_from_stack = (self.raw_params_table & pres_key).fetch1(
             'from_raw_data', 'trigger_precision', 'compute_from_stack')
         isrepeated, ntrigger_rep = (self.stimulus_table & pres_key).fetch1("isrepeated", "ntrigger_rep")
 
-        rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=pres_key['date'],
+        rec = ScanMRecording(filepath=filepath, **setup_kwargs,
                              repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep, time_precision=trigger_precision)
 
         if compute_from_stack or from_raw_data:
@@ -461,11 +462,11 @@ class PresentationTemplate(dj.Computed):
         triggertimes, filepath = (self & key).fetch1('triggertimes', 'pres_data_file')
         triggertimes = load_array(triggertimes)
 
-        setupid = (self.experiment_table().ExpInfo & key).fetch1("setupid")
+        setup_kwargs = self.recording_setup_kwargs(key)
         isrepeated, ntrigger_rep = (self.stimulus_table & key).fetch1("isrepeated", "ntrigger_rep")
 
         with local_path(filepath, self._filepath_store) as filepath_local:
-            rec = ScanMRecording(filepath=filepath_local, setup_id=setupid, date=key['date'],
+            rec = ScanMRecording(filepath=filepath_local, **setup_kwargs,
                                  repeated_stim=isrepeated, ntrigger_rep=ntrigger_rep)
             rec.set_auto_trigger_threshold()
             trigger_trace = rec.ch_stacks[rec.trigger_ch_name].T.flatten()

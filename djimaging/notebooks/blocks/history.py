@@ -64,3 +64,13 @@ QdsPyLog().populate(display_progress=True)
 # %%
 ExpHistoryStimLog().populate(display_progress=True)
 ExpHistoryStimLog()
+
+# %% [markdown]
+# `PresentationLog`: the QDSpy log entry of each `Presentation` (matched by the QDSpy md5 or file name in
+# `stim_dict['stim_hash_list']` / `stim_dict['stim_name_list']` of the stimulus). Used e.g. to identify moving bar and
+# mouse cam versions.
+
+# %%
+PresentationLog().populate(make_kwargs=dict(verbose=0, skip_if_no_log=True), suppress_errors=True,
+                           display_progress=True)
+print(f"{len(PresentationLog())} of {len(Presentation())} presentations have a log entry")

@@ -84,6 +84,7 @@ class ScanMRecording:
     """
     def __init__(self, filepath: str, setup_id: Optional[int] = None,
                  date: Optional[str] = None, stimulator_delay: Optional[float] = None,
+                 scan_width_um: Optional[float] = None, npixartifact: Optional[int] = None,
                  roi_mask_ignore_not_found: bool = True,
                  trigger_ch_name: str = 'wDataCh2', time_precision: str = 'line',
                  triggers_ignore_not_found: bool = True,
@@ -106,6 +107,12 @@ class ScanMRecording:
         stimulator_delay : float, optional
             Stimulator delay in seconds.  When None, will be looked up from
             the stimulator-delay table using ``date`` and ``setup_id``.
+        scan_width_um : float, optional
+            Full-field scan width in micrometres at zoom 1 (e.g. from `ImagingSetup`). When None, the constant of
+            ``setup_id`` in `setup_utils` is used.
+        npixartifact : int, optional
+            Number of light artifact lines (e.g. from `ImagingSetup`). When None, the constant of ``setup_id`` in
+            `setup_utils` is used.
         roi_mask_ignore_not_found : bool, optional
             If True, a missing ROI mask does not raise an exception.
             Default is True.
@@ -138,6 +145,8 @@ class ScanMRecording:
         self.setup_id = setup_id
         self.date = date
         self.stimulator_delay = stimulator_delay
+        self.scan_width_um = scan_width_um
+        self.npixartifact = npixartifact
         self.scan_type = None
         self.scan_type_id = None
 
@@ -320,7 +329,12 @@ class ScanMRecording:
         self.pix_nx = max(0, int(self.pix_nx_full - self.pix_n_retrace - self.pix_n_line_offset))
         self.pix_ny = int(wparams.pop("User_dyPix", 0))
         self.pix_nz = int(wparams.pop("User_dzPix", 0))
-        self.pix_n_artifact = setup_utils.get_npixartifact(setupid=self.setup_id) if self.setup_id is not None else None
+        if self.npixartifact is not None:
+            self.pix_n_artifact = int(self.npixartifact)
+        elif self.setup_id is not None:
+            self.pix_n_artifact = setup_utils.get_npixartifact(setupid=self.setup_id)
+        else:
+            self.pix_n_artifact = None
 
         # Scan info
         self.real_pixel_duration = wparams.pop('RealPixDur') * 1e-6
@@ -334,7 +348,10 @@ class ScanMRecording:
         self.obj_angle_deg = wparams.pop("Angle_deg")
 
         # Pixel sizes
-        if self.pix_nx > 0 and self.setup_id is not None:
+        if self.pix_nx > 0 and self.scan_width_um is not None:
+            self.pix_dx_um = setup_utils.pixel_size_from_scan_width(
+                scan_width_um=self.scan_width_um, zoom=self.obj_zoom, npix=self.pix_nx)
+        elif self.pix_nx > 0 and self.setup_id is not None:
             self.pix_dx_um = setup_utils.get_pixel_size_xy_um(
                 zoom=self.obj_zoom, setupid=self.setup_id, npix=self.pix_nx)
         else:

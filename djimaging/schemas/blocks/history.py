@@ -43,3 +43,11 @@ class ExpHistoryStimLog(history.ExpHistoryStimLogTemplate):
 
     class Stim(history.ExpHistoryStimLogTemplate.Stim):
         stim_log_table = QdsPyLog.StimLog
+
+
+@schema
+class PresentationLog(core.PresentationLogTemplate):
+    log_table = QdsPyLog.StimLog
+    stimulus_table = Stimulus
+    exp_table = Experiment
+    presentation_table = Presentation

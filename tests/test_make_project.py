@@ -279,3 +279,52 @@ def test_add_default_raw_data_params_is_deprecated():
     with pytest.warns(DeprecationWarning, match='add_default'):
         Params.add_default(Params.__new__(Params))
     assert calls[0]['igor_roi_masks'] == 'yes'
+
+
+@pytest.mark.parametrize('extra', [[], ['history']])
+def test_setup_tables_before_field(extra):
+    """The stimulator block is inserted before Field; Field, Presentation and HighRes take the setup values from it."""
+    blocks = make_project.resolve_blocks(['stimulator', 'mouse_cam', 'mb_direction'] + extra)
+    text = make_project.build_schema_text(ROOT, blocks)
+    namespace = exec_schema(text)
+    assert text.index('class ExperimentImagingSetup(') < text.index('class Field(core.FieldTemplate)')
+    for name in ('Field', 'Presentation', 'HighRes'):
+        assert namespace[name].experiment_stimulator_table is namespace['ExperimentStimulator']
+        assert namespace[name].experiment_imaging_setup_table is namespace['ExperimentImagingSetup']
+    log = namespace['PresentationLog'] if 'history' in extra else None
+    assert namespace['MbDirectionMap'].presentation_log_table is log
+    assert namespace['MouseCamGeometry'].presentation_log_table is log
+    nb = make_project.build_notebook_text(ROOT, blocks, schema_module='my.schema', project='tester')
+    ast.parse(nb)
+    assert nb.index('Experiment().rescan_filesystem') < nb.index('ExperimentImagingSetup().populate') \
+        < nb.index('Field().rescan_filesystem')
+    if 'history' in extra:
+        assert nb.index('Presentation().populate') < nb.index('PresentationLog().populate') \
+            < nb.index('MbDirectionMap().populate')
+
+
+def test_setup_tables_not_bound_without_stimulator_block():
+    namespace = exec_schema(make_project.build_schema_text(ROOT, make_project.resolve_blocks([])))
+    assert namespace['Field'].experiment_stimulator_table is None
+    assert namespace['Presentation'].experiment_imaging_setup_table is None
+
+
+@pytest.mark.parametrize('extra', [[], ['motion']])
+def test_stimulator_blocks(extra):
+    """rf_offset and mb_direction bind the stimulator; RfRoiOffset uses MotionRoiMask in motion mode."""
+    blocks = make_project.resolve_blocks(['rf_offset', 'mb_direction'] + extra)
+    assert {'stimulator', 'location', 'rf_sta', 'basic'} <= set(blocks)
+    namespace = exec_schema(make_project.build_schema_text(ROOT, blocks))
+    assert namespace['ExperimentStimulator'].stimulator_table is namespace['Stimulator']
+    assert namespace['RfRoiOffset'].experiment_stimulator_tab is namespace['ExperimentStimulator']
+    assert namespace['MbDirectionMap'].experiment_stimulator_table is namespace['ExperimentStimulator']
+    assert namespace['MbRetinalPrefDir'].retinal_field_location_table is namespace['RetinalFieldLocation']
+    expected_mask = namespace['MotionRoiMask'] if 'motion' in extra else namespace['RoiMask'].RoiMaskPresentation
+    assert namespace['RfRoiOffset'].roimask_tab is expected_mask
+
+
+def test_mb_direction_without_location():
+    blocks = make_project.resolve_blocks(['mb_direction'])
+    assert 'location' not in blocks
+    namespace = exec_schema(make_project.build_schema_text(ROOT, blocks))
+    assert namespace['MbRetinalPrefDir'].retinal_field_location_table is None
