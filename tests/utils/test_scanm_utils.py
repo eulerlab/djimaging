@@ -8,7 +8,7 @@ from numpy.testing import assert_almost_equal
 
 from djimaging.utils.scanm import read_h5_utils, setup_utils, traces_and_triggers_utils, wparams_utils
 
-_TEST_DATA_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'test_data'))
+from tests.fixtures.data_paths import TEST_DATA_PATH as _TEST_DATA_PATH  # noqa: E402
 
 
 def test_get_pixel_size_um_64_default_scan1():

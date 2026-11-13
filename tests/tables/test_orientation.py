@@ -7,7 +7,7 @@ import pytest
 
 from djimaging.tables.response.movingbar.orientation_utils import compute_os_ds_idxs
 
-_TEST_DATA_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'test_data'))
+from tests.fixtures.data_paths import TEST_DATA_PATH as _TEST_DATA_PATH  # noqa: E402
 
 
 def load_test_data(cell_type, path=os.path.join(_TEST_DATA_PATH, 'test_mb.pkl')):

@@ -12,6 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv pip install -e .                  # install editable; extras: ".[autorois]", ".[rf]", ".[dev]"
 pytest -v tests --ignore=tests/integration       # unit tests (what the python-app CI runs; also runs flake8)
 pytest tests/utils/test_x.py::test_name          # single test
+DJIMAGING_TEST_DATA=X:/Data/DataJointTestData uv run pytest tests --ignore=tests/integration
+                                                 # real test data (default <repo>/test_data); tests skip if missing
 DJ_TEST_MYSQL=1 pytest -q tests/integration      # MySQL integration tests; needs a MySQL server
                                                  # (env DJ_HOST/DJ_PORT/DJ_USER/DJ_PASS, defaults 127.0.0.1:3306 root/datajoint)
 python3 make_project.py <project> [--blocks basic,rf_sta | --all] [--target-dir PATH]   # standalone project (default ../djimaging-projects/<project>): installable package dji_<project> with schema, settings.py and numbered notebooks 01_setup, 02_roi_masks, 03_traces, 04_<block>... built from the chosen table blocks; never overwrites files
