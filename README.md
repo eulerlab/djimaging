@@ -78,7 +78,7 @@ relative to the common reference root.
 JSON does not support comments, so these store roles are documented here rather
 than inside the config template.
 
-### Create a project folder
+### Create a project
 
 Inside the root folder <code>djimaging</code> (not in <code>djimaging/djimaging</code>)
 run the make project script by calling
@@ -87,16 +87,44 @@ run the make project script by calling
 python3 make_project.py your_project_name
 ```
 
-This creates the git-ignored folder <code>djimaging/djimaging/user/your_project_name/</code> containing
+This creates a standalone project next to the djimaging repo, in
+<code>&lt;parent folder of djimaging&gt;/djimaging-projects/your_project_name/</code>
+(choose another folder with <code>--target-dir PATH</code>; it must be outside the djimaging repo).
+The project is an installable package (<code>dji_your_project_name</code>) that is ready to be a git repository:
 
-- <code>schemas/your_project_name_schema.py</code>: the schema of your project, built from the table blocks you select,
-- <code>notebooks/populate_your_project_name_schema.ipynb</code>: a notebook to connect to and populate this schema,
-- <code>notebooks/</code>: the static example notebooks (e.g. <code>connect_to_schema.ipynb</code>),
-- <code>tables/my_table.py</code>: a copy of <code>_new_table_example.py</code> as a starting point for your own table templates.
+```
+djimaging-projects/your_project_name/
+  README.md               the exact make_project command, djimaging commit, blocks and notebooks
+  pyproject.toml          depends on djimaging (+ the extras the blocks need), [tool.uv.sources] points to your
+                          local djimaging repo (editable); pytest fails on DataJoint v1 fetch()/ERD warnings
+  .gitignore              Python, environments, notebook checkpoints, DataJoint config files, large data files
+  .gitattributes, .flake8
+  tests/test_schema.py    the schema can be imported and defines its tables (no database needed)
+  dji_your_project_name/
+    settings.py           CONFIG_FILE and SCHEMA_NAME, used by all notebooks
+    schemas/your_project_name_schema.py   the schema, built from the table blocks you select
+    tables/my_table.py    copy of _new_table_example.py, a starting point for your own table templates
+    notebooks/
+      01_setup.ipynb      data import (UserInfo, Channel, RawDataParams, Experiment, setup tables, Field, Stimulus,
+                          Presentation, experiment history), creates the schema and shows its diagram
+      02_roi_masks.ipynb  ROI masks (AutoROIs, corrections, ROI canvas) and Roi
+      03_traces.ipynb     motion correction (motion block), traces, preprocessing, snippets, averages
+      04_<block>.ipynb    one numbered notebook per further block, in the order of the table below
+      drop_schema.ipynb   drops the schema (not numbered, so it is never run by accident)
+      connect_to_schema.ipynb, scan_for_corrupted_recordings.ipynb
+```
 
-> ❗ Per default everything in this folder will not be under version control.
-> Consider adding an expectation for your files here, but do not upload them to the shared repository.
-> Do not upload personal config files.
+Then install the project, e.g. with <code>uv sync --extra dev</code> in the project folder (or
+<code>pip install -e "&lt;djimaging&gt;[autorois]"</code> and <code>pip install -e ".[dev]"</code>), check
+<code>settings.py</code> and run the notebooks in their order. Every notebook connects on its own (config, schema,
+<code>activate_schema</code>), so a notebook can be rerun without the ones before; only <code>01_setup</code> creates
+the schema. <code>settings.SCHEMA_NAME</code> defaults to <code>ageuler_&lt;login name&gt;_&lt;project&gt;</code>; use
+a fixed name for a schema that several users populate together.
+
+> ❗ Do not commit personal config files (the generated <code>.gitignore</code> excludes the usual names).
+
+Older projects in the git-ignored <code>djimaging/djimaging/user/&lt;project&gt;/</code> folder keep working
+(imported as <code>djimaging.user.&lt;project&gt;</code>), but <code>make_project.py</code> no longer creates them.
 
 #### Choosing table blocks
 
@@ -135,9 +163,9 @@ block, the `setupid` constants of `setup_utils` are used as before). Every assig
 `medium`, `low`) and a reason; conventions are documented in `djimaging/utils/stimulator.py`. With the `history`
 block, moving bar and mouse cam versions are read from the QDSpy logs (`PresentationLog`).
 
-The project name becomes part of the import path <code>djimaging.user.&lt;project&gt;</code>, so it may only contain
-letters, digits and underscores and must not start with a digit; anything else is rejected.
-The notebook uses <code>ageuler_&lt;login name&gt;_&lt;project&gt;</code> as the schema name.
+The project name becomes part of the package name <code>dji_&lt;project&gt;</code> and the module
+<code>&lt;project&gt;_schema</code>, so it may only contain letters, digits and underscores and must not start with a
+digit; anything else is rejected.
 
 `core` is always included, and any block a selected block requires is added automatically.
 
@@ -155,10 +183,12 @@ listing it in `--blocks`); it requires, and thereby adds, the `motion` block.
 Without `--blocks`/`--all`, the script asks interactively; when there is no terminal (e.g. in a script or CI)
 it falls back to `core` only. Unknown block names raise an error that lists the available blocks.
 
-Existing files are never overwritten: if your schema or populate notebook already exists, the script prints a
-message and skips it. To regenerate them with a different selection, move or delete the old files first.
-If `jupytext` is not installed (<code>pip install jupytext</code>), the notebook is written as a percent-format
-<code>.py</code> file instead of an <code>.ipynb</code>; it can be converted later with
+Existing files are never overwritten: if a file of the project already exists, the script prints a message and
+skips it. To regenerate files with a different selection, move or delete the old ones first.
+The project README records the command with every option given explicitly (also the answers given interactively),
+so running it again creates the same project.
+If `jupytext` is not installed (<code>pip install jupytext</code>), the notebooks are written as percent-format
+<code>.py</code> files instead of <code>.ipynb</code>; they can be converted later with
 <code>jupytext --to ipynb</code>.
 
 #### Experiment history and listed stimuli (`history` block)
@@ -196,7 +226,7 @@ python3 make_project.py your_project_name --legacy-userinfo-stacks              
 
 Without `--n-functional` and `--n-background`, the script asks interactively (default 1 and 1; the defaults are also
 used when there is no terminal). The channels are named `wDataCh0`, `wDataCh1`, ... (functional channels first); the
-generated notebook fills `Channel` in an extra cell, where you can edit the names and the `functional` list.
+generated `01_setup` notebook fills `Channel` in an extra cell, where you can edit the names and the `functional` list.
 
 - **Functional channels** (`is_functional`): traces are only extracted for these. **Background channels** have no
   traces, but they are loaded in the ROI canvas and the field plots.
@@ -239,17 +269,28 @@ Every block has two matching parts:
   <code>@schema</code> and binds their abstract table attributes. A block imports the block it builds on
   (e.g. <code>from djimaging.schemas.blocks.core import *</code>), so it is also a valid, importable schema on its own.
 - **Notebook part**: <code>djimaging/notebooks/blocks/&lt;name&gt;.py</code> is a percent-format
-  (<code># %%</code>) notebook section. <code>cleanup.py</code> is always appended last; the placeholders
-  <code>__SCHEMA_MODULE__</code> and <code>__BLOCKS__</code> are filled in with your schema module and the selected blocks.
+  (<code># %%</code>) notebook section that starts with a top-level heading (<code># # Title</code>), which becomes
+  the title of its notebook. The `notebook` key of the block in <code>BLOCKS</code> says where it goes: `'own'`
+  (default) a numbered notebook of its own, `'setup'`, `'rois'` or `'traces'` appended to <code>01_setup</code>,
+  <code>02_roi_masks</code> or <code>03_traces</code>. The `core` part is split at its <code># # Core: ROIs</code> and
+  <code># # Core: Traces and responses</code> headings into these three notebooks; `stimulator` (before `Field`),
+  `motion` (before `Traces`) and `motion_refine` (before `MotionRoiMask`) are inserted at fixed places.
+  Every notebook starts with <code>preamble.py</code> (connect, import and activate the schema), <code>01_setup</code>
+  also gets <code>overview.py</code> (diagram), and <code>cleanup.py</code> becomes <code>drop_schema</code>.
+  Placeholders such as <code>__SCHEMA_MODULE__</code>, <code>__PACKAGE__</code> and <code>__BLOCKS__</code> are filled
+  in. Use <code>plot_if_data</code> (from <code>djimaging.utils.dj_utils</code>, imported by the preamble) for plots, so
+  that *Run all* works on empty tables. A notebook must only use names it defines itself or gets from the preamble.
 
 To generate your files, <code>make_project.py</code>
 
 1. resolves the selection (adds required blocks, removes duplicates, orders them as in <code>BLOCKS</code>),
 2. concatenates the schema parts into one file: the inter-block imports are dropped (the block code is already
-   included above), all other imports are de-duplicated and moved to the top,
-3. concatenates the notebook parts and converts them to an <code>.ipynb</code> via jupytext.
+   included above), all other imports are de-duplicated, merged per module and moved to the top,
+3. builds the numbered notebooks from the notebook parts and converts them to <code>.ipynb</code> via jupytext,
+4. writes the project files (README, pyproject, settings, ...); `extras` of the selected blocks become extras of the
+   djimaging dependency.
 
-The generated schema starts with a <code># Generated by make_project.py. Blocks: ...</code> header and ends with a
+The generated schema starts with a header (blocks, channels, the make_project command) and ends with a
 commented-out example showing how to add your own table (see <code>tables/my_table.py</code>).
 The ready-made schemas in <code>djimaging/schemas/</code> (<code>core_schema</code>, <code>full_rgc_schema</code>,
 <code>rf_glm_schema</code>, <code>tutorial_schema</code>) are still available to copy; <code>core_schema</code>
@@ -261,14 +302,17 @@ re-exports the <code>core</code> block.
    depends on, e.g. <code>from djimaging.schemas.blocks.core import *</code>, then define the tables.
    Imports must be top-level, since they are parsed to merge the blocks.
 2. Add the notebook part <code>djimaging/notebooks/blocks/&lt;name&gt;.py</code> with the sections that populate and
-   inspect your tables.
-3. Register the block in <code>BLOCKS</code> in <code>make_project.py</code> with a `description` and its `requires`.
-   The order of that dict is the order in the generated files, so list a block after the blocks it requires.
+   inspect your tables, starting with a top-level heading (<code># # Title</code>).
+3. Register the block in <code>BLOCKS</code> in <code>make_project.py</code> with a `description` and its `requires`,
+   and if needed `notebook` (default `'own'`) and `extras` (extras of djimaging it needs, e.g. `['rf']`).
+   The order of that dict is the order in the generated files (and of the numbered notebooks), so list a block after
+   the blocks it requires.
 
 ### Clean up
 
 When you no longer need your test schema, make sure you drop it by
-calling <code>schema.drop()</code> and confirm by entering <code>yes</code>.
+calling <code>schema.drop()</code> (e.g. in the <code>drop_schema</code> notebook of your project) and confirm by
+entering <code>yes</code>.
 
 > ⚠️ Make sure you only drop your own schema! <code>schema.drop()</code> will show you the name of the schema.
 > If you are not sure about the schema's origin, don't drop it!
