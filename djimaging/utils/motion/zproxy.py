@@ -18,6 +18,24 @@ from djimaging.utils.motion.image_utils import (
     register_stack, spearman_brown, valid_region)
 from djimaging.utils.motion.registration import union_masks
 
+# Similarity (noise-corrected corr of band-passed images at recording resolution) vs. |z offset| [um], from one z-stack
+# (zstack/20190130, docs/motion_qc.md "z-stack check"). Depends on cell size, PSF and objective: order of magnitude.
+Z_CALIBRATION = {
+    'ch0': (np.array([1.0, 0.95, 0.90, 0.775, 0.55]), np.array([0., 1.65, 2.25, 3.75, 6.])),
+    'ch1': (np.array([1.0, 0.95, 0.90, 0.775, 0.55]), np.array([0., 1.5, 2.5, 4., 5.5])),
+}
+
+
+def dz_from_similarity(sim, channel: str = 'ch1'):
+    """Rough |z offset| [um] for a noise-corrected similarity; clipped to the calibrated range, NaN stays NaN.
+
+    Scalar in, float out; array in, array out. No sign: a similarity says how far, not in which direction.
+    """
+    s, z = Z_CALIBRATION[channel]
+    x = np.asarray(sim if sim is not None else np.nan, dtype=float)
+    out = np.where(np.isfinite(x), np.interp(np.nan_to_num(x), s[::-1], z[::-1]), np.nan)
+    return float(out) if out.ndim == 0 else out
+
 
 def _zproxy_channel(stack, ref_img, ref_halves, disp_frames, edges, valid):
     reg = register_stack(stack, disp_frames)

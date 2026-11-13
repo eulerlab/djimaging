@@ -49,6 +49,10 @@ BLOCKS = {
     'location': dict(
         description='OpticDisk, RelativeFieldLocation, RetinalFieldLocation',
         requires=['core']),
+    'highres': dict(
+        description='HighResAlignment: shift of the HighRes scan vs. the field ROI mask, match score, rough z offset '
+                    '(also populates HighRes)',
+        requires=['core']),
     'classifier': dict(
         description='RGC classifier: Baden16TracesV2 (moving bar features from OsDsIndexes), ClassifierV2, '
                     'CelltypeAssignmentV2',

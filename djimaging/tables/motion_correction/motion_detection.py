@@ -78,8 +78,9 @@ DEFAULT_MOTION_PARAMS = dict(
     refine_grow=True,  # border pixels outside the drawn ROI may be added
     # presentation mask reshape
     rel_thresh=0.2, rel_drop=0.3, min_valid_frac=0.95, min_contrast_frac=0.5,
-    # trust
-    corr_lo=0.5, corr_hi=0.85, res_scale=0.75, fast_scale=0.75, z_lo=0.75, z_hi=0.95,
+    # trust (MotionTrust): only for the summaries and `MotionTrust.valid_repeats` defaults, not for the stored values
+    trust_thresh=0.7,  # an ROI / bin / repeat is low if less than this fraction of the ROI is on its cell
+    dz_thresh_um=3.,  # a bin / repeat is low if the plane changed by more than this (approx., structural channel)
 )
 
 

@@ -7,6 +7,8 @@ registered mean image, pooled over the presentations of a condition, shrunk towa
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from scipy import ndimage
 
@@ -157,29 +159,45 @@ def pool_roi_shifts(centroids: np.ndarray, shifts_list: list, quality_list: list
     Low-quality ROIs get the field value. Validated: pooled per-ROI shifts predict held-out presentations of the
     same condition to ~0.08 px (noise floor), vs. 0.34-0.39 px with global correction only.
 
+    A per-ROI shift at the search limit (``max_shift``) is not a measurement (the match is likely another cell): it is
+    left out of the pooling and of the field fit; an ROI without any valid shift gets the field value (flag
+    ``at_limit``). Otherwise such a shift moved small ROIs off their cell or out of the FOV (no pixels left).
+
     Returns:
         shifts (n_rois, 2) and a dict with ``lam``, ``pooled``, ``field``, ``spread`` (per-ROI disagreement),
-        ``n_presentations`` and the flags ``at_limit``, ``inconsistent``, ``low_quality`` (bool arrays).
+        ``n_presentations``, ``n_valid`` (per ROI, presentations not at the limit) and the flags ``at_limit``,
+        ``inconsistent``, ``low_quality`` (bool arrays).
     """
     s = np.stack([np.asarray(x, float) for x in shifts_list])
     q_all = np.stack([np.asarray(x, float) for x in quality_list])
     k = len(s)
-    pooled = np.median(s, axis=0) if k > 1 else s[0]
-    q = q_all.mean(axis=0)
+    lim = np.any(np.abs(s) >= max_shift - 0.25, axis=2)  # (k, n_rois)
+    valid = ~lim
+    n_valid = valid.sum(axis=0)
+    has = n_valid > 0
+    sv = np.where(valid[:, :, None], s, np.nan)
+    pooled = np.zeros(s.shape[1:])
+    q = np.zeros(s.shape[1])
+    with warnings.catch_warnings():  # ROIs without valid shift: handled by `has`
+        warnings.simplefilter('ignore', RuntimeWarning)
+        pooled[has] = np.nanmedian(sv[:, has], axis=0)
+        q[has] = np.nanmean(np.where(valid, q_all, np.nan)[:, has], axis=0)
     fld = smooth_shift_field(centroids, pooled, q, sigma=sigma, min_quality=min_quality)
-    resid = pooled - fld
-    if k > 1:
-        noise_var = np.mean(np.var(s, axis=0, ddof=1).sum(axis=1)) / k
-        lam = float(np.clip(1 - noise_var / max(np.mean((resid ** 2).sum(axis=1)), 1e-12), 0, 1))
+    resid = np.where(has[:, None], pooled - fld, 0.)
+    multi = n_valid > 1
+    if k > 1 and multi.any():
+        noise_var = np.mean(np.nanvar(sv[:, multi], axis=0, ddof=1).sum(axis=1) / n_valid[multi])
+        lam = float(np.clip(1 - noise_var / max(np.mean((resid[has] ** 2).sum(axis=1)), 1e-12), 0, 1))
     else:
         lam = float(lam_single)
     final = fld + lam * resid
     low_q = q < min_quality
     final[low_q] = fld[low_q]
-    spread = np.sqrt(np.var(s, axis=0).sum(axis=1)) if k > 1 else np.zeros(len(pooled))
-    flags = dict(at_limit=np.any(np.abs(s) >= max_shift - 0.25, axis=(0, 2)), inconsistent=spread > inconsistent_px,
-                 low_quality=low_q)
-    return final, dict(lam=lam, pooled=pooled, field=fld, spread=spread, n_presentations=k, **flags)
+    spread = np.zeros(len(pooled))
+    if k > 1:
+        spread[multi] = np.sqrt(np.nanvar(sv[:, multi], axis=0).sum(axis=1))
+    flags = dict(at_limit=lim.any(axis=0), inconsistent=spread > inconsistent_px, low_quality=low_q & has)
+    return final, dict(lam=lam, pooled=pooled, field=fld, spread=spread, n_presentations=k, n_valid=n_valid, **flags)
 
 
 def shifted_roi_weights(roi_mask: np.ndarray, roi_shifts: np.ndarray, roi_ids: np.ndarray | None = None) -> np.ndarray:
@@ -275,9 +293,21 @@ def uncrop_weights(cropped: np.ndarray, x0: int, y0: int, shape: tuple) -> np.nd
     return out
 
 
-def extract_traces_weighted(stack: np.ndarray, weights: np.ndarray) -> np.ndarray:
-    """Weighted-mean traces (t, n) from ``stack`` (x, y, t) with ``weights`` (n, x, y); NaN pixels are ignored."""
+def extract_traces_weighted(stack: np.ndarray, weights: np.ndarray, return_valid_frac: bool = False):
+    """Weighted-mean traces (t, n) from ``stack`` (x, y, t) with ``weights`` (n, x, y); NaN pixels are ignored.
+
+    Frames in which an ROI has no valid (finite, weighted) pixel are NaN, and ROIs without any weight are NaN
+    everywhere: no value is better than a fake 0. With ``return_valid_frac``, also returns (t, n) the fraction of the
+    ROI weight on valid pixels per frame (0 for ROIs without weight).
+    """
     x = stack.reshape(-1, stack.shape[2])
     f = np.isfinite(x)
     wf = weights.reshape(weights.shape[0], -1)
-    return ((wf @ np.where(f, x, 0.)) / np.maximum(wf @ f, 1e-9)).T
+    w_valid = wf @ f
+    with np.errstate(invalid='ignore', divide='ignore'):
+        traces = np.where(w_valid > 0, (wf @ np.where(f, x, 0.)) / np.where(w_valid > 0, w_valid, 1.), np.nan).T
+    if not return_valid_frac:
+        return traces
+    w_sum = wf.sum(axis=1)
+    valid_frac = (w_valid / np.where(w_sum > 0, w_sum, 1.)[:, None]).T
+    return traces, valid_frac

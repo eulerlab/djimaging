@@ -66,6 +66,12 @@ class RepeatQITemplate(dj.Computed):
         assert snippets.ndim == 2
         qidx = np.var(np.mean(snippets, axis=1)) / np.mean(np.var(snippets, axis=0))
         min_qidx = 1 / snippets.shape[1]
+        if not np.isfinite(qidx):
+            # DataJoint would omit a NaN and the insert would fail with "Field 'qidx' doesn't have a default value"
+            raise ValueError(
+                f"qidx is not finite for {key}: snippets {snippets.shape} contain "
+                f"{np.sum(~np.isfinite(snippets))} non-finite values, variance {np.nanvar(snippets):.3g}. "
+                f"Usually the trace is constant or NaN (e.g. an ROI without pixels); check Traces / PreprocessTraces.")
         self.insert1(dict(key, qidx=qidx, min_qidx=min_qidx))
 
     def plot(self, restriction=None):

@@ -53,6 +53,12 @@ If you need them, install them yourself, preferably in a separate environment, e
 How ROI masks get into the database, the ROI canvas, corrections, shrink to fit and motion mode:
 see [ROI_MASKS.md](ROI_MASKS.md).
 
+> ⚠️ **Motion detection and motion QC are experimental** (`motion` / `motion_refine` blocks: `MotionDetection`,
+> `MotionRoiMask`, `MotionTrust`, motion-corrected `Traces`; also `HighResAlignment`). They were validated on a
+> limited set of recordings (xy RGC fields of four experiments and one z-stack), and thresholds and the z estimates
+> are not calibrated beyond that. Check the plots for your data before relying on them. Method, validation and
+> known limitations: [docs/motion_qc.md](docs/motion_qc.md).
+
 > ❗ To test if the package was successfully installed, e.g.
 > open a jupyter notebook in your container and call <code>import djimaging</code>.
 
@@ -138,6 +144,7 @@ Instead of copying a fixed schema, <code>make_project.py</code> assembles the sc
 | `history`    | ExpHistory, ExpHistoryField, ExpHistoryStimLog, QdsPyLogFile, QdsPyLog, PresentationLog (see below) | `core`   |
 | `basic`      | ChirpQI, ChirpFeatures, OsDsIndexes                                                     | `core`   |
 | `location`   | OpticDisk, RelativeFieldLocation, RetinalFieldLocation                                  | `core`   |
+| `highres`    | HighResAlignment (shift and match of the HighRes scan vs. the ROI mask; populates HighRes) | `core` |
 | `classifier` | Baden16TracesV2, ClassifierV2, CelltypeAssignmentV2                                     | `basic`  |
 | `rf_sta`     | FastSta, SplitRF, FitGauss2DRF, FitDoG2DRF                                              | `core`   |
 | `rf_glm`     | RfGlm, SplitRfGlm, FitGauss2DRfGlm, FitDoG2DRfGlm                                       | `core`   |

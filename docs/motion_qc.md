@@ -2,6 +2,11 @@
 
 Method, design decisions and validation of the motion tables.
 
+> ⚠️ **Experimental.** Motion detection, the presentation ROI masks, the trust score and the HighRes alignment were
+> validated on a limited set of recordings: the xy RGC fields of four experiments in `imaging_2p_data` (2018 and 2022,
+> setups 1 and 3) and one z-stack. Thresholds (trust, z) and the conversion of similarities to µm are not calibrated
+> beyond these data. Check the plots (`plot1`) of your data before excluding ROIs or repeats based on them.
+
 - Implementation: `djimaging/utils/motion/` (computation) and `djimaging/tables/motion_correction/` (tables
   `MotionParams`, `MotionReference`, `MotionDetection`, `MotionRoiMask`, `MotionTrust`).
 - Use: `python make_project.py <project> --blocks motion,...` switches a schema into motion mode: `RoiMask` only stores
@@ -113,7 +118,8 @@ Good recordings are already stable; the goal is to get the most out of slightly 
 - **z proxy** (2 s bins): Pearson corr of band-passed images after xy registration, *noise-corrected*
   (corr / sqrt(R_bin·R_target), R from split-half Spearman-Brown). Against the recording's own mean (within-recording
   change) and against the field reference (plane vs. reference); Ch1 = activity-independent.
-- **Within-recording trust** per ROI and 2 s bin, aggregated per repeat (min over the repeat):
+- **Within-recording trust** per ROI and 2 s bin, aggregated per repeat (min over the repeat). Since 2026-11-13 the
+  fraction of the ROI on its cell, with the z change reported separately (see "Trust, revised" below). Before:
   `soft(corr_self; 0.5..0.85) · gauss(res_shift; 0.75 px) · gauss(fast; 0.75 px) · soft(Ch1 z self; 0.75..0.95) · coverage`
   - corr_self: noise-corrected patch corr (Ch0, band-passed, ROI dilated by 2 px) vs. the recording's own mean.
   - res_shift: local displacement of the ROI patch vs. the **field reference** after slow correction (position only).
@@ -327,12 +333,129 @@ Real data (16 xy fields, 1340 ROIs), decided on the field mask presentation, eva
 The strict default matches the expectation "most fields need nothing, some 1-3 ROIs"; the few ROIs it changes get
 slightly better traces. The sensitive preset is for a single ROI that looks wrong in the canvas (undo restores it).
 
+## ROIs without pixels in a presentation (ChirpQI failure, 2026-11-13)
+
+`ChirpQI` failed with `Field 'qidx' doesn't have a default value`: `qidx` was NaN, and DataJoint omits NaN in a NOT NULL
+column. Cause: in `ageuler_all_gcl_v2`, 1920 of 517658 ROI × presentation entries (0.37 %, 298 field/conditions from
+2013 to 2024; median 9 px) have no pixel left in their `MotionRoiMask` weights (`n_px = 0`). Their motion trace was a
+constant 0 (weighted mean without weight), which standardization (std 0) turns into NaN, and `qidx = 0/0`. Not single
+trials, not NaN in the raw data, and not the NULL change of `MotionTrust`.
+Why ROIs lose all pixels: ≥ 50 % touch the field edge (`dist_edge = 0`; pixels outside the FOV in > 5 % of the frames
+are dropped), 34 % have a per-ROI shift at the search limit (±3 px; see next section).
+
+Fixed:
+- `extract_traces_weighted`: frames without any valid pixel of the ROI (and ROIs without weight) are NaN, not 0.
+- `roi2trace_from_stack_motion`: such ROIs get `trace_valid = 0`; `PreprocessTraces` (and Cascade) only use valid
+  traces, so nothing downstream breaks. The trace stays in `Traces` (flagged).
+- `Traces` in motion mode: `incl_artifact` is decided on the field ROI mask (as without motion mode). The presentation
+  label mask never contains artifact pixels (they are dropped from the weights), so with `include_artifacts = False`
+  ROIs in the artifact were not skipped before.
+- `RepeatQITemplate`: a non-finite `qidx` raises an error that names the key and the reason.
+
+## Per-ROI shifts at the search limit (`pool_roi_shifts`, 2026-11-13)
+
+A per-ROI shift at the search limit (`roi_max_shift`, ±3 px) is not a measurement: the patch most likely matched a
+neighbouring cell. Before, it entered the pooled shift and the smooth field and moved small ROIs off their cell or out of
+the FOV. Now such shifts are left out of the pooling and of the field fit; an ROI without any valid shift gets the
+smooth field value. The `at_limit` flag is unchanged (any presentation at the limit).
+
+## Trust, revised (2026-11-13)
+
+**Analysis** (local re-run of the table chain on 19 fields / 97 presentations / 8580 ROI × presentations, xy-RGCs
+2018 + 2022; `MotionDetection` → `MotionRoiMask` (pooled per condition) → `MotionTrust`):
+- Within a presentation the old trust varied little (IQR 0.002–0.06) and was barely related to ROI contrast,
+  brightness, size, distance to the edge or artifact, vessels, neighbour density or chirp QI (|Spearman ρ| < 0.16).
+- `corr_self` contributed nothing: its factor was 1.0 (median) in every presentation, also in GCL1_DN_D of 20220215
+  with real z drift. It was ~0.998 even for the dimmest ROIs, i.e. the feared SNR confound did not occur, but neither
+  did it detect defocus (the field-level z factor did).
+- The per-ROI residual displacement is precise: on the reference recordings median 0.07 px, p90 0.17 px, independent of
+  ROI contrast and size.
+- In bins with old trust < 0.5 the limiting factor was the per-ROI residual (43 %), the field-level z (21 %), fast
+  motion (20 %), coverage (10 %), `corr_self` (6 %).
+- The product of soft factors mixed xy and z, and field-level factors (z, fast motion) set every ROI to the same low
+  value (20220215 GCL1_DN_D: all ROIs → 0 at the end of the recording although xy is fine).
+
+**Definition** (`compute_trust`, `trust_on_cell`): per ROI and 2 s bin,
+`trust` = mean over the frames of the bin of the **fraction of the ROI mask still on its cell**, × the FOV coverage.
+The displacement of a frame is the ROI's residual in the bin (local displacement of its band-passed neighbourhood vs.
+the field reference, minus the applied shift) plus the frame's deviation of the uncorrected fast motion from the bin
+mean. For a binary mask the fraction is the normalized autocorrelation of the mask at that displacement
+(|M ∩ (M + d)| / |M|, bilinear between integer lags), so the ROI's size and shape enter: a 3×3 ROI keeps 6/9 at 1 px,
+a large ROI more. Separately per bin and field: `dz_um`, the approximate |z change| vs. the recording's mean plane
+from the structural-channel similarity (z-stack calibration below; NaN without structural channel). Per repeat:
+`trust_rep` (min over the repeat) and `dz_rep` (max). `corr_self` is kept as a diagnostic, not part of trust.
+Thresholds (`MotionParams`): `trust_thresh = 0.7` (summaries `frac_low`, `n_rois_flagged`) and `dz_thresh_um = 3`
+(`frac_dz_high`); `MotionTrust().valid_repeats(key)` returns the repeats to keep per ROI.
+
+**Behaviour** (same data): per-ROI ranking as before (within-presentation Spearman old vs. new 0.88); new trust
+depends on ROI size (ρ 0.35; median 0.966 for ROIs ≤ 13 px vs. 0.980 for > 28 px, 5th percentile 0.84 vs. 0.93).
+Noise floor on stable recordings: median ~0.97 (the 0.07 px residual noise), so 1.0 is not reached.
+
+| example | old trust (median ROI) | new trust (median ROI) | dz |
+|---|---|---|---|
+| 20220201 GCL0 DN_C1, fast motion event at ~185 s (max \|fast\| 0.9 px) | 0.25 | 0.73 (worst ROIs ~0.3) | < 0.6 µm |
+| 20220215 GCL1 DN_D, z drift through the plane | → 0 for all ROIs | ~0.93 | up to 4.3 µm, 33 % of bins > 3 µm |
+| 20220215 GCL3 DN_D, deformation between conditions | dips to 0.56 at ~170 s | ~0.92 | up to 2.8 µm |
+
+**What it does not capture** (judge these yourself):
+- Brightness of what moves in or out: the trace error of a given lost fraction depends on the contrast between the cell
+  and its surround relative to the response amplitude. Fast jitter changes the lost fraction from frame to frame and
+  creates fluctuations; in the simulation above, 1 px / 1 Hz jitter reduced the trace fidelity to r ≈ 0.38, while the
+  mean on-cell fraction of sinusoidal 1 px jitter is 0.76 (13 px ROI) to 0.85 (21 px ROI). Trust above 0.7 does
+  therefore not guarantee a clean trace under fast motion; use `fast` (per bin) or a stricter threshold there.
+- z per ROI: `dz_um` is field-level (structural channel) and only relative to the recording's mean plane; plane
+  changes between presentations are in `MotionDetection` (`z_ref_ch1`) and `MotionTrust.Roi.match_corr`.
+- Errors of the reference itself (the mask drawn wrongly, or the reference recording drifting) and motion faster than a
+  frame (within-frame line distortions).
+- Neuropil contamination and SNR: not motion, not in trust.
+
+## HighRes alignment (`HighResAlignment`, block `highres`, 2026-11-13)
+
+The HighRes scan (`HighRes`) is the same field at 8× the pixel resolution and the same FOV (all local data: 512 vs.
+64 px, e.g. 0.184 vs. 1.47 µm/px), usually recorded at the end of the stimulus session; it can be shifted in x, y and
+z. `utils.highres_alignment.align_highres` resamples the HR to the field grid (area average; FOVs centred) and
+registers it to the channel averages of the ROI mask's presentation (the stored `RoiMask.roi_mask` is aligned to it)
+with the motion registration (band-passed Ch0 + Ch1, partially whitened cross-correlation, subpixel). The aligned HR is
+resampled once more from full resolution at the shift (no interpolation blur at field resolution). Stored per HR:
+`shift_x/y` [field px and µm] (mask position p is at p + shift in the HR), `match_ch0/ch1` (noise-corrected
+similarity of the band-passed images after the shift, as the z proxy), `dz_um_approx` (from `match_ch1` with the
+z-stack calibration; `match_ch0` without structural channel), `mask_fit_hr` vs. `mask_fit_ref`, the stage differences
+and the aligned HR images. The table only reads the database (channel medians), no files.
+
+Validation on all 27 local HR scans (`hr_validate.py`, `hr_fitscan.py`, `zstack_hr.py`; scratch scripts, not in the
+repository):
+
+| check | result |
+|---|---|
+| known shift added to the HR (1.37, −2.21) px | recovered to 0.06 px (median), max 0.22 |
+| even vs. odd HR frames | ≤ 0.07 px apart |
+| reference = plain channel median (as in the table) vs. registered mean | ≤ 0.11 px apart |
+| Ch0-only vs. Ch1-only registration | median 0.35 px apart, max 2.0 (20220201 GCL0 C2, Ch1 match 0.56: plane changed) |
+| HR vs. the presentations of the same condition (motion offset) | median 0.5 px (C1) / 0.6 px (C2/D), max 1.2 |
+| shift vs. maximum of the ROI-mask fit over a ±3 px grid | median 0.5 px apart (fit surface flat within ±0.5 px); for shifts > 1 px: 0.7 px vs. 1.8 px without alignment |
+| stage xy difference vs. measured shift | unrelated (Spearman 0.15): stage positions do not predict the shift |
+| HR vs. MB / Chirp of zstack/20190130 (plane offsets 0.56 / 0.71 µm from the z-stack) | match Ch0 0.95, Ch1 0.94 / 0.91 → `dz_um_approx` 1.8 / 2.2 µm |
+
+- Shifts: median 0.7 px, up to 3.4 px (20220201: the stage was moved by ~15 µm between C1 and C2/DETANO; the HRs there
+  are shifted by 2.6–3.4 px, and the mask fit goes from negative without alignment to ~0.2 with it).
+- Match: C1 HRs Ch0 0.93 (0.85–0.95), Ch1 0.91 (0.76–0.98); HRs of C2/D Ch0 0.87, Ch1 0.75 (0.56–0.97), consistent with
+  the plane changes between conditions found above.
+- **Precision of `dz_um_approx`**: an HR and a recording of (almost) the same plane do not reach a match of 1 (different
+  scan: pixel dwell time, activity, resampling); at 0.56 µm the estimate was 1.8 µm. Read values up to ~2 µm as "same
+  plane", and larger values as an upper-biased order of magnitude without sign. A z-stack is needed for real z.
+- The precision of the shift for the ROI mask is ~0.5 px (independent criteria agree to that); this is below the
+  resolution at which the mask fit can tell.
+- `mask_fit_hr` is about half of `mask_fit_ref` (median 0.52) even when aligned: the HR has a different contrast
+  (no averaged activity, fewer frames). Compare it between HRs, not with `mask_fit_ref` directly.
+- Not applicable to scans with a different FOV or centre (e.g. z-stacks): `align_highres` assumes centred FOVs.
+
 ## Open points / next steps
 
 1. ~~Per-ROI shift field between presentations~~ done (see above). Open: within-condition changes of the deformation
    (currently one estimate per condition), and ROIs at the search limit (re-detect? drop?).
-2. Calibrate trust thresholds (corr 0.5–0.85, z 0.75–0.95, 0.75 px) and the `low_contrast` criterion (drug!) on more
-   data / a recording with real within-recording drift.
+2. Calibrate the trust thresholds (`trust_thresh` 0.7, `dz_thresh_um` 3) against trace fidelity (simulated fast
+   jitter, real drift), and the `low_contrast` criterion (drug!), on more data / a recording with real within-recording
+   drift. The z calibration (similarity → µm) comes from a single z-stack.
 3. Fast-motion detection undersamples 1 Hz jitter with 0.5 s bins → try 2-frame bins or per-frame estimates on Ch0+Ch1.
 4. ~~Vectorize the per-ROI loops~~ done (trust 20 s → 2.4 s per recording; registration vectorized + cached; fields in parallel).
 5. ~~Tables~~ done: `MotionParams`, `MotionReference` (from the presentation of the field ROI mask), `MotionDetection`,

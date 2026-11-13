@@ -11,7 +11,9 @@ from djimaging.utils.motion.image_utils import masked_pearson, pearson, reg_imag
 from djimaging.utils.motion.refine import pooled_mean_image, refine_roi_mask
 from djimaging.utils.motion.registration import lowpass_disp
 from djimaging.utils.motion.roi_shifts import local_shifts_batch, roi_centroids
-from djimaging.utils.motion.trust import fast_per_bin, stim_bins
+from djimaging.utils.motion.trust import (
+    fast_max_per_bin, on_cell_fraction, per_repeat, roi_overlap_tables, stim_bins, trust_on_cell)
+from djimaging.utils.motion.zproxy import dz_from_similarity
 
 NX = NY = 64
 FS = 7.8125
@@ -191,6 +193,25 @@ def test_pool_roi_shifts_shrinks_noise_and_keeps_reproducible_shifts():
     assert smooth_shift_field(cent, smooth, sigma=np.inf).std(axis=0).max() < 1e-9
 
 
+def test_pool_roi_shifts_ignores_shifts_at_search_limit():
+    """A shift at the search limit is not used: from the other presentations if any, else the smooth field."""
+    rng = np.random.default_rng(6)
+    cent = rng.uniform(0, 64, (40, 2))
+    true = np.tile([0.4, -0.3], (40, 1))
+    reps = [true + rng.normal(0, 0.03, true.shape) for _ in range(3)]
+    reps[0][0] = [3., 3.]  # ROI 0: one presentation at the limit, two valid
+    for r in reps:
+        r[1] = [-3., 0.]  # ROI 1: at the limit in all presentations
+    final, info = pool_roi_shifts(cent, reps, [np.ones(40)] * 3, max_shift=3)
+    assert info['at_limit'][0] and info['at_limit'][1] and not info['at_limit'][2:].any()
+    assert info['n_valid'][0] == 2 and info['n_valid'][1] == 0
+    assert np.allclose(final[0], true[0], atol=0.1)
+    assert np.allclose(final[1], true[1], atol=0.1)  # field value, not (-3, 0)
+    assert not info['low_quality'][1]
+    final1, _ = pool_roi_shifts(cent, reps[:1], [np.ones(40)], max_shift=3)
+    assert np.allclose(final1[1], true[1], atol=0.1)
+
+
 def test_zproxy_and_trust_detect_defocus(reference):
     ref, mask = reference
     n = 320
@@ -208,11 +229,54 @@ def test_zproxy_and_trust_detect_defocus(reference):
         assert np.median(zp[k][calm]) > 0.95
         assert np.median(zp[k][defocus]) < np.median(zp[k][calm]) - 0.05
     reg0 = register_stack(c0, motion.slow_frames)
-    fast = fast_per_bin(motion.fast_bins, motion.bin_centers, edges)
-    res = compute_trust(reg0, ref, mask, edges, fast, info['npixartifact'], zself_ch1=zp['self_ch1'])
+    res = compute_trust(reg0, ref, mask, edges, motion.disp_frames - motion.slow_frames, info['npixartifact'],
+                        zself_ch1=zp['self_ch1'])
+    # trust is xy only (fraction of the ROI on its cell); the defocus shows up in the field's approx. z change
     assert np.median(res.trust[:, calm]) > 0.8
-    assert np.median(res.trust[:, defocus]) < np.median(res.trust[:, calm]) - 0.2
     assert res.trust.shape == (len(roi_ids_from_mask(mask)), len(edges) - 1)
+    assert np.nanmedian(res.dz_um[defocus]) > np.nanmedian(res.dz_um[calm]) + 1.
+
+
+def test_on_cell_fraction_is_mask_overlap():
+    """3x3 ROI: 1 px shift leaves 6 of 9 pixels on the cell, (1, 1) leaves 4, >= 3 px none; symmetric; bilinear."""
+    mask = np.ones((12, 12), int)
+    mask[4:7, 4:7] = -1
+    table = roi_overlap_tables(mask, np.array([-1]))[0]
+    assert on_cell_fraction(table, np.array([0., 0.])) == pytest.approx(1.)
+    assert on_cell_fraction(table, np.array([1., 0.])) == pytest.approx(6 / 9)
+    assert on_cell_fraction(table, np.array([-1., 0.])) == pytest.approx(6 / 9)
+    assert on_cell_fraction(table, np.array([1., 1.])) == pytest.approx(4 / 9)
+    assert on_cell_fraction(table, np.array([0.5, 0.])) == pytest.approx((1 + 6 / 9) / 2)
+    assert on_cell_fraction(table, np.array([3., 0.])) == pytest.approx(0.)
+    assert on_cell_fraction(table, np.array([np.nan, 0.])) == 0.
+
+
+def test_trust_on_cell_uses_frame_deviations_and_coverage():
+    mask = np.ones((12, 12), int)
+    mask[4:7, 4:7] = -1
+    edges = np.array([0, 4, 8])
+    res_vec = np.zeros((1, 2, 2))
+    fast = np.zeros((8, 2))
+    fast[4:6, 0], fast[6:8, 0] = 1., -1.  # bin 1: frames jitter by +-1 px around a mean of 0
+    cov = np.array([[1., 0.5]])
+    t = trust_on_cell(mask, np.array([-1]), res_vec, edges, fast, cov)
+    assert t[0, 0] == pytest.approx(1.)
+    assert t[0, 1] == pytest.approx(0.5 * 6 / 9)
+    # a constant fast offset within a bin is already in the bin's residual (measured on the bin mean): not counted twice
+    fast[4:8, 0] = 1.
+    assert trust_on_cell(mask, np.array([-1]), res_vec, edges, fast, np.ones((1, 2)))[0, 1] == pytest.approx(1.)
+    assert np.allclose(fast_max_per_bin(fast, edges), [0., 1.])
+
+
+def test_dz_from_similarity_and_per_repeat_max():
+    assert dz_from_similarity(1.0) == 0. and dz_from_similarity(0.95) == pytest.approx(1.5)
+    assert dz_from_similarity(0.2) == pytest.approx(5.5) and np.isnan(dz_from_similarity(np.nan))
+    assert np.allclose(dz_from_similarity(np.array([0.9, np.nan]))[:1], 2.5)
+    dz = np.array([0., 1., 4., 0., np.nan, np.nan])
+    edges = np.arange(7) * 16
+    triggertimes = np.arange(6) * 16 / FS  # one trigger per bin, 2 triggers per repeat -> repeats of 2 bins
+    out, starts = per_repeat(dz, edges, FS, triggertimes, ntrigger_rep=2, agg=np.max)
+    assert np.allclose(out[:2], [1., 4.]) and np.isnan(out[2]) and len(starts) == 3
 
 
 def test_trust_per_repeat():
@@ -236,6 +300,38 @@ def test_extract_traces_weighted_ignores_nan():
     assert np.allclose(extract_traces_weighted(stack, w)[:, 0], 3.)
 
 
+def test_extract_traces_weighted_nan_without_valid_pixels():
+    """No fake 0: ROIs without weight and frames without any valid pixel of the ROI are NaN."""
+    stack = np.full((4, 4, 3), 5., np.float32)
+    stack[0, 0, 1] = np.nan  # ROI 0 has only this pixel -> frame 1 has no valid pixel
+    w = np.zeros((3, 4, 4))
+    w[0, 0, 0] = 1.
+    w[1, 2, 2] = 0.5
+    w[1, 2, 3] = 0.5  # ROI 2 has no weight at all
+    traces, valid_frac = extract_traces_weighted(stack, w, return_valid_frac=True)
+    assert np.allclose(traces[[0, 2], 0], 5.) and np.isnan(traces[1, 0])
+    assert np.allclose(traces[:, 1], 5.)
+    assert np.all(np.isnan(traces[:, 2]))
+    assert np.allclose(valid_frac[:, 0], [1., 0., 1.]) and np.allclose(valid_frac[:, 1], 1.)
+    assert np.allclose(valid_frac[:, 2], 0.)
+
+
+def test_roi2trace_from_stack_motion_flags_rois_without_pixels(monkeypatch):
+    """An ROI whose presentation weights are all 0 gets trace_valid = 0 (PreprocessTraces only uses valid traces)."""
+    from djimaging.utils.scanm import traces_and_triggers_utils as ttu
+    stack = np.random.default_rng(0).normal(100., 1., (8, 8, 20)).astype(np.float32)
+    monkeypatch.setattr(ttu.read_utils, 'load_stacks', lambda *a, **k: ({'wDataCh0': stack}, {}))
+    monkeypatch.setattr(ttu.wparams_utils, 'compute_frame_times',
+                        lambda wparams, n_frames, precision: (np.arange(n_frames) * 0.128, np.zeros((8, 8)), 0.128))
+    w = np.zeros((2, 8, 8))
+    w[0, 3:5, 3:5] = 1.  # ROI 1 normal, ROI 2 without pixels
+    roi2trace, frame_dt = ttu.roi2trace_from_stack_motion(
+        filepath='x.h5', roi_ids=np.array([1, 2]), roi_weights=w, weight_roi_ids=np.array([1, 2]),
+        disp_frames=np.zeros((20, 2)), data_stack_name='wDataCh0', precision='line')
+    assert roi2trace[1]['trace_valid'] == 1 and np.all(np.isfinite(roi2trace[1]['trace']))
+    assert roi2trace[2]['trace_valid'] == 0 and np.all(np.isnan(roi2trace[2]['trace']))
+
+
 def test_full_chain_runs_on_tiny_synthetic_recordings(synthetic_recording_path):
     """Smoke test of the chain used by the motion tables on the 8x8 px tutorial recordings."""
     import h5py
@@ -256,7 +352,7 @@ def test_full_chain_runs_on_tiny_synthetic_recordings(synthetic_recording_path):
     weights, _ = presentation_roi_weights(np.nanmean(reg0, axis=2), np.mean(np.isfinite(reg0), axis=2), ref['ch0'],
                                           mask, final, pinfo['npixartifact'])
     edges = zp['bin_edges']
-    res = compute_trust(reg0, ref, mask, edges, fast_per_bin(motion.fast_bins, motion.bin_centers, edges),
+    res = compute_trust(reg0, ref, mask, edges, motion.disp_frames - motion.slow_frames,
                         pinfo['npixartifact'], zself_ch1=zp['self_ch1'], roi_shifts=final)
     traces = extract_traces_weighted(reg0, weights)
     assert np.all(np.isfinite(motion.disp_bins))
