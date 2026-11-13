@@ -232,7 +232,7 @@ def test_mc_confidence(version, setupid, conf):
 @pytest.mark.parametrize('setupid', ['1', '2', '3'])
 def test_default_stimulators_reproduce_stimulator_delay_csv(setupid):
     from djimaging.utils.scanm.setup_utils import get_stimulator_delay
-    for date in np.arange(np.datetime64('2005-01-01'), np.datetime64('2027-06-01'), 11):
+    for date in np.arange(np.datetime64('2005-01-01'), np.datetime64('2027-06-01'), np.timedelta64(11, 'D')):
         stim_id, _, _ = st.assign_stimulator(setupid, str(date), st.DEFAULT_STIMULATORS)
         row = next(r for r in st.DEFAULT_STIMULATORS if r['stimulator_id'] == stim_id)
         assert row['stimulator_delay_ms'] / 1000. == pytest.approx(get_stimulator_delay(str(date), setupid))
