@@ -869,6 +869,21 @@ def test_schema_defines_tables():
 '''
 
 
+def kernel_setup_commands(project):
+    """Shell commands that install the project and register its environment as a Jupyter kernel."""
+    return ["uv sync", "source .venv/bin/activate", f"python -m ipykernel install --user --name={project}"]
+
+
+def next_steps(project, project_dir):
+    """What to do after creating the project, printed at the end."""
+    commands = '\n'.join(f"    {c}" for c in [f'cd "{project_dir}"'] + kernel_setup_commands(project))
+    return (f"\nNext steps (details in README.md there):\n"
+            f"1. Install the project and register its Jupyter kernel:\n{commands}\n"
+            f"2. Restart Jupyter by refreshing the page in the browser.\n"
+            f"3. Check {package_name(project)}/settings.py (DataJoint config file and schema name).\n"
+            f"4. Open the notebooks in {package_name(project)}/notebooks and select the kernel '{project}'.\n")
+
+
 def build_readme(djimaging_dir, project_dir, project, blocks, notebook_titles, command):
     """README of the project. `notebook_titles`: [(file name without extension, title)] of the numbered notebooks."""
     package = package_name(project)
@@ -893,15 +908,20 @@ With [uv](https://docs.astral.sh/uv/), using the local djimaging repo (`{djimagi
 `pyproject.toml`):
 
 ```bash
-uv sync --extra dev
+{chr(10).join(kernel_setup_commands(project))}
 ```
 
-or with pip, djimaging first (editable):
+`uv sync --extra dev` also installs pytest and flake8. On Windows, activate with `.venv\\Scripts\\activate`.
+
+Or with pip, djimaging first (editable), in an environment of your choice:
 
 ```bash
 pip install -e {pip_target}
 pip install -e ".[dev]"
+python -m ipykernel install --user --name={project}
 ```
+
+Then restart Jupyter by refreshing the page in the browser, open a notebook and select the kernel `{project}`.
 
 ## Configuration
 
@@ -1022,8 +1042,7 @@ def create_project(djimaging_dir, project_dir, project, blocks, channels=DEFAULT
         created.append(relpath)
 
     print(f"Project {project}: created {len(created)} files, skipped {len(skipped)} existing files in {project_dir}")
-    print("Next steps (see README.md there): git init (optional), install the project (uv sync or pip install -e .), "
-          f"check {package_name(project)}/settings.py and run the notebooks in {package_name(project)}/notebooks.")
+    print(next_steps(project, project_dir))
     return created, skipped
 
 
