@@ -67,6 +67,8 @@ def test_compute_triggertimes_synthetic(
 
     # wParamsNum uses ScanM's float32 metadata, which accumulates a few
     # microseconds of rounding over the longest synthetic recording.
-    atol = PIXEL_DURATION_US * 1e-6 if precision == "line" else 5e-6
+    # Tolerance: one float32 step at the latest trigger (~30 us at 400 s), at least 5 us.
+    float32_step = float(np.spacing(np.float32(np.max(expected_times))))
+    atol = PIXEL_DURATION_US * 1e-6 if precision == "line" else max(5e-6, float32_step)
     assert_allclose(trigger_times, expected_times, atol=atol, rtol=0)
     assert_allclose(trigger_values, expected_values)

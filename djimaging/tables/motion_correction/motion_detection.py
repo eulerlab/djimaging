@@ -243,6 +243,11 @@ def _xcorr_kws(params: dict) -> dict:
                 upsample=params['upsample'])
 
 
+def _finite_or_none(x):
+    """Scalar as float, None (NULL) if missing or not finite."""
+    return None if x is None or not np.isfinite(x) else float(x)
+
+
 def _fill_only(data: dict):
     from djimaging.utils.motion import fill_artifact_lines
     ch1 = data['ch1']
@@ -276,7 +281,7 @@ class MotionDetectionTemplate(dj.Computed):
         z_bin_edges : <blob>  # (n_zbins + 1,) frame edges of the z-proxy bins
         z_self_ch0 : <blob>  # noise-corrected similarity to the recording's own mean, functional channel
         z_ref_ch0 : <blob>  # same, to the field reference
-        z_rec_ref_ch0 : float32  # whole recording vs. field reference, functional channel
+        z_rec_ref_ch0=null : float32  # whole recording vs. field reference, functional channel; NULL if undefined
         z_self_ch1=null : <blob>  # same for the structural channel
         z_ref_ch1=null : <blob>
         z_rec_ref_ch1=null : float32
@@ -346,10 +351,10 @@ class MotionDetectionTemplate(dj.Computed):
             fast_frac=float(np.mean(fast_abs[sel] > params['fast_thresh'])),
             npixartifact_qc=npix, k_bleed=info['k_bleed'], z_bin_edges=zp['bin_edges'],
             z_self_ch0=zp['self_ch0'].astype(np.float32), z_ref_ch0=zp['ref_ch0'].astype(np.float32),
-            z_rec_ref_ch0=zp['rec_ref_ch0'],
+            z_rec_ref_ch0=_finite_or_none(zp['rec_ref_ch0']),
             z_self_ch1=None if zp['self_ch1'] is None else zp['self_ch1'].astype(np.float32),
             z_ref_ch1=None if zp['ref_ch1'] is None else zp['ref_ch1'].astype(np.float32),
-            z_rec_ref_ch1=zp['rec_ref_ch1'],
+            z_rec_ref_ch1=_finite_or_none(zp['rec_ref_ch1']),
             roi_shifts_meas=roi_shifts.astype(np.float32), roi_shift_quality=quality.astype(np.float32)))
 
     def get_motion(self, key: dict) -> MotionEstimate:
