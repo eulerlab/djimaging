@@ -220,6 +220,7 @@ Stimulus().add_noise(
     offset_y_um=-15,
     stim_path=noise_file,
     stim_trace=noise_stimulus,
+    array_to_screen={'x': '+y', 'y': '+x'},  # Axes of noise.h5 (transposed) on the QDSpy screen, used by RfRoiOffset
     skip_duplicates=True,
 )
 Stimulus().add_movingbar(

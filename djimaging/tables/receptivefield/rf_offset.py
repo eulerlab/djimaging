@@ -13,7 +13,7 @@ class RfRoiOffset(receptivefield.RfRoiOffsetTemplate):
     rf_offset_tab = RfOffset
     roi_pos_wrt_field_tab = RelativeRoiLocationWrtField
     userinfo_tab = UserInfo
-    experiment_tab = Experiment
+    experiment_stimulator_tab = ExperimentStimulator
     stimulus_tab = Stimulus
     pres_tab = Presentation
     roimask_tab = RoiMask.RoiMaskPresentation  # motion mode: MotionRoiMask
@@ -22,6 +22,11 @@ class RfRoiOffset(receptivefield.RfRoiOffsetTemplate):
 `roimask_tab` provides the presentation ROI mask (`roi_mask`, Igor format) and its integer shift relative to the field
 mask (`shift_dx`, `shift_dy`). In motion mode (RoiMask without presentation masks) use `MotionRoiMask`, which provides
 the same attributes (label mask in raw presentation coordinates and the rounded global shift).
+
+The geometry (how the stimulus array is oriented in the recording field) is taken only from the stimulator of the
+experiment (`experiment_stimulator_tab`, see djimaging.tables.stimulator) and from `stim_dict['array_to_screen']` of
+the noise stimulus (e.g. `NOISE_ARRAY_TO_SCREEN` in djimaging.utils.stimulator). Stimuli without `array_to_screen`
+raise an error.
 """
 
 import warnings
@@ -34,6 +39,24 @@ from matplotlib import pyplot as plt
 from djimaging.tables.receptivefield import FitGauss2DRFTemplate, FitDoG2DRFTemplate, RfContoursTemplate
 from djimaging.utils.dj_storage import load_array
 from djimaging.utils.receptive_fields.srf_contour_utils import compute_cntr_center
+from djimaging.utils.stimulator import array_to_field_matrix, ellipse_to_frame
+
+# Map from the field frame (XCoord, YCoord) to the plot frame of plot_field (x = YCoord, y = -XCoord)
+_FIELD_TO_PLOT = np.array([[0, 1], [-1, 0]])
+
+
+def compute_rf_roi_offset(rf_dx_um: float, rf_dy_um: float, relx_wrt_field: float, rely_wrt_field: float,
+                          array_to_screen: dict, geometry: dict) -> tuple[float, float]:
+    """Offset of the RF center from the ROI in the field frame (XCoord, YCoord).
+
+    `rf_dx_um`, `rf_dy_um` are the RF center relative to the stimulus center in stimulus array coordinates (RfOffset),
+    `geometry` holds the screen axes and offsets of the stimulator (ExperimentStimulator.get_geometry).
+    """
+    m = array_to_field_matrix(array_to_screen, geometry['screen_x_axis'], geometry['screen_y_axis'])
+    rf_relx, rf_rely = m @ np.array([rf_dx_um, rf_dy_um], dtype=float)
+    rf_relx += geometry.get('offset_relx_um', 0.)
+    rf_rely += geometry.get('offset_rely_um', 0.)
+    return float(rf_relx - relx_wrt_field), float(rf_rely - rely_wrt_field)
 
 
 class RfOffsetTemplate(dj.Computed):
@@ -182,16 +205,20 @@ class RfRoiOffsetTemplate(dj.Computed):
         definition = """
         -> self.rf_offset_tab
         -> self.roi_pos_wrt_field_tab
+        -> self.experiment_stimulator_tab
         ---
-        relx_rf_roi_um: float32
-        rely_rf_roi_um: float32
+        relx_rf_roi_um: float32  # RF center minus ROI position along XCoord_um
+        rely_rf_roi_um: float32  # RF center minus ROI position along YCoord_um
+        geometry_confidence: enum('high', 'medium', 'low')  # confidence of the stimulator geometry
+        geometry_reason: varchar(1023)  # why the confidence is not high
         """
         return definition
 
     @property
     def key_source(self):
         try:
-            return self.rf_offset_tab.proj() * self.roi_pos_wrt_field_tab.proj()
+            return (self.rf_offset_tab.proj() * self.roi_pos_wrt_field_tab.proj()
+                    * self.experiment_stimulator_tab.proj())
         except (AttributeError, TypeError):
             pass
 
@@ -212,7 +239,7 @@ class RfRoiOffsetTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def experiment_tab(self):
+    def experiment_stimulator_tab(self):
         pass
 
     @property
@@ -249,33 +276,24 @@ class RfRoiOffsetTemplate(dj.Computed):
 
         Raises
         ------
-        NotImplementedError
-            If the setup ID is not 1 or 3.
+        ValueError
+            If the stimulus does not declare `array_to_screen` in its `stim_dict`.
         """
         rf_dx_um, rf_dy_um = (self.rf_offset_tab & key).fetch1('rf_dx_um', 'rf_dy_um')
         relx_wrt_field, rely_wrt_field = (self.roi_pos_wrt_field_tab & key).fetch1(
             'relx_wrt_field', 'rely_wrt_field')
+        stim_dict = (self.stimulus_tab & key).fetch1('stim_dict')
+        if not stim_dict or 'array_to_screen' not in stim_dict:
+            raise ValueError(f"Stimulus `{key.get('stim_name')}` has no `array_to_screen` in its stim_dict. Declare "
+                             f"how the stimulus array axes map to the QDSpy screen, e.g. "
+                             f"djimaging.utils.stimulator.NOISE_ARRAY_TO_SCREEN for the standard dense noise.")
+        geometry = self.experiment_stimulator_tab().get_geometry(key)
 
-        setupid = (self.experiment_tab.ExpInfo & key).fetch1('setupid')
+        relx_rf_roi_um, rely_rf_roi_um = compute_rf_roi_offset(
+            rf_dx_um, rf_dy_um, relx_wrt_field, rely_wrt_field, stim_dict['array_to_screen'], geometry)
 
-        # If you stand in front of the setup:
-        # -rely is this axis: → (left to right)
-        # +relx is this axis: ↑ (front to back, typically ventral to dorsal)
-
-        # For the RF x and y can have different meaning,
-        # dependent in which direction the dense noise stimulus was provided by the user.
-
-        # TODO: find a solution to make this robust.
-        if str(setupid) == "1":
-            rely_rf_roi_um = - rf_dx_um - rely_wrt_field  # RF x is aligned with -rely axis
-            relx_rf_roi_um = + rf_dy_um - relx_wrt_field  # RF y is aligned with relx axis
-        elif str(setupid) == "3":
-            rely_rf_roi_um = - rf_dx_um - rely_wrt_field  # RF x is aligned with -rely axis
-            relx_rf_roi_um = - rf_dy_um - relx_wrt_field  # RF y is aligned with relx axis
-        else:
-            raise NotImplementedError
-
-        self.insert1(dict(**key, relx_rf_roi_um=relx_rf_roi_um, rely_rf_roi_um=rely_rf_roi_um))
+        self.insert1(dict(**key, relx_rf_roi_um=relx_rf_roi_um, rely_rf_roi_um=rely_rf_roi_um,
+                          geometry_confidence=geometry['confidence'], geometry_reason=geometry['reason'][:1023]))
 
     def plot(self, restriction: dict | None = None) -> tuple:
         """Plot RF-to-ROI offsets and regression lines.
@@ -378,6 +396,9 @@ class RfRoiOffsetTemplate(dj.Computed):
             (self.pres_tab.StackAverages & key & dict(ch_name=data_name)).fetch1('ch_average'))
         stim_dict = (self.stimulus_tab & key).fetch1('stim_dict')
         pix_scale_x_um, pix_scale_y_um = stim_dict['pix_scale_x_um'], stim_dict['pix_scale_y_um']
+        geometry = self.experiment_stimulator_tab().get_geometry(key)
+        array_to_plot = _FIELD_TO_PLOT @ array_to_field_matrix(
+            stim_dict['array_to_screen'], geometry['screen_x_axis'], geometry['screen_y_axis'])
 
         if scan_type == 'xy':
             extent = np.array([
@@ -428,11 +449,13 @@ class RfRoiOffsetTemplate(dj.Computed):
                     srf_params = None
 
                 if srf_params is not None:
-                    ax.add_patch(Ellipse(
-                        xy=rf_xy,
-                        width=n_std * 2 * srf_params['x_stddev'] * pix_scale_x_um,
-                        height=n_std * 2 * srf_params['y_stddev'] * pix_scale_y_um,
-                        angle=np.rad2deg(srf_params['theta']), color=colors[i], fill=False, alpha=0.5))
+                    # Ellipse in stimulus array coordinates, mapped to the plot frame
+                    width, height, angle = ellipse_to_frame(
+                        n_std * 2 * srf_params['x_stddev'] * pix_scale_x_um,
+                        n_std * 2 * srf_params['y_stddev'] * pix_scale_y_um,
+                        np.rad2deg(srf_params['theta']), array_to_plot)
+                    ax.add_patch(Ellipse(xy=rf_xy, width=width, height=height, angle=angle,
+                                         color=colors[i], fill=False, alpha=0.5))
 
         if scan_type == 'xy':
             ax.set_xlabel('relY [µm]')

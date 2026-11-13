@@ -26,9 +26,10 @@ from djimaging.utils.dj_storage import load_array, relative_store_path
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm.recording import ScanMRecording
+from djimaging.tables.core.setup_params import RecordingSetupMixin
 
 
-class HighResTemplate(dj.Computed):
+class HighResTemplate(RecordingSetupMixin, dj.Computed):
     """DataJoint computed table template for high-resolution stack metadata and averages."""
 
     database = ""
@@ -180,7 +181,7 @@ class HighResTemplate(dj.Computed):
             verboselvl: Verbosity level. 0 = silent, 1 = progress messages,
                 >1 = additional detail.
         """
-        setupid = (self.experiment_table().ExpInfo & key).fetch1("setupid")
+        setup_kwargs = self.recording_setup_kwargs(key)
 
         file_info_df = self.load_field_stim_file_info_df(field_key=key)
         if len(self.new_primary_keys) > 0:
@@ -206,17 +207,17 @@ class HighResTemplate(dj.Computed):
                 if verboselvl >= 0:
                     warnings.warn(f"More than one highres file found for {pres_key}. Using the first one.")
             filepath = pres_df.iloc[0].filepath
-            self._add_entry(pres_key, filepath=filepath, setupid=setupid)
+            self._add_entry(pres_key, filepath=filepath, setup_kwargs=setup_kwargs)
 
-    def _add_entry(self, key: dict, filepath: str, setupid: str) -> None:
+    def _add_entry(self, key: dict, filepath: str, setup_kwargs: dict) -> None:
         """Load data, create key and insert entry.
 
         Args:
             key: DataJoint primary key dict for the high-resolution entry.
             filepath: Path to the recording file (e.g. an h5 file).
-            setupid: Setup identifier string used to initialise the recording object.
+            setup_kwargs: Setup parameters for `ScanMRecording` (`recording_setup_kwargs`).
         """
-        rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=key['date'])
+        rec = ScanMRecording(filepath=filepath, **setup_kwargs)
         hr_entry, avg_entries = self._complete_keys(key, rec)
 
         self.insert1(hr_entry)

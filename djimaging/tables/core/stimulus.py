@@ -175,6 +175,7 @@ class StimulusTemplate(dj.Manual):
             locations_cats: list = None,
             offset_x_um: float = None,
             offset_y_um: float = None,
+            array_to_screen: dict | None = None,
             skip_duplicates: bool = False,
     ) -> None:
         """Add a dense noise stimulus entry to the table.
@@ -202,6 +203,9 @@ class StimulusTemplate(dj.Manual):
                 assumed and a warning is issued.
             offset_y_um: Stimulus offset in y (micrometers). If None, 0 is
                 assumed and a warning is issued.
+            array_to_screen: QDSpy screen axis of the stimulus array x (column) and y (row) axes, e.g.
+                {'x': '+y', 'y': '+x'} for the standard dense noise (`NOISE_ARRAY_TO_SCREEN` in
+                djimaging.utils.stimulator). Required to align RFs with ROIs (RfRoiOffset).
             skip_duplicates: If True, silently skip duplicate entries.
                 Default is False.
         """
@@ -240,6 +244,11 @@ class StimulusTemplate(dj.Manual):
                 "Stimulus offset not set. Assuming 0 offset. "
                 "This is incorrect for the standard dense noise stimulus.")
             stim_dict["offset_y_um"] = 0
+
+        if array_to_screen is not None:
+            from djimaging.utils.stimulator import axes_to_matrix
+            axes_to_matrix(array_to_screen['x'], array_to_screen['y'])  # validate
+            stim_dict["array_to_screen"] = dict(array_to_screen)
 
         self.add_stimulus(
             stim_name=stim_name,

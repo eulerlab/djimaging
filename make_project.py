@@ -41,6 +41,19 @@ BLOCKS = {
     'rf_glm': dict(
         description='Receptive fields from GLM: RfGlm, SplitRfGlm, FitGauss2DRfGlm, FitDoG2DRfGlm',
         requires=['core']),
+    'stimulator': dict(
+        description='Setup tables: Stimulator (geometry, delay), ImagingSetup (scan width, light artifact), '
+                    'ExperimentStimulator, ExperimentImagingSetup. Inserted before Field, which uses them',
+        requires=['core']),
+    'mouse_cam': dict(
+        description='Mouse cam (natural movie) orientation: MouseCamGeometry',
+        requires=['stimulator']),
+    'mb_direction': dict(
+        description='Moving bar directions on the retina: MovingBarVersion, MbDirectionMap, MbRetinalPrefDir',
+        requires=['basic', 'stimulator']),
+    'rf_offset': dict(
+        description='RF position relative to the ROI: RelativeRoiLocationWrtField, RfOffset, RfRoiOffset',
+        requires=['location', 'rf_sta', 'stimulator']),
 }
 
 SCHEMA_MODULE_PLACEHOLDER = '__SCHEMA_MODULE__'
@@ -70,6 +83,20 @@ NOTEBOOK_TRACES_SECTION = "# %% [markdown]\n# # Core: Traces and responses\n"
 # Anchors in the motion block that are changed by the motion_refine block.
 MOTION_ROI_MASK_CLASS_HEADER = "@schema\nclass MotionRoiMask(motion_correction.MotionRoiMaskTemplate):\n"
 NOTEBOOK_MOTION_ROI_MASK_CELL = "# %%\nMotionRoiMask().populate("
+
+# Anchors in the stimulator blocks that are linked to tables of other blocks.
+RF_ROI_OFFSET_ROI_MASK = "    roimask_tab = RoiMask.RoiMaskPresentation\n"
+MB_RETINAL_FIELD_LOCATION = "    retinal_field_location_table = None  # RetinalFieldLocation"
+PRESENTATION_LOG_ANCHOR = "    presentation_log_table = None  # PresentationLog"
+STIM_LOG_ANCHOR = "    stim_log_table = None  # QdsPyLog.StimLog"
+
+# Anchors in the core blocks for the setup tables of the stimulator block (inserted before Field, bound in the
+# tables that load recordings).
+FIELD_CLASS_HEADER = "@schema\nclass Field(core.FieldTemplate):\n"
+SETUP_TABLE_USERS = (FIELD_CLASS_HEADER, "@schema\nclass Presentation(core.PresentationTemplate):\n",
+                     "@schema\nclass HighRes(misc.HighResTemplate):\n",
+                     "@schema\nclass ExpHistory(history.ExpHistoryTemplate):\n")  # history block: scan width
+NOTEBOOK_FIELD_CELL = "# %%\nField().rescan_filesystem("
 
 
 def parse_args(argv=None):
@@ -287,12 +314,45 @@ def add_motion_to_schema(code, motion_code):
         "    RoiMaskPresentation = None\n",
         1)
     code = code.replace(TRACES_CLASS_HEADER, motion_code.strip("\n") + "\n\n\n" + TRACES_CLASS_HEADER, 1)
+    code = code.replace(RF_ROI_OFFSET_ROI_MASK, "    roimask_tab = MotionRoiMask  # Motion mode\n", 1)
     return code.replace(
         TRACES_CLASS_HEADER,
         TRACES_CLASS_HEADER
         + "    _include_motion_correction = True  # Registered stack + presentation ROI weights of MotionRoiMask\n"
         + "    motion_roi_mask_table = MotionRoiMask\n",
         1)
+
+
+def link_optional_tables(code, blocks):
+    """Bind optional table attributes to tables of other selected blocks."""
+    if 'location' in blocks:
+        code = code.replace(MB_RETINAL_FIELD_LOCATION, "    retinal_field_location_table = RetinalFieldLocation  #", 1)
+    if 'history' in blocks:
+        code = code.replace(PRESENTATION_LOG_ANCHOR, "    presentation_log_table = PresentationLog  #")
+        code = code.replace(STIM_LOG_ANCHOR, "    stim_log_table = QdsPyLog.StimLog  #")
+    return code
+
+
+def add_setup_tables_to_schema(code, stimulator_code):
+    """Insert the setup tables (stimulator block) before Field and let Field, Presentation and HighRes take the
+    stimulator delay, scan width and light artifact rows from them."""
+    assert FIELD_CLASS_HEADER in code, "Field table not found in the schema blocks."
+    code = code.replace(FIELD_CLASS_HEADER, stimulator_code.strip("\n") + "\n\n\n" + FIELD_CLASS_HEADER, 1)
+    for header in SETUP_TABLE_USERS:
+        if header in code:
+            code = code.replace(
+                header,
+                header
+                + "    experiment_stimulator_table = ExperimentStimulator  # Stimulator delay\n"
+                + "    experiment_imaging_setup_table = ExperimentImagingSetup  # Scan width, light artifact rows\n",
+                1)
+    return code
+
+
+def add_setup_tables_to_notebook(text, stimulator_text):
+    """Insert the setup table cells before Field (Field needs them)."""
+    assert NOTEBOOK_FIELD_CELL in text, "Field cell not found in the notebook blocks."
+    return text.replace(NOTEBOOK_FIELD_CELL, stimulator_text.strip("\n") + "\n\n" + NOTEBOOK_FIELD_CELL, 1)
 
 
 def add_refine_to_motion_schema(motion_code, refine_code):
@@ -431,7 +491,7 @@ def split_imports(source):
 
 def build_schema_text(djimaging_dir, blocks, channels=DEFAULT_CHANNELS):
     """Combine the schema blocks to one schema file. Imports between blocks are replaced by the block's code."""
-    imports, codes, motion_code, refine_code = [], [], None, None
+    imports, codes, motion_code, refine_code, stimulator_code = [], [], None, None, None
     for name in blocks:
         block_imports, code = split_imports(read_block(djimaging_dir, 'schemas', name))
         for line in block_imports:
@@ -441,6 +501,8 @@ def build_schema_text(djimaging_dir, blocks, channels=DEFAULT_CHANNELS):
             motion_code = code
         elif name == 'motion_refine':
             refine_code = code
+        elif name == 'stimulator':
+            stimulator_code = code
         else:
             codes.append(code)
 
@@ -450,15 +512,20 @@ def build_schema_text(djimaging_dir, blocks, channels=DEFAULT_CHANNELS):
         motion_code = add_refine_to_motion_schema(motion_code, refine_code)
     if motion_code is not None:
         code = add_motion_to_schema(code, motion_code)
+    if stimulator_code is not None:
+        code = add_setup_tables_to_schema(code, stimulator_code)
+    code = link_optional_tables(code, blocks)
     return "\n".join(imports) + "\n\n\n" + add_channels_to_schema(code, channels) + "\n"
 
 
 def build_notebook_text(djimaging_dir, blocks, schema_module, project, channels=DEFAULT_CHANNELS, raw_params=None):
     """Combine the notebook blocks in the order of the blocks, followed by the clean-up section."""
     parts = [read_block(djimaging_dir, 'notebooks', name).strip("\n") for name in blocks
-             if name not in ('motion', 'motion_refine')]
+             if name not in ('motion', 'motion_refine', 'stimulator')]
     parts.append(read_block(djimaging_dir, 'notebooks', 'cleanup').strip("\n"))
     text = "\n\n".join(parts) + "\n"
+    if 'stimulator' in blocks:
+        text = add_setup_tables_to_notebook(text, read_block(djimaging_dir, 'notebooks', 'stimulator'))
     if 'motion' in blocks:
         motion_text = read_block(djimaging_dir, 'notebooks', 'motion')
         if 'motion_refine' in blocks:

@@ -42,9 +42,10 @@ from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.filesystem_utils import get_file_info_df
 from djimaging.utils.scanm.recording import ScanMRecording
 from djimaging.utils.scanm.setup_utils import get_retinal_position
+from djimaging.tables.core.setup_params import RecordingSetupMixin
 
 
-class OutlineAbsTemplate(dj.Computed):
+class OutlineAbsTemplate(RecordingSetupMixin, dj.Computed):
     database = ""
     _filepath_store = "reference"
     _from_raw_data = True  # Use SMP or h5 files?
@@ -129,7 +130,7 @@ class OutlineAbsTemplate(dj.Computed):
         return file_info_df
 
     def make(self, key, verbose=False):
-        setupid = (self.experiment_table().ExpInfo & key).fetch1("setupid")
+        setup_kwargs = self.recording_setup_kwargs(key)
 
         file_info_df = self.load_exp_file_info_df(key)
 
@@ -148,7 +149,7 @@ class OutlineAbsTemplate(dj.Computed):
         nums = []
 
         for i, row in file_info_df.iterrows():
-            rec = ScanMRecording(filepath=row.filepath, setup_id=setupid, date=key['date'])
+            rec = ScanMRecording(filepath=row.filepath, **setup_kwargs)
             field_key = key.copy()
             field_key['field'] = row['field']
 

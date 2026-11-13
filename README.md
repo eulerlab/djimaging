@@ -107,12 +107,25 @@ Instead of copying a fixed schema, <code>make_project.py</code> assembles the sc
 | Block        | Tables                                                                                  | Requires |
 |--------------|-----------------------------------------------------------------------------------------|----------|
 | `core`       | UserInfo, Experiment, Field, Stimulus, Presentation, RoiMask, Roi, Traces, Snippets, Averages | –        |
-| `history`    | ExpHistory, ExpHistoryField, ExpHistoryStimLog, QdsPyLogFile, QdsPyLog (see below)     | `core`   |
+| `history`    | ExpHistory, ExpHistoryField, ExpHistoryStimLog, QdsPyLogFile, QdsPyLog, PresentationLog (see below) | `core`   |
 | `basic`      | ChirpQI, ChirpFeatures, OsDsIndexes                                                     | `core`   |
 | `location`   | OpticDisk, RelativeFieldLocation, RetinalFieldLocation                                  | `core`   |
 | `classifier` | Baden16TracesV2, ClassifierV2, CelltypeAssignmentV2                                     | `core`   |
 | `rf_sta`     | FastSta, SplitRF, FitGauss2DRF, FitDoG2DRF                                              | `core`   |
 | `rf_glm`     | RfGlm, SplitRfGlm, FitGauss2DRfGlm, FitDoG2DRfGlm                                       | `core`   |
+| `stimulator` | Stimulator, ExperimentStimulator, ImagingSetup, ExperimentImagingSetup (before Field)  | `core`   |
+| `mouse_cam`  | MouseCamGeometry                                                                        | `stimulator` |
+| `mb_direction` | MovingBarVersion, MbDirectionMap, MbRetinalPrefDir                                   | `basic`, `stimulator` |
+| `rf_offset`  | RelativeRoiLocationWrtField, RfOffset, RfRoiOffset                                      | `location`, `rf_sta`, `stimulator` |
+
+The `stimulator` blocks hold all setup-dependent parameters, per setup and period and assigned to each experiment:
+stimulus geometry (how the QDSpy screen is projected onto the retina, used for moving bar directions on the retina,
+RF positions relative to ROIs and mouse cam orientation) and stimulator delay (`Stimulator`), and scan width and
+light artifact rows (`ImagingSetup`). `make_project.py` inserts the `stimulator` tables before `Field` and binds them
+in `Field`, `Presentation` and `HighRes`, which then take delay, pixel size and artifact rows from them (without the
+block, the `setupid` constants of `setup_utils` are used as before). Every assignment has a confidence (`high`,
+`medium`, `low`) and a reason; conventions are documented in `djimaging/utils/stimulator.py`. With the `history`
+block, moving bar and mouse cam versions are read from the QDSpy logs (`PresentationLog`).
 
 The project name becomes part of the import path <code>djimaging.user.&lt;project&gt;</code>, so it may only contain
 letters, digits and underscores and must not start with a digit; anything else is rejected.
