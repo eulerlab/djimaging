@@ -33,8 +33,9 @@ BLOCKS = {
         description='OpticDisk, RelativeFieldLocation, RetinalFieldLocation',
         requires=['core']),
     'classifier': dict(
-        description='RGC classifier: Baden16TracesV2, ClassifierV2, CelltypeAssignmentV2',
-        requires=['core']),
+        description='RGC classifier: Baden16TracesV2 (moving bar features from OsDsIndexes), ClassifierV2, '
+                    'CelltypeAssignmentV2',
+        requires=['basic']),
     'rf_sta': dict(
         description='Receptive fields from STA: FastSta, SplitRF, FitGauss2DRF, FitDoG2DRF',
         requires=['core']),

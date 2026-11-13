@@ -110,13 +110,21 @@ Instead of copying a fixed schema, <code>make_project.py</code> assembles the sc
 | `history`    | ExpHistory, ExpHistoryField, ExpHistoryStimLog, QdsPyLogFile, QdsPyLog, PresentationLog (see below) | `core`   |
 | `basic`      | ChirpQI, ChirpFeatures, OsDsIndexes                                                     | `core`   |
 | `location`   | OpticDisk, RelativeFieldLocation, RetinalFieldLocation                                  | `core`   |
-| `classifier` | Baden16TracesV2, ClassifierV2, CelltypeAssignmentV2                                     | `core`   |
+| `classifier` | Baden16TracesV2, ClassifierV2, CelltypeAssignmentV2                                     | `basic`  |
 | `rf_sta`     | FastSta, SplitRF, FitGauss2DRF, FitDoG2DRF                                              | `core`   |
 | `rf_glm`     | RfGlm, SplitRfGlm, FitGauss2DRfGlm, FitDoG2DRfGlm                                       | `core`   |
 | `stimulator` | Stimulator, ExperimentStimulator, ImagingSetup, ExperimentImagingSetup (before Field)  | `core`   |
 | `mouse_cam`  | MouseCamGeometry                                                                        | `stimulator` |
 | `mb_direction` | MovingBarVersion, MbDirectionMap, MbRetinalPrefDir                                   | `basic`, `stimulator` |
 | `rf_offset`  | RelativeRoiLocationWrtField, RfOffset, RfRoiOffset                                      | `location`, `rf_sta`, `stimulator` |
+
+The `classifier` block reads the moving bar features of the RGC classifier (time component and DS p-value) from
+`OsDsIndexes` (block `basic`), so both use the same moving bar analysis (Baden et al. 2016: SVD tuning curve,
+DS/OS index as resultant vector length, permutation test). They match the training data of the classifier only with
+the per-trial snippet baseline of Baden et al. 2016 (`snippet_base_dt` in `Stimulus`: 5 x 0.128 s for the moving bar,
+8 x 0.128 s for the chirp; the defaults of `add_movingbar` and `add_chirp`), `OsDsIndexes._n_shuffles >= 1000` and
+moving bar snippets at 7.8125 Hz; `Baden16TracesV2` checks this. Without the per-trial baseline, slow drift shared by the
+consecutive opposite directions of the moving bar inflates orientation selectivity.
 
 The `stimulator` blocks hold all setup-dependent parameters, per setup and period and assigned to each experiment:
 stimulus geometry (how the QDSpy screen is projected onto the retina, used for moving bar directions on the retina,

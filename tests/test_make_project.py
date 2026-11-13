@@ -23,6 +23,8 @@ def exec_schema(text):
 def test_resolve_blocks_adds_requirements_and_orders():
     assert make_project.resolve_blocks([]) == ['core']
     assert make_project.resolve_blocks(['rf_glm', 'basic', 'basic']) == ['core', 'basic', 'rf_glm']
+    # The classifier reads its moving bar features from OsDsIndexes (basic)
+    assert make_project.resolve_blocks(['classifier']) == ['core', 'basic', 'classifier']
 
 
 def test_resolve_blocks_rejects_unknown():

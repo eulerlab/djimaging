@@ -33,6 +33,7 @@ class Baden16TracesV2(classifier_v2.Baden16TracesV2Template):
     traces_table = Traces
     presentation_table = Presentation
     stimulus_table = Stimulus
+    osds_table = OsDsIndexes
 
 
 @schema

@@ -9,6 +9,11 @@ import numpy as np
 
 from djimaging.utils.dj_storage import relative_store_path
 
+# Per-repetition snippet baseline (median of the first frames of each snippet) of Baden et al. 2016 / Franke et al. 2017:
+# 8 frames for the chirp and 5 frames for the moving bar at 7.8125 Hz (0.128 s per frame).
+CHIRP_SNIPPET_BASE_DT = 8 * 0.128
+MOVINGBAR_SNIPPET_BASE_DT = 5 * 0.128
+
 
 def check_trial_info(trial_info: list, ntrigger_rep: int) -> list:
     """Validate canonical trial dictionaries and their trigger counts.
@@ -273,7 +278,7 @@ class StimulusTemplate(dj.Manual):
             framerate: float = 60.,
             ntrigger_rep: int = 2,
             isrepeated: bool = True,
-            snippet_base_dt: float = None,
+            snippet_base_dt: float | None = CHIRP_SNIPPET_BASE_DT,
             stim_trace: np.ndarray = None,
             stim_path: str | Path | None = None,
             alias: str = None,
@@ -288,7 +293,8 @@ class StimulusTemplate(dj.Manual):
             framerate: Stimulus frame rate in Hz. Default is 60 [Hz].
             ntrigger_rep: Number of triggers per repetition. Default is 2.
             isrepeated: Whether the stimulus is repeated. Default is True.
-            snippet_base_dt: Baseline window duration for snippet correction.
+            snippet_base_dt: Baseline window (s) subtracted from each repetition (median), as in Baden et al. 2016.
+                Default is 8 frames at 7.8125 Hz. None disables it.
             stim_trace: Optional numerical stimulus trace array.
             stim_path: Optional source stimulus file in the configured reference store.
             alias: Custom alias string; defaults to a standard chirp alias if
@@ -327,7 +333,7 @@ class StimulusTemplate(dj.Manual):
             isrepeated: bool = True,
             trial_info: list = None,
             framerate: float = 60.,
-            snippet_base_dt: float = None,
+            snippet_base_dt: float | None = MOVINGBAR_SNIPPET_BASE_DT,
             bardx: float = None,
             bardy: float = None,
             velumsec: float = None,
@@ -348,7 +354,9 @@ class StimulusTemplate(dj.Manual):
                 If None, defaults to the standard 8-direction protocol
                 [0, 180, 45, 225, 90, 270, 135, 315].
             framerate: Stimulus frame rate in Hz. Default is 60 Hz.
-            snippet_base_dt: Baseline window duration for snippet correction.
+            snippet_base_dt: Baseline window (s) subtracted from each trial (median), as in Baden et al. 2016.
+                Default is 5 frames at 7.8125 Hz. None disables it. Without it, slow drift shared by the
+                consecutive opposite directions biases OsDsIndexes towards orientation selectivity.
             bardx: Bar width in micrometers.
             bardy: Bar height in micrometers.
             velumsec: Bar velocity in micrometers per second.

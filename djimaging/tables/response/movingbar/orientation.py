@@ -1,5 +1,12 @@
 """
-Moving-bar feature extraction following the Baden et al. 2016 MATLAB implementation
+Moving-bar feature extraction following the Baden et al. 2016 MATLAB implementation.
+
+DS and OS indexes are the (bin-spacing corrected) resultant lengths of the SVD tuning curve on the circle
+(directions for DS, doubled directions for OS); the p-values come from a permutation test of the trial labels.
+The snippets need the per-trial baseline of Baden et al. 2016 (Stimulus.snippet_base_dt = 5 * 0.128 s,
+the default of Stimulus.add_movingbar): without it, slow drift shared by consecutive opposite directions
+inflates orientation selectivity.
+The classifier (Baden16TracesV2) reads time_component and ds_pvalue from this table and needs _n_shuffles >= 1000.
 
 Example usage:
 
@@ -14,6 +21,8 @@ class OsDsIndexes(response.OsDsIndexesTemplate):
     snippets_table = Snippets
 """
 from abc import abstractmethod
+
+import warnings
 
 import datajoint as dj
 import numpy as np
@@ -30,6 +39,7 @@ class OsDsIndexesTemplate(dj.Computed):
     database = ""
     _reduced_storage = True  # Don't save all intermediate results
     _n_shuffles = 100  # Number of shuffles for null distribution
+    _seed = 0  # Seed of the permutation test, for reproducible p-values
 
     @property
     def definition(self):
@@ -86,9 +96,16 @@ class OsDsIndexesTemplate(dj.Computed):
         snippets_dt, snippets = (self.snippets_table() & key).fetch1('snippets_dt', 'snippets')
         snippets = load_array(snippets)
 
+        snippet_base_dt = (self.stimulus_table() & key).fetch1('snippet_base_dt')
+        if snippet_base_dt is None or not np.isfinite(snippet_base_dt):
+            warnings.warn(
+                f"Stimulus.snippet_base_dt is not set for {key.get('stim_name')}: snippets have no per-trial "
+                f"baseline, which biases OsDsIndexes towards orientation selectivity (Baden et al. 2016 use 5 * 0.128 s).")
+
         dsi, p_dsi, null_dist_dsi, pref_dir, osi, p_osi, null_dist_osi, pref_or, \
             on_off, d_qi, time_component, dir_component, surrogate_v, dsi_s, avg_sorted_responses = \
-            compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=snippets_dt, n_shuffles=self._n_shuffles)
+            compute_os_ds_idxs(snippets=snippets, dir_order=dir_order, dt=snippets_dt, n_shuffles=self._n_shuffles,
+                               seed=self._seed)
 
         entry = dict(
             key,
@@ -124,7 +141,7 @@ class OsDsIndexesTemplate(dj.Computed):
 
         fig.suptitle(
             f"DSI: {ds_index:.2f}, Pref-Dir: {(360 + np.rad2deg(pref_dir)) % 360:.0f}°; p={ds_pvalue:.2f}\n"
-            f"OSI: {ds_index:.2f}, Pref-Or: {(180 + np.rad2deg(pref_or)) % 180:.0f}°; p={os_pvalue:.2f}\n"
+            f"OSI: {os_index:.2f}, Pref-Or: {(180 + np.rad2deg(pref_or)) % 180:.0f}°; p={os_pvalue:.2f}\n"
             f"On-Off: {on_off:.2f}")
 
         # Polar plot in center
