@@ -35,6 +35,10 @@ class ExpHistoryTemplate(dj.Computed):
     extra_data_dirs = ()
     # Count the triggers of .smp files without .h5 file? Loads the whole .smp file, so it is slow.
     _count_smp_triggers = False
+    # Optional: ExperimentImagingSetup (stimulator block). If bound, the pixel size is computed from its dated scan
+    # width (as in Field, Presentation and HighRes), and only experiments with an imaging setup are populated.
+    # If None, the setupid constants of `setup_utils` (setupid of the recording header) are used.
+    experiment_imaging_setup_table = None
 
     @property
     def definition(self):
@@ -61,9 +65,17 @@ class ExpHistoryTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
+            if self.experiment_imaging_setup_table is not None:
+                return self.experiment_table.proj() & self.experiment_imaging_setup_table.proj()
             return self.experiment_table.proj()
         except (AttributeError, TypeError):
             pass
+
+    def _scan_width_um(self, key: dict) -> float | None:
+        """Scan width at zoom 1 of the experiment from `experiment_imaging_setup_table`, None if not bound."""
+        if self.experiment_imaging_setup_table is None:
+            return None
+        return self.experiment_imaging_setup_table().get_recording_params(key)['scan_width_um']
 
     class Recording(dj.Part):
         _filepath_store = "reference"
@@ -102,7 +114,8 @@ class ExpHistoryTemplate(dj.Computed):
             real_pix_dur_us = NULL : float32  # pixel dwell time in us
             zoom = NULL : float32  # zoom of the scan
             angle_deg = NULL : float32  # scan angle
-            pixel_size_um = NULL : float32  # from setup and zoom; NULL if setup or zoom are not supported
+            scan_width_um = NULL : float32  # scan width at zoom 1 used for pixel_size_um (imaging setup or setupid)
+            pixel_size_um = NULL : float32  # scan_width_um / nxpix / zoom; NULL if setup or zoom are not supported
             absx = NULL : float32  # stage position in x in um
             absy = NULL : float32  # stage position in y in um
             absz = NULL : float32  # stage position in z in um
@@ -147,7 +160,8 @@ class ExpHistoryTemplate(dj.Computed):
                           f"{data_dirs} and are not registered, e.g. {unscanned[:3]}. "
                           f"Add their folders to `extra_data_dirs` to register them.")
 
-        rows = [self._recording_row(key, rec, user_dict) for rec in recordings]
+        scan_width_um = self._scan_width_um(key)
+        rows = [self._recording_row(key, rec, user_dict, scan_width_um=scan_width_um) for rec in recordings]
 
         self.insert1(dict(
             **key, n_recordings=len(rows), data_dirs=[os.path.relpath(f, header_path) for f in folders],
@@ -157,10 +171,12 @@ class ExpHistoryTemplate(dj.Computed):
         if verbose > 0:
             print(f"{key}: {len(rows)} recordings in {folders}")
 
-    def _recording_row(self, key: dict, rec: exp_history_utils.RecordingFiles, user_dict: dict) -> dict:
+    def _recording_row(self, key: dict, rec: exp_history_utils.RecordingFiles, user_dict: dict,
+                       scan_width_um: float | None = None) -> dict:
         from djimaging.utils.dj_storage import relative_store_path
 
-        entry = exp_history_utils.read_recording(rec, count_smp_triggers=self._count_smp_triggers)
+        entry = exp_history_utils.read_recording(rec, count_smp_triggers=self._count_smp_triggers,
+                                                 scan_width_um=scan_width_um)
         name_info = dict(
             h5=exp_history_utils.parse_recording_name(rec.h5.path, user_dict) if rec.h5 is not None else None,
             smp=exp_history_utils.parse_recording_name(rec.smp.path, user_dict) if rec.smp is not None else None)

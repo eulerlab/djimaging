@@ -148,7 +148,10 @@ of stimuli that are not in the `Stimulus` table. It scans the `pre_data_dir` and
 the folders in `ExpHistory.extra_data_dirs`, links `.smp`/`.smh` and `.h5` files of the same recording (by the
 original file name stored in the `.h5`, the file name, or the time stamp; see `link_method`), and stores the scan
 parameters needed for the light exposure history (start, duration, zoom, pixel size, pixel dwell time, stage position,
-setup, number of triggers). Laser power and stimulus intensity are not stored digitally. `ExpHistoryField` links
+setup, number of triggers). Laser power and stimulus intensity are not stored digitally. The pixel size is computed
+from the dated scan width of `ExperimentImagingSetup` if `ExpHistory.experiment_imaging_setup_table` is bound
+(as for Field, Presentation and HighRes), otherwise from the setupid constant; the scan width used is stored in
+`scan_width_um`. `ExpHistoryField` links
 recordings to fields, `ExpHistoryStimLog` assigns the QDSpy stimuli (log entries) to the recordings during which they
 were shown (the clock offset between the QDSpy and ScanM computers is estimated).
 

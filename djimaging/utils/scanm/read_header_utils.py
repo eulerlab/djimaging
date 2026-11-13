@@ -172,14 +172,42 @@ def n_frames_from_smh(header: dict) -> int | None:
     return int(n_set - counter) if 0 <= counter <= n_set else int(n_set)
 
 
-def pixel_size_um(header: dict) -> float | None:
-    """Pixel size in um from setup and zoom (as for Field), None if the setup or zoom is not supported."""
+def setup_scan_width_um(setupid: int | None) -> float | None:
+    """Scan width at zoom 1 from the setupid constant of `setup_utils`, None if the setup is not supported.
+    Fallback only: if the schema has an imaging setup table (ExperimentImagingSetup), use its dated value instead."""
+    if setupid is None:
+        return None
+    try:
+        return float(setup_utils.get_setup_xscale(setupid))
+    except (AssertionError, ValueError, TypeError):
+        return None
+
+
+def pixel_size_um(header: dict, scan_width_um: float | None = None) -> float | None:
+    """Pixel size in um: `scan_width_um / npix / zoom` (as for Field).
+
+    Parameters
+    ----------
+    header : dict
+        `normalize_header(...)` of the recording.
+    scan_width_um : float | None, optional
+        Full-field scan width at zoom 1, e.g. from `ExperimentImagingSetup`. If None, the setupid constant of the
+        recording header is used (`setup_scan_width_um`).
+
+    Returns
+    -------
+    float | None
+        None if the scan width (unknown setup), the zoom or the number of pixels is missing or not supported.
+    """
     nx = header.get('nxpix_full')
-    if nx is None or header.get('setupid') is None or header.get('zoom') is None:
+    if scan_width_um is None:
+        scan_width_um = setup_scan_width_um(header.get('setupid'))
+    if nx is None or scan_width_um is None or header.get('zoom') is None:
         return None
     nxpix = nx - (header.get('nxpix_retrace') or 0) - (header.get('nxpix_offset') or 0)
     try:
-        return float(setup_utils.get_pixel_size_xy_um(setupid=header['setupid'], npix=nxpix, zoom=header['zoom']))
+        return float(setup_utils.pixel_size_from_scan_width(scan_width_um=scan_width_um, npix=nxpix,
+                                                            zoom=header['zoom']))
     except (AssertionError, ValueError, TypeError):
         return None
 

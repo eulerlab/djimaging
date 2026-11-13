@@ -237,11 +237,21 @@ def parse_recording_name(filename: str, user_dict: dict) -> dict:
     return {k: v for k, v in info.items() if k not in ('filepath', 'mask_order')}
 
 
-def read_recording(rec: RecordingFiles, count_smp_triggers: bool = False) -> dict:
+def read_recording(rec: RecordingFiles, count_smp_triggers: bool = False, scan_width_um: float | None = None) -> dict:
     """Describe one recording from its headers, without loading the stacks.
 
     The .smh header is used if available (it knows how many frames were set and recorded), else the .h5 wParams.
     Errors are not raised but collected in `header_issue`, so that every recording can be registered.
+
+    Parameters
+    ----------
+    rec : RecordingFiles
+        The recording.
+    count_smp_triggers : bool, optional
+        Count the triggers of .smp files without .h5 file (slow, loads the whole file).
+    scan_width_um : float | None, optional
+        Full-field scan width at zoom 1 for the pixel size, e.g. from `ExperimentImagingSetup`. If None, the setupid
+        constant of the recording header is used.
 
     Returns
     -------
@@ -296,7 +306,8 @@ def read_recording(rec: RecordingFiles, count_smp_triggers: bool = False) -> dic
         real_pix_dur_us=header['real_pix_dur_us'],
         zoom=header['zoom'],
         angle_deg=header['angle_deg'],
-        pixel_size_um=rhu.pixel_size_um(header),
+        scan_width_um=scan_width_um if scan_width_um is not None else rhu.setup_scan_width_um(header['setupid']),
+        pixel_size_um=rhu.pixel_size_um(header, scan_width_um=scan_width_um),
         absx=header['absx'],
         absy=header['absy'],
         absz=header['absz'],

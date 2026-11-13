@@ -70,6 +70,17 @@ def test_pixel_size_is_none_for_unknown_setup_or_zoom():
     assert rhu.pixel_size_um(dict(header, zoom=None)) is None
 
 
+def test_pixel_size_from_scan_width():
+    """A scan width (e.g. from ExperimentImagingSetup) replaces the setupid constant, also for unknown setups."""
+    header = dict(nxpix_full=80, nxpix_retrace=10, nxpix_offset=6, setupid=1, zoom=0.87)
+    assert rhu.pixel_size_um(header, scan_width_um=100.) == pytest.approx(100. / 64 / 0.87)
+    assert rhu.pixel_size_um(dict(header, setupid=4), scan_width_um=100.) == pytest.approx(100. / 64 / 0.87)
+    assert rhu.pixel_size_um(dict(header, setupid=None), scan_width_um=100.) == pytest.approx(100. / 64 / 0.87)
+    assert rhu.pixel_size_um(dict(header, zoom=10), scan_width_um=100.) is None
+    assert rhu.setup_scan_width_um(1) == 112. and rhu.setup_scan_width_um(3) == 71.5
+    assert rhu.setup_scan_width_um(4) is None and rhu.setup_scan_width_um(None) is None
+
+
 def test_count_triggers_in_flat_stack():
     assert rhu.count_triggers_in_stack(np.zeros((4, 4, 10)), {}) == 0
     assert rhu.count_triggers_in_stack(np.zeros((0, 4, 10)), {}) is None
@@ -93,6 +104,40 @@ def test_read_h5_header(synthetic_pre_dir):
     assert info['ch_names'] == ['wDataCh0', 'wDataCh1', 'wDataCh2']
     assert info['header']['nxpix_full'] == synthetic_scanm.NX
     assert info['header']['zoom'] == 1
+
+
+def test_read_recording_scan_width(synthetic_pre_dir):
+    """`scan_width_um` is stored with the recording; without an imaging setup it comes from the header setupid."""
+    rec = ehu.find_recordings([str(synthetic_pre_dir)])[0]
+    header = rec.h5.header
+    nxpix = header['nxpix_full'] - (header['nxpix_retrace'] or 0) - (header['nxpix_offset'] or 0)
+
+    entry = ehu.read_recording(rec, scan_width_um=150.)
+    assert entry['scan_width_um'] == 150.
+    assert entry['pixel_size_um'] == pytest.approx(150. / nxpix / header['zoom'])
+
+    entry = ehu.read_recording(rec)  # synthetic files have no setupid
+    assert header['setupid'] is None
+    assert entry['scan_width_um'] is None and entry['pixel_size_um'] is None
+
+
+def test_exp_history_uses_imaging_setup_table():
+    from djimaging.tables.history import ExpHistoryTemplate
+
+    class FakeImagingSetup:
+        def __call__(self):
+            return self
+
+        @staticmethod
+        def get_recording_params(key):
+            return dict(scan_width_um=95.5, npixartifact=2)
+
+    without = type('T', (ExpHistoryTemplate,), dict(experiment_table=None, userinfo_table=None))()
+    with_setup = type('T', (ExpHistoryTemplate,), dict(
+        experiment_table=None, userinfo_table=None, experiment_imaging_setup_table=FakeImagingSetup()))()
+    assert without._scan_width_um(dict(experimenter='x')) is None
+    assert with_setup._scan_width_um(dict(experimenter='x')) == 95.5
+    assert 'scan_width_um = NULL' in ExpHistoryTemplate.Recording().definition
 
 
 def test_read_h5_header_counts_triggers_without_triggertimes(synthetic_pre_dir, tmp_path):
