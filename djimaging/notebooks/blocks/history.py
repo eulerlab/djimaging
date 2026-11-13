@@ -44,13 +44,17 @@ ExpHistoryField.Recording()
 # %% [markdown]
 # ## Stimulus logs (QDSpy)
 #
-# Set the folders with the QDSpy log files of your setups. Log files are matched to experiments by the date at the
-# start of their file name (`YYYYMMDD_...`).
+# The folders with the QDSpy log files of the setups (default: the setup log folders of the lab in the reference store;
+# setup 2 has none). Log files are matched to experiments by setup and by the date at the start of their file name
+# (`YYYYMMDD_...`).
 
 # %%
-qdspy_log_dirs = dict()  # {setupid: folder with QDSpy log files}, e.g. {1: reference_root / 'Resources/__Setup_1/log files'}
+qdspy_log_dirs = {setupid: reference_root / f'Resources/__Setup_{setupid}/log files' for setupid in [1, 3]}
 
 for setupid, log_dir in qdspy_log_dirs.items():
+    if not os.path.isdir(log_dir):
+        print(f"No QDSpy log folder for setup {setupid}: {log_dir}")
+        continue
     log_files = sorted(f for f in os.listdir(log_dir) if f[:8].isdigit())
     for exp_key in (Experiment.ExpInfo() & dict(setupid=str(setupid))).proj().to_dicts():
         date_str = exp_key['date'].strftime('%Y%m%d')
