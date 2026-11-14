@@ -13,6 +13,12 @@ Tables
   (`time_source='recording'`, assumed to run for the whole recording).
 - **prior**: one row per recording, the exposure before the recording started (total, at this field, elsewhere).
 - **meta**: dict with experiment-level information (setup, stimulator, calibration, clock offset) and the known gaps.
+- **fields** (optional): one row per recorded field (all fields with a recording, also structure-only fields) and per
+  landmark (optic disc, outline), with stage position, scan area, retinal position (if known) and the field images
+  (`images`: {channel name: 2D array}), see `build_fields`. Shown as a field map in the HTML report.
+
+Reports are written to one folder per experiment (`export_experiment`), e.g. `<experiment folder>/exposure_history/`
+next to the .ini file. Existing files are never overwritten unless they are recognised as report files (`exists`).
 
 Gaps are explicit: values that are not known are NaN/None here and written as `unknown` (and `n/a` where a value does
 not apply to the event type). Each row has an `incomplete` column with `;`-separated reasons.
@@ -23,9 +29,12 @@ field. Without a simultaneous recording, the position is taken from the next rec
 """
 from __future__ import annotations
 
+import base64
 import html
+import io
 import json
 import os
+import warnings
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta
 
@@ -69,6 +78,22 @@ PRIOR_COLUMNS = [
     'prior_led_s_unknown_field', 'prior_led_uv_dose', 'prior_led_green_dose', 'prior_led_s_levels_unknown',
     'prior_fields', 'prior_stimuli_this_field', 'incomplete',
 ]
+
+# Field map: one row per field and landmark. `status`: 'response' (at least one response recording), 'structure'
+# (only structural recordings, e.g. high resolution stacks), 'optic_disc', 'outline'. Positions are stage positions.
+FIELD_COLUMNS = [
+    'field', 'status', 't_first', 'x_um', 'y_um', 'z_um', 'width_um', 'height_um', 'scan_type', 'angle_deg',
+    'ventral_dorsal_pos_um', 'temporal_nasal_pos_um', 'retinal_source', 'n_response', 'n_structure', 'rec_names',
+    'image_rec', 'image_source', 'image_issue',
+]
+FIELD_STATUSES = ('response', 'structure', 'optic_disc', 'outline')
+DEFAULT_IMAGE_CMAPS = {'wDataCh0': 'viridis', 'wDataCh1': 'Reds'}
+
+# Report files of `export_experiment`; only these are ever written to a report folder
+GENERATOR = 'djimaging.utils.exposure_history'
+REPORT_FILES = dict(events='exposure_events.csv', prior='prior_exposure.csv', fields='fields.csv',
+                    meta='experiment_meta.json', html='exposure_history.html')
+EXISTS_OPTIONS = ('error', 'skip', 'overwrite')
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -444,6 +469,97 @@ def experiment_gaps(events: pd.DataFrame, meta: Mapping) -> list[str]:
     return gaps
 
 
+_FIELD_KINDS = ('response', 'hr', 'unknown')  # recordings of a field; 'unknown': no stimulus part in the name
+_SCAN_TYPE_PREFERENCE = {'xy': 0, 'xyz': 1, 'xz': 2}
+
+
+def build_fields(recordings: pd.DataFrame, field_info: Mapping[str, Mapping] | None = None,
+                 retinal: Mapping[str, tuple] | None = None) -> pd.DataFrame:
+    """One row per recorded field and per landmark (optic disc and outline recordings) of one experiment.
+
+    Parameters
+    ----------
+    recordings : pd.DataFrame
+        One row per recording. Required: `rec_name`, `kind`, `field` (field label, None if the recording has no field
+        part in its name). Optional: `rec_start`, `absx`, `absy`, `absz`, `pixel_size_um`, `nxpix`, `nypix`,
+        `scan_type`, `angle_deg`.
+    field_info : Mapping | None
+        Per field label, values that replace the ones taken from the recordings, e.g. from the Field table:
+        `x_um`, `y_um`, `z_um`, `width_um`, `height_um`, `scan_type`, `image_rec`, `image_source`, `images`.
+    retinal : Mapping | None
+        Per field label (or rec_name for landmarks): (ventral_dorsal_pos_um, temporal_nasal_pos_um, source).
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns `FIELD_COLUMNS` and `images` (None; filled from `field_info` or later). Fields in order of their first
+        recording, then the landmarks. `status` is 'response' if the field has at least one response recording, else
+        'structure'. The geometry is that of `image_rec`: the first xy recording (response recordings first), else
+        xyz, else xz recording.
+    """
+    field_info = field_info or {}
+    retinal = retinal or {}
+    recs = recordings.copy()
+    for col in ('rec_start', 'absx', 'absy', 'absz', 'pixel_size_um', 'nxpix', 'nypix', 'scan_type', 'angle_deg'):
+        if col not in recs:
+            recs[col] = None
+    recs = recs.astype(object).where(recs.notna(), None)
+    starts = [pd.Timestamp(v) if v is not None else pd.Timestamp.max for v in recs['rec_start']]
+    recs = recs.iloc[np.argsort(np.array(starts, dtype='datetime64[ns]'), kind='stable')]
+
+    rows = []
+    is_field = recs['kind'].isin(_FIELD_KINDS) & recs['field'].notna()
+    for label in _unique(recs.loc[is_field, 'field']):
+        group = recs[is_field & (recs['field'] == label)]
+        n_response = int((group['kind'] == 'response').sum())
+        best = min(group.to_dict('records'), key=lambda r: (
+            _SCAN_TYPE_PREFERENCE.get(r['scan_type'], 3), r['kind'] != 'response'))
+        row = _geometry_row(best)
+        row.update(field=label, status='response' if n_response > 0 else 'structure',
+                   t_first=group['rec_start'].iloc[0], n_response=n_response, n_structure=len(group) - n_response,
+                   rec_names=';'.join(group['rec_name']), image_rec=best['rec_name'], image_source=None,
+                   image_issue=None, images=None)
+        row.update({k: v for k, v in dict(field_info.get(label, {})).items() if v is not None})
+        rows.append(row)
+
+    for kind, status in (('od', 'optic_disc'), ('outline', 'outline')):
+        group = recs[recs['kind'] == kind]
+        for i, r in enumerate(group.to_dict('records')):
+            row = _geometry_row(r)
+            name = 'optic disc' if kind == 'od' else (r['field'] or 'outline')
+            row.update(field=f"{name} {i + 1}" if len(group) > 1 and kind == 'od' else name, status=status,
+                       t_first=r['rec_start'], n_response=0, n_structure=1, rec_names=r['rec_name'],
+                       image_rec=None, image_source=None, image_issue=None, images=None)
+            rows.append(row)
+
+    for row in rows:
+        key = row['field'] if row['status'] in ('response', 'structure') else row['rec_names']
+        vd, tn, source = retinal.get(key, (None, None, None))
+        row.update(ventral_dorsal_pos_um=_float(vd), temporal_nasal_pos_um=_float(tn),
+                   retinal_source=source if _notna(vd) else None)
+    return pd.DataFrame(rows, columns=FIELD_COLUMNS + ['images'])
+
+
+def _geometry_row(r: Mapping) -> dict:
+    pixel_size = _float(r.get('pixel_size_um'))
+    pixel_size = pixel_size if pixel_size is not None and pixel_size > 0 else None
+    scan_type = r.get('scan_type')
+    return dict(x_um=_float(r.get('absx')), y_um=_float(r.get('absy')), z_um=_float(r.get('absz')),
+                width_um=_mul(pixel_size, r.get('nxpix')),
+                height_um=_mul(pixel_size, r.get('nypix')) if scan_type in ('xy', 'xyz') else None,
+                scan_type=scan_type, angle_deg=_float(r.get('angle_deg')))
+
+
+def field_image(stack: np.ndarray, scan_type: str | None = None) -> np.ndarray:
+    """2D image of a channel stack (x, y, frames): median over time, max projection for xyz stacks."""
+    stack = np.asarray(stack, dtype=np.float32)
+    if stack.ndim == 2:
+        return stack
+    if scan_type == 'xyz':
+        return np.nanmax(stack, axis=2)
+    return np.nanmedian(stack, axis=2)
+
+
 # ----------------------------------------------------------------------------------------------------------------------
 # Output
 # ----------------------------------------------------------------------------------------------------------------------
@@ -469,18 +585,89 @@ def to_display(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def write_csv(out_dir: str, events: pd.DataFrame, prior: pd.DataFrame, meta: Mapping) -> dict:
-    """Write `exposure_events.csv`, `prior_exposure.csv` and `experiment_meta.json` to `out_dir` (created).
+def write_csv(out_dir: str, events: pd.DataFrame, prior: pd.DataFrame, meta: Mapping,
+              fields: pd.DataFrame | None = None) -> dict:
+    """Write `exposure_events.csv`, `prior_exposure.csv`, `fields.csv` (without images; only the header if `fields`
+    is None) and `experiment_meta.json` to `out_dir` (created). Overwrites without checks, see `export_experiment`.
     Returns the file paths."""
     os.makedirs(out_dir, exist_ok=True)
-    files = dict(events=os.path.join(out_dir, 'exposure_events.csv'),
-                 prior=os.path.join(out_dir, 'prior_exposure.csv'),
-                 meta=os.path.join(out_dir, 'experiment_meta.json'))
+    files = {k: os.path.join(out_dir, REPORT_FILES[k]) for k in ('events', 'prior', 'fields', 'meta')}
     to_display(events).to_csv(files['events'], index=False)
     to_display(prior).to_csv(files['prior'], index=False)
+    fields = pd.DataFrame(columns=FIELD_COLUMNS) if fields is None else fields[FIELD_COLUMNS]
+    to_display(fields).to_csv(files['fields'], index=False)
     with open(files['meta'], 'w', encoding='utf-8') as f:
-        json.dump(dict(meta), f, indent=2, default=str)
+        json.dump(dict(generator=GENERATOR, **{k: v for k, v in meta.items() if k != 'generator'}), f, indent=2,
+                  default=str)
     return files
+
+
+def is_report_file(path: str) -> bool:
+    """True if `path` is a file written by `export_experiment` (also by earlier versions without marker).
+
+    HTML and JSON files are recognised by their generator marker (or the title / keys of earlier versions), CSV files
+    by their first column names.
+    """
+    name = os.path.basename(path)
+    if name not in REPORT_FILES.values() or not os.path.isfile(path):
+        return False
+    try:
+        with open(path, encoding='utf-8') as f:
+            head = f.read(4096)
+    except (OSError, UnicodeDecodeError):
+        return False
+    if name == REPORT_FILES['html']:
+        return f'<meta name="generator" content="{GENERATOR}">' in head or '<title>Light exposure history' in head
+    if name == REPORT_FILES['meta']:
+        try:
+            with open(path, encoding='utf-8') as f:
+                content = json.load(f)
+        except (OSError, ValueError):
+            return False
+        return isinstance(content, dict) and (
+                content.get('generator') == GENERATOR or {'experiment', 'gaps', 'n_recordings'} <= set(content))
+    first_cols = dict(events=EVENT_COLUMNS[:3], prior=PRIOR_COLUMNS[:3], fields=FIELD_COLUMNS[:3])
+    for k, cols in first_cols.items():
+        if name == REPORT_FILES[k]:
+            return head.split('\n', 1)[0].strip().split(',')[:3] == cols
+    return False
+
+
+def check_report_dir(out_dir: str, exists: str = 'skip') -> bool:
+    """Check whether a report can be written to `out_dir`.
+
+    Parameters
+    ----------
+    out_dir : str
+        Report folder.
+    exists : str
+        What to do if report files (`REPORT_FILES`) exist in `out_dir`: 'error' (raise `FileExistsError`), 'skip'
+        (warn, return False) or 'overwrite'. 'overwrite' replaces only files that are recognised as report files
+        (`is_report_file`); if any of the file names is taken by another file, `FileExistsError` is raised and nothing
+        is written. Other files in `out_dir` are never touched.
+
+    Returns
+    -------
+    bool
+        True if the report can be written.
+    """
+    if exists not in EXISTS_OPTIONS:
+        raise ValueError(f"exists={exists!r}, must be one of {EXISTS_OPTIONS}")
+    if os.path.exists(out_dir) and not os.path.isdir(out_dir):
+        raise FileExistsError(f"Report folder {out_dir} is a file.")
+    existing = [os.path.join(out_dir, f) for f in REPORT_FILES.values() if os.path.lexists(os.path.join(out_dir, f))]
+    if len(existing) == 0:
+        return True
+    if exists == 'error':
+        raise FileExistsError(f"Report exists in {out_dir}: {[os.path.basename(f) for f in existing]}. "
+                              f"Use exists='skip' or exists='overwrite'.")
+    if exists == 'skip':
+        warnings.warn(f"Report exists in {out_dir}, skipped. Use exists='overwrite' to replace it.")
+        return False
+    foreign = [f for f in existing if os.path.islink(f) or not is_report_file(f)]
+    if foreign:
+        raise FileExistsError(f"Not overwriting {foreign}: not recognised as exposure history report file(s).")
+    return True
 
 
 def read_csv(out_dir: str) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
@@ -553,11 +740,14 @@ def read_nwb(nwbfile, name: str = 'light_exposure_history') -> tuple[pd.DataFram
     return df, meta
 
 
-def render_html(events: pd.DataFrame, prior: pd.DataFrame | None, meta: Mapping, path: str | None = None) -> str:
-    """Self-contained HTML page: header with setup and gaps, timeline per field, event and prior-exposure tables.
+def render_html(events: pd.DataFrame, prior: pd.DataFrame | None, meta: Mapping, path: str | None = None,
+                fields: pd.DataFrame | None = None, image_cmaps: Mapping[str, str] | None = None) -> str:
+    """Self-contained HTML page: header with setup and gaps, timeline per field, field map (if `fields` is given),
+    event and prior-exposure tables.
 
     Works with the output of `build_events`, `read_csv` or `read_nwb` (uses `t_start_rel_s`/`t_end_rel_s`).
-    Writes to `path` if given and returns the HTML.
+    `fields`: output of `build_fields`; `image_cmaps`: colormap per channel name (default `DEFAULT_IMAGE_CMAPS`).
+    Writes to `path` if given (without checks, see `export_experiment`) and returns the HTML.
     """
     title = f"Light exposure history {meta.get('experiment', '')}".strip()
     gaps = meta.get('gaps') or experiment_gaps(events, meta)
@@ -567,19 +757,22 @@ def render_html(events: pd.DataFrame, prior: pd.DataFrame | None, meta: Mapping,
     info = ''.join(f"<tr><th>{_e(k)}</th><td>{_e(meta.get(k, UNKNOWN) if meta.get(k) is not None else UNKNOWN)}"
                    f"</td></tr>" for k in info_keys)
     parts = [
-        _HTML_HEAD.replace('__TITLE__', _e(title)),
+        _HTML_HEAD.replace('__TITLE__', _e(title)).replace('__GENERATOR__', GENERATOR),
         f"<h1>{_e(title)}</h1>",
         "<section><h2>Setup</h2><table class='kv'>", info, "</table></section>",
         "<section class='gaps'><h2>Gaps</h2><ul>", ''.join(f"<li>{_e(g)}</li>" for g in gaps), "</ul></section>",
         "<section><h2>Timeline</h2>", _timeline_svg(events), _LEGEND, "</section>",
     ]
+    if fields is not None and len(fields) > 0:
+        parts.append(_fields_section(fields, image_cmaps))
     if prior is not None and len(prior) > 0:
         parts += ["<section><h2>Exposure before each recording</h2>",
                   "<p class='note'>Seconds of laser scanning and stimulation before the recording started. "
                   "Dose = mean LED input (0-255) x s. <code>*</code>: position taken from the next recording.</p>",
                   _html_table(to_display(prior.drop(columns=['t_start'], errors='ignore'))), "</section>"]
     shown = [c for c in EVENT_COLUMNS if c in events and c not in ('t_start', 't_end')]
-    parts += ["<section><h2>Events</h2>", _html_table(to_display(events[shown])), "</section>", _HTML_TAIL]
+    parts += ["<section><h2>Events</h2>", _html_table(to_display(events[shown])), "</section>",
+              _files_section(meta), _HTML_TAIL]
     page = '\n'.join(parts)
     if path is not None:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -588,15 +781,40 @@ def render_html(events: pd.DataFrame, prior: pd.DataFrame | None, meta: Mapping,
     return page
 
 
-def export_experiment(out_dir: str, events: pd.DataFrame, meta: Mapping, html: bool = True) -> dict:
-    """Write CSV, JSON and (optionally) HTML of one experiment to `out_dir`. Returns the file paths."""
+def export_experiment(out_dir: str, events: pd.DataFrame, meta: Mapping, html: bool = True,
+                      fields: pd.DataFrame | None = None, exists: str = 'skip',
+                      image_cmaps: Mapping[str, str] | None = None) -> dict | None:
+    """Write CSV, JSON and (optionally) HTML of one experiment to `out_dir`.
+
+    Parameters
+    ----------
+    out_dir : str
+        Report folder, e.g. `<experiment folder>/exposure_history` (see `exposure_history_dj.report_dir_next_to_ini`).
+    events, meta : see `build_events`.
+    html : bool
+        Also write the HTML report.
+    fields : pd.DataFrame | None
+        Output of `build_fields` (field map in the HTML report, `fields.csv`).
+    exists : str
+        'error', 'skip' (default) or 'overwrite' if a report exists in `out_dir`, see `check_report_dir`. Only report
+        files are ever overwritten, never other files.
+    image_cmaps : Mapping | None
+        Colormap per channel name for the field images.
+
+    Returns
+    -------
+    dict | None
+        The file paths; None if skipped.
+    """
+    if not check_report_dir(out_dir, exists=exists):
+        return None
     meta = dict(meta)
     meta['gaps'] = experiment_gaps(events, meta)
     prior = summarize_prior_exposure(events)
-    files = write_csv(out_dir, events, prior, meta)
+    files = write_csv(out_dir, events, prior, meta, fields=fields)
     if html:
-        files['html'] = os.path.join(out_dir, 'exposure_history.html')
-        render_html(events, prior, meta, path=files['html'])
+        files['html'] = os.path.join(out_dir, REPORT_FILES['html'])
+        render_html(events, prior, meta, path=files['html'], fields=fields, image_cmaps=image_cmaps)
     return files
 
 
@@ -610,12 +828,14 @@ def experiment_folder_name(key: Mapping) -> str:
 # ----------------------------------------------------------------------------------------------------------------------
 _HTML_HEAD = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="__GENERATOR__">
 <title>__TITLE__</title>
 <style>
 :root { --bg:#fff; --fg:#1d1d1f; --muted:#666; --line:#ddd; --laser:#c0392b; --led:#2e6fd8; --unk:#f6e7b0;
-        --head:#f4f4f6; }
+        --head:#f4f4f6; --resp:#d97706; --struct:#7c3aed; --landmark:#555; }
 @media (prefers-color-scheme: dark) { :root { --bg:#16171a; --fg:#e8e8ea; --muted:#9a9aa0; --line:#33343a;
-        --laser:#ff6b5b; --led:#6aa1ff; --unk:#5a4b14; --head:#202126; } }
+        --laser:#ff6b5b; --led:#6aa1ff; --unk:#5a4b14; --head:#202126; --resp:#fbbf24; --struct:#b794f6;
+        --landmark:#bbb; } }
 body { background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, sans-serif; margin:0; padding:16px; }
 h1 { font-size:20px; } h2 { font-size:16px; margin-top:28px; }
 table { border-collapse:collapse; font-size:12px; } th, td { border:1px solid var(--line); padding:2px 6px; }
@@ -626,6 +846,17 @@ td.unknown { background:var(--unk); } td.na { color:var(--muted); }
 .gaps li { margin:2px 0; } .note { color:var(--muted); font-size:12px; }
 svg text { fill:var(--fg); font-size:11px; } .legend span { margin-right:16px; font-size:12px; }
 .sw { display:inline-block; width:14px; height:10px; margin-right:4px; vertical-align:middle; }
+.maps { display:flex; flex-wrap:wrap; gap:16px; } .maps figure { margin:0; flex:1 1 420px; max-width:640px; }
+.maps figcaption { font-size:12px; color:var(--muted); }
+svg .grid { stroke:var(--line); stroke-width:1; } svg .lab { font-size:10px; }
+svg .ret { font-size:9px; fill:var(--muted); }
+.gallery { display:flex; flex-wrap:wrap; gap:10px; }
+.card { border:3px solid var(--line); border-radius:4px; padding:6px; font-size:11px; max-width:320px; }
+.card.response { border-color:var(--resp); } .card.structure { border-color:var(--struct); border-style:dashed; }
+.card img { width:140px; height:auto; image-rendering:pixelated; margin-right:4px; vertical-align:top; }
+.card .ttl { font-weight:600; font-size:12px; } .card .noimg { color:var(--muted); }
+textarea.paths { display:block; width:100%; box-sizing:border-box; margin:6px 0 10px; font:12px ui-monospace, monospace;
+                 background:var(--head); color:var(--fg); border:1px solid var(--line); white-space:pre; }
 </style></head><body>"""
 
 _HTML_TAIL = """<script>
@@ -690,6 +921,195 @@ def _timeline_svg(events: pd.DataFrame) -> str:
     return ''.join(out)
 
 
+_FIELD_NOTE = (
+    "Stage positions (absx/absy of ScanM) of all recorded fields. Border: <span style='color:var(--resp)'>solid = "
+    "response</span> (at least one response recording), <span style='color:var(--struct)'>dashed = structure only"
+    "</span>. Image: stack average of the Field table, else of one recording read from file (time median; max "
+    "projection for z-stacks). Images are drawn with the x index along +absx and the y index along +absy (as "
+    "<code>Field.plot1</code>); the scan angle is ignored and the orientation relative to the stage is not verified. "
+    "xz scans are drawn as lines. Retinal positions (D/V: dorsal/ventral, N/T: nasal/temporal) are shown if known.")
+
+
+def _fields_section(fields: pd.DataFrame, image_cmaps: Mapping[str, str] | None = None) -> str:
+    cmaps = dict(DEFAULT_IMAGE_CMAPS, **(image_cmaps or {}))
+    images = fields['images'] if 'images' in fields else [None] * len(fields)
+    channels = sorted({ch for imgs in images if isinstance(imgs, Mapping) for ch in imgs})
+    uris = [{ch: _png_data_uri(img, cmaps.get(ch, 'gray')) for ch, img in imgs.items()}
+            if isinstance(imgs, Mapping) else {} for imgs in images]
+    maps = [f"<figure>{_field_map_svg(fields, uris, ch)}<figcaption>{_e(ch or 'scan areas')}</figcaption></figure>"
+            for ch in (channels or [None])]
+    shown = [c for c in FIELD_COLUMNS if c in fields and c != 't_first']
+    return ''.join([
+        "<section><h2>Fields</h2>", f"<p class='note'>{_FIELD_NOTE}</p>",
+        "<div class='maps'>", *maps, "</div>",
+        "<h3>Field images</h3>", _field_gallery(fields, uris, channels),
+        "<h3>Field table</h3>", _html_table(to_display(fields[shown])), "</section>"])
+
+
+def _retinal_text(row: Mapping) -> str:
+    vd, tn = row.get('ventral_dorsal_pos_um'), row.get('temporal_nasal_pos_um')
+    if not (_notna(vd) and _notna(tn)):
+        return ''
+    return f"{'D' if vd >= 0 else 'V'} {abs(vd):.0f} µm, {'N' if tn >= 0 else 'T'} {abs(tn):.0f} µm"
+
+
+def _field_tip(row: Mapping) -> str:
+    parts = [f"{row['field']} ({row['status']})"]
+    if _notna(row.get('x_um')) and _notna(row.get('y_um')):
+        parts.append(f"stage x={row['x_um']:.0f} y={row['y_um']:.0f} z={_fmt(row.get('z_um'))} µm")
+    if _retinal_text(row):
+        parts.append(f"retina: {_retinal_text(row)} ({row.get('retinal_source')})")
+    if _notna(row.get('angle_deg')) and row['angle_deg'] != 0:
+        parts.append(f"scan angle {row['angle_deg']:.4g} deg (not drawn)")
+    parts.append(f"recordings: {row.get('rec_names')}")
+    if row.get('image_rec'):
+        parts.append(f"image: {row['image_rec']} ({row.get('image_source') or 'none'})")
+    if row.get('image_issue'):
+        parts.append(f"image issue: {row['image_issue']}")
+    return '\n'.join(parts)
+
+
+def _nice_step(span: float, n: int = 5) -> float:
+    raw = max(span / n, 1e-9)
+    mag = 10 ** np.floor(np.log10(raw))
+    return float(min((m * mag for m in (1, 2, 5, 10) if m * mag >= raw), default=10 * mag))
+
+
+def _field_map_svg(fields: pd.DataFrame, uris: list[dict], ch: str | None, max_w: float = 600.,
+                   max_h: float = 600.) -> str:
+    rows = [(r, u) for r, u in zip(fields.to_dict('records'), uris) if _notna(r['x_um']) and _notna(r['y_um'])]
+    if len(rows) == 0:
+        return "<p class='note'>No field with a known position.</p>"
+    is_field = [r['status'] in ('response', 'structure') for r, _ in rows]  # landmarks: centre only
+    half_w = [(_float(r['width_um']) or 0.) / 2 if f else 0. for (r, _), f in zip(rows, is_field)]
+    half_h = [(_float(r['height_um']) or 0.) / 2 if f else 0. for (r, _), f in zip(rows, is_field)]
+    xs, ys = [r['x_um'] for r, _ in rows], [r['y_um'] for r, _ in rows]
+    x0, x1 = min(x - w for x, w in zip(xs, half_w)), max(x + w for x, w in zip(xs, half_w))
+    y0, y1 = min(y - h for y, h in zip(ys, half_h)), max(y + h for y, h in zip(ys, half_h))
+    pad = max(0.08 * max(x1 - x0, y1 - y0), 50.)
+    x0, x1, y0, y1 = x0 - pad, x1 + pad, y0 - pad, y1 + pad
+    scale = min(max_w / (x1 - x0), max_h / (y1 - y0))
+    left, bottom, top = 50, 34, 8
+    w_px, h_px = (x1 - x0) * scale, (y1 - y0) * scale
+
+    def px(x):
+        return left + (x - x0) * scale
+
+    def py(y):
+        return top + (y1 - y) * scale
+
+    out = [f"<svg viewBox='0 0 {left + w_px + 10:.0f} {top + h_px + bottom:.0f}' width='100%' role='img' "
+           f"aria-label='field map {_e(ch or '')}'>"]
+    step = _nice_step(max(x1 - x0, y1 - y0))
+    for t in np.arange(np.ceil(x0 / step) * step, x1, step):
+        out.append(f"<line class='grid' x1='{px(t):.1f}' x2='{px(t):.1f}' y1='{top}' y2='{top + h_px:.1f}'/>"
+                   f"<text class='lab' x='{px(t):.1f}' y='{top + h_px + 12:.1f}' text-anchor='middle'>{t:.0f}</text>")
+    for t in np.arange(np.ceil(y0 / step) * step, y1, step):
+        out.append(f"<line class='grid' x1='{left}' x2='{left + w_px:.1f}' y1='{py(t):.1f}' y2='{py(t):.1f}'/>"
+                   f"<text class='lab' x='{left - 4}' y='{py(t) + 3:.1f}' text-anchor='end'>{t:.0f}</text>")
+    out.append(f"<text x='{left + w_px / 2:.1f}' y='{top + h_px + 28:.1f}' text-anchor='middle'>absx [µm]</text>"
+               f"<text x='12' y='{top + h_px / 2:.1f}' text-anchor='middle' "
+               f"transform='rotate(-90 12 {top + h_px / 2:.1f})'>absy [µm]</text>")
+
+    outline = [(px(r['x_um']), py(r['y_um'])) for r, _ in rows if r['status'] == 'outline']
+    if len(outline) > 1:
+        pts = ' '.join(f"{x:.1f},{y:.1f}" for x, y in outline)
+        out.append(f"<polyline points='{pts}' fill='none' stroke='var(--landmark)' stroke-dasharray='2 3'/>")
+
+    for (r, u), hw, hh in zip(rows, half_w, half_h):
+        tip = f"<title>{_e(_field_tip(r))}</title>"
+        cx, cy = px(r['x_um']), py(r['y_um'])
+        if r['status'] in ('optic_disc', 'outline'):
+            radius = 6 if r['status'] == 'optic_disc' else 3
+            out.append(f"<g><circle cx='{cx:.1f}' cy='{cy:.1f}' r='{radius}' fill='none' stroke='var(--landmark)' "
+                       f"stroke-width='2'/>{tip}</g>")
+            if r['status'] == 'optic_disc':
+                out.append(f"<text class='lab' x='{cx + 8:.1f}' y='{cy + 3:.1f}'>OD</text>")
+            continue
+        color = 'var(--resp)' if r['status'] == 'response' else 'var(--struct)'
+        dash = '' if r['status'] == 'response' else " stroke-dasharray='4 2'"
+        if hw > 0 and hh > 0:
+            x, y, w, h = cx - hw * scale, cy - hh * scale, 2 * hw * scale, 2 * hh * scale
+            img = (f"<image href='{u[ch]}' x='{x:.1f}' y='{y:.1f}' width='{w:.1f}' height='{h:.1f}' "
+                   f"preserveAspectRatio='none' style='image-rendering:pixelated'/>") if ch in u else ''
+            out.append(f"<g>{img}<rect x='{x:.1f}' y='{y:.1f}' width='{w:.1f}' height='{h:.1f}' fill='none' "
+                       f"stroke='{color}' stroke-width='2'{dash}/>{tip}</g>")
+            y_lab = y - 3
+        elif hw > 0:  # xz scan: line along x
+            out.append(f"<g><line x1='{cx - hw * scale:.1f}' x2='{cx + hw * scale:.1f}' y1='{cy:.1f}' y2='{cy:.1f}' "
+                       f"stroke='{color}' stroke-width='4'{dash}/>{tip}</g>")
+            y_lab = cy - 5
+        else:  # unknown scan area
+            out.append(f"<g><rect x='{cx - 4:.1f}' y='{cy - 4:.1f}' width='8' height='8' fill='none' "
+                       f"stroke='{color}' stroke-width='2'{dash}/>{tip}</g>")
+            y_lab = cy - 7
+        out.append(f"<text class='lab' x='{cx:.1f}' y='{y_lab:.1f}' text-anchor='middle'>{_e(r['field'])}</text>")
+        if _retinal_text(r):
+            y_ret = (cy + hh * scale + 10) if hh > 0 else cy + 12
+            out.append(f"<text class='ret' x='{cx:.1f}' y='{y_ret:.1f}' text-anchor='middle'>"
+                       f"{_e(_retinal_text(r))}</text>")
+    out.append("</svg>")
+    return ''.join(out)
+
+
+def _field_gallery(fields: pd.DataFrame, uris: list[dict], channels: list[str]) -> str:
+    cards = []
+    for r, u in zip(fields.to_dict('records'), uris):
+        if r['status'] not in ('response', 'structure'):
+            continue
+        imgs = ''.join(f"<img src='{u[ch]}' alt='{_e(r['field'])} {_e(ch)}' title='{_e(ch)}'>"
+                       for ch in channels if ch in u)
+        if not imgs:
+            imgs = f"<div class='noimg'>no image{': ' + _e(r['image_issue']) if r.get('image_issue') else ''}</div>"
+        has_pos = _notna(r['x_um']) and _notna(r['y_um'])
+        pos = f"stage x={r['x_um']:.0f}, y={r['y_um']:.0f}, z={_fmt(r['z_um'])} µm" if has_pos else \
+            'stage position unknown'
+        ret = f"<br>retina: {_e(_retinal_text(r))}" if _retinal_text(r) else ''
+        cards.append(
+            f"<div class='card {r['status']}' title='{_e(_field_tip(r))}'><div class='ttl'>{_e(r['field'])}</div>"
+            f"{r['status']}, {_e(r['scan_type'] or UNKNOWN)}, {r['n_response']} response / "
+            f"{r['n_structure']} other recording(s)<br>{_e(pos)}{ret}<br>{imgs}</div>")
+    return f"<div class='gallery'>{''.join(cards)}</div>" if cards else "<p class='note'>No field.</p>"
+
+
+def _png_data_uri(img, cmap: str = 'gray', gamma: float = 0.5) -> str:
+    """PNG data URI of a 2D image (x, y): x to the right, y up; 5-99 percentile normalisation and gamma."""
+    from matplotlib import image as mpl_image
+
+    im = np.asarray(img, dtype=float)
+    finite = np.isfinite(im)
+    if finite.any():
+        vmin, vmax = np.percentile(im[finite], [5, 99])
+        im = np.clip((im - vmin) / (vmax - vmin if vmax > vmin else 1.), 0, 1) ** gamma
+    im = np.where(finite, im, 0.)
+    buf = io.BytesIO()
+    mpl_image.imsave(buf, np.flipud(im.T), cmap=cmap, vmin=0, vmax=1, format='png')
+    return 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode('ascii')
+
+
+def _files_section(meta: Mapping) -> str:
+    """Experiment folder and all recording files of `meta['files']` (table and one path per line, for copying)."""
+    files = list(meta.get('files') or [])
+    header_path = meta.get('header_path')
+    if not files and not header_path:
+        return ''
+    paths = [str(header_path)] if header_path else []
+    paths += [str(f[k]) for f in files for k in ('smp_file', 'smh_file', 'h5_file') if _notna(f.get(k))]
+    paths += [os.path.join(str(header_path), str(f)) if header_path else str(f)
+              for f in meta.get('unscanned_files') or []]
+    table = pd.DataFrame(files, columns=['field', 'rec_name', 'kind', 'smp_file', 'smh_file', 'h5_file'])
+    return ''.join([
+        "<section><h2>Files</h2>",
+        f"<p class='note'>Experiment folder: <code>{_e(header_path or UNKNOWN)}</code>. All paths, one per line "
+        f"(experiment folder, recording files, unregistered ScanM files):</p>",
+        "<button type='button' onclick=\"const t=document.getElementById('paths');t.select();"
+        "navigator.clipboard?navigator.clipboard.writeText(t.value):document.execCommand('copy');\">Copy</button>",
+        f"<textarea id='paths' class='paths' readonly rows='{min(max(len(paths), 2), 20)}' "
+        f"onclick='this.select()'>{_e(chr(10).join(paths))}</textarea>",
+        _html_table(table.astype(object).where(table.notna(), NOT_APPLICABLE)) if len(table) > 0 else '',
+        "</section>"])
+
+
 def _html_table(df: pd.DataFrame) -> str:
     head = ''.join(f"<th>{_e(c)}</th>" for c in df.columns)
     body = []
@@ -711,6 +1131,8 @@ def _e(v) -> str:
 
 
 def _fmt(v) -> str:
+    if v is None:
+        return UNKNOWN
     if isinstance(v, (float, np.floating)):
         return f"{v:.4g}"
     return str(v)

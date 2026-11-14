@@ -223,7 +223,12 @@ The **light exposure history** of an experiment (`djimaging.utils.exposure_histo
 `exposure_history_dj.fetch_exposure_history`) lists every laser scan and stimulus in time order with position,
 duration, setup, stimulator and processing status, and writes it as CSV, JSON and HTML (`export_experiment`). Unknown
 values are written as `unknown` and gaps are listed explicitly; unlisted stimuli appear by name only, never with
-results. The `history` notebook part ends with a cell that exports it for every experiment.
+results. The HTML report also has a field map: the images of all recorded fields (also structure-only fields, read from
+their files) at their stage positions, with a border colour for response vs. structure-only fields and the retinal
+position if known (`exposure_history_dj.fetch_field_map`). `export_exposure_history(..., next_to_ini=True)` also writes
+the report to `<experiment folder>/exposure_history/` next to the .ini file; `exists='error' | 'skip' | 'overwrite'`
+(default `'skip'`) decides about existing reports, and only files recognised as earlier reports are ever overwritten.
+The `history` notebook part ends with a cell that exports it for every experiment.
 
 #### Imaging channels (functional and background)
 

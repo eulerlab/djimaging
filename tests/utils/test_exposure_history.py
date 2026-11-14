@@ -1,3 +1,4 @@
+import os
 from datetime import date, datetime, timedelta
 
 import numpy as np
@@ -248,3 +249,106 @@ def test_nwb_roundtrip(events):
     assert df['is_this_field'].sum() == (events['field'] == 'GCL0').sum()
     page = eh.render_html(df, None, meta)
     assert '<svg' in page
+
+
+def _field_recordings():
+    rows = [
+        dict(rec_name='SMP_C1_GCL0_chirp', kind='response', field='GCL0', rec_start=T0, absx=0., absy=0., absz=35.,
+             pixel_size_um=1.5, nxpix=64, nypix=64, scan_type='xy'),
+        dict(rec_name='SMP_C1_GCL0_stack', kind='hr', field='GCL0', rec_start=T0 + timedelta(minutes=1), absx=0.,
+             absy=0., absz=30., pixel_size_um=0.5, nxpix=512, nypix=512, scan_type='xyz'),
+        dict(rec_name='SMP_C1_IPL1_hr', kind='hr', field='IPL1', rec_start=T0 + timedelta(minutes=2), absx=300.,
+             absy=-100., absz=20., pixel_size_um=0.5, nxpix=512, nypix=512, scan_type='xy'),
+        dict(rec_name='SMP_C1_IPL2_xz', kind='hr', field='IPL2', rec_start=T0 + timedelta(minutes=3), absx=-200.,
+             absy=50., absz=20., pixel_size_um=1., nxpix=64, nypix=1, scan_type='xz'),
+        dict(rec_name='SMP_C1_od', kind='od', field=None, rec_start=T0 - timedelta(minutes=5), absx=-1000.,
+             absy=500., absz=0., scan_type='xy'),
+        dict(rec_name='SMP_C1_outline1', kind='outline', field='E1', rec_start=T0 + timedelta(minutes=4), absx=1000.,
+             absy=0., absz=0., scan_type='xy'),
+        dict(rec_name='SMP_C1_outline2', kind='outline', field='E2', rec_start=T0 + timedelta(minutes=5), absx=1000.,
+             absy=800., absz=0., scan_type='xy'),
+    ]
+    return pd.DataFrame(rows)
+
+
+def test_build_fields():
+    images = {'wDataCh0': np.arange(64 * 64, dtype=float).reshape(64, 64)}
+    fields = eh.build_fields(
+        _field_recordings(), field_info=dict(GCL0=dict(x_um=1., images=images, image_source='Field.StackAverages')),
+        retinal=dict(GCL0=(100., -50., 'RetinalFieldLocation')))
+    by_field = fields.set_index('field')
+    assert list(fields['field'][:3]) == ['GCL0', 'IPL1', 'IPL2']
+    assert by_field.loc['GCL0', 'status'] == 'response' and by_field.loc['IPL1', 'status'] == 'structure'
+    assert by_field.loc['GCL0', 'image_rec'] == 'SMP_C1_GCL0_chirp'  # xy response recording first
+    assert by_field.loc['GCL0', 'x_um'] == 1.  # from field_info
+    assert by_field.loc['GCL0', 'n_response'] == 1 and by_field.loc['GCL0', 'n_structure'] == 1
+    assert by_field.loc['IPL1', 'width_um'] == 256. and pd.isna(by_field.loc['IPL2', 'height_um'])
+    assert by_field.loc['GCL0', 'ventral_dorsal_pos_um'] == 100.
+    assert pd.isna(by_field.loc['IPL1', 'retinal_source'])
+    assert set(fields['status']) == set(eh.FIELD_STATUSES)
+
+    page = eh.render_html(eh.build_events(_recordings(), None), None, dict(experiment='e'), fields=fields)
+    assert page.count('<image ') == 1 and 'data:image/png;base64,' in page
+    assert 'D 100 µm, T 50 µm' in page and '>OD<' in page and '<polyline' in page
+    assert "class='card response'" in page and "class='card structure'" in page
+
+
+def test_field_image():
+    stack = np.random.default_rng(0).random((8, 6, 5))
+    assert np.allclose(eh.field_image(stack, 'xy'), np.median(stack, axis=2))
+    assert np.allclose(eh.field_image(stack, 'xyz'), np.max(stack, axis=2))
+    assert eh.field_image(stack[:, :, 0]).shape == (8, 6)
+
+
+def test_report_exists(events, tmp_path):
+    meta = dict(experiment='e', has_stim_log=True, clock_offset_s=60.)
+    out = tmp_path / 'exposure_history'
+    fields = eh.build_fields(_field_recordings())
+    files = eh.export_experiment(str(out), events, meta, fields=fields)
+    assert set(files) == set(eh.REPORT_FILES)
+    assert all(eh.is_report_file(f) for f in files.values())
+    (out / 'notes.txt').write_text('mine')
+
+    with pytest.raises(FileExistsError):
+        eh.export_experiment(str(out), events, meta, exists='error')
+    with pytest.warns(UserWarning, match='skipped'):
+        assert eh.export_experiment(str(out), events, meta) is None  # default: skip
+    with pytest.raises(ValueError):
+        eh.export_experiment(str(out), events, meta, exists='replace')
+
+    mtime = os.path.getmtime(files['html'])
+    assert eh.export_experiment(str(out), events, meta, exists='overwrite') is not None
+    assert os.path.getmtime(files['html']) >= mtime
+    assert (out / 'notes.txt').read_text() == 'mine'
+
+    # A file with a report name that is not a report is never overwritten, and nothing is written
+    (out / eh.REPORT_FILES['html']).write_text('<html>my own page</html>')
+    with pytest.raises(FileExistsError, match='not recognised'):
+        eh.export_experiment(str(out), events, meta, exists='overwrite')
+    assert (out / eh.REPORT_FILES['html']).read_text() == '<html>my own page</html>'
+
+
+def test_is_report_file_legacy(tmp_path):
+    (tmp_path / 'experiment_meta.json').write_text('{"experiment": "e", "gaps": [], "n_recordings": 1}')
+    (tmp_path / 'exposure_history.html').write_text('<!doctype html><html><head><title>Light exposure history e')
+    (tmp_path / 'exposure_events.csv').write_text('event,t_start,t_end\n')
+    (tmp_path / 'prior_exposure.csv').write_text('a,b,c\n')
+    assert eh.is_report_file(str(tmp_path / 'experiment_meta.json'))
+    assert eh.is_report_file(str(tmp_path / 'exposure_history.html'))
+    assert eh.is_report_file(str(tmp_path / 'exposure_events.csv'))
+    assert not eh.is_report_file(str(tmp_path / 'prior_exposure.csv'))
+
+
+def test_html_files_section(events):
+    meta = dict(experiment='e', header_path='/data/exp1', unscanned_files=['Other/SMP_x.h5'],
+                files=[dict(field='GCL0', rec_name='SMP_GCL0_chirp', kind='response',
+                            h5_file='/data/exp1/Pre/SMP_GCL0_chirp.h5',
+                            smp_file='/data/exp1/Raw/GCL0_chirp.smp', smh_file=None)])
+    page = eh.render_html(events, None, meta)
+    textarea = page.split("<textarea", 1)[1].split("</textarea>", 1)[0].split('>', 1)[1]
+    assert textarea.split('\n') == ['/data/exp1', '/data/exp1/Raw/GCL0_chirp.smp', '/data/exp1/Pre/SMP_GCL0_chirp.h5',
+                                    os.path.join('/data/exp1', 'Other/SMP_x.h5')]
+    files_table = page.split('<h2>Files</h2>', 1)[1]
+    assert files_table.index('<th>field</th>') < files_table.index('<th>rec_name</th>')
+    assert '<td>GCL0</td>' in files_table
+    assert '<h2>Files</h2>' not in eh.render_html(events, None, dict(experiment='e'))

@@ -6,6 +6,8 @@ other stimulus-specific data. Unlisted recordings never have a Presentation, so 
 """
 from __future__ import annotations
 
+import os
+import warnings
 from collections.abc import Mapping
 from pathlib import PurePosixPath
 
@@ -13,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from djimaging.utils import exposure_history as eh
+from djimaging.utils.exp_history_utils import FIELD_KEY_DEFAULTS
 
 _REC_ATTRS = ['kind', 'stim_token', 'rec_start', 'rec_dur_s', 'stopped_early', 'absx', 'absy', 'absz', 'zoom',
               'pixel_size_um', 'nxpix', 'nypix', 'nzpix', 'z_step_um', 'real_pix_dur_us', 'scan_type', 'setupid',
@@ -86,6 +89,7 @@ def fetch_exposure_history(
     meta = dict(experiment=eh.experiment_folder_name(exp_key), key={k: str(v) for k, v in exp_key.items()},
                 n_recordings=len(recs), data_dirs=list(exp_row.get('data_dirs') or []),
                 unscanned_files=list(exp_row.get('unscanned_files') or []))
+    meta.update(_file_paths(exp_key, exp_history_table, recs))
     setupids = sorted({str(s) for s in recs.get('setupid', []) if eh._notna(s)})
     meta['setupid'] = ';'.join(setupids) if setupids else None
 
@@ -112,17 +116,255 @@ def fetch_exposure_history(
     return events, meta
 
 
-def export_exposure_history(out_dir: str, keys, html: bool = True, **tables) -> list[dict]:
-    """Export one sub-folder `<out_dir>/<date>_<exp_num>_<experimenter>/` per experiment key.
+INI_REPORT_DIR = 'exposure_history'  # Report folder in the experiment folder (next to the .ini file)
 
-    `tables` are passed to `fetch_exposure_history`. Returns the written file paths per experiment.
+
+def report_dir_next_to_ini(key: Mapping, exp_history_table) -> str:
+    """Report folder `<experiment folder>/exposure_history` next to the .ini file of the experiment (`header_path`)."""
+    header_path = (exp_history_table.experiment_table & key).fetch1('header_path')
+    return os.path.join(header_path, INI_REPORT_DIR)
+
+
+def export_exposure_history(out_dir: str | None, keys, html: bool = True, exists: str = 'skip',
+                            next_to_ini: bool = False, field_map: bool = True, field_map_kwargs: dict | None = None,
+                            **tables) -> list[dict]:
+    """Export the report of each experiment key to `<out_dir>/<date>_<exp_num>_<experimenter>/` and/or next to the
+    .ini file of the experiment (`<experiment folder>/exposure_history/`).
+
+    Parameters
+    ----------
+    out_dir : str | None
+        One sub-folder per experiment; None: no export there.
+    keys : iterable of experiment keys.
+    html : bool
+        Also write the HTML report.
+    exists : str
+        'error', 'skip' (default) or 'overwrite' if a report exists, see `exposure_history.check_report_dir`. Only
+        report files are ever overwritten, never other files.
+    next_to_ini : bool
+        Also write the report to `<experiment folder>/exposure_history/`.
+    field_map : bool
+        Include the field map (`fetch_field_map`).
+    field_map_kwargs : dict | None
+        Passed to `fetch_field_map`, e.g. `retinal_location_table`, `images_from_files`.
+    tables
+        Passed to `fetch_exposure_history` (`exp_history_table`, ...).
+
+    Returns
+    -------
+    list[dict]
+        Per experiment: `{'out_dir': files or None, 'next_to_ini': files or None}` (None: not written or skipped).
     """
-    import os
-    files = []
+    results = []
     for key in keys:
         events, meta = fetch_exposure_history(key, **tables)
-        files.append(eh.export_experiment(os.path.join(out_dir, meta['experiment']), events, meta, html=html))
-    return files
+        fields = None
+        if field_map:
+            fields = fetch_field_map(
+                key, tables['exp_history_table'], exp_history_field_table=tables.get('exp_history_field_table'),
+                from_raw_data=tables.get('from_raw_data', False), **(field_map_kwargs or {}))
+        result = dict(out_dir=None, next_to_ini=None)
+        targets = []
+        if out_dir is not None:
+            targets.append(('out_dir', os.path.join(out_dir, meta['experiment'])))
+        if next_to_ini:
+            targets.append(('next_to_ini', report_dir_next_to_ini(key, tables['exp_history_table'])))
+        for name, target in targets:
+            result[name] = eh.export_experiment(target, events, meta, html=html, fields=fields, exists=exists)
+        results.append(result)
+    return results
+
+
+_FIELD_REC_ATTRS = ['kind', 'name_info', 'rec_start', 'absx', 'absy', 'absz', 'pixel_size_um', 'nxpix', 'nypix',
+                    'scan_type', 'angle_deg', 'h5_file', 'smp_file']
+
+
+def fetch_field_map(key: Mapping, exp_history_table, exp_history_field_table=None, retinal_location_table=None,
+                    images: bool = True, images_from_files: bool = True,
+                    image_channels: tuple = ('wDataCh0', 'wDataCh1'), from_raw_data: bool = False,
+                    verbose: bool = False) -> pd.DataFrame:
+    """All recorded fields (also structure-only fields) and landmarks of one experiment, see
+    `exposure_history.build_fields`.
+
+    Parameters
+    ----------
+    key : Mapping
+        Restriction to one experiment.
+    exp_history_table : ExpHistory
+    exp_history_field_table : ExpHistoryField, optional
+        Fields of the Field table and their recordings: position, scan area and image (`StackAverages`) are taken from
+        the Field table. Recordings that are not linked to a Field are grouped by the field parts of their file names
+        (`field`, `region`, ...).
+    retinal_location_table : RetinalFieldLocation, optional
+        Retinal positions of the fields in the table. For other fields and landmarks, the position is computed from
+        the optic disc (`OpticDisk` of its `relativefieldlocation_table`) and eye and orientation (`expinfo_table`),
+        if they are known.
+    images : bool
+        Load field images.
+    images_from_files : bool
+        Load the images of fields that are not in the Field table from their recording (.h5, else .smp file).
+    image_channels : tuple
+        Channels to show.
+    from_raw_data : bool
+        Use the .smp file names to group recordings (as Presentation with `from_raw_data=1`).
+    """
+    exp_key = (exp_history_table & key).fetch1('KEY')
+    recs = pd.DataFrame((exp_history_table.Recording & exp_key).proj(*_FIELD_REC_ATTRS).to_dicts())
+    if len(recs) == 0:
+        return eh.build_fields(pd.DataFrame(columns=['rec_name', 'kind', 'field']))
+
+    field_table = exp_history_field_table.field_table if exp_history_field_table is not None else None
+    key_names = list(field_table().new_primary_keys) if field_table is not None else ['field', 'region']
+
+    linked, field_keys = {}, {}
+    if exp_history_field_table is not None:
+        for row in (exp_history_field_table.Recording & exp_key).to_dicts():
+            label = _field_label(row, key_names)
+            linked.setdefault(row['rec_name'], label)
+            field_keys.setdefault(label, {k: row[k] for k in field_table().primary_key})
+
+    from djimaging.tables.history.exp_history import _preferred_name_info
+    labels = []
+    for rec_name, name_info in zip(recs['rec_name'], recs['name_info']):
+        if rec_name in linked:
+            labels.append(linked[rec_name])
+            continue
+        info = _preferred_name_info(name_info or {}, from_raw_data)
+        if info is None or info.get('field') is None:
+            labels.append(None)
+        else:
+            labels.append(_field_label(
+                {k: info.get(k) if info.get(k) is not None else FIELD_KEY_DEFAULTS.get(k) for k in key_names},
+                key_names))
+    recs['field'] = labels
+
+    field_info = {label: _field_table_info(field_table, fkey, images, image_channels)
+                  for label, fkey in field_keys.items()}
+    retinal = _retinal_from_table(field_keys, retinal_location_table) if retinal_location_table is not None else {}
+    fields = eh.build_fields(recs.drop(columns=['name_info']), field_info=field_info, retinal=retinal)
+    if retinal_location_table is not None:
+        _add_computed_retinal(fields, exp_key, retinal_location_table)
+
+    if images and images_from_files:
+        files = {r: (h5, smp) for r, h5, smp in zip(recs['rec_name'], recs['h5_file'], recs['smp_file'])}
+        for i, row in fields.iterrows():
+            if row['status'] not in ('response', 'structure') or isinstance(row['images'], Mapping) \
+                    or not row['image_rec']:
+                continue
+            imgs, issue = _images_from_file(*files[row['image_rec']], scan_type=row['scan_type'],
+                                            channels=image_channels, store=exp_history_table._filepath_store)
+            fields.at[i, 'images'] = imgs
+            fields.at[i, 'image_source'] = 'file' if imgs else None
+            fields.at[i, 'image_issue'] = issue
+            if verbose:
+                print(f"{row['field']}: image from {row['image_rec']}{f' failed: {issue}' if issue else ''}")
+    return fields
+
+
+def _field_label(row: Mapping, key_names) -> str:
+    return '/'.join(str(row[k]) for k in key_names if k in row and str(row[k]) not in ('N/A', '', 'None'))
+
+
+def _field_table_info(field_table, field_key: Mapping, images: bool, image_channels) -> dict:
+    """Position, scan area and stack averages of a field of the Field table."""
+    row = (field_table & field_key).fetch1()
+    pixel_size = row.get('pixel_size_um')
+    pixel_size = float(pixel_size) if pixel_size is not None and pixel_size > 0 else None
+    info = dict(x_um=row['absx'], y_um=row['absy'], z_um=row['absz'], scan_type=row['scan_type'],
+                image_rec=PurePosixPath(str(_ref_path(row['field_data_file']))).name)
+    if pixel_size is not None:
+        info['width_um'] = pixel_size * row['nxpix']
+        info['height_um'] = pixel_size * row['nypix'] if row['scan_type'] in ('xy', 'xyz') else None
+    if images:
+        from djimaging.utils.dj_storage import load_array
+        ch_names, averages = (field_table.StackAverages & field_key).to_arrays('ch_name', 'ch_average')
+        imgs = {ch: eh.field_image(load_array(avg)) for ch, avg in zip(ch_names, averages) if ch in image_channels}
+        if imgs:
+            info.update(images=imgs, image_source='Field.StackAverages')
+    return info
+
+
+def _images_from_file(h5_file, smp_file, scan_type, channels, store: str) -> tuple[dict | None, str | None]:
+    """Images of one recording (.h5 file, else .smp file); returns (images, issue)."""
+    from djimaging.utils.dj_storage import local_path
+    from djimaging.utils.scanm.recording import ScanMRecording
+
+    issues = []
+    for value in (h5_file, smp_file):
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            continue
+        try:
+            with local_path(value, store) as filepath:
+                rec = ScanMRecording(str(filepath))
+            imgs = {ch: eh.field_image(stack, scan_type) for ch, stack in rec.ch_stacks.items() if ch in channels}
+            if imgs:
+                return imgs, None
+            issues.append(f"{PurePosixPath(str(_ref_path(value))).name}: no channel of {list(channels)}")
+        except Exception as e:  # the report must not fail because of one unreadable file
+            issues.append(f"{PurePosixPath(str(_ref_path(value))).name}: {type(e).__name__}: {e}"[:300])
+    return None, '; '.join(issues) or 'no file'
+
+
+def _retinal_from_table(field_keys: Mapping, retinal_location_table) -> dict:
+    """Retinal positions of fields in RetinalFieldLocation: {label: (ventral_dorsal, temporal_nasal, source)}."""
+    out = {}
+    for label, fkey in field_keys.items():
+        rows = (retinal_location_table & fkey).to_dicts()
+        if len(rows) > 0:
+            out[label] = (rows[0]['ventral_dorsal_pos_um'], rows[0]['temporal_nasal_pos_um'], 'RetinalFieldLocation')
+    return out
+
+
+def _add_computed_retinal(fields: pd.DataFrame, exp_key: Mapping, retinal_location_table) -> None:
+    """Retinal positions of the other fields and landmarks, from their stage position, the optic disc and eye and
+    orientation of the experiment (as RetinalFieldLocation). Only if the experiment has one optic disc position."""
+    missing = fields['ventral_dorsal_pos_um'].isna() & fields['x_um'].notna() & fields['y_um'].notna()
+    if not missing.any():
+        return
+    try:
+        od_table = retinal_location_table.relativefieldlocation_table.opticdisk_table
+        od_pos = {(float(x), float(y)) for x, y in zip(*(od_table & exp_key).to_arrays('odx', 'ody'))}
+        eye, rotation = (retinal_location_table.expinfo_table & exp_key).fetch1('eye', 'prepwmorient')
+    except Exception as e:  # optional information, e.g. no ExpInfo
+        warnings.warn(f"Retinal position of fields that are not in RetinalFieldLocation unknown for {exp_key}: {e}")
+        return
+    if len(od_pos) != 1 or rotation == -1 or eye not in ('left', 'right'):
+        return
+    from djimaging.utils.scanm.setup_utils import get_retinal_position
+    odx, ody = od_pos.pop()
+    for i in fields.index[missing]:
+        vd, tn = get_retinal_position(rel_xcoord_um=fields.at[i, 'x_um'] - odx,
+                                      rel_ycoord_um=fields.at[i, 'y_um'] - ody, rotation=rotation, eye=eye)
+        fields.at[i, 'ventral_dorsal_pos_um'] = float(vd)
+        fields.at[i, 'temporal_nasal_pos_um'] = float(tn)
+        fields.at[i, 'retinal_source'] = 'computed from OpticDisk'
+
+
+def _file_paths(exp_key: Mapping, exp_history_table, recs: pd.DataFrame) -> dict:
+    """`header_path` (experiment folder) and `files`: per recording its field label and the absolute paths of its
+    .h5, .smp and .smh files (store-relative if the store is not mounted locally)."""
+    header_path = (exp_history_table.experiment_table & exp_key).fetch1('header_path')
+    store = exp_history_table._filepath_store
+    smh = {}
+    if len(recs) > 0:
+        smh = dict(zip(*(exp_history_table.Recording & exp_key).to_arrays('rec_name', 'smh_file')))
+    files = []
+    for r in recs.to_dict('records'):
+        files.append(dict(field=r.get('field'), rec_name=r['rec_name'], kind=r.get('kind'),
+                          h5_file=_abs_path(r.get('h5_file'), store), smp_file=_abs_path(r.get('smp_file'), store),
+                          smh_file=_abs_path(smh.get(r['rec_name']), store)))
+    return dict(header_path=header_path, files=files)
+
+
+def _abs_path(value, store: str) -> str | None:
+    """Absolute local path of a fetched `<filepath>`, else its store-relative path; None if missing."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return None
+    from djimaging.utils.dj_storage import local_file_path
+    try:
+        return str(local_file_path(value, store))
+    except Exception:  # remote or unconfigured store
+        return _ref_path(value)
 
 
 def _ref_path(value) -> str | None:
