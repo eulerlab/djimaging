@@ -4,7 +4,9 @@
   (.smp + .smh and/or .h5 file), with the scan parameters needed to reconstruct the laser exposure of the tissue.
 - `ExpHistoryFieldTemplate`: which recordings belong to which field.
 - `ExpHistoryStimLogTemplate`: which QDSpy stimulus (log entry) was shown during which recording. Covers also
-  stimuli that were shown while nothing was recorded (e.g. during focus scans).
+  stimuli that were shown while nothing was recorded (e.g. during focus scans). If experiments share a QDSpy log
+  (e.g. two retinas in one session), the clock offset is estimated jointly and stimuli of the other experiments get
+  status 'outside'.
 
 Recordings of stimuli that are not in the Stimulus table ("unlisted", e.g. unpublished stimuli) are registered with
 their names, but never become Presentations, so they never get traces. See `djimaging.utils.stimulus_listing`.
@@ -346,6 +348,7 @@ class ExpHistoryStimLogTemplate(dj.Computed):
     database = ""
     _max_clock_offset_s = 900.  # Maximum clock difference between the QDSpy and the ScanM computer
     _tolerance_s = 2.  # A stimulus may start this much before the recording and is still assigned to it
+    _window_pad_s = 600.  # Stimuli without recording this close to the recordings of an experiment belong to it
 
     @property
     def definition(self):
@@ -355,7 +358,8 @@ class ExpHistoryStimLogTemplate(dj.Computed):
         ---
         clock_offset_s = NULL : float32  # estimate: add to QDSpy log times to get ScanM times; NULL: no match
         n_stims : int32  # number of logged stimuli
-        n_matched : int32  # number of stimuli shown during a recording
+        n_matched : int32  # number of stimuli shown during a recording of this experiment
+        n_outside : int32  # number of stimuli of other experiments sharing the QDSpy log, see Stim.status
         """
         return definition
 
@@ -385,6 +389,8 @@ class ExpHistoryStimLogTemplate(dj.Computed):
             -> master
             -> self.stim_log_table
             ---
+            status : enum('recording', 'in_session', 'outside')  # in a recording of this experiment; no recording but
+            # in the time window of this experiment (e.g. focus scan); other experiment or outside all windows
             rec_name = NULL : varchar(191)  # recording during which the stimulus started; NULL: no recording
             lag_s = NULL : float32  # stimulus start minus recording start in s
             """
@@ -395,24 +401,55 @@ class ExpHistoryStimLogTemplate(dj.Computed):
         def stim_log_table(self):
             pass
 
+    def _shared_log_experiments(self, key: dict) -> list[dict]:
+        """Keys of all experiments (of the same date) with a log file that `key` also has, including `key`."""
+        pk = self.exp_history_table.primary_key
+        log_file_table = self.log_table().log_file_table
+        paths = set((log_file_table & key).to_arrays('log_path'))
+        siblings = {tuple(key[k] for k in pk): {k: key[k] for k in pk}}
+        if paths:
+            for row in log_file_table.to_dicts():
+                if row['log_path'] in paths and all(k in row for k in pk):
+                    sib = {k: row[k] for k in pk}
+                    if 'date' in sib and 'date' in key and sib['date'] != key['date']:
+                        continue
+                    siblings.setdefault(tuple(sib.values()), sib)
+        return [s for s in siblings.values() if len(self.exp_history_table & s) > 0]
+
     def make(self, key: dict) -> None:
-        """Estimate the clock offset between the QDSpy and the ScanM computer and assign stimuli to recordings."""
-        recs = (self.exp_history_table.Recording & key & 'rec_start IS NOT NULL').proj(
-            'rec_start', 'rec_dur_s').to_dicts(order_by='rec_start')
+        """Estimate the clock offset between the QDSpy and the ScanM computer and assign stimuli to recordings.
+
+        The offset is estimated jointly for all experiments that share the QDSpy log file (e.g. two retinas recorded
+        in one session). Stimuli of the other experiments get status 'outside', see
+        `exp_history_utils.assign_stimuli_to_experiments`.
+        """
+        pk = self.exp_history_table.primary_key
+        exp_id = tuple(key[k] for k in pk)
+        recs_by_exp, own_recs = {}, []
+        for sib in self._shared_log_experiments(key):
+            sib_id = tuple(sib[k] for k in pk)
+            recs = (self.exp_history_table.Recording & sib & 'rec_start IS NOT NULL').proj(
+                'rec_start', 'rec_dur_s').to_dicts(order_by='rec_start')
+            starts = [exp_history_utils.seconds_of_day(r['rec_start']) for r in recs]
+            ends = [s + (r['rec_dur_s'] or 0.) for s, r in zip(starts, recs)]
+            recs_by_exp[sib_id] = (starts, ends)
+            if sib_id == exp_id:
+                own_recs = recs
+        recs_by_exp.setdefault(exp_id, ([], []))
+
         stim_log_table = self.Stim.stim_log_table
         stims = (stim_log_table & key).proj('t_start').to_dicts()
-
-        rec_starts = [exp_history_utils.seconds_of_day(r['rec_start']) for r in recs]
-        rec_ends = [s + (r['rec_dur_s'] or 0.) for s, r in zip(rec_starts, recs)]
         stim_starts = [exp_history_utils.seconds_of_day(s['t_start']) for s in stims]
 
-        offset, matches = exp_history_utils.match_stimuli_to_recordings(
-            rec_starts, rec_ends, stim_starts, max_offset_s=self._max_clock_offset_s, tolerance_s=self._tolerance_s)
+        offset, assigned = exp_history_utils.assign_stimuli_to_experiments(
+            recs_by_exp, exp_id, stim_starts, max_offset_s=self._max_clock_offset_s,
+            tolerance_s=self._tolerance_s, pad_s=self._window_pad_s)
 
         self.insert1(dict(**key, clock_offset_s=offset, n_stims=len(stims),
-                          n_matched=sum(m[0] is not None for m in matches)))
+                          n_matched=sum(a[0] == 'recording' for a in assigned),
+                          n_outside=sum(a[0] == 'outside' for a in assigned)))
         stim_keys = stim_log_table.primary_key
         self.Stim().insert([
-            {**key, **{k: s[k] for k in stim_keys},
-             'rec_name': recs[rec_idx]['rec_name'] if rec_idx is not None else None, 'lag_s': lag}
-            for s, (rec_idx, lag) in zip(stims, matches)])
+            {**key, **{k: s[k] for k in stim_keys}, 'status': status,
+             'rec_name': own_recs[rec_idx]['rec_name'] if rec_idx is not None else None, 'lag_s': lag}
+            for s, (status, rec_idx, lag) in zip(stims, assigned)])

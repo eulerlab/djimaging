@@ -99,9 +99,10 @@ def fetch_exposure_history(
         stim_row = (stim_log_table & exp_key).fetch1()
         clock_offset_s = stim_row['clock_offset_s']
         meta.update(has_stim_log=True, clock_offset_s=clock_offset_s, n_stims_logged=stim_row['n_stims'],
-                    n_stims_matched=stim_row['n_matched'])
+                    n_stims_matched=stim_row['n_matched'],
+                    n_stims_other_experiments=stim_row['n_outside'])
         stims = pd.DataFrame(((stim_log_table.Stim & exp_key) * stim_log_table.Stim.stim_log_table).proj(
-            'rec_name', 'stim_file_name', 'stim_md5', 't_start', 't_end', 't_dur_s', 'aborted').to_dicts())
+            'rec_name', 'status', 'stim_file_name', 'stim_md5', 't_start', 't_end', 't_dur_s', 'aborted').to_dicts())
         if len(stims) > 0:
             stims['stim_name'] = [_logged_stim_name(m, f, stimulus_table)
                                   for m, f in zip(stims['stim_md5'], stims['stim_file_name'])]

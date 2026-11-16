@@ -436,3 +436,69 @@ def match_stimuli_to_recordings(
         idx = int(np.argmin(np.abs(lags)))
         matches.append((idx, float(lags[idx])))
     return offset, matches
+
+
+def assign_stimuli_to_experiments(
+        recs_by_exp: dict, exp_id, stim_starts_s: Iterable[float],
+        max_offset_s: float = 900., tolerance_s: float = 2., pad_s: float = 600.) -> tuple[float | None, list]:
+    """Assign the stimuli of a shared QDSpy log to one experiment, e.g. when two retinas were recorded in one session.
+
+    The clock offset is estimated jointly from the recordings of all experiments that share the log
+    (see `match_stimuli_to_recordings`). Then each stimulus gets a status for experiment `exp_id`:
+
+    - `'recording'`: started during a recording of `exp_id`.
+    - `'in_session'`: started while no recording was running, but belongs to `exp_id`: within `pad_s` of the time
+      window (first recording start to last recording end) of `exp_id`, and not closer to the window of another
+      experiment. E.g. focus scans or tests. Without a clock offset (no match at all) all stimuli are `'in_session'`.
+    - `'outside'`: during a recording of another experiment, or closer to the window of another experiment, or farther
+      than `pad_s` from all windows.
+
+    Parameters
+    ----------
+    recs_by_exp : dict
+        `exp_id -> (rec_starts_s, rec_ends_s)` in seconds of the day (ScanM clock), recordings in the order that the
+        returned indices should refer to. Must contain `exp_id`.
+    exp_id : hashable
+        Experiment for which to assign the stimuli.
+    stim_starts_s : Iterable[float]
+        Start of the stimuli in seconds of the day (QDSpy clock).
+
+    Returns
+    -------
+    clock_offset_s : float | None
+    assignments : list
+        Per stimulus `(status, rec_idx, lag_s)`; `rec_idx` indexes the recordings of `exp_id` (None unless
+        status is `'recording'`).
+    """
+    stim_starts = np.asarray(list(stim_starts_s), dtype=float)
+    pool_starts, pool_ends, pool_exp, pool_local = [], [], [], []
+    windows = {}
+    for eid, (starts, ends) in recs_by_exp.items():
+        starts, ends = list(starts), list(ends)
+        for i, (s, e) in enumerate(zip(starts, ends)):
+            pool_starts.append(s)
+            pool_ends.append(e)
+            pool_exp.append(eid)
+            pool_local.append(i)
+        if len(starts) > 0:
+            windows[eid] = (min(starts), max(ends))
+
+    offset, matches = match_stimuli_to_recordings(
+        pool_starts, pool_ends, stim_starts, max_offset_s=max_offset_s, tolerance_s=tolerance_s)
+
+    out = []
+    for start, (idx, lag) in zip(stim_starts, matches):
+        if idx is not None:
+            if pool_exp[idx] == exp_id:
+                out.append(('recording', pool_local[idx], lag))
+            else:
+                out.append(('outside', None, None))
+        elif offset is None:
+            out.append(('in_session', None, None))
+        else:
+            t = start + offset
+            dists = {eid: max(w[0] - t, t - w[1], 0.) for eid, w in windows.items()}
+            nearest = min(dists, key=dists.get) if dists else None
+            ok = nearest == exp_id and dists[nearest] <= pad_s
+            out.append(('in_session' if ok else 'outside', None, None))
+    return offset, out

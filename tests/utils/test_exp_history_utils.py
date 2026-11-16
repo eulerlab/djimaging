@@ -303,3 +303,34 @@ def test_match_stimuli_to_recordings_without_match():
     # Too far apart for the maximum clock offset
     offset, matches = ehu.match_stimuli_to_recordings([0.], [10.], [5000.], max_offset_s=900)
     assert offset is None and matches == [(None, None)]
+
+
+def test_assign_stimuli_to_experiments_two_retinas_one_log():
+    # Retina A recorded 1000-1100 and 1200-1300, retina B 3000-3100 (ScanM clock); QDSpy clock is 40 s behind.
+    recs = {'A': ([1000., 1200.], [1100., 1300.]), 'B': ([3000.], [3100.])}
+    scanm_times = [1005., 1030., 1205., 1230., 1150., 3005., 3050., 3080., 5000.]
+    stims = [t - 40 for t in scanm_times]
+    offset_a, a = ehu.assign_stimuli_to_experiments(recs, 'A', stims)
+    offset_b, b = ehu.assign_stimuli_to_experiments(recs, 'B', stims)
+    assert offset_a == offset_b
+    assert 35 <= offset_a <= 40
+    assert [x[0] for x in a] == ['recording'] * 4 + ['in_session'] + ['outside'] * 4
+    assert [x[1] for x in a[:4]] == [0, 0, 1, 1]
+    assert [x[0] for x in b] == ['outside'] * 5 + ['recording'] * 3 + ['outside']
+    assert [x[1] for x in b[5:8]] == [0, 0, 0]
+
+
+def test_assign_stimuli_to_experiments_between_goes_to_nearest():
+    recs = {'A': ([1000.], [1100.]), 'B': ([1500.], [1600.])}
+    stims = [1005., 1030., 1505., 1530., 1180., 1420.]
+    _, a = ehu.assign_stimuli_to_experiments(recs, 'A', stims, pad_s=600.)
+    _, b = ehu.assign_stimuli_to_experiments(recs, 'B', stims, pad_s=600.)
+    assert [x[0] for x in a] == ['recording'] * 2 + ['outside'] * 2 + ['in_session', 'outside']
+    assert [x[0] for x in b] == ['outside'] * 2 + ['recording'] * 2 + ['outside', 'in_session']
+
+
+def test_assign_stimuli_to_experiments_single_experiment_and_no_match():
+    _, a = ehu.assign_stimuli_to_experiments({'A': ([1000.], [1100.])}, 'A', [1005., 1030., 1200., 9000.], pad_s=600.)
+    assert [x[0] for x in a] == ['recording', 'recording', 'in_session', 'outside']
+    offset, a = ehu.assign_stimuli_to_experiments({'A': ([], [])}, 'A', [1., 2.])
+    assert offset is None and [x[0] for x in a] == ['in_session'] * 2

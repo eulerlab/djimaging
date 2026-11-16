@@ -116,7 +116,8 @@ def build_events(recordings: pd.DataFrame, stims: pd.DataFrame | None = None, cl
         One row per logged stimulus (`ExpHistoryStimLog.Stim` joined with the QDSpy log). Required: `t_start`
         (time of day, QDSpy clock), `t_dur_s`, `rec_name` (recording it started in, None if none). Optional:
         `t_end`, `stim_file_name`, `stim_md5`, `stim_name` (Stimulus name if listed), `aborted`, `log_idx`,
-        `stim_idx`. None: no QDSpy log for this experiment.
+        `stim_idx`, `status` (rows with 'outside', i.e. of other experiments, are ignored).
+        None: no QDSpy log for this experiment.
     clock_offset_s : float | None
         Add to QDSpy times to get ScanM times (`ExpHistoryStimLog.clock_offset_s`). None: unknown, the QDSpy times
         are used unchanged and tagged.
@@ -138,6 +139,8 @@ def build_events(recordings: pd.DataFrame, stims: pd.DataFrame | None = None, cl
     rows = [_laser_row(r) for r in recs.to_dict('records')]
 
     logged_recs = set()
+    if stims is not None and 'status' in stims:  # drop stimuli of other experiments sharing the QDSpy log
+        stims = stims[stims['status'] != 'outside']
     if stims is not None and len(stims) > 0:
         for s in stims.to_dict('records'):
             rows.append(_logged_stim_row(s, recs, clock_offset_s, exp_date, light_levels))
