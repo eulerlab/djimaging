@@ -474,9 +474,10 @@ correction = RoiMask().correct_roi_masks(
 # *Deploy to database* (only enabled in the *Dangerzone*). Deploying **deletes everything downstream of the ROI
 # mask of this field** (traces, snippets, analyses, ...), and only repopulates `Roi`.
 #
-# The canvas can also run the AutoROIs models itself (`autorois_models=['UNet', 'Cellpose3_cyto3']`, loaded when
-# the canvas is created). Each loaded model needs memory, so only load the ones you use, and release the canvas
-# and the models with `free_memory()` when you are done.
+# The canvas can also run the AutoROIs models itself, see "AutoROIs models" above. Preload the models you need with
+# `load_default_autorois_models(models=[...])` and pass them as `autorois_models`. Each loaded model needs memory,
+# so only load the ones you use, and release the canvas and the models with `free_memory()` when you are done
+# (see below).
 
 # %%
 import gc
@@ -494,14 +495,28 @@ def free_memory():
 
 
 # %%
+# Canvas without AutoROIs models
 # field_key = Field().keys()[0]  # Pick the field you want to look at
 # roi_canvas = RoiMask().draw_roi_mask(
 #     field_key=field_key, canvas_width=30, roi_mask_dir='AutoROIs', roi_table=Roi, autorois_models=None)
 # roi_canvas.start_gui()
 
 # %%
-# Release the canvas when you are done
+# Canvas with preloaded AutoROIs models (see "AutoROIs models" above for the available names)
+# from djimaging.tables.core.roi_mask import load_default_autorois_models
+#
+# field_key = Field().keys()[0]  # Pick the field you want to look at
+#
+# autorois_models = load_default_autorois_models(models=['UNet'])
+#
+# roi_canvas = RoiMask().draw_roi_mask(
+#     field_key=field_key, canvas_width=30, roi_mask_dir='AutoROIs', roi_table=Roi, autorois_models=autorois_models)
+# roi_canvas.start_gui()
+
+# %%
+# Release the canvas and the models when you are done
 # roi_canvas = None
+# autorois_models = None
 # free_memory()
 
 # %%

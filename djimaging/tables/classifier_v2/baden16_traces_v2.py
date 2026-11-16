@@ -6,7 +6,7 @@ V2 is updated to incorporate all processing steps of the chirp in this table, to
 original pipeline as possible. The moving bar features (time component and DS p-value) are read from the OsDsIndexes
 table, which follows the Baden et al. 2016 implementation. The classifier was trained on these features, so OsDsIndexes
 must use the Baden et al. 2016 per-trial snippet baseline (Stimulus.snippet_base_dt = 5 * 0.128 s), 1000 shuffles and
-snippets at 7.8125 Hz. Under these conditions the features are identical to the former computation inside this table.
+snippets at 7.8125 Hz that start 4 frames after the trigger (stim_dict['trigger_delay'] = 4 * 0.128 s). Under these conditions the features are identical to the former computation inside this table.
 
 Example usage:
 
@@ -29,7 +29,7 @@ from scipy.interpolate import interp1d
 
 from djimaging.tables.core.averages import compute_upsampled_average
 from djimaging.tables.core.preprocesstraces import process_trace
-from djimaging.tables.core.stimulus import MOVINGBAR_SNIPPET_BASE_DT
+from djimaging.tables.core.stimulus import MOVINGBAR_SNIPPET_BASE_DT, MOVINGBAR_TRIGGER_DELAY
 from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 import datajoint as dj
@@ -103,12 +103,14 @@ class Baden16TracesV2Template(dj.Computed):
         qi, chirp_average = preprocess_chirp_v2(chirp_trace, chirp_t0, chirp_dt, chirp_triggertimes, chirp_ntrigger_rep)
 
         # Fetch moving bar features of OsDsIndexes
-        bar_snippet_base_dt = (self.stimulus_table() & dict(stim_name=self._stim_name_bar)).fetch1('snippet_base_dt')
+        bar_snippet_base_dt, bar_stim_dict = (self.stimulus_table() & dict(stim_name=self._stim_name_bar)).fetch1(
+            'snippet_base_dt', 'stim_dict')
         time_component, time_component_dt, ds_pvalue = (
                 self.osds_table & dict(stim_name=self._stim_name_bar) & key).fetch1(
             'time_component', 'time_component_dt', 'ds_pvalue')
         check_bar_features_match_classifier(
-            n_shuffles=self.osds_table._n_shuffles, snippet_base_dt=bar_snippet_base_dt, dt=time_component_dt)
+            n_shuffles=self.osds_table._n_shuffles, snippet_base_dt=bar_snippet_base_dt, dt=time_component_dt,
+            trigger_delay=(bar_stim_dict or dict()).get('trigger_delay', 0.))
 
         key = key.copy()
         key['preproc_chirp'] = chirp_average
@@ -193,7 +195,8 @@ def preprocess_chirp_v2(trace, t0, dt, triggertimes, ntrigger_rep=2, poly_order=
     return qi, baden16like_average
 
 
-def check_bar_features_match_classifier(n_shuffles: int, snippet_base_dt, dt: float) -> None:
+def check_bar_features_match_classifier(n_shuffles: int, snippet_base_dt, dt: float,
+                                        trigger_delay: float = MOVINGBAR_TRIGGER_DELAY) -> None:
     """Raise if the OsDsIndexes features were not computed like the training data of the classifier."""
     if n_shuffles < MIN_N_SHUFFLES:
         raise ValueError(f"OsDsIndexes._n_shuffles={n_shuffles}, but the classifier needs >= {MIN_N_SHUFFLES} "
@@ -201,6 +204,11 @@ def check_bar_features_match_classifier(n_shuffles: int, snippet_base_dt, dt: fl
     if snippet_base_dt is None or not np.isclose(snippet_base_dt, MOVINGBAR_SNIPPET_BASE_DT):
         raise ValueError(f"Stimulus.snippet_base_dt={snippet_base_dt} of the moving bar, but the classifier needs the "
                          f"Baden et al. 2016 per-trial baseline of {MOVINGBAR_SNIPPET_BASE_DT:.3f} s.")
+    if trigger_delay is None or not np.isclose(trigger_delay, MOVINGBAR_TRIGGER_DELAY):
+        raise ValueError(f"Stimulus.stim_dict['trigger_delay']={trigger_delay} of the moving bar, but the classifier "
+                         f"needs snippets that start {MOVINGBAR_TRIGGER_DELAY:.3f} s after the trigger (as in Baden "
+                         f"et al. 2016), otherwise the bar response is misaligned. Add the stimulus with "
+                         f"`add_movingbar(trigger_delay={MOVINGBAR_TRIGGER_DELAY:.3f})` (the default).")
     if not np.isclose(dt, BADEN16_DT, rtol=0.02):
         raise ValueError(f"Moving bar snippets have dt={dt}, but the classifier needs {BADEN16_DT} s (7.8125 Hz).")
 

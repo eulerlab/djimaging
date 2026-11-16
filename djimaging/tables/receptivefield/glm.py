@@ -136,7 +136,7 @@ class RfGlmParamsTemplate(FastStaParamsTemplate):
         """Return the default `other_params_dict`, updated with `other_params_dict`."""
         params = dict(
             min_iters=100, max_iters=2000, step_size=0.1, step_size_finetune=0.03, tolerance=5,
-            alphas=(1.,), verbose=100, n_perm=20, min_cc=0.2, seed=42,
+            alphas=(1.,), verbose=0, n_perm=20, min_cc=0.2, seed=42,
             fit_R=False, fit_intercept=True, init_method='random', atol=1e-5,
             distr='gaussian', frac_test=0,
         )
@@ -294,7 +294,7 @@ class RfGlmTemplate(FastStaTemplate):
         for i, trace in enumerate(traces):
             if np.all(np.isfinite(trace)):
                 idxs.append(i)
-            else:
+            elif glm_kwargs.get('verbose', 0) > 0:
                 print(f"Skipping trace with {np.sum(~np.isfinite(trace))} non-finite values after alignment.")
 
         n_jobs = max(1, min(n_jobs, len(idxs), os.cpu_count() or 1))

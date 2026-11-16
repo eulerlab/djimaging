@@ -154,8 +154,6 @@ def test_generated_ipynb(tmp_path):
 
     nb = jupytext.read(project_dir / 'dji_tester' / 'notebooks' / '04_rf_glm.ipynb')
     assert nb.metadata['kernelspec'] == dict(display_name='tester', language='python', name='tester')
-    static = json.loads((project_dir / 'dji_tester' / 'notebooks' / 'connect_to_schema.ipynb').read_text('utf8'))
-    assert static['metadata']['kernelspec']['name'] == 'tester'
     code = "\n".join(c.source for c in nb.cells if c.cell_type == 'code')
     assert 'from dji_tester.schemas.tester_schema import *' in code
     assert 'from dji_tester import settings' in code
@@ -448,8 +446,8 @@ def test_create_project(tmp_path):
         assert (project_dir / relpath).is_file(), relpath
     notebooks = sorted(p.name for p in (pkg / 'notebooks').iterdir())
     assert notebooks == ['01_setup.ipynb', '02_roi_masks.ipynb', '03_traces.ipynb', '04_basic.ipynb',
-                         '05_classifier.ipynb', '06_rf_sta.ipynb', '07_rf_glm.ipynb', 'connect_to_schema.ipynb',
-                         'drop_schema.ipynb', 'scan_for_corrupted_recordings.ipynb']
+                         '05_classifier.ipynb', '06_rf_sta.ipynb', '07_rf_glm.ipynb',
+                         'drop_schema.ipynb']
     for nb in notebooks:
         json.loads((pkg / 'notebooks' / nb).read_text(encoding='utf8'))
 
@@ -474,13 +472,18 @@ def test_create_project(tmp_path):
     assert namespace['Traces']._include_motion_correction and 'CelltypeAssignmentV2' in namespace
     exec_schema((pkg / 'tables' / 'my_table.py').read_text(encoding='utf8'))
 
-    # Static notebooks use the schema name of the settings
-    connect = json.loads((pkg / 'notebooks' / 'connect_to_schema.ipynb').read_text(encoding='utf8'))
-    source = "".join("".join(c['source']) for c in connect['cells'])
-    assert 'schema_name = settings.SCHEMA_NAME' in source and 'ENTER_SCHEMA_NAME_HERE' not in source
-
     gitignore = (project_dir / '.gitignore').read_text(encoding='utf8')
     assert '.ipynb_checkpoints/' in gitignore and 'dj_*conf*.json' in gitignore
+
+
+def test_create_project_py_notebooks(tmp_path):
+    project_dir = tmp_path / 'tester'
+    command = make_project.make_command('tester', ['core'], notebook_format='py')
+    assert '--notebook-format py' in command
+    make_project.create_project(ROOT, str(project_dir), 'tester', ['core'], command=command, notebook_format='py')
+    names = sorted(p.name for p in (project_dir / 'dji_tester' / 'notebooks').iterdir())
+    assert names and all(n.endswith('.py') for n in names)
+    assert make_project.parse_args(['x']).notebook_format == 'ipynb'
 
 
 def test_create_project_never_overwrites(tmp_path):
@@ -509,13 +512,13 @@ def test_main_creates_project(tmp_path, monkeypatch):
     assert (project_dir / 'dji_tester' / 'schemas' / 'tester_schema.py').is_file()
     readme = (project_dir / 'README.md').read_text(encoding='utf8')
     assert ' \\\n    --blocks location \\\n    --n-functional 1 \\\n    --n-background 1 \\\n    --from-raw-data no ' \
-           '\\\n    --igor-roi-masks yes \\\n    --target-dir ' in readme
+           '\\\n    --igor-roi-masks yes \\\n    --notebook-format ipynb \\\n    --target-dir ' in readme
 
 
 def test_format_command_is_the_same_shell_command():
     command = make_project.make_command('tester', ['core', 'basic'], target_dir='a b/--c')
     lines = make_project.format_command(command, prefix='#   ').splitlines()
-    assert all(line.startswith('#   ') for line in lines) and len(lines) == 7
+    assert all(line.startswith('#   ') for line in lines) and len(lines) == 8
     assert shlex.split(" ".join(line[4:].rstrip('\\') for line in lines)) == shlex.split(command)
 
 

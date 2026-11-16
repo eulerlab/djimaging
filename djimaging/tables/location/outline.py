@@ -288,19 +288,20 @@ class OutlineRelTemplate(dj.Computed):
 
         eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
 
-        if prepwmorient == -1:
-            warnings.warn(f'prepwmorient is -1 for {key}. skipping')
-            return
+        # Orientation unknown (-1): register this fact with NaN retinal positions instead of skipping the entry.
+        orientation_known = prepwmorient != -1
+
+        def to_retina(relx, rely):
+            if not orientation_known:
+                return np.nan, np.nan
+            return get_retinal_position(rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)
 
         outline_rel_xy = [
             (absx - odx, absy - ody)
             for absx, absy in outline_abs_xy
         ]
 
-        outline_retina_xy = [
-            get_retinal_position(rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)
-            for relx, rely in outline_rel_xy
-        ]
+        outline_retina_xy = [to_retina(relx, rely) for relx, rely in outline_rel_xy]
 
         field_entries = []
         for absx, absy, absz, field_key in zip(absxs, absys, abszs, field_keys):
@@ -309,8 +310,8 @@ class OutlineRelTemplate(dj.Computed):
             field_entry["relx"] = absx - odx
             field_entry["rely"] = absy - ody
             field_entry["relz"] = absz - odz
-            field_entry["ventral_dorsal_pos_um"], field_entry["temporal_nasal_pos_um"] = get_retinal_position(
-                rel_xcoord_um=field_entry["relx"], rel_ycoord_um=field_entry["rely"], rotation=prepwmorient, eye=eye)
+            field_entry["ventral_dorsal_pos_um"], field_entry["temporal_nasal_pos_um"] = to_retina(
+                field_entry["relx"], field_entry["rely"])
 
             field_entries.append(field_entry)
 

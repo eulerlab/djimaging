@@ -13,6 +13,9 @@ from djimaging.utils.dj_storage import relative_store_path
 # 8 frames for the chirp and 5 frames for the moving bar at 7.8125 Hz (0.128 s per frame).
 CHIRP_SNIPPET_BASE_DT = 8 * 0.128
 MOVINGBAR_SNIPPET_BASE_DT = 5 * 0.128
+# Moving bar snippets of Baden et al. 2016 start 4 frames after the trigger. The RGC classifier was trained on the
+# moving bar time component (first 32 frames) of snippets cut this way.
+MOVINGBAR_TRIGGER_DELAY = 4 * 0.128
 
 
 def log_identifiers(stim_hash_list=None, stim_name_list=None) -> dict:
@@ -365,6 +368,7 @@ class StimulusTemplate(dj.Manual):
             trial_info: list = None,
             framerate: float = 60.,
             snippet_base_dt: float | None = MOVINGBAR_SNIPPET_BASE_DT,
+            trigger_delay: float | None = MOVINGBAR_TRIGGER_DELAY,
             bardx: float = None,
             bardy: float = None,
             velumsec: float = None,
@@ -390,6 +394,10 @@ class StimulusTemplate(dj.Manual):
             snippet_base_dt: Baseline window (s) subtracted from each trial (median), as in Baden et al. 2016.
                 Default is 5 frames at 7.8125 Hz. None disables it. Without it, slow drift shared by the
                 consecutive opposite directions biases OsDsIndexes towards orientation selectivity.
+            trigger_delay: Snippets start this long (s) after each trigger, stored as `stim_dict['trigger_delay']`.
+                Default is 4 frames at 7.8125 Hz as in Baden et al. 2016. The RGC classifier (Baden16TracesV2)
+                expects the moving bar time component to be aligned like this, so changing it misaligns the bar
+                response in the classifier. None: no delay (snippets start at the trigger).
             bardx: Bar width in micrometers.
             bardy: Bar height in micrometers.
             velumsec: Bar velocity in micrometers per second.
@@ -460,6 +468,8 @@ class StimulusTemplate(dj.Manual):
             "velumsec": velumsec,
             "tmovedurs": tmovedurs,
         }
+        if trigger_delay is not None:
+            stim_dict["trigger_delay"] = trigger_delay
         if stim_dict_other is not None:
             stim_dict.update(stim_dict_other)
 

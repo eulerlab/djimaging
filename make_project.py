@@ -92,9 +92,9 @@ CREATE_SCHEMA_PLACEHOLDER = '__CREATE_SCHEMA__'
 PROJECTS_DIR_NAME = 'djimaging-projects'
 PACKAGE_PREFIX = 'dji_'
 
-# Static example notebooks that are copied to every project (the numbered notebooks are generated from blocks).
-STATIC_NOTEBOOKS = ('connect_to_schema.ipynb', 'scan_for_corrupted_recordings.ipynb')
-STATIC_NOTEBOOK_SCHEMA_NAME = 'schema_name = "ageuler_ENTER_SCHEMA_NAME_HERE"'
+# File formats of the generated notebooks: Jupyter notebooks or percent-format Python scripts (jupytext).
+NOTEBOOK_FORMATS = ('ipynb', 'py')
+DEFAULT_NOTEBOOK_FORMAT = 'ipynb'
 
 # First heading of the parts of the core notebook block that start the 02_roi_masks and 03_traces notebooks.
 NOTEBOOK_ROIS_SECTION = "# %% [markdown]\n# # Core: ROIs\n"
@@ -176,6 +176,10 @@ def parse_args(argv=None):
              "'either': per field mask file if available, else Igor, 'init': Igor masks only as starting mask in "
              "the ROI canvas. Default: ask interactively, or 'yes'.")
     parser.add_argument(
+        '--notebook-format', choices=list(NOTEBOOK_FORMATS), default=DEFAULT_NOTEBOOK_FORMAT,
+        help="File format of the notebooks: 'ipynb' (Jupyter notebooks) or 'py' (percent-format Python scripts, "
+             "which can be opened as notebooks with jupytext). Default: 'ipynb'.")
+    parser.add_argument(
         '--legacy-userinfo-stacks', action='store_true',
         help='Use the old design without Channel table: the stacks are defined by data_stack_name and alt_stack_name '
              'in UserInfo (functional channel and alternative channel) and one trace per ROI is extracted.')
@@ -198,8 +202,10 @@ def main(argv=None):
 
     djimaging_dir = os.path.dirname(os.path.abspath(__file__))
     project_dir = os.path.abspath(args.target_dir) if args.target_dir else default_project_dir(djimaging_dir, project)
-    command = make_command(project, blocks, channels, raw_params, target_dir=args.target_dir)
-    create_project(djimaging_dir, project_dir, project, blocks, channels, raw_params, command=command)
+    command = make_command(project, blocks, channels, raw_params, target_dir=args.target_dir,
+                           notebook_format=args.notebook_format)
+    create_project(djimaging_dir, project_dir, project, blocks, channels, raw_params, command=command,
+                   notebook_format=args.notebook_format)
 
 
 def validate_project_name(project):
@@ -673,7 +679,8 @@ def is_inside(path, folder):
         return False
 
 
-def make_command(project, blocks, channels=DEFAULT_CHANNELS, raw_params=None, target_dir=None):
+def make_command(project, blocks, channels=DEFAULT_CHANNELS, raw_params=None, target_dir=None,
+                 notebook_format=DEFAULT_NOTEBOOK_FORMAT):
     """The make_project command with every option given explicitly, so that it creates the same project again without
     asking (it is recorded in the README of the project)."""
     raw_params = validate_raw_params(dict(DEFAULT_RAW_PARAMS if raw_params is None else raw_params))
@@ -684,7 +691,7 @@ def make_command(project, blocks, channels=DEFAULT_CHANNELS, raw_params=None, ta
     else:
         argv += ['--n-functional', str(channels[0]), '--n-background', str(channels[1])]
     argv += ['--from-raw-data', 'yes' if raw_params['from_raw_data'] else 'no',
-             '--igor-roi-masks', raw_params['igor_roi_masks']]
+             '--igor-roi-masks', raw_params['igor_roi_masks'], '--notebook-format', notebook_format]
     if target_dir is not None:
         argv += ['--target-dir', target_dir]
     return shlex.join(argv)
@@ -962,8 +969,7 @@ The notebooks are in `{package}/notebooks/`. Run them in this order:
 |---|---|
 {notebook_rows}
 
-`drop_schema` drops the schema with all its data. `connect_to_schema` connects to a schema without its definition and
-`scan_for_corrupted_recordings` finds recordings that turned into noise.
+`drop_schema` drops the schema with all its data.
 
 ## Tests
 
@@ -980,22 +986,8 @@ def percent_to_ipynb(text, project):
     return jupytext.writes(nb, fmt='ipynb')
 
 
-def build_static_notebook(djimaging_dir, name, package, project):
-    """A static example notebook, with the schema name taken from the settings of the project."""
-    with open(os.path.join(djimaging_dir, 'djimaging', 'notebooks', name), 'r', encoding='utf8') as f:
-        nb = json.load(f)
-    for cell in nb['cells']:
-        source = ''.join(cell['source'])
-        if STATIC_NOTEBOOK_SCHEMA_NAME in source:
-            source = source.replace(STATIC_NOTEBOOK_SCHEMA_NAME,
-                                    f"from {package} import settings\n\nschema_name = settings.SCHEMA_NAME")
-            cell['source'] = source.splitlines(keepends=True)
-    nb.setdefault('metadata', {})['kernelspec'] = kernelspec(project)
-    return json.dumps(nb, indent=1, ensure_ascii=False) + "\n"
-
-
 def build_project_files(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS, raw_params=None,
-                        command=None):
+                        command=None, notebook_format=DEFAULT_NOTEBOOK_FORMAT):
     """All files of a new project: {path relative to the project folder (with /): text}."""
     package = package_name(project)
     command = make_command(project, blocks, channels, raw_params) if command is None else command
@@ -1021,29 +1013,23 @@ def build_project_files(djimaging_dir, project_dir, project, blocks, channels=DE
         'tests/test_schema.py': build_schema_test(project),
     }
 
-    try:
-        import jupytext  # noqa: F401
-        has_jupytext = True
-    except ImportError:
-        has_jupytext = False
-        print("jupytext is not installed (pip install jupytext), the notebooks are written as percent-format .py files.")
+    assert notebook_format in NOTEBOOK_FORMATS, f"notebook_format must be one of {NOTEBOOK_FORMATS}"
     for stem, text in notebooks.items():
-        if has_jupytext:
+        if notebook_format == 'ipynb':
             files[f'{package}/notebooks/{stem}.ipynb'] = percent_to_ipynb(text, project)
         else:
             files[f'{package}/notebooks/{stem}.py'] = text
-    for name in STATIC_NOTEBOOKS:
-        files[f'{package}/notebooks/{name}'] = build_static_notebook(djimaging_dir, name, package, project)
     return files
 
 
 def create_project(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS, raw_params=None,
-                   command=None):
+                   command=None, notebook_format=DEFAULT_NOTEBOOK_FORMAT):
     """Write the files of a new project to `project_dir`. Existing files are never overwritten, they are skipped.
     Returns the created and the skipped files (relative paths)."""
     assert not is_inside(project_dir, djimaging_dir), \
         f"The project folder {project_dir} must be outside the djimaging repo {djimaging_dir}."
-    files = build_project_files(djimaging_dir, project_dir, project, blocks, channels, raw_params, command)
+    files = build_project_files(djimaging_dir, project_dir, project, blocks, channels, raw_params, command,
+                           notebook_format)
 
     created, skipped = [], []
     for relpath, text in files.items():

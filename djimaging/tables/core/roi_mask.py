@@ -1921,7 +1921,9 @@ class RoiMaskTemplate(dj.Manual):
         onset = int(np.floor(triggertimes[0] * fs)) if len(triggertimes) > 0 else 0
         if onset >= stack.shape[2] - 1:
             onset = 0
-        img = stack[:, :, onset:].mean(axis=2)
+        with warnings.catch_warnings():  # NaN frames (e.g. at the end) must not turn the whole image to NaN
+            warnings.simplefilter('ignore', RuntimeWarning)
+            img = np.nanmean(stack[:, :, onset:], axis=2)
 
         has_stack_ave = False
         if str(data_file).endswith('.h5') and os.path.isfile(data_file):

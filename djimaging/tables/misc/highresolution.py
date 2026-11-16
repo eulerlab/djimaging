@@ -258,7 +258,7 @@ class HighResTemplate(RecordingSetupMixin, dj.Computed):
         for name, stack in rec.ch_stacks.items():
             avg_entry = deepcopy(base_key)
             avg_entry["ch_name"] = name
-            avg_entry["ch_average"] = np.median(stack, 2)
+            avg_entry["ch_average"] = np.nanmedian(stack, 2)
             avg_entries.append(avg_entry)
 
         return hr_entry, avg_entries

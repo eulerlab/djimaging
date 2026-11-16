@@ -139,7 +139,11 @@ class HighResAlignmentTemplate(dj.Computed):
 
     def plot1(self, key: dict | None = None, gamma: float = 0.7) -> None:
         """Mask presentation, aligned HR (both channels) with the ROI mask outlines, and an overlay
-        (mask presentation green, aligned HR magenta)."""
+        (mask presentation green, aligned HR magenta).
+
+        The HR images are shown **resampled to the pixel grid of the field** (in the frame of the ROI mask), so they
+        can be compared pixel by pixel with the mask, which is why they look low resolution. The original
+        high resolution averages are in `HighRes.StackAverages`."""
         from matplotlib import pyplot as plt
         key = get_primary_key(self, key)
         row = (self & key).fetch1()
@@ -153,9 +157,9 @@ class HighResAlignmentTemplate(dj.Computed):
             lo, hi = np.nanpercentile(img, [1, 99.5])
             return np.nan_to_num(np.clip((img - lo) / max(hi - lo, 1e-12), 0, 1)) ** gamma
 
-        imgs = [(f'mask presentation ({func})', norm(ref0)), (f'HR aligned ({func})', norm(load_array(row['hr_ch0'])))]
+        imgs = [(f'mask presentation ({func})', norm(ref0)), (f'HR resampled to field grid ({func})', norm(load_array(row['hr_ch0'])))]
         if row['hr_ch1'] is not None:
-            imgs.append((f'HR aligned ({struct})', norm(load_array(row['hr_ch1']))))
+            imgs.append((f'HR resampled to field grid ({struct})', norm(load_array(row['hr_ch1']))))
         fig, axs = plt.subplots(1, len(imgs) + 1, figsize=(4 * (len(imgs) + 1), 4.3))
         for ax, (title, img) in zip(axs, imgs):
             ax.imshow(img.T, cmap='gray', origin='lower')

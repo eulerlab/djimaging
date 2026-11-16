@@ -14,6 +14,7 @@ of a compiled function (`_get_chunk_runner`) that is cached across models with t
 
 import functools
 import itertools
+import os
 import time
 import warnings
 from copy import deepcopy
@@ -22,6 +23,10 @@ from typing import NamedTuple
 import numpy as np
 
 try:
+    # The GLM is deliberately fit on the CPU (many small fits in parallel processes). Selecting the platform before
+    # jax is imported also avoids jax probing for a GPU and warning that no CUDA-enabled jaxlib is installed.
+    os.environ.setdefault('JAX_PLATFORMS', 'cpu')
+
     import jax
     import jax.numpy as jnp
     import jax.random as random

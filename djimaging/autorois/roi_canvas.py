@@ -1613,7 +1613,9 @@ class InteractiveRoiCanvas(RoiCanvas):
                 plot=False, thresh=self._selected_thresh, max_pixel_dist=self._selected_size)
             self.add_to_current_mask(mask=mask)
         elif self._selected_tool == 'bg':
-            img = math_utils.normalize_zero_one(np.mean(self.bg_img, axis=2))
+            with warnings.catch_warnings():  # NaN frames must not turn the whole image to NaN
+                warnings.simplefilter('ignore', RuntimeWarning)
+                img = math_utils.normalize_zero_one(np.nanmean(self.bg_img, axis=2))
             if self.bg_img.shape[0] != self.nx or self.bg_img.shape[1] != self.ny:
                 img = image_utils.resize_image(img, output_shape=(self.nx, self.ny))
             mask = mask_utils.get_mask_by_bg(

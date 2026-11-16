@@ -174,11 +174,11 @@ class RetinalFieldLocationTemplate(dj.Computed):
         eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
 
         if prepwmorient == -1:
-            warnings.warn(f'prepwmorient is -1 for {key}. skipping')
-            return
-
-        ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(
-            rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)
+            # Orientation unknown: register this fact (NaN) instead of leaving the entry unpopulated.
+            ventral_dorsal_pos_um, temporal_nasal_pos_um = np.nan, np.nan
+        else:
+            ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(
+                rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)
 
         rfl_key = key.copy()
         rfl_key['ventral_dorsal_pos_um'] = ventral_dorsal_pos_um

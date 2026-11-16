@@ -7,7 +7,7 @@ import pytest
 from djimaging.tables.classifier_v2.baden16_traces_v2 import (
     BADEN16_DT, MIN_N_SHUFFLES, check_bar_features_match_classifier, preprocess_bar_v2)
 from djimaging.tables.core.snippets import SnippetsTemplate
-from djimaging.tables.core.stimulus import CHIRP_SNIPPET_BASE_DT, MOVINGBAR_SNIPPET_BASE_DT, StimulusTemplate
+from djimaging.tables.core.stimulus import CHIRP_SNIPPET_BASE_DT, MOVINGBAR_SNIPPET_BASE_DT, MOVINGBAR_TRIGGER_DELAY, StimulusTemplate
 from djimaging.tables.response.movingbar.orientation_utils import compute_null_dist, compute_os_ds_idxs
 
 DIR_ORDER = np.array([0, 180, 45, 225, 90, 270, 135, 315])
@@ -97,9 +97,12 @@ def test_preprocess_bar_v2():
     (dict(snippet_base_dt=None), 'baseline'),
     (dict(snippet_base_dt=8 * 0.128), 'baseline'),
     (dict(dt=1 / 31.25), 'dt'),
+    (dict(trigger_delay=0.), 'trigger_delay'),
+    (dict(trigger_delay=None), 'trigger_delay'),
 ])
 def test_check_bar_features_match_classifier_raises(kwargs, match):
-    params = dict(n_shuffles=MIN_N_SHUFFLES, snippet_base_dt=MOVINGBAR_SNIPPET_BASE_DT, dt=BADEN16_DT)
+    params = dict(n_shuffles=MIN_N_SHUFFLES, snippet_base_dt=MOVINGBAR_SNIPPET_BASE_DT, dt=BADEN16_DT,
+                  trigger_delay=MOVINGBAR_TRIGGER_DELAY)
     params.update(kwargs)
     with pytest.raises(ValueError, match=match):
         check_bar_features_match_classifier(**params)
@@ -108,3 +111,9 @@ def test_check_bar_features_match_classifier_raises(kwargs, match):
 def test_check_bar_features_match_classifier_passes():
     check_bar_features_match_classifier(n_shuffles=MIN_N_SHUFFLES, snippet_base_dt=np.float32(5 * 0.128),
                                         dt=np.float32(0.128))
+
+
+def test_movingbar_trigger_delay_default():
+    params_mb = inspect.signature(StimulusTemplate.add_movingbar).parameters
+    assert params_mb['trigger_delay'].default == MOVINGBAR_TRIGGER_DELAY
+    assert np.isclose(MOVINGBAR_TRIGGER_DELAY, 4 * 0.128)

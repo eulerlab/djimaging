@@ -117,7 +117,6 @@ djimaging-projects/your_project_name/
       03_traces.ipynb     motion correction (motion block), traces, preprocessing, snippets, averages
       04_<block>.ipynb    one numbered notebook per further block, in the order of the table below
       drop_schema.ipynb   drops the schema (not numbered, so it is never run by accident)
-      connect_to_schema.ipynb, scan_for_corrupted_recordings.ipynb
 ```
 
 Then install the project, e.g. with <code>uv sync --extra dev</code> in the project folder (or
@@ -194,9 +193,9 @@ Existing files are never overwritten: if a file of the project already exists, t
 skips it. To regenerate files with a different selection, move or delete the old ones first.
 The project README records the command with every option given explicitly (also the answers given interactively),
 so running it again creates the same project.
-If `jupytext` is not installed (<code>pip install jupytext</code>), the notebooks are written as percent-format
-<code>.py</code> files instead of <code>.ipynb</code>; they can be converted later with
-<code>jupytext --to ipynb</code>.
+The notebooks are written as Jupyter notebooks (<code>.ipynb</code>) by default. With
+<code>--notebook-format py</code> they are written as percent-format <code>.py</code> files instead (easier to
+diff and review); they can be opened as notebooks or converted later with <code>jupytext --to ipynb</code>.
 
 #### Experiment history and listed stimuli (`history` block)
 
