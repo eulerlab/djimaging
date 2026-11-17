@@ -252,7 +252,8 @@ class MbRetinalPrefDirTemplate(dj.Computed):
         od_pos = None
         if self.retinal_field_location_table is not None:
             rows = (self.retinal_field_location_table & key).to_dicts()
-            if len(rows) == 1:
+            if len(rows) == 1 and rows[0]['temporal_nasal_pos_um'] is not None \
+                    and rows[0]['ventral_dorsal_pos_um'] is not None:  # NULL if orientation unknown
                 od_pos = rows[0]['temporal_nasal_pos_um'], rows[0]['ventral_dorsal_pos_um']
 
         self.insert1(dict(**key, **compute_retinal_pref_dir(

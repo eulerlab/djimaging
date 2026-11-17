@@ -228,8 +228,8 @@ class RetinalRoiLocationTemplate(dj.Computed):
         definition = """
         -> self.relative_roi_location_table
         ---
-        ventral_dorsal_pos_um       :float32      # position on the ventral-dorsal axis, greater 0 means dorsal
-        temporal_nasal_pos_um       :float32      # position on the temporal-nasal axis, greater 0 means nasal
+        ventral_dorsal_pos_um = NULL :float32      # position on the ventral-dorsal axis, greater 0 means dorsal; NULL if unknown
+        temporal_nasal_pos_um = NULL :float32      # position on the temporal-nasal axis, greater 0 means nasal; NULL if unknown
         """
         return definition
 
@@ -255,11 +255,14 @@ class RetinalRoiLocationTemplate(dj.Computed):
         eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
 
         if prepwmorient == -1:
-            # Orientation unknown: register this fact (NaN) instead of leaving the entry unpopulated.
-            ventral_dorsal_pos_um, temporal_nasal_pos_um = np.nan, np.nan
+            # Orientation unknown: register this fact (NULL) instead of leaving the entry unpopulated.
+            ventral_dorsal_pos_um, temporal_nasal_pos_um = None, None
         else:
             ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(
                 rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)
+            # NaN cannot be inserted by DataJoint (column is omitted); store NULL.
+            ventral_dorsal_pos_um = None if np.isnan(ventral_dorsal_pos_um) else ventral_dorsal_pos_um
+            temporal_nasal_pos_um = None if np.isnan(temporal_nasal_pos_um) else temporal_nasal_pos_um
 
         rfl_key = key.copy()
         rfl_key['ventral_dorsal_pos_um'] = ventral_dorsal_pos_um
