@@ -59,6 +59,81 @@ def compute_rf_roi_offset(rf_dx_um: float, rf_dy_um: float, relx_wrt_field: floa
     return float(rf_relx - relx_wrt_field), float(rf_rely - rely_wrt_field)
 
 
+def fit_affine_roi_to_rf(roi_xy: np.ndarray, rf_xy: np.ndarray, groups: np.ndarray | None = None) -> dict:
+    """Least-squares fit of `rf_xy ≈ A @ roi_xy + b_group` in the field frame (XCoord, YCoord).
+
+    Each group (e.g. recording field) gets its own intercept, so `A` only describes how RF positions scale and rotate
+    with ROI positions within a field. `A` is split by polar decomposition into `A = R @ S`, with `R` a rotation
+    (or reflection) and `S` symmetric positive semi-definite.
+
+    Expected for a correct geometry and unbiased RF centers: rotation 0, scales 1, shear 0, no reflection.
+
+    Parameters
+    ----------
+    roi_xy, rf_xy : np.ndarray
+        Arrays of shape (n, 2) with ROI and RF center positions in µm.
+    groups : np.ndarray or None
+        Group label per row; None = one group.
+
+    Returns
+    -------
+    dict
+        A (2x2), rotation_deg (counterclockwise from XCoord towards YCoord), reflection (bool),
+        scale_x, scale_y (diagonal of S), shear (off-diagonal of S), r2 (of the within-group fit), n, n_groups.
+    """
+    roi_xy = np.asarray(roi_xy, dtype=float)
+    rf_xy = np.asarray(rf_xy, dtype=float)
+    if groups is None:
+        groups = np.zeros(len(roi_xy), dtype=int)
+    groups = np.asarray(groups)
+
+    valid = np.all(np.isfinite(roi_xy), axis=1) & np.all(np.isfinite(rf_xy), axis=1)
+    roi_xy, rf_xy, groups = roi_xy[valid], rf_xy[valid], groups[valid]
+
+    # Remove the per-group intercept by centering within each group
+    roi_c, rf_c = roi_xy.copy(), rf_xy.copy()
+    unique_groups = np.unique(groups)
+    for g in unique_groups:
+        idx = groups == g
+        roi_c[idx] -= roi_xy[idx].mean(axis=0)
+        rf_c[idx] -= rf_xy[idx].mean(axis=0)
+
+    n_dof = len(roi_c) - len(unique_groups)
+    if n_dof < 3:
+        nan = float('nan')
+        return dict(A=np.full((2, 2), np.nan), rotation_deg=nan, reflection=False, scale_x=nan, scale_y=nan,
+                    shear=nan, r2=nan, n=int(len(roi_c)), n_groups=int(len(unique_groups)))
+
+    # rf_c = roi_c @ A.T
+    a_t, *_ = np.linalg.lstsq(roi_c, rf_c, rcond=None)
+    A = a_t.T
+
+    ss_res = np.sum((rf_c - roi_c @ A.T) ** 2)
+    ss_tot = np.sum(rf_c ** 2)
+    r2 = 1. - ss_res / ss_tot if ss_tot > 0 else np.nan
+
+    u, s, vt = np.linalg.svd(A)
+    R = u @ vt
+    S = vt.T @ np.diag(s) @ vt
+
+    return dict(A=A, rotation_deg=float(np.degrees(np.arctan2(R[1, 0], R[0, 0]))),
+                reflection=bool(np.linalg.det(R) < 0),
+                scale_x=float(S[0, 0]), scale_y=float(S[1, 1]), shear=float(S[0, 1]),
+                r2=float(r2), n=int(len(roi_c)), n_groups=int(len(unique_groups)))
+
+
+def _format_affine(fit: dict) -> str:
+    text = (f"rot = {fit['rotation_deg']:+.1f}°\n"
+            f"scale x = {fit['scale_x']:.2f}\n"
+            f"scale y = {fit['scale_y']:.2f}\n"
+            f"shear = {fit['shear']:+.2f}\n"
+            f"R² = {fit['r2']:.2f}\n"
+            f"n = {fit['n']} ({fit['n_groups']} fields)")
+    if fit['reflection']:
+        text += "\nREFLECTION"
+    return text
+
+
 class RfOffsetTemplate(dj.Computed):
     database = ''
 
@@ -318,7 +393,7 @@ class RfRoiOffsetTemplate(dj.Computed):
         df['relx_rf_wrt_field'] = df['relx_rf_roi_um'] + df['relx_wrt_field']
         df['rely_rf_wrt_field'] = df['rely_rf_roi_um'] + df['rely_wrt_field']
 
-        fig, axs = plt.subplots(1, 4, figsize=(15, 4))
+        fig, axs = plt.subplots(1, 5, figsize=(19, 4))
 
         ax = axs[0]
         sns.regplot(ax=ax, data=df, x='relx_wrt_field', y='relx_rf_wrt_field', scatter=False, color='black')
@@ -348,14 +423,62 @@ class RfRoiOffsetTemplate(dj.Computed):
             ax = axs[3]
             sns.scatterplot(ax=ax, data=df_field, x='rely_rf_roi_um', y='relx_rf_roi_um', color=colors[i], **s_kws)
 
-        for ax in axs:
+        for ax in axs[:4]:
             ax.grid()
             ax.set_aspect('equal', 'datalim')
             ax.axline([-1, -1], [+1, +1], color='dimgray', ls='--', lw=1)
 
+        self._plot_affine(axs[4], df)
+
         plt.tight_layout()
 
         return fig, ax
+
+    @staticmethod
+    def _plot_affine(ax, df, min_rois_per_field: int = 10) -> dict:
+        """Plot the affine map ROI position -> RF position as the image of the unit square.
+
+        Dashed: identity (expected). Thick black: pooled fit with one intercept per field. Thin colored: per-field fits
+        (fields with at least `min_rois_per_field` rows). Marker at the image of (1, 0) shows the orientation.
+        """
+        df = df.reset_index()
+        field_cols = [c for c in ['experimenter', 'date', 'exp_num', 'raw_id', 'field', 'region', 'cond1', 'cond2',
+                                  'cond3'] if c in df.columns]
+        field_ids = df.groupby(field_cols, sort=False).ngroup().values if field_cols else None
+
+        roi_xy = df[['relx_wrt_field', 'rely_wrt_field']].values
+        rf_xy = df[['relx_rf_wrt_field', 'rely_rf_wrt_field']].values
+        fit = fit_affine_roi_to_rf(roi_xy, rf_xy, groups=field_ids)
+
+        square = np.array([[1, 0], [1, 1], [0, 1], [0, 0], [1, 0]], dtype=float).T
+
+        def draw(A, **kws):
+            pts = A @ square
+            ax.plot(pts[0], pts[1], **kws)
+            ax.plot(*pts[:, 0], 'o', ms=kws.get('lw', 1) * 2, color=kws.get('color'), alpha=kws.get('alpha', 1))
+
+        draw(np.eye(2), color='dimgray', ls='--', lw=1)
+
+        if field_ids is not None and len(np.unique(field_ids)) > 1:
+            for i, g in enumerate(np.unique(field_ids)):
+                idx = field_ids == g
+                if idx.sum() < min_rois_per_field:
+                    continue
+                fit_g = fit_affine_roi_to_rf(roi_xy[idx], rf_xy[idx])
+                if np.all(np.isfinite(fit_g['A'])):
+                    draw(fit_g['A'], color=f'C{i % 10}', lw=0.8, alpha=0.6)
+
+        if np.all(np.isfinite(fit['A'])):
+            draw(fit['A'], color='black', lw=2)
+
+        ax.text(0.02, 0.98, _format_affine(fit), transform=ax.transAxes, va='top', ha='left', fontsize=8,
+                family='monospace', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+        ax.axhline(0, color='lightgray', lw=0.5, zorder=-10)
+        ax.axvline(0, color='lightgray', lw=0.5, zorder=-10)
+        ax.set_aspect('equal', 'datalim')
+        ax.set(xlabel='XCoord (field frame)', ylabel='YCoord (field frame)', title='Affine ROI → RF')
+
+        return fit
 
     def plot_field(self, key: dict, rf_qidx_thresh: float = 0.45, n_std: float = 1,
                    gamma: float = 0.7, adjust_rfs: tuple = (0, 0),

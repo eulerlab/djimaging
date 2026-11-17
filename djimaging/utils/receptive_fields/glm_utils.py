@@ -37,8 +37,9 @@ def fit_receptive_field_glm(trace: np.ndarray, glm_kwargs: dict, basis_projectio
     x_stimulus : np.ndarray, optional
         Design matrix with the same number of rows as the trace. Only needed without `basis_projections`.
     single_threaded : bool, optional
-        If True, restrict jax to a single thread. Must be set before jax is imported in the process to take effect.
-        Use in worker processes to avoid oversubscribing the CPU. Default is False.
+        If True, restrict jax to a single CPU thread (and the CPU, also if a GPU is available). Must be set before jax
+        is imported in the process to take effect. Use in worker processes to avoid oversubscribing the CPU, and
+        every worker allocating GPU memory. Default is False.
 
     Returns
     -------
@@ -46,6 +47,7 @@ def fit_receptive_field_glm(trace: np.ndarray, glm_kwargs: dict, basis_projectio
         (rf, quality_dict, model_dict), see `ReceptiveFieldGLM.compute_glm_receptive_field`.
     """
     if single_threaded and 'jax' not in sys.modules:
+        os.environ['JAX_PLATFORMS'] = 'cpu'
         os.environ['XLA_FLAGS'] = (os.environ.get('XLA_FLAGS', '') +
                                    ' --xla_cpu_multi_thread_eigen=false intra_op_parallelism_threads=1').strip()
 
@@ -429,7 +431,11 @@ class ReceptiveFieldGLM:
         rows_dict = {k: _as_slice(rows) for k, rows in rows_dict.items()}
 
         model, metric_dev_opt_hp_sets = self.compute_best_rf_model(rows=rows_dict['train'], trace=trace_dict['train'])
+        return self._evaluate_model(model, metric_dev_opt_hp_sets, rows_dict, trace_dict, starttime)
 
+    def _evaluate_model(self, model, metric_dev_opt_hp_sets: np.ndarray, rows_dict: dict, trace_dict: dict,
+                        starttime: float) -> tuple:
+        """Quality, RF and model metadata of a fitted model, see `compute_glm_receptive_field`."""
         quality_dict = dict(metric=self.metric)
 
         if self.verbose > 0:
@@ -940,6 +946,296 @@ class ReceptiveFieldGLM:
         info = f"{model.metric}={model.metric_dev_opt:.4f} "
         info += f"for HP-set: alpha={model.alpha:.5g}, beta={model.beta:.5g}, df={model.df}, dims={model.dims}"
         return info
+
+
+def fit_receptive_field_glms(traces: list, glm_kwargs: dict, basis_projections: dict, dtype=None) -> list:
+    """Fit GLM receptive fields to several traces jointly, see `BatchedReceptiveFieldGLM`.
+
+    The results are the same as fitting every trace with `fit_receptive_field_glm` (up to floating point differences,
+    and the precision `dtype`), but much faster on a GPU, where the design matrix is transferred only once and every
+    optimization step is a matrix-matrix product.
+
+    Parameters
+    ----------
+    traces : list of np.ndarray
+        Neural response traces. Traces of different lengths are fit in separate batches.
+    glm_kwargs : dict
+        Other arguments of `ReceptiveFieldGLM`.
+    basis_projections : dict
+        Precomputed projections of the design matrix, see `ReceptiveFieldGLM.compute_basis_projections`.
+        Pass the arrays on the device (see `rfest_glm.basis_projections_to_device`) to transfer them only once for
+        several calls.
+    dtype : numpy dtype, optional
+        Precision of the GLMs. Default is None, the default of `rfest_glm.GLM` (float64). Use float32 on a GPU.
+
+    Returns
+    -------
+    list of tuple
+        (rf, quality_dict, model_dict) for every trace, see `ReceptiveFieldGLM.compute_glm_receptive_field`.
+    """
+    results = [None] * len(traces)
+    sizes = np.array([np.shape(trace)[0] for trace in traces])
+    for size in np.unique(sizes):
+        idxs = np.flatnonzero(sizes == size)
+        batch = BatchedReceptiveFieldGLM(
+            traces=np.stack([traces[i] for i in idxs], axis=1), basis_projections=basis_projections, dtype=dtype,
+            **glm_kwargs)
+        for i, result in zip(idxs, batch.compute_glm_receptive_fields()):
+            results[i] = result
+    return results
+
+
+class BatchedReceptiveFieldGLM(ReceptiveFieldGLM):
+    """`ReceptiveFieldGLM` for several traces of the same length that share the design matrix.
+
+    The GLMs of all traces share the (projected) design matrices and are optimized jointly (see
+    `rfest_glm.optimize_many`), with the same hyperparameter search, stopping criteria and model selection per trace
+    as `ReceptiveFieldGLM`. This is much faster on a GPU, in particular if the basis projections are already on the
+    device (see `rfest_glm.basis_projections_to_device`).
+    """
+
+    def __init__(self, traces: np.ndarray, basis_projections: dict, dtype=None, **kwargs):
+        """
+        Parameters
+        ----------
+        traces : np.ndarray
+            Neural response traces, shape (n_frames, n_traces).
+        basis_projections : dict
+            Design matrix projected onto the spline bases, see `ReceptiveFieldGLM.compute_basis_projections`.
+        dtype : numpy dtype, optional
+            Precision of the GLMs. Default is None, the default of `rfest_glm.GLM` (float64).
+        **kwargs
+            Other arguments of `ReceptiveFieldGLM`, except for `x_stimulus` and `trace`.
+        """
+        traces = np.asarray(traces)
+        if traces.ndim != 2 or traces.shape[1] == 0:
+            raise ValueError(f"traces must have shape (n_frames, n_traces), got {traces.shape}")
+        if basis_projections is None:
+            raise ValueError("`basis_projections` are required to fit several traces jointly.")
+        super().__init__(x_stimulus=None, trace=traces[:, 0], basis_projections=basis_projections, **kwargs)
+        self.traces = traces
+        self.dtype = None if dtype is None else np.dtype(dtype)
+        self._prediction_inputs = dict()
+
+    def compute_glm_receptive_field(self) -> tuple:
+        raise NotImplementedError("Use `compute_glm_receptive_fields` to fit all traces.")
+
+    def compute_glm_receptive_fields(self) -> list:
+        """Estimate the RFs of all traces, see `ReceptiveFieldGLM.compute_glm_receptive_field`.
+
+        Returns
+        -------
+        list of tuple
+            (rf, quality_dict, model_dict) for every trace.
+        """
+        np.random.seed(self.seed)
+        starttime = time.time()
+
+        rows_dict, traces_dict = split_data(
+            x=np.arange(self.traces.shape[0]), y=self.traces, frac_train=1. - self.frac_test, frac_dev=0,
+            as_dict=True)
+        rows_dict = {k: _as_slice(rows) for k, rows in rows_dict.items()}
+
+        models, metrics_dev_opt = self.compute_best_rf_models(rows=rows_dict['train'], traces=traces_dict['train'])
+
+        try:
+            results = []
+            for j, model in enumerate(models):
+                trace_dict = {k: v[:, j] for k, v in traces_dict.items()}
+                results.append(self._evaluate_model(model, metrics_dev_opt[j], rows_dict, trace_dict, starttime))
+        finally:
+            self._prediction_inputs.clear()
+        return results
+
+    def _predict(self, model, rows):
+        """Predict the response of a fitted GLM, with the design matrices of the rows shared by all models."""
+        df = tuple(int(dfi) for dfi in model.df[self.channel_names[0]])
+        cache_key = (df, rows.start, rows.stop) if isinstance(rows, slice) and rows.step is None else None
+        XS = self._prediction_inputs.get(cache_key) if cache_key is not None else None
+        if XS is None:
+            Xs, is_projected = self._get_design_matrices(rows, df)
+            assert is_projected
+            XS = {name: _to_model_array(X[model.burn_in:], model.dtype) for name, X in Xs.items()}
+            if cache_key is not None:
+                self._prediction_inputs[cache_key] = XS
+        return model.predict_projected(XS)
+
+    def compute_best_rf_models(self, traces: np.ndarray, rows) -> tuple:
+        """Compute the best RF model of every trace, see `ReceptiveFieldGLM.compute_best_rf_model`.
+
+        Parameters
+        ----------
+        traces : np.ndarray
+            Neural response traces of the training data, shape (n_samples, n_traces).
+        rows : slice or np.ndarray
+            Rows of the design matrix of the training data.
+
+        Returns
+        -------
+        tuple
+            best_models : list
+                The fitted GLM of every trace with its optimal hyperparameters.
+            metrics_dev_opt : np.ndarray
+                Development set metrics of shape (n_traces, n_folds, n_dfs, n_betas).
+        """
+        dfs = self._df_grid()
+        n_traces = traces.shape[1]
+
+        metrics_dev_opt = np.zeros((n_traces, np.maximum(self.kfold, 1), len(dfs), len(self.betas)))
+
+        rows = np.arange(self.trace.shape[0])[rows]
+        y = traces.copy().astype(np.float32)
+        assert rows.size == y.shape[0], (rows.size, y.shape)
+        n_samples = rows.size
+
+        if self.kfold == 0:
+            splits = [(rows, y, None, None)]
+        elif self.kfold == 1:
+            split_idx = int(n_samples * 0.8)
+            splits = [(rows[:split_idx], y[:split_idx], rows[split_idx:], y[split_idx:])]
+        else:
+            splits = []
+            for train_idx, dev_idx in KFold(n_splits=self.kfold, shuffle=False).split(np.arange(n_samples)):
+                train_idx = train_idx[(train_idx < np.min(dev_idx)) | (train_idx > np.max(dev_idx) + self.burn_in)]
+                splits += [(rows[train_idx], y[train_idx], rows[dev_idx], y[dev_idx])]
+        splits = [(_as_slice(rows_train), y_train, None if rows_dev is None else _as_slice(rows_dev), y_dev)
+                  for rows_train, y_train, rows_dev, y_dev in splits]
+
+        best_models = [None] * n_traces
+        for idx_dfs, df in enumerate(dfs):
+            for idx_kf, (rows_train_k, y_train_k, rows_dev_k, y_dev_k) in enumerate(splits):
+                Xs_train_k, is_projected = self._get_design_matrices(rows_train_k, df)
+                Xs_dev_k = None if rows_dev_k is None else self._get_design_matrices(rows_dev_k, df)[0]
+                assert is_projected
+
+                models, metrics_dev_opt_i = self.create_and_fit_glms(
+                    df=df, Xs_train=Xs_train_k, y_train=y_train_k, Xs_dev=Xs_dev_k, y_dev=y_dev_k,
+                    alphas=self.alphas, betas=self.betas)
+                metrics_dev_opt[:, idx_kf, idx_dfs, :] = metrics_dev_opt_i
+
+            if self.kfold > 1:
+                continue  # The models are refit with the best hyperparameters below.
+
+            for j in range(n_traces):
+                if self.kfold == 0 or self._select_best_hps(metrics_dev_opt[j, 0, :idx_dfs + 1])[0] == idx_dfs:
+                    best_models[j] = models[j]
+
+        if self.kfold > 0:
+            assert np.all(np.isfinite(metrics_dev_opt)), metrics_dev_opt
+            best_hps = [self._select_best_hps(np.mean(metrics_dev_opt[j], axis=0)) for j in range(n_traces)]
+        else:
+            assert metrics_dev_opt.shape[1:] == (1, 1, 1)
+            best_hps = [(0, 0)] * n_traces
+
+        if self.kfold == 1:
+            for j, (_, best_beta_idx) in enumerate(best_hps):
+                assert best_models[j].beta == self.betas[best_beta_idx], (best_models[j].beta, best_beta_idx)
+
+        if self.kfold > 1:
+            # Refit all traces with the same best hyperparameters jointly.
+            for best_df_idx, best_beta_idx in sorted(set(best_hps)):
+                idxs = [j for j, hps in enumerate(best_hps) if hps == (best_df_idx, best_beta_idx)]
+                best_df = dfs[best_df_idx]
+                Xs, _ = self._get_design_matrices(_as_slice(rows), best_df)
+                models, _ = self.create_and_fit_glms(
+                    df=best_df, Xs_train=Xs, y_train=y[:, idxs], Xs_dev=None, y_dev=None,
+                    alphas=self.alphas, betas=[self.betas[best_beta_idx]])
+                for j, model in zip(idxs, models):
+                    model.metric_dev_opt = np.mean(metrics_dev_opt[j, :, best_df_idx, best_beta_idx])
+                    best_models[j] = model
+
+        return best_models, metrics_dev_opt
+
+    def create_and_fit_glms(self, df: tuple, Xs_train: dict, y_train: np.ndarray, alphas, betas,
+                            Xs_dev: dict = None, y_dev: np.ndarray = None) -> tuple:
+        """Create and jointly fit the GLMs of several traces, see `ReceptiveFieldGLM.create_and_fit_glm`.
+
+        Returns
+        -------
+        tuple
+            models (one per column of `y_train`), and the dev metrics of shape (n_traces, n_hp_sets).
+        """
+        finalized_df = self._finalize_df(df)
+        if finalized_df != tuple(df):
+            raise ValueError(f"Projected design matrices require a finalized df, got {df} instead of {finalized_df}")
+
+        models = self.initialize_models(df=finalized_df, Xs_train=Xs_train, y_train=y_train, Xs_dev=Xs_dev)
+        metrics_dev_opt = self.fit_glms(models=models, y_train=y_train, y_dev=y_dev, alphas=alphas, betas=betas)
+        return models, metrics_dev_opt
+
+    def initialize_models(self, df: tuple, Xs_train: dict, y_train: np.ndarray, Xs_dev: dict = None) -> list:
+        """Initialize one GLM per trace (column of `y_train`), all sharing the design matrices.
+        See `ReceptiveFieldGLM.initialize_model`."""
+        from djimaging.utils.receptive_fields.rfest_glm import GLM
+
+        def new_model():
+            model = GLM(distr=self.distr, output_nonlinearity=self.output_nonlinearity, dtype=self.dtype)
+            model.burn_in = self.burn_in
+            return model
+
+        ref = new_model()
+        for name in self.channel_names:
+            ref.add_design_matrix(
+                Xs_train[name], is_design_matrix=True, df=df, dims=self.dims, shift=self.shift,
+                smooth='cr', filter_nonlinearity='none', name=name, is_projected=True)
+            if Xs_dev is not None:
+                ref.add_design_matrix(
+                    Xs_dev[name], is_design_matrix=True, dims=self.dims, shift=self.shift,
+                    name=name, kind='dev', is_projected=True)
+
+        models = [ref]
+        for _ in range(1, y_train.shape[1]):
+            model = new_model()
+            model.share_design_matrices(ref)
+            models.append(model)
+
+        mle = ref.compute_mle(y_train) if self.init_method == 'mle' else None
+        for j, model in enumerate(models):
+            model.initialize(num_subunits=self.num_subunits, dt=self.dt, method=self.init_method,
+                             compute_ci=False, random_seed=42, y=y_train[:, j],
+                             fit_R=self.fit_R, fit_intercept=self.fit_intercept,
+                             mle=None if mle is None else mle[:, j])
+        return models
+
+    def fit_glms(self, models: list, alphas, betas, y_train: np.ndarray, y_dev: np.ndarray = None) -> np.ndarray:
+        """Jointly fit the GLMs of several traces, see `ReceptiveFieldGLM.fit_glm`.
+
+        Returns
+        -------
+        np.ndarray
+            Dev metrics of shape (n_traces, n_hp_sets).
+        """
+        from djimaging.utils.receptive_fields.rfest_glm import fit_hps_many, fit_many
+
+        if len(alphas) == 1 and len(betas) == 1:
+            if y_dev is not None:
+                ys = [{'train': y_train[:, j], 'dev': y_dev[:, j]} for j in range(len(models))]
+                return_model = 'best_dev_metric'
+                early_stopping = True
+            else:
+                ys = [{'train': y_train[:, j]} for j in range(len(models))]
+                return_model = 'best_train_cost'
+                early_stopping = False
+
+            fit_many(
+                models, ys, metric=self.metric, num_iters=self.max_iters, min_iters=self.min_iters,
+                step_size=self.step_size, atol=self.atol, tolerance=self.tolerance, alpha=alphas[0], beta=betas[0],
+                verbose=self.verbose, return_model=return_model, early_stopping=early_stopping)
+            return np.array([[model.metric_dev_opt] for model in models])
+
+        return fit_hps_many(
+            models, [{'train': y_train[:, j], 'dev': y_dev[:, j]} for j in range(len(models))],
+            num_iters=self.max_iters, verbose=self.verbose, tolerance=self.tolerance, metric=self.metric,
+            step_size=self.step_size, step_size_finetune=self.step_size_finetune,
+            alphas=alphas, betas=betas, min_iters=self.min_iters,
+            min_iters_other=self.min_iters // 5, atol=self.atol, return_model='best_train_cost',
+            early_stopping=False)
+
+
+def _to_model_array(x, dtype):
+    """Design matrix as a jax array of the model precision, without a host round trip for jax arrays."""
+    import jax.numpy as jnp
+    return x.astype(dtype) if hasattr(x, 'devices') else jnp.asarray(np.asarray(x).astype(dtype))
 
 
 def quality_test(score_trueX: float, score_permX: np.ndarray, metric: str) -> float:

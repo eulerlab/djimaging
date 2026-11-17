@@ -58,7 +58,7 @@ BLOCKS = {
                     'CelltypeAssignmentV2',
         requires=['basic']),
     'rf_sta': dict(
-        description='Receptive fields from STA: FastSta, SplitRF, FitGauss2DRF, FitDoG2DRF',
+        description='Receptive fields from STA: FastSta, SplitRF, FitGauss2DRF, FitDoG2DRF, FitSRFJoint',
         requires=['core']),
     'rf_glm': dict(
         description='Receptive fields from GLM: RfGlm, SplitRfGlm, FitGauss2DRfGlm, FitDoG2DRfGlm',
