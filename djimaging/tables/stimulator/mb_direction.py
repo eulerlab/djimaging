@@ -3,7 +3,7 @@ Moving bar directions on the retina.
 
 The direction of a moving bar trial is defined by the script angle (`trial_info` of the Stimulus). How it moves on the
 QDSpy screen depends on the moving bar version (QDSpy md5), how the screen is projected into the chamber on the
-stimulator (ExperimentStimulator), and how the retina lies in the chamber (eye and prepwmorient of the experiment).
+stimulator (ExperimentStimulator), and how the retina lies in the chamber (eye and orientation in RetinaOrientation).
 See djimaging.utils.stimulator for the conventions. Every row has a confidence ('high', 'medium', 'low') and a reason.
 
 Example usage:
@@ -19,7 +19,7 @@ class MbDirectionMap(stimulator.MbDirectionMapTemplate):
     stimulus_table = Stimulus
     experiment_stimulator_table = ExperimentStimulator
     mb_version_table = MovingBarVersion
-    expinfo_table = Experiment.ExpInfo
+    retina_orientation_table = RetinaOrientation
     presentation_log_table = PresentationLog  # optional: None if there are no QDSpy logs
     stim_log_table = QdsPyLog.StimLog  # optional: None if there are no QDSpy logs
 
@@ -96,6 +96,7 @@ class MbDirectionMapTemplate(dj.Computed):
         # Directions of the moving bar trials in the field and on the retina
         -> self.presentation_table
         -> self.experiment_stimulator_table
+        -> self.retina_orientation_table
         ---
         stim_md5 = null          : char(32)       # md5 of the QDSpy stimulus (NULL: no log)
         stim_file_name = null    : varchar(255)   # QDSpy script name (NULL: no log)
@@ -132,14 +133,14 @@ class MbDirectionMapTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def expinfo_table(self):
+    def retina_orientation_table(self):
         pass
 
     @property
     def key_source(self):
         try:
             return ((self.presentation_table & (self.stimulus_table & dict(stim_family=self._stim_family))).proj()
-                    * self.experiment_stimulator_table.proj())
+                    * self.experiment_stimulator_table.proj() * self.retina_orientation_table.proj())
         except (AttributeError, TypeError):
             pass
 
@@ -147,7 +148,7 @@ class MbDirectionMapTemplate(dj.Computed):
         trial_info = (self.stimulus_table & key).fetch1('trial_info')
         script_dirs_deg = np.array([float(trial['name']) for trial in trial_info])
         geometry = self.experiment_stimulator_table().get_geometry(key)
-        eye, prepwmorient = (self.expinfo_table & key).fetch1('eye', 'prepwmorient')
+        eye, orientation_deg = self.retina_orientation_table().get_eye_and_orientation(key)
         stim_log, log_reason = fetch_stim_log(self.presentation_log_table, self.stim_log_table, key)
         stim_md5 = stim_log['stim_md5'] if stim_log else None
         stim_file_name = stim_log['stim_file_name'] if stim_log else None
@@ -155,7 +156,7 @@ class MbDirectionMapTemplate(dj.Computed):
         row = compute_mb_direction_map(
             script_dirs_deg=script_dirs_deg, stim_md5=stim_md5, stim_file_name=stim_file_name,
             log_reason=log_reason, versions=self.mb_version_table().to_dicts(), geometry=geometry,
-            eye=eye, prepwmorient=prepwmorient)
+            eye=eye, prepwmorient=orientation_deg)
         self.insert1(dict(**key, **row))
 
     def report(self):

@@ -139,7 +139,7 @@ Instead of copying a fixed schema, <code>make_project.py</code> assembles the sc
 
 | Block        | Tables                                                                                  | Requires |
 |--------------|-----------------------------------------------------------------------------------------|----------|
-| `core`       | UserInfo, Experiment, Field, Stimulus, Presentation, RoiMask, Roi, Traces, Snippets, Averages | –        |
+| `core`       | UserInfo, Experiment, Field, RetinaOrientation, Stimulus, Presentation, RoiMask, Roi, Traces, Snippets, Averages | –        |
 | `history`    | ExpHistory, ExpHistoryField, ExpHistoryStimLog, QdsPyLogFile, QdsPyLog, PresentationLog (see below) | `core`   |
 | `basic`      | ChirpQI, ChirpFeatures, OsDsIndexes                                                     | `core`   |
 | `location`   | OpticDisk, RelativeFieldLocation, RetinalFieldLocation                                  | `core`   |

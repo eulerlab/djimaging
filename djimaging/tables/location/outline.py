@@ -21,7 +21,7 @@ class OutlineAbs(location.OutlineAbsTemplate):
 class OutlineRel(location.OutlineRelTemplate):
     opticdisk_table = OpticDisk
     outline_abs_table = OutlineAbs
-    expinfo_table = Experiment.ExpInfo
+    retina_orientation_table = RetinaOrientation
 
     class OutlineRelField(location.OutlineRelTemplate.OutlineRelField):
         pass
@@ -42,6 +42,7 @@ from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.filesystem_utils import get_file_info_df
 from djimaging.utils.scanm.recording import ScanMRecording
 from djimaging.utils.scanm.setup_utils import get_retinal_position
+from djimaging.tables.location.location import retinal_position_or_none
 from djimaging.tables.core.setup_params import RecordingSetupMixin
 
 
@@ -238,6 +239,7 @@ class OutlineRelTemplate(dj.Computed):
         definition = """
         -> self.outline_abs_table
         -> self.opticdisk_table
+        -> self.retina_orientation_table
         ---
         outline_rel_xy : <blob>  # outline of the retinal field in coordinates relative to the optic disk
         outline_retina_xy : <blob>  # outline of the retinal field in retinal coordinates
@@ -252,8 +254,8 @@ class OutlineRelTemplate(dj.Computed):
         relx: float32  # relative position of the center (of the cropped field) in the x axis as recorded by ScanM
         rely: float32  # relative position of the center (of the cropped field) in the y axis as recorded by ScanM
         relz: float32  # relative position of the center (of the cropped field) in the z axis as recorded by ScanM
-        ventral_dorsal_pos_um: float32
-        temporal_nasal_pos_um: float32
+        ventral_dorsal_pos_um = NULL: float32  # NULL if the orientation is unknown
+        temporal_nasal_pos_um = NULL: float32  # NULL if the orientation or eye is unknown
         """
 
     @property
@@ -268,13 +270,14 @@ class OutlineRelTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def expinfo_table(self):
+    def retina_orientation_table(self):
         pass
 
     @property
     def key_source(self):
         try:
-            return self.outline_abs_table.proj() * self.opticdisk_table.proj()
+            return (self.outline_abs_table.proj() * self.opticdisk_table.proj()
+                    * self.retina_orientation_table.proj())
         except (AttributeError, TypeError):
             pass
 
@@ -286,15 +289,13 @@ class OutlineRelTemplate(dj.Computed):
         field_keys, absxs, absys, abszs = (self.outline_abs_table().OutlineAbsField & key).to_arrays(
             'absx', 'absy', 'absz', include_key=True)
 
-        eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
+        eye, orientation_deg = self.retina_orientation_table().get_eye_and_orientation(key)
 
-        # Orientation unknown (-1): register this fact with NaN retinal positions instead of skipping the entry.
-        orientation_known = prepwmorient != -1
-
+        # Orientation unknown: register this fact with NaN (outline) / NULL (fields) instead of skipping the entry.
         def to_retina(relx, rely):
-            if not orientation_known:
+            if orientation_deg is None:
                 return np.nan, np.nan
-            return get_retinal_position(rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)
+            return get_retinal_position(rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=orientation_deg, eye=eye)
 
         outline_rel_xy = [
             (absx - odx, absy - ody)
@@ -310,8 +311,8 @@ class OutlineRelTemplate(dj.Computed):
             field_entry["relx"] = absx - odx
             field_entry["rely"] = absy - ody
             field_entry["relz"] = absz - odz
-            field_entry["ventral_dorsal_pos_um"], field_entry["temporal_nasal_pos_um"] = to_retina(
-                field_entry["relx"], field_entry["rely"])
+            field_entry["ventral_dorsal_pos_um"], field_entry["temporal_nasal_pos_um"] = retinal_position_or_none(
+                field_entry["relx"], field_entry["rely"], orientation_deg, eye)
 
             field_entries.append(field_entry)
 

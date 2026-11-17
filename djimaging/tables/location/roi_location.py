@@ -23,7 +23,7 @@ class RelativeRoiLocation(location.RelativeRoiLocationTemplate):
 @schema
 class RetinalRoiLocation(location.RetinalRoiLocationTemplate):
     relative_roi_location_table = RelativeRoiLocation
-    expinfo_table = Experiment.ExpInfo
+    retina_orientation_table = RetinaOrientation
 """
 
 import warnings
@@ -32,9 +32,8 @@ import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.location.location import plot_relxy_pos, plot_relyz_pos
+from djimaging.tables.location.location import plot_relxy_pos, plot_relyz_pos, retinal_position_or_none
 from djimaging.utils.dj_storage import load_array
-from djimaging.utils.scanm.setup_utils import get_retinal_position
 from djimaging.utils.scanm.roi_utils import get_rel_roi_pos
 
 
@@ -227,6 +226,7 @@ class RetinalRoiLocationTemplate(dj.Computed):
     def definition(self):
         definition = """
         -> self.relative_roi_location_table
+        -> self.retina_orientation_table
         ---
         ventral_dorsal_pos_um = NULL :float32      # position on the ventral-dorsal axis, greater 0 means dorsal; NULL if unknown
         temporal_nasal_pos_um = NULL :float32      # position on the temporal-nasal axis, greater 0 means nasal; NULL if unknown
@@ -236,7 +236,7 @@ class RetinalRoiLocationTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.relative_roi_location_table.proj()
+            return self.relative_roi_location_table.proj() * self.retina_orientation_table.proj()
         except (AttributeError, TypeError):
             pass
 
@@ -247,22 +247,13 @@ class RetinalRoiLocationTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def expinfo_table(self):
+    def retina_orientation_table(self):
         pass
 
     def make(self, key):
         relx, rely = (self.relative_roi_location_table() & key).fetch1('relx', 'rely')
-        eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
-
-        if prepwmorient == -1:
-            # Orientation unknown: register this fact (NULL) instead of leaving the entry unpopulated.
-            ventral_dorsal_pos_um, temporal_nasal_pos_um = None, None
-        else:
-            ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(
-                rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)
-            # NaN cannot be inserted by DataJoint (column is omitted); store NULL.
-            ventral_dorsal_pos_um = None if np.isnan(ventral_dorsal_pos_um) else ventral_dorsal_pos_um
-            temporal_nasal_pos_um = None if np.isnan(temporal_nasal_pos_um) else temporal_nasal_pos_um
+        eye, orientation_deg = self.retina_orientation_table().get_eye_and_orientation(key)
+        ventral_dorsal_pos_um, temporal_nasal_pos_um = retinal_position_or_none(relx, rely, orientation_deg, eye)
 
         rfl_key = key.copy()
         rfl_key['ventral_dorsal_pos_um'] = ventral_dorsal_pos_um

@@ -25,7 +25,7 @@ class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
 @schema
 class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
     relativefieldlocation_table = RelativeFieldLocation
-    expinfo_table = Experiment.ExpInfo
+    retina_orientation_table = RetinaOrientation
 """
 
 import warnings
@@ -141,6 +141,7 @@ class RetinalFieldLocationTemplate(dj.Computed):
         # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
 
         -> self.relativefieldlocation_table
+        -> self.retina_orientation_table
         ---
         ventral_dorsal_pos_um = NULL :float32      # position on the ventral-dorsal axis, greater 0 means dorsal; NULL if unknown
         temporal_nasal_pos_um = NULL :float32      # position on the temporal-nasal axis, greater 0 means nasal; NULL if unknown
@@ -150,7 +151,7 @@ class RetinalFieldLocationTemplate(dj.Computed):
     @property
     def key_source(self):
         try:
-            return self.relativefieldlocation_table.proj()
+            return self.relativefieldlocation_table.proj() * self.retina_orientation_table.proj()
         except (AttributeError, TypeError):
             pass
 
@@ -161,7 +162,7 @@ class RetinalFieldLocationTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def expinfo_table(self):
+    def retina_orientation_table(self):
         pass
 
     def make(self, key: dict) -> None:
@@ -171,17 +172,8 @@ class RetinalFieldLocationTemplate(dj.Computed):
             key: DataJoint primary key dict identifying a unique relative field location entry.
         """
         relx, rely = (self.relativefieldlocation_table() & key).fetch1('relx', 'rely')
-        eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
-
-        if prepwmorient == -1:
-            # Orientation unknown: register this fact (NULL) instead of leaving the entry unpopulated.
-            ventral_dorsal_pos_um, temporal_nasal_pos_um = None, None
-        else:
-            ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(
-                rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)
-            # NaN cannot be inserted by DataJoint (column is omitted); store NULL.
-            ventral_dorsal_pos_um = None if np.isnan(ventral_dorsal_pos_um) else ventral_dorsal_pos_um
-            temporal_nasal_pos_um = None if np.isnan(temporal_nasal_pos_um) else temporal_nasal_pos_um
+        eye, orientation_deg = self.retina_orientation_table().get_eye_and_orientation(key)
+        ventral_dorsal_pos_um, temporal_nasal_pos_um = retinal_position_or_none(relx, rely, orientation_deg, eye)
 
         rfl_key = key.copy()
         rfl_key['ventral_dorsal_pos_um'] = ventral_dorsal_pos_um
@@ -294,6 +286,20 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
         ax.set(xlabel="temporal_nasal", ylabel="ventral_dorsal")
         ax.set_aspect(aspect="equal", adjustable="datalim")
         plt.show()
+
+
+def retinal_position_or_none(relx: float, rely: float, orientation_deg: float | None, eye: str | None)         -> tuple[float | None, float | None]:
+    """(ventral_dorsal_pos_um, temporal_nasal_pos_um) from positions relative to the optic disk, None where unknown.
+
+    Both are None if the orientation is unknown, temporal_nasal_pos_um is None if the eye is unknown.
+    NaN cannot be inserted by DataJoint (the column is omitted), so unknown values are None (NULL).
+    """
+    if orientation_deg is None:
+        return None, None
+    ventral_dorsal, temporal_nasal = get_retinal_position(
+        rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=orientation_deg, eye=eye)
+    return (None if np.isnan(ventral_dorsal) else float(ventral_dorsal),
+            None if np.isnan(temporal_nasal) else float(temporal_nasal))
 
 
 def plot_relxy_pos(relx: np.ndarray, rely: np.ndarray, view: str = 'igor_local') -> None:

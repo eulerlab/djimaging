@@ -6,7 +6,7 @@
 # - `OpticDisk`: Position of the optic disk of each experiment, used as reference point.
 # - `RelativeFieldLocation`: Position of each field relative to the optic disk.
 # - `RetinalFieldLocation`: Position of each field in retinal coordinates (e.g. ventral-dorsal and nasal-temporal),
-#   taking the eye and orientation information of the experiment into account.
+#   using eye and orientation from `RetinaOrientation` (NULL where they are unknown).
 
 # %%
 OpticDisk().populate(processes=20, display_progress=True)

@@ -100,6 +100,7 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
         "and response metrics must stay in the database"
     )
 
+    tutorial_schema.RetinaOrientation().populate(experiment_key, display_progress=False)
     tutorial_schema.OpticDisk().populate(experiment_key, display_progress=False)
     tutorial_schema.RelativeFieldLocation().populate(experiment_key, display_progress=False)
     tutorial_schema.RetinalFieldLocation().populate(experiment_key, display_progress=False)
@@ -117,6 +118,7 @@ def test_tutorial_pipeline(tutorial_schema, tutorial_data_dir, dj_test_stores):
         tutorial_schema.Averages(): 4,
         tutorial_schema.ChirpQI(): 2,
         tutorial_schema.OsDsIndexes(): 2,
+        tutorial_schema.RetinaOrientation(): 1,
         tutorial_schema.OpticDisk(): 1,
         tutorial_schema.RelativeFieldLocation(): 1,
         tutorial_schema.RetinalFieldLocation(): 1,

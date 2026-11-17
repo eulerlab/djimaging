@@ -15,7 +15,7 @@ class MbDirectionMap(stimulator.MbDirectionMapTemplate):
     stimulus_table = Stimulus
     experiment_stimulator_table = ExperimentStimulator
     mb_version_table = MovingBarVersion
-    expinfo_table = Experiment.ExpInfo
+    retina_orientation_table = RetinaOrientation
     # The moving bar version is identified by the QDSpy md5 in the logs. Without logs every row has low confidence.
     # Set these if the schema has QDSpy log tables:
     presentation_log_table = None  # PresentationLog

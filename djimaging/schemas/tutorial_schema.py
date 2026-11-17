@@ -18,7 +18,7 @@ class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
 @schema
 class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
     relativefieldlocation_table = RelativeFieldLocation
-    expinfo_table = Experiment.ExpInfo
+    retina_orientation_table = RetinaOrientation
 
 
 @schema

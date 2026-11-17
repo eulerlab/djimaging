@@ -198,7 +198,8 @@ def fetch_field_map(key: Mapping, exp_history_table, exp_history_field_table=Non
         (`field`, `region`, ...).
     retinal_location_table : RetinalFieldLocation, optional
         Retinal positions of the fields in the table. For other fields and landmarks, the position is computed from
-        the optic disc (`OpticDisk` of its `relativefieldlocation_table`) and eye and orientation (`expinfo_table`),
+        the optic disc (`OpticDisk` of its `relativefieldlocation_table`) and eye and orientation
+        (`retina_orientation_table`),
         if they are known.
     images : bool
         Load field images.
@@ -325,11 +326,15 @@ def _add_computed_retinal(fields: pd.DataFrame, exp_key: Mapping, retinal_locati
     try:
         od_table = retinal_location_table.relativefieldlocation_table.opticdisk_table
         od_pos = {(float(x), float(y)) for x, y in zip(*(od_table & exp_key).to_arrays('odx', 'ody'))}
-        eye, rotation = (retinal_location_table.expinfo_table & exp_key).fetch1('eye', 'prepwmorient')
-    except Exception as e:  # optional information, e.g. no ExpInfo
+        orientations = {(row['eye'], row['orientation_deg'])
+                        for row in (retinal_location_table.retina_orientation_table & exp_key).to_dicts()}
+    except Exception as e:  # optional information, e.g. RetinaOrientation not bound
         warnings.warn(f"Retinal position of fields that are not in RetinalFieldLocation unknown for {exp_key}: {e}")
         return
-    if len(od_pos) != 1 or rotation == -1 or eye not in ('left', 'right'):
+    if len(od_pos) != 1 or len(orientations) != 1:
+        return
+    eye, rotation = orientations.pop()
+    if rotation is None or eye not in ('left', 'right'):
         return
     from djimaging.utils.scanm.setup_utils import get_retinal_position
     odx, ody = od_pos.pop()

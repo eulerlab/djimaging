@@ -60,6 +60,9 @@ RawDataParams()
 #
 # - `Experiment`: One entry per recorded animal/preparation, including meta data (animal, indicator, pharmacology).
 # - `Field`: One entry per imaged field (a scan region of the recording), found by scanning the data folder.
+# - `RetinaOrientation`: Eye and orientation of the retina in the chamber, read from the experiment header. All
+#   retinal coordinates (locations, moving bar directions) use it. Unknown values are NULL; correct wrong ones with
+#   `RetinaOrientation().set_manual(key, eye='left', orientation_deg=90)`.
 
 # %%
 Experiment().rescan_filesystem(verboselvl=2)
@@ -68,6 +71,10 @@ Experiment()
 # %%
 Field().rescan_filesystem(verboselvl=2)
 Field()
+
+# %%
+RetinaOrientation().populate(display_progress=True)
+RetinaOrientation() & "eye IS NULL OR orientation_deg IS NULL OR source != 'header'"  # entries to check
 
 # %%
 # If you call plot1 on a djimaging table, it will plot the given key.

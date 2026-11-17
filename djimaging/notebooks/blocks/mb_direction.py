@@ -2,7 +2,7 @@
 # # Moving bar directions on the retina
 #
 # The moving bar directions of `trial_info` are script angles. Where the bar moves on the retina depends on the moving
-# bar version (QDSpy md5), the stimulator and the eye and orientation of the retina (`Experiment.ExpInfo`).
+# bar version (QDSpy md5), the stimulator and the eye and orientation of the retina (`RetinaOrientation`).
 #
 # - `MovingBarVersion`: Known moving bar versions and their direction convention.
 # - `MbDirectionMap`: Direction of every trial in the field and on the retina (0° = nasal, 90° = dorsal), per

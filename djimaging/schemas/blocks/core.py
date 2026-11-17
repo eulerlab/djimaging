@@ -48,6 +48,13 @@ class Field(core.FieldTemplate):
 
 
 @schema
+class RetinaOrientation(core.RetinaOrientationTemplate):
+    incl_region = False  # One entry per region of Field (e.g. LR, RR) instead of per experiment?
+    experiment_table = Experiment
+    field_table = Field
+
+
+@schema
 class Stimulus(core.StimulusTemplate):
     pass
 

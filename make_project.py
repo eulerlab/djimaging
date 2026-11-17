@@ -23,7 +23,7 @@ import sys
 # `extras`: extras of the djimaging package that the generated project depends on.
 BLOCKS = {
     'core': dict(
-        description='UserInfo, Experiment, Field, Stimulus, Presentation, RoiMask, Roi, Traces, Snippets, Averages',
+        description='UserInfo, Experiment, Field, RetinaOrientation, Stimulus, Presentation, RoiMask, Roi, Traces, Snippets, Averages',
         requires=[],
         notebook='core',  # Split into 01_setup, 02_roi_masks and 03_traces
         extras=['autorois']),  # AutoROIs and the ROI canvas in 02_roi_masks
