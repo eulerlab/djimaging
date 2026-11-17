@@ -143,7 +143,8 @@ class HighResAlignmentTemplate(dj.Computed):
 
         The HR images are shown **resampled to the pixel grid of the field** (in the frame of the ROI mask), so they
         can be compared pixel by pixel with the mask, which is why they look low resolution. The original
-        high resolution averages are in `HighRes.StackAverages`."""
+        high resolution average (functional channel, from `HighRes.StackAverages`) is shown in its own panel, unaligned
+        and on its own pixel grid, so without mask outlines."""
         from matplotlib import pyplot as plt
         key = get_primary_key(self, key)
         row = (self & key).fetch1()
@@ -160,11 +161,17 @@ class HighResAlignmentTemplate(dj.Computed):
         imgs = [(f'mask presentation ({func})', norm(ref0)), (f'HR resampled to field grid ({func})', norm(load_array(row['hr_ch0'])))]
         if row['hr_ch1'] is not None:
             imgs.append((f'HR resampled to field grid ({struct})', norm(load_array(row['hr_ch1']))))
-        fig, axs = plt.subplots(1, len(imgs) + 1, figsize=(4 * (len(imgs) + 1), 4.3))
+        hr_orig = (self.highres_table.StackAverages & key & dict(ch_name=func)).to_arrays('ch_average')
+        hr_orig = norm(load_array(hr_orig[0])) if len(hr_orig) else None
+        n = len(imgs) + 1 + (hr_orig is not None)
+        fig, axs = plt.subplots(1, n, figsize=(4 * n, 4.3))
         for ax, (title, img) in zip(axs, imgs):
             ax.imshow(img.T, cmap='gray', origin='lower')
             ax.contour((roi_mask < 0).T, levels=[0.5], colors='y', linewidths=0.6, origin='lower')
             ax.set_title(title, fontsize=9)
+        if hr_orig is not None:  # own pixel grid and not shifted, so no mask outlines
+            axs[len(imgs)].imshow(hr_orig.T, cmap='gray', origin='lower')
+            axs[len(imgs)].set_title(f'HR original, unaligned ({func})', fontsize=9)
         overlay = np.stack([imgs[1][1], imgs[0][1], imgs[1][1]], axis=-1)
         axs[-1].imshow(np.transpose(overlay, (1, 0, 2)), origin='lower')
         axs[-1].set_title('green: mask presentation, magenta: HR', fontsize=9)
