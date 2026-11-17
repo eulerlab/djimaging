@@ -1261,7 +1261,7 @@ class RoiMaskTemplate(dj.Manual):
 
         alt_average, vessel_mask, vessel_ids, alt_name = None, None, [], None
         if vessel_threshold is not None:
-            alt_names = [n for n in (self.presentation_table.StackAverages & pres_key).fetch('ch_name')
+            alt_names = [n for n in (self.presentation_table.StackAverages & pres_key).to_arrays('ch_name')
                          if n != data_name]
             if len(alt_names) > 0:
                 from djimaging.utils.mask_utils import estimate_vessel_mask

@@ -76,6 +76,8 @@ QdsPyLog().populate(display_progress=True)
 # %%
 stim_claims = []
 for stim_name, stim_dict in zip(*Stimulus().to_arrays('stim_name', 'stim_dict')):
+    if stim_dict is None:
+        continue
     stim_claims.append((stim_name, set(stim_dict.get('stim_hash_list', [])),
                         {n.lower() for n in list(stim_dict.get('stim_name_list', [])) + [stim_name]}))
 
