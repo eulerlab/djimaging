@@ -501,7 +501,7 @@ def shrink_light_artifact_rois(mask: np.ndarray, n_artifact: int, verbose: bool 
 SHRINK_STATUS = ('unchanged', 'shrunk', 'low_signal', 'too_small', 'too_many', 'split')
 # Sensitive parameters of shrink_rois_to_fit for one ROI the user picked as suspicious (ROI canvas, 'Shrink ROI'). The
 # defaults are strict (batch use: changes ~2 % of the ROIs of the xy-RGCs test data, most fields none).
-SHRINK_SENSITIVE = dict(margin=0.15, min_rel_corr=0.2, min_group=1)
+SHRINK_SENSITIVE = dict(margin=0.15, min_rel_corr=0.2, min_group=1, bright_excess=1.)
 
 
 def _zscored_highpass(traces: np.ndarray, highpass_frames: float) -> np.ndarray:
@@ -522,11 +522,64 @@ def _corr_with(z: np.ndarray, others: np.ndarray) -> np.ndarray:
     return np.divide(np.sum(z * others, axis=1), norm, out=np.zeros(z.shape[0]), where=norm > 0)
 
 
+def _bright_border_pixels(roi: np.ndarray, mean_img: np.ndarray, inside: np.ndarray, min_excess: float,
+                          layer_frac: float) -> np.ndarray:
+    """Border pixels of one ROI that get brighter towards the outside (crop arrays, see shrink_rois_to_fit).
+
+    The brightness of a cell falls off from its centre to its border. A border pixel that is brighter than all its
+    inner 8-neighbours by more than ``min_excess`` times the brightness spread of the ROI (MAD of its pixels), and
+    has an outer 8-neighbour that is brighter still, gets its light from outside the ROI (typically a bright
+    neighbouring cell).
+
+    Args:
+        roi: Boolean ROI mask.
+        mean_img: Time-averaged brightness, same shape; must include the pixels around the ROI.
+        inside: Pixels that do not count as outside of the ROI (the ROI, the field edge, light artifact rows), same
+            shape; the border is where the ROI meets the rest of the image, not where the image or the artifact ends.
+        min_excess: Brightness above the brightest inner neighbour, in units of the ROI's brightness MAD.
+        layer_frac: Border layers checked = max(1, round(layer_frac * sqrt(n_px / pi))), as a fraction of the
+            radius of a disc with the ROI's area (0.5: 1 layer for most ROIs, 2 from 29 px).
+
+    Returns:
+        Boolean mask of the pixels to remove: only pixels connected (4-neighbourhood) through removed pixels to the
+        outermost layer, so that no holes are cut.
+    """
+    from scipy import ndimage
+
+    n_px = int(roi.sum())
+    flagged = np.zeros_like(roi)
+    b = mean_img[roi]
+    med = np.median(b)
+    mad = 1.4826 * np.median(np.abs(b - med))
+    if not mad > 0:
+        return flagged
+    n_layers = max(1, int(np.floor(layer_frac * np.sqrt(n_px / np.pi) + 0.5)))
+    depth = ndimage.distance_transform_cdt(inside, metric='taxicab')  # 1: 4-neighbour outside the ROI
+    depth[~roi] = 0
+    outside = ~inside
+    nx, ny = roi.shape
+    for layer in range(n_layers, 0, -1):  # inside out, so that the inner of two bright pixels does not shield the outer
+        for x, y in zip(*np.nonzero(depth == layer)):
+            x0, x1, y0, y1 = max(x - 1, 0), min(x + 2, nx), max(y - 1, 0), min(y + 2, ny)
+            win, dwin = mean_img[x0:x1, y0:y1], depth[x0:x1, y0:y1]
+            inner = (dwin > layer) & ~flagged[x0:x1, y0:y1]
+            outer = outside[x0:x1, y0:y1] | ((dwin > 0) & (dwin < layer))
+            if not (inner.any() and outer.any()):
+                continue
+            if mean_img[x, y] - win[inner].max() > min_excess * mad and win[outer].max() > mean_img[x, y]:
+                flagged[x, y] = True
+    if n_layers > 1 and flagged.any():
+        groups, _ = ndimage.label(flagged, structure=ndimage.generate_binary_structure(2, 1))
+        flagged &= np.isin(groups, np.unique(groups[flagged & (depth == 1)]))
+    return flagged
+
+
 def shrink_rois_to_fit(
         roi_mask: np.ndarray, stack: np.ndarray, n_artifact: int = 0, roi_ids=None, highpass_frames: float = 40.,
         margin: float = 0.3, min_rel_corr: float = 0.0, min_ref_corr: float = 0.2, min_size: int = 6,
-        min_keep_frac: float = 0.6, local_px: int = 2, min_group: int = 2) -> tuple[np.ndarray, dict]:
-    """Remove border pixels whose activity does not belong to the ROI, e.g. of an ROI drawn one pixel too large.
+        min_keep_frac: float = 0.6, local_px: int = 2, min_group: int = 2, bright_excess: float | None = 5.,
+        bright_layer_frac: float = 0.5) -> tuple[np.ndarray, dict]:
+    """Remove border pixels that do not belong to the ROI, e.g. of an ROI drawn one pixel too large.
 
     Conservative by design: most ROIs are left unchanged. Per ROI (python format, labels > 0):
 
@@ -535,19 +588,28 @@ def shrink_rois_to_fit(
        the mean of the pixels outside the ROI within ``local_px`` of it (``corr_out``: neighbouring cell or
        neuropil; light artifact rows excluded).
     3. The reference is the median ``corr_in`` of the core (pixels without a 4-neighbour outside the ROI; all pixels
-       if the core has fewer than 3). ROIs with a reference below ``min_ref_corr`` have too little signal to judge and
-       are left unchanged (``low_signal``), as are ROIs with fewer than ``min_size`` pixels (``too_small``).
-    4. A *border* pixel does not fit if it belongs to its surround, ``corr_out > corr_in + margin`` (e.g. part of a
-       neighbouring cell), or has no signal of the ROI at all, ``corr_in < min_rel_corr * reference`` (e.g. a dark
-       gap or vessel). Border pixels of the cell itself keep part of its signal (optical blur), also when dim, and are
-       kept: pixels just outside a cell still correlate with it, so a ROI that is one pixel too large is only changed
-       where that pixel clearly belongs elsewhere. Only connected groups (8-neighbourhood) of at least ``min_group``
-       such pixels are removed: an ROI drawn too large has a whole edge that does not fit, single pixels are mostly
-       noise. Defaults are strict, so that most ROIs and most fields are left unchanged (validation: 1.7 % of 1340
-       ROIs changed, 6 of 16 fields none; ``docs/motion_qc.md``). ``SHRINK_SENSITIVE`` is for a single ROI that looks
-       wrong. Pixels exactly between two touching cells are mixed (optical blur) and often not detected.
-    5. The ROI is left unchanged if it would keep fewer than ``min_keep_frac`` of its pixels (``too_many``) or split
-       into several parts (``split``). Pixels are never added, ROI labels are kept, only one border layer is checked.
+       if the core has fewer than 3). ROIs with a reference below ``min_ref_corr`` have too little signal to judge by
+       correlation (``low_signal``; only the brightness gate 5 applies). ROIs with fewer than ``min_size`` pixels are
+       left unchanged (``too_small``).
+    4. Correlation gates: a *border* pixel does not fit if it belongs to its surround, ``corr_out > corr_in + margin``
+       (e.g. part of a neighbouring cell), or has no signal of the ROI at all, ``corr_in < min_rel_corr * reference``
+       (e.g. a dark gap or vessel). Border pixels of the cell itself keep part of its signal (optical blur), also when
+       dim, and are kept: pixels just outside a cell still correlate with it, so a ROI that is one pixel too large is
+       only changed where that pixel clearly belongs elsewhere. Only connected groups (8-neighbourhood) of at least
+       ``min_group`` such pixels are removed: an ROI drawn too large has a whole edge that does not fit, single pixels
+       are mostly noise. Pixels exactly between two touching cells are mixed (optical blur) and often not detected.
+    5. Brightness gate (independent of 4 and of ``min_group``): the brightness of a cell falls off from its centre to
+       its border. A border pixel (time-averaged stack) that is brighter than all its inner neighbours by more than
+       ``bright_excess`` times the ROI's brightness MAD, with an outer neighbour brighter still, takes its light from
+       outside the ROI, typically a bright neighbouring cell whose activity it adds to the ROI trace. Large ROIs get
+       more than one layer checked (``bright_layer_frac``, see ``_bright_border_pixels``). The field edge and the
+       light artifact rows do not count as border (a cell cut off there is brightest at the cut). Also applied to
+       ``low_signal`` ROIs. ``bright_excess=None`` disables the gate.
+    6. The ROI is left unchanged if it would keep fewer than ``min_keep_frac`` of its pixels (``too_many``) or split
+       into several parts (``split``). Pixels are never added, ROI labels are kept.
+
+    Defaults are strict, so that most ROIs and most fields are left unchanged (validation in ``docs/motion_qc.md``).
+    ``SHRINK_SENSITIVE`` is for a single ROI that looks wrong.
 
     Args:
         roi_mask: Label mask in python format (0 background, ROI labels > 0), shape (x, y).
@@ -556,8 +618,8 @@ def shrink_rois_to_fit(
         roi_ids: Labels of the ROIs to check. Default: all.
 
     Returns:
-        The shrunk mask (python format) and a dict label -> dict(status, n_px, n_removed, ref_corr, removed (list of
-        (x, y))).
+        The shrunk mask (python format) and a dict label -> dict(status, n_px, n_removed, n_bright, ref_corr,
+        removed (list of (x, y)), removed_bright (the part of removed flagged by the brightness gate)).
     """
     from scipy import ndimage
 
@@ -574,14 +636,22 @@ def shrink_rois_to_fit(
     out_mask, info = roi_mask.copy(), dict()
     four = ndimage.generate_binary_structure(2, 1)
     # High-passed, z-scored traces of all pixels that can be used (ROIs to check and their surround)
-    used = ndimage.binary_dilation(np.isin(roi_mask, labels), iterations=local_px) if len(labels) else roi_mask > 0
+    used = ndimage.binary_dilation(np.isin(roi_mask, labels), iterations=max(local_px, 1)) \
+        if len(labels) else roi_mask > 0
+    raw = stack[used]
     zs = np.zeros(roi_mask.shape + (stack.shape[2],))
-    zs[used] = _zscored_highpass(stack[used], highpass_frames)
+    zs[used] = _zscored_highpass(raw, highpass_frames)
+    mean_img = np.full(roi_mask.shape, np.nan)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)  # all-NaN pixels
+        mean_img[used] = np.nanmean(raw, axis=1)
+    del raw
 
     for label in labels:
         roi = roi_mask == label
         n_px = int(roi.sum())
-        d = dict(status='unchanged', n_px=n_px, n_removed=0, ref_corr=np.nan, removed=[])
+        d = dict(status='unchanged', n_px=n_px, n_removed=0, n_bright=0, ref_corr=np.nan, removed=[],
+                 removed_bright=[])
         info[int(label)] = d
         if n_px < min_size:
             d['status'] = 'too_small'
@@ -594,30 +664,51 @@ def shrink_rois_to_fit(
         core = ~border
         ref = float(np.median(corr_in[core] if core.sum() >= 3 else corr_in))
         d['ref_corr'] = ref
-        if not ref >= min_ref_corr:
-            d['status'] = 'low_signal'
-            continue
+
+        bright = set()
+        if bright_excess is not None:
+            # Crop with one free pixel around the ROI; beyond the field edge counts as inside (not a cell border)
+            x0, x1, y0, y1 = max(xs.min() - 1, 0), min(xs.max() + 2, nx), max(ys.min() - 1, 0), min(ys.max() + 2, ny)
+            edge = ((int(x0 == 0), int(x1 == nx)), (int(y0 == 0), int(y1 == ny)))
+            inside = np.pad(roi[x0:x1, y0:y1] | ~valid[x0:x1, y0:y1], 1, constant_values=0)
+            for axis, (lo, hi) in enumerate(edge):
+                sl = [slice(None), slice(None)]
+                if lo:
+                    sl[axis] = 0
+                    inside[tuple(sl)] = True
+                if hi:
+                    sl[axis] = -1
+                    inside[tuple(sl)] = True
+            mean_crop = np.pad(np.nan_to_num(mean_img[x0:x1, y0:y1]), 1)
+            flagged = _bright_border_pixels(np.pad(roi[x0:x1, y0:y1], 1), mean_crop, inside, bright_excess,
+                                            bright_layer_frac)
+            fx, fy = np.nonzero(flagged)
+            bright = {int(np.flatnonzero((xs == x + x0 - 1) & (ys == y + y0 - 1))[0]) for x, y in zip(fx, fy)}
 
         remove = []
-        for i in np.flatnonzero(border):
-            if corr_in[i] < min_rel_corr * ref:
-                remove.append(i)
-                continue
-            x0, x1 = max(xs[i] - local_px, 0), min(xs[i] + local_px + 1, nx)
-            y0, y1 = max(ys[i] - local_px, 0), min(ys[i] + local_px + 1, ny)
-            surround = ~roi[x0:x1, y0:y1] & valid[x0:x1, y0:y1]
-            if surround.sum() < 2:
-                continue
-            out_mean = zs[x0:x1, y0:y1][surround].mean(axis=0, keepdims=True)
-            if _corr_with(z[i:i + 1], out_mean)[0] > corr_in[i] + margin:
-                remove.append(i)
+        if not ref >= min_ref_corr:
+            d['status'] = 'low_signal'  # too little signal for the correlation gates
+        else:
+            for i in np.flatnonzero(border):
+                if corr_in[i] < min_rel_corr * ref:
+                    remove.append(i)
+                    continue
+                x0, x1 = max(xs[i] - local_px, 0), min(xs[i] + local_px + 1, nx)
+                y0, y1 = max(ys[i] - local_px, 0), min(ys[i] + local_px + 1, ny)
+                surround = ~roi[x0:x1, y0:y1] & valid[x0:x1, y0:y1]
+                if surround.sum() < 2:
+                    continue
+                out_mean = zs[x0:x1, y0:y1][surround].mean(axis=0, keepdims=True)
+                if _corr_with(z[i:i + 1], out_mean)[0] > corr_in[i] + margin:
+                    remove.append(i)
 
-        if len(remove) > 0 and min_group > 1:
-            flagged = np.zeros_like(roi)
-            flagged[xs[remove], ys[remove]] = True
-            groups, _ = ndimage.label(flagged, structure=np.ones((3, 3)))
-            sizes = np.bincount(groups.ravel())
-            remove = [i for i in remove if sizes[groups[xs[i], ys[i]]] >= min_group]
+            if len(remove) > 0 and min_group > 1:
+                flagged = np.zeros_like(roi)
+                flagged[xs[remove], ys[remove]] = True
+                groups, _ = ndimage.label(flagged, structure=np.ones((3, 3)))
+                sizes = np.bincount(groups.ravel())
+                remove = [i for i in remove if sizes[groups[xs[i], ys[i]]] >= min_group]
+        remove = sorted(set(remove) | bright)
         if len(remove) == 0:
             continue
         new_roi = roi.copy()
@@ -629,7 +720,9 @@ def shrink_rois_to_fit(
             d['status'] = 'split'
             continue
         out_mask[roi & ~new_roi] = 0
-        d.update(status='shrunk', n_removed=len(remove), removed=[(int(xs[i]), int(ys[i])) for i in remove])
+        d.update(status='shrunk', n_removed=len(remove), n_bright=len(bright),
+                 removed=[(int(xs[i]), int(ys[i])) for i in remove],
+                 removed_bright=[(int(xs[i]), int(ys[i])) for i in sorted(bright)])
 
     return out_mask, info
 

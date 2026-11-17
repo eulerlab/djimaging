@@ -1324,8 +1324,8 @@ class InteractiveRoiCanvas(RoiCanvas):
 
     def create_widget_shrink_roi(self):
         widget = Button(description='Shrink ROI', disabled=False, button_style='warning',
-                        tooltip='Remove border pixels of the selected ROI that do not fit its activity '
-                                '(shrink_rois_to_fit; most ROIs stay unchanged). Undo restores them.')
+                        tooltip='Remove border pixels of the selected ROI that do not fit its activity or are lit '
+                                'by a brighter neighbour (shrink_rois_to_fit). Undo restores them.')
         widget.on_click(self.exec_shrink_roi)
         return widget
 
@@ -1364,7 +1364,8 @@ class InteractiveRoiCanvas(RoiCanvas):
             self.update_info()
         if roi_ids is not None and len(roi_ids) == 1:
             d = info.get(int(roi_ids[0]), dict(status='unknown ROI', n_removed=0))
-            msg = f"ROI {roi_ids[0]}: {d['status']}" + (f", {d['n_removed']} px removed" if d['n_removed'] else '')
+            msg = f"ROI {roi_ids[0]}: {d['status']}" + (f", {d['n_removed']} px removed" if d['n_removed'] else '') + \
+                (f" ({d['n_bright']} too bright)" if d.get('n_bright') else '')
         else:
             msg = f"{len(shrunk)} of {len(info)} ROIs shrunk, {sum(d['n_removed'] for d in shrunk.values())} px removed"
         self.widget_info.value = f"n_px={np.sum(self.current_mask)} | shrink: {msg}"

@@ -304,7 +304,8 @@ ROIs') and `correct_roi_masks(shrink=True)` (files, review, deploy). Per ROI, on
 `corr_in` = correlation with the rest of the ROI, `corr_out` = with the pixels outside within 2 px; reference = median
 `corr_in` of the core. A border pixel does not fit if `corr_out > corr_in + margin` (belongs to the surround, e.g. a
 neighbour) or `corr_in < min_rel_corr * reference` (no signal of the ROI, e.g. a dark gap / vessel); only connected
-groups of `min_group` such pixels are removed; ROIs that would lose > 40 % or split stay as drawn.
+groups of `min_group` such pixels are removed; ROIs that would lose > 40 % or split stay as drawn. Independent third
+gate since 2026-11-17: border pixels lit by a brighter neighbour (`bright_excess`, see "Brightness gate" below).
 
 Key observation (real data, pixel classes): correlation with the cell falls off smoothly outside the ROI (blur, somata
 larger than the ROI): pixels 1 px outside keep a median of 0.51 of the ROI's correlation, 2 px outside 0.24-0.28. So a
@@ -332,6 +333,37 @@ Real data (16 xy fields, 1340 ROIs), decided on the field mask presentation, eva
 
 The strict default matches the expectation "most fields need nothing, some 1-3 ROIs"; the few ROIs it changes get
 slightly better traces. The sensitive preset is for a single ROI that looks wrong in the canvas (undo restores it).
+
+### Brightness gate (2026-11-17)
+
+Motivation: 20181011/1 GCL0 ROI 3 has one border pixel, (24, 5), lit by the much brighter ROI 9 next to it; its trace
+carries ROI 9's activity. Correlation does not catch it reliably: the high-pass removes most of the foreign slow
+signal, `corr_in` drops only to 0.13-0.39 (reference 0.61-0.75), and the strict default keeps it on all three
+presentations.
+
+Observations (16 fields, border pixels of the field mask presentation):
+- Brightness falls off towards the border: the layer inside the border is brighter than the border in 93 % of ROIs.
+  Large ROIs often have a darker centre (nuclear exclusion: 25 % of ROIs ≥ 3 layers deep), so a pixel is compared
+  only with its inner neighbours, not with the centre.
+- A robust z-score against the ROI's pixels does not work (ROI 3's pixel: z = 3; dim ROIs with a gradient have a
+  large spread). Used: excess over the brightest inner neighbour in units of the ROI's brightness MAD, plus "an outer
+  neighbour is brighter still" (the light comes from outside). 12 % of border pixels are brighter than all inner
+  neighbours, 8 % also have a brighter outer neighbour, so a threshold is needed.
+- ROI 3's pixel is a weak violation: excess 1.4 / 2.5 / 1.2 MAD on DS / Chirp / MC11.
+
+Gate only (`margin`, `min_rel_corr` disabled), held-out evaluation as above:
+
+| `bright_excess` | ROIs changed | fields unchanged | dQI median (per ROI > 0) | dNP median (per ROI < 0) |
+|---|---|---|---|---|
+| 1 (sensitive) | 235 (17.5 %) | 0 / 16 | -0.003 (0.35) | -0.006 (0.74) |
+| 5 (strict default) | 24 (1.8 %) | 4 / 16 | +0.001 (0.58) | -0.013 (0.79) |
+
+Combined with the correlation gates: strict 47 ROIs (3.5 %, 0-8 per field, 3 / 16 fields unchanged; dQI +0.002,
+62 % > 0; dNP -0.007), sensitive 419 ROIs (31 %; dQI -0.001). Thresholds 2 / 3 / 8 change 136 / 87 / 33 ROIs
+(strict). Low thresholds make the traces less contaminated (dNP) but noisier (fewer pixels, dQI < 0), so the strict
+default stays at 5; the sensitive preset (1) catches ROI 3's pixel on all presentations. Pixels at the field edge and
+at the light artifact rows are not border (a cut-off cell is brightest at the cut). Layers checked:
+max(1, round(0.5 · sqrt(n_px / π))), i.e. 2 layers from 29 px (largest quarter of the ROIs).
 
 ## ROIs without pixels in a presentation (ChirpQI failure, 2026-11-13)
 

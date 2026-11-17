@@ -201,10 +201,15 @@ is removed if
 
 - it correlates clearly more with the pixels just outside the ROI than with the ROI (e.g. part of a neighbouring cell),
   or
-- it carries almost no signal of the ROI (e.g. a dark gap or vessel).
+- it carries almost no signal of the ROI (e.g. a dark gap or vessel), or
+- it is clearly brighter than the ROI further inside while the pixel just outside is brighter still (brightness should
+  fall off from the centre of a cell to its border; such a pixel is lit by a bright neighbour and adds its activity to
+  the trace). The field edge and the light artifact do not count as border. Large ROIs get 2 layers checked.
 
-Pixels are removed only in connected groups, never added; ROI ids are kept; ROIs that would lose more than 40 % of
-their pixels or split stay as drawn, as do ROIs with too little signal or fewer than 6 pixels.
+The two correlation criteria remove pixels only in connected groups and skip ROIs with too little signal; the
+brightness criterion also removes single pixels and also checks ROIs with too little signal. Pixels are never added;
+ROI ids are kept; ROIs that would lose more than 40 % of their pixels or split stay as drawn, as do ROIs with fewer
+than 6 pixels.
 
 | Where | Setting | Use |
 |---|---|---|
