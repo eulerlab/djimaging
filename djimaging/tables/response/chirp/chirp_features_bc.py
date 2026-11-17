@@ -49,8 +49,8 @@ class ChirpFeaturesBcTemplate(dj.Computed):
         ---
         polarity_index: float32 # Polarity index (POi) from Franke et al. 2017
         high_frequency_index: float32 # High Frequency Index (HFi) from Baden et al. 2013 and Franke et al. 2017
-        transience_index: float32 # Response transience index (RTi) from Franke et al. 2017
-        plateau_index: float32 # Response plateau index (RPi) from Franke et al. 2017 (corrected equation!)
+        transience_index = NULL : float32 # Response transience index (RTi) from Franke et al. 2017; NULL if no positive peak
+        plateau_index = NULL : float32 # Response plateau index (RPi) from Franke et al. 2017 (corrected equation!); NULL if no positive peak
         tonic_release_index: float32 # Tonic release index (TRi) from Franke et al. 2017
         l_freq_response : float32 # Low frequency response
         h_freq_response : float32 # High frequency response
@@ -121,7 +121,10 @@ class ChirpFeaturesBcTemplate(dj.Computed):
             snippets=snippets, fs=1 / mean_dt, constant=self._hfi_constant, plot=axs[1])
 
         # Normalize as in Franke et al. 2017
-        average /= np.max(np.abs(average))
+        max_abs = np.max(np.abs(average))
+        if not np.isfinite(max_abs) or max_abs <= 0:
+            raise ValueError(f"Average trace is flat or non-finite for {key}; cannot compute chirp features.")
+        average /= max_abs
         average = average - np.median(average[:int(self._fs_resample * self._t_on_step)])
 
         polarity_index = compute_polarity_index(
@@ -132,6 +135,10 @@ class ChirpFeaturesBcTemplate(dj.Computed):
 
         plateau_index = compute_plateau_index(
             average=average, fs=self._fs_resample, t_on_step=self._t_on_step, t_max=self._t_max, plot=axs[4])
+
+        if np.isnan(transience_index) or np.isnan(plateau_index):
+            warnings.warn(f"No positive on-peak in average for {key}: "
+                          f"RTi={transience_index}, RPi={plateau_index} are stored as NULL.")
 
         tonic_release_index = compute_tonic_release_index(
             average=average, fs=self._fs_resample,
@@ -365,7 +372,7 @@ def compute_peak_to_post_peak_ratio(
     -------
     float
         Ratio of post-peak response to peak response (or 1 - ratio if invert is True).
-        Returns -1 if the peak response is non-positive.
+        Returns NaN if the peak response is non-positive.
 
     Raises
     ------
@@ -378,6 +385,9 @@ def compute_peak_to_post_peak_ratio(
     idx_start = int(t_on_step * fs)
     idx_end = int(t_max * fs)
 
+    if idx_start < 1 or idx_start >= len(average):
+        raise ValueError(f"Trace of length {len(average)} too short for t_on_step={t_on_step} s at fs={fs} Hz")
+
     idx_peak = idx_start + np.argmax(average[idx_start:idx_end])
     idx_post_peak = idx_peak + int(alpha * fs)
     didx = int(alpha_dt * fs)
@@ -388,9 +398,8 @@ def compute_peak_to_post_peak_ratio(
     peak_response = np.maximum(0, average_norm[idx_peak])
     post_peak_response = np.maximum(0, np.mean(average_norm[idx_post_peak - didx:idx_post_peak + didx + 1]))
 
-    if peak_response <= 1e-9:
-        warnings.warn("Peak response can not be computed for <= 0 peak.")
-        response_index = -1
+    if not np.isfinite(peak_response) or peak_response <= 1e-9:
+        response_index = np.nan  # No positive peak; caller warns with context
     else:
         response_index = np.minimum(1, post_peak_response / peak_response)
         if invert:
