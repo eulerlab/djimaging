@@ -438,12 +438,14 @@ class ExpHistoryStimLogTemplate(dj.Computed):
         recs_by_exp.setdefault(exp_id, ([], []))
 
         stim_log_table = self.Stim.stim_log_table
-        stims = (stim_log_table & key).proj('t_start').to_dicts()
+        has_dur = 't_dur_s' in stim_log_table.heading.names
+        stims = (stim_log_table & key).proj('t_start', *(['t_dur_s'] if has_dur else [])).to_dicts()
         stim_starts = [exp_history_utils.seconds_of_day(s['t_start']) for s in stims]
+        stim_durs = [s['t_dur_s'] for s in stims] if has_dur else None  # negative: unknown
 
         offset, assigned = exp_history_utils.assign_stimuli_to_experiments(
             recs_by_exp, exp_id, stim_starts, max_offset_s=self._max_clock_offset_s,
-            tolerance_s=self._tolerance_s, pad_s=self._window_pad_s)
+            tolerance_s=self._tolerance_s, pad_s=self._window_pad_s, stim_durs_s=stim_durs)
 
         self.insert1(dict(**key, clock_offset_s=offset, n_stims=len(stims),
                           n_matched=sum(a[0] == 'recording' for a in assigned),

@@ -34,6 +34,7 @@ import html
 import io
 import json
 import os
+import re
 import warnings
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta
@@ -450,6 +451,9 @@ def experiment_gaps(events: pd.DataFrame, meta: Mapping) -> list[str]:
         gaps.append('No QDSpy log: stimuli are taken from the file names of the recordings only.')
     elif meta.get('clock_offset_s') is None:
         gaps.append('Clock offset between QDSpy and ScanM unknown: stimulus times are not aligned.')
+    else:
+        gaps.append(f"Stimulus times are shifted by an estimated {_fmt_shift(float(meta['clock_offset_s']))} "
+                    f"(QDSpy to ScanM clock), see Clock alignment.")
     if meta.get('stimulator_id') is None:
         gaps.append('No stimulator assigned: geometry, color map and calibration unknown.')
     elif meta.get('stimulator_confidence') not in (None, 'high'):
@@ -470,6 +474,97 @@ def experiment_gaps(events: pd.DataFrame, meta: Mapping) -> list[str]:
     ]
     gaps += [f"{n} {text}." for n, text in counts if n > 0]
     return gaps
+
+
+OVERRUN_TOLERANCE_S = 2.  # A stimulus that ends this much later than its recording counts as overrunning it
+
+
+def clock_alignment(events: pd.DataFrame, meta: Mapping) -> dict:
+    """How the stimulus times (QDSpy clock) were shifted to the recording clock (ScanM) and how well they fit.
+
+    Returns a dict with `status` ('aligned', 'not_aligned', 'no_log'), `clock_offset_s` and, for logged stimuli
+    placed with the offset: `n_logged`, `n_in_recording` (start during a recording), `n_fully_in_recording`,
+    `lag_s_min/median/max` (stimulus start - recording start) and `overrunning` (list of
+    `(rec_name, stimulus, overrun_s)`, stimuli that end more than `OVERRUN_TOLERANCE_S` after their recording).
+    Uses `t_start_rel_s`/`t_end_rel_s`, so it works with the output of `build_events`, `read_csv` and `read_nwb`.
+    """
+    offset = _float(meta.get('clock_offset_s'))
+    if not meta.get('has_stim_log'):
+        return dict(status='no_log', clock_offset_s=None)
+    led = events[events['event'] == 'led_stimulus']
+    logged = led[led['time_source'].isin(['qdspy+offset', 'qdspy_unaligned'])]
+    out = dict(status='aligned' if offset is not None else 'not_aligned', clock_offset_s=offset,
+               n_logged=len(logged))
+    if offset is None:
+        return out
+    laser = events[(events['event'] == 'laser_scan') & events['rec_name'].notna()]
+    rec_t = {r['rec_name']: (_float(r['t_start_rel_s']), _float(r['t_end_rel_s'])) for r in laser.to_dict('records')}
+    lags, overrunning, n_in, n_full = [], [], 0, 0
+    for e in logged.to_dict('records'):
+        if e.get('position_source') != 'simultaneous_recording' or e.get('rec_name') not in rec_t:
+            continue
+        r0, r1 = rec_t[e['rec_name']]
+        s0, s1 = _float(e.get('t_start_rel_s')), _float(e.get('t_end_rel_s'))
+        if r0 is None or s0 is None:
+            continue
+        n_in += 1
+        lags.append(s0 - r0)
+        if s1 is not None and r1 is not None and s1 - r1 > OVERRUN_TOLERANCE_S:
+            overrunning.append((e['rec_name'], e.get('stimulus'), s1 - r1))
+        else:
+            n_full += 1
+    out.update(n_in_recording=n_in, n_fully_in_recording=n_full, overrunning=overrunning,
+               lag_s_min=float(np.min(lags)) if lags else None,
+               lag_s_median=float(np.median(lags)) if lags else None,
+               lag_s_max=float(np.max(lags)) if lags else None)
+    return out
+
+
+def _fmt_shift(offset_s: float, signed: bool = True) -> str:
+    """Shift in s, with minutes if at least one minute, e.g. '-303.0 s (-5 min 3 s)' or '303.0 s (5 min 3 s)'."""
+    sign = ('+' if offset_s >= 0 else '-') if signed else ''
+    m, s = divmod(abs(offset_s), 60)
+    return f"{sign}{abs(offset_s):.1f} s" + (f" ({sign}{int(m)} min {s:.0f} s)" if m >= 1 else '')
+
+
+def _clock_section(events: pd.DataFrame, meta: Mapping) -> str:
+    c = clock_alignment(events, meta)
+    head = "<section class='clock'><h2>Clock alignment (assumed time shift)</h2>"
+    if c['status'] == 'no_log':
+        return (head + "<p>No QDSpy log: stimuli are only known from the recording file names and are drawn at the "
+                       "time of their recording. No time shift is applied.</p></section>")
+    if c['status'] == 'not_aligned':
+        return (head + "<p class='warn'><b>Stimulus times are NOT aligned to the recordings.</b> The clock offset "
+                       "between the stimulus PC (QDSpy) and the recording PC (ScanM) could not be estimated (no "
+                       "logged stimulus fits a recording within the allowed offset). Stimuli are drawn at their QDSpy "
+                       "time; their position relative to the laser scans is meaningless "
+                       f"({c['n_logged']} logged stimuli).</p></section>")
+    offset = c['clock_offset_s']
+    ahead = 'behind' if offset >= 0 else 'ahead of'
+    parts = [head,
+             f"<p class='shift'>All {c['n_logged']} logged stimulus times are shifted by <b>{_e(_fmt_shift(offset))}"
+             f"</b> (QDSpy time + shift = ScanM time): the stimulus PC clock is assumed to be "
+             f"{_e(_fmt_shift(offset, signed=False))} {ahead} the recording PC clock.</p>",
+             "<p>The two PCs have independent clocks. The shift is <b>estimated, not measured</b>: one constant for "
+             "the whole experiment (drift is neglected), chosen as the shift that fits most logged stimuli completely "
+             "into a recording, then the one with the shortest delays from recording start to stimulus start. "
+             "If that delay was never zero, the true shift is somewhat larger (by at most the smallest delay).</p>",
+             "<table class='kv'>",
+             f"<tr><th>stimuli starting during a recording</th><td>{c['n_in_recording']} of {c['n_logged']}</td></tr>",
+             f"<tr><th>of these fully inside their recording</th><td>{c['n_fully_in_recording']}</td></tr>"]
+    if c['lag_s_median'] is not None:
+        parts.append(f"<tr><th>delay recording start &rarr; stimulus start</th><td>min {c['lag_s_min']:.1f} s, "
+                     f"median {c['lag_s_median']:.1f} s, max {c['lag_s_max']:.1f} s</td></tr>")
+    parts.append("</table>")
+    if c['overrunning']:
+        items = ''.join(f"<li>{_e(s)} in {_e(r)}: ends {o:.0f} s after the recording</li>"
+                        for r, s, o in c['overrunning'])
+        parts.append(f"<p class='warn'>{len(c['overrunning'])} stimulus/stimuli end more than "
+                     f"{OVERRUN_TOLERANCE_S:.0f} s after their recording. A few: recording stopped early. Many, with "
+                     f"stimuli consistently in the recording after the one their name suggests: the shift is "
+                     f"probably wrong.</p><ul>{items}</ul>")
+    parts.append("</section>")
+    return ''.join(parts)
 
 
 _FIELD_KINDS = ('response', 'hr', 'unknown')  # recordings of a field; 'unknown': no stimulus part in the name
@@ -764,7 +859,9 @@ def render_html(events: pd.DataFrame, prior: pd.DataFrame | None, meta: Mapping,
         f"<h1>{_e(title)}</h1>",
         "<section><h2>Setup</h2><table class='kv'>", info, "</table></section>",
         "<section class='gaps'><h2>Gaps</h2><ul>", ''.join(f"<li>{_e(g)}</li>" for g in gaps), "</ul></section>",
-        "<section><h2>Timeline</h2>", _timeline_svg(events), _LEGEND, "</section>",
+        _clock_section(events, meta),
+        "<section><h2>Timeline</h2>", _timeline_note(meta), _timeline_key(events), _timeline_svg(events), _LEGEND,
+        "</section>",
     ]
     if fields is not None and len(fields) > 0:
         parts.append(_fields_section(fields, image_cmaps))
@@ -846,6 +943,11 @@ th { background:var(--head); position:sticky; top:0; cursor:pointer; white-space
 td.unknown { background:var(--unk); } td.na { color:var(--muted); }
 .kv th { text-align:left; cursor:default; position:static; }
 .scroll { overflow:auto; max-height:70vh; max-width:100%; }
+.clock { border-left:4px solid var(--led); padding-left:10px; } .clock .shift { font-size:16px; }
+.warn { color:var(--laser); }
+.tkey { font-size:12px; margin:4px 0 8px; } .tkey span { margin-right:12px; white-space:nowrap; }
+svg text.bl { fill:#fff; font-size:9px; pointer-events:none; } svg text.bl.on { fill:var(--fg); }
+svg text.bl.out { fill:var(--fg); stroke:var(--bg); stroke-width:3px; paint-order:stroke; }
 .gaps li { margin:2px 0; } .note { color:var(--muted); font-size:12px; }
 svg text { fill:var(--fg); font-size:11px; } .legend span { margin-right:16px; font-size:12px; }
 .sw { display:inline-block; width:14px; height:10px; margin-right:4px; vertical-align:middle; }
@@ -879,6 +981,104 @@ _LEGEND = ("<div class='legend'><span><i class='sw' style='background:var(--lase
            "</span></div>")
 
 
+def _timeline_note(meta: Mapping) -> str:
+    offset = _float(meta.get('clock_offset_s'))
+    if not meta.get('has_stim_log'):
+        return "<p class='note'>Time 0: first event. Stimuli from file names, drawn at their recording.</p>"
+    if offset is None:
+        return "<p class='note warn'>Time 0: first event. Logged stimuli are NOT aligned (QDSpy clock).</p>"
+    return (f"<p class='note'>Time 0: first event (ScanM clock). Logged stimuli are drawn at QDSpy time "
+            f"<b>{_e(_fmt_shift(offset))}</b> (estimated, see Clock alignment).</p>")
+
+
+def _name_words(name: str) -> list[str]:
+    """'RGC_MovingBar2' -> ['RGC', 'Moving', 'Bar', '2']: split at non-alphanumerics, case changes and digits."""
+    return re.findall(r'[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+', name)
+
+
+def _abbreviation_candidates(name: str) -> list[str]:
+    """Short codes for a stimulus or recording name, preferred first (the bars of the timeline are narrow).
+
+    Words are split by `_name_words`; numbers are kept. Several words: their initials, first without all-caps
+    words such as 'RGC' ('RGC_MovingBar' -> 'MB', then 'RMB'). One word: kept if at most 3 characters ('DN'), else
+    its first 2, then 3 letters ('Chirp' -> 'Ch', 'Chi'; 'Noise_RGC' -> 'No').
+    """
+    words = _name_words(name) or [name]
+    digits = ''.join(w for w in words if w.isdigit())
+    letters = [w for w in words if not w.isdigit()] or [name]
+    content = [w for w in letters if not (len(w) > 1 and w.isupper())] or letters
+    cands = []
+    for ws in (content, letters):
+        if len(ws) == 1:
+            w = ws[0]
+            cands += [w + digits] if len(w) <= 3 else [w[0].upper() + w[1] + digits, w[0].upper() + w[1:3] + digits]
+        else:
+            cands.append(''.join(w[0].upper() for w in ws) + digits)
+    return _unique(cands)
+
+
+def _abbreviations(names: Iterable[str], priority: Iterable[str] = ()) -> dict[str, str]:
+    """Unique short code for each name: names in `priority` first, then names that are their own code, each taking
+    the first free candidate of `_abbreviation_candidates`, else the first candidate with a number ('MB~2')."""
+    priority = set(priority)
+    names = sorted(set(names), key=lambda n: (n not in priority, _abbreviation_candidates(n)[0] != n, n.lower()))
+    out, used = {}, set()
+    for name in names:
+        cands = _abbreviation_candidates(name)
+        code = next((c for c in cands if c not in used), None)
+        k = 2
+        while code is None:
+            code = f"{cands[0]}~{k}" if f"{cands[0]}~{k}" not in used else None
+            k += 1
+        used.add(code)
+        out[name] = code
+    return out
+
+
+def _bar_label(e: Mapping) -> str | None:
+    """Name shown in a timeline bar: recordings: stimulus part of the file name (or the recording kind); stimuli:
+    the QDSpy stimulus file (or the file-name token if not in the log)."""
+    name = e.get('stimulus')
+    if not _notna(name) and e.get('event') == 'laser_scan':
+        name = e.get('kind') if e.get('kind') not in (None, UNKNOWN, 'response') else None
+    return str(name) if _notna(name) else None
+
+
+_LOGGED_TIME_SOURCES = ('qdspy+offset', 'qdspy_unaligned')
+
+
+def _timeline_codes(events: pd.DataFrame) -> dict[str, dict[str, str]]:
+    """Abbreviations of the bar names per event type. Stimuli from the QDSpy log get their code before stimuli
+    known only from a file name ('RGC_MovingBar' -> 'MB', a file-name token 'MB' -> 'MB~2')."""
+    records = events.to_dict('records')
+    out = {}
+    for ev in ('laser_scan', 'led_stimulus'):
+        recs = [e for e in records if e['event'] == ev]
+        names = [n for n in (_bar_label(e) for e in recs) if n]
+        logged = [_bar_label(e) for e in recs if e.get('time_source') in _LOGGED_TIME_SOURCES]
+        out[ev] = _abbreviations(names, priority=[n for n in logged if n])
+    return out
+
+
+def _timeline_key(events: pd.DataFrame) -> str:
+    """Explains the abbreviations in the timeline bars."""
+    rows = []
+    all_codes = _timeline_codes(events)
+    for event, color, what in [('laser_scan', 'laser', 'Recordings (stimulus part of the file name)'),
+                               ('led_stimulus', 'led', 'Stimuli (QDSpy stimulus file)')]:
+        codes = all_codes[event]
+        if not codes:
+            continue
+        items = ' '.join(f"<span><code style='color:var(--{color})'>{_e(c)}</code> {_e(n)}</span>"
+                         if c != n else f"<span><code style='color:var(--{color})'>{_e(c)}</code></span>"
+                         for n, c in sorted(codes.items(), key=lambda x: x[1].lower()))
+        rows.append(f"<div><b>{what}:</b> {items}</div>")
+    if not rows:
+        return ''
+    return ("<div class='tkey'>" + ''.join(rows) + "<div class='note'>Names are shown in or next to a bar if there is "
+            "room, always in its tooltip.</div></div>")
+
+
 def _timeline_svg(events: pd.DataFrame) -> str:
     t0 = pd.to_numeric(events['t_start_rel_s'], errors='coerce')
     t1 = pd.to_numeric(events['t_end_rel_s'], errors='coerce')
@@ -888,16 +1088,20 @@ def _timeline_svg(events: pd.DataFrame) -> str:
     lanes = fields + [UNKNOWN]
     t_max = float(np.nanmax(np.concatenate([t0.to_numpy(dtype=float), t1.to_numpy(dtype=float)])))
     t_max = max(t_max, 1.)
-    lane_h, left, width = 26, 90, 1000
+    records = events.to_dict('records')
+    codes = _timeline_codes(events)
+    lane_h, left, width, bar_h, char_w = 34, 90, 1000, 12, 5.5  # char_w: approx. width of a 9 px character
     height = lane_h * len(lanes) + 30
-    out = [f"<div class='scroll'><svg viewBox='0 0 {left + width + 10} {height}' width='100%' "
-           f"style='min-width:640px' role='img' aria-label='timeline'>"]
+    # Drawn at its natural size (not stretched to the page width), so that the text matches the rest of the report
+    out = [f"<div class='scroll'><svg viewBox='0 0 {left + width + 10} {height}' width='{left + width + 10}' "
+           f"height='{height}' role='img' aria-label='timeline'>"]
     for i, lane in enumerate(lanes):
         y = i * lane_h
-        out.append(f"<text x='4' y='{y + 17}'>{_e(lane)}</text>"
+        out.append(f"<text x='4' y='{y + 20}'>{_e(lane)}</text>"
                    f"<line x1='{left}' x2='{left + width}' y1='{y + lane_h}' y2='{y + lane_h}' "
                    f"stroke='var(--line)'/>")
-    for e, a, b in zip(events.to_dict('records'), t0, t1):
+    bars = []  # (y, x, w, solid, code)
+    for e, a, b in zip(records, t0, t1):
         if pd.isna(a):
             continue
         b = a if pd.isna(b) else b
@@ -905,16 +1109,36 @@ def _timeline_svg(events: pd.DataFrame) -> str:
         x = left + a / t_max * width
         w = max((b - a) / t_max * width, 1.5)
         laser = e['event'] == 'laser_scan'
-        y = lane * lane_h + (3 if laser else 14)
+        y = lane * lane_h + (3 if laser else 4 + bar_h)
         tip = _e(f"{e['event']} {e.get('rec_name') or ''} {e.get('stimulus') or ''} "
                  f"[{a / 60:.1f}-{b / 60:.1f} min] {e.get('incomplete') or ''}")
+        solid = True
         if laser:
             style = "fill='var(--laser)'"
         elif e.get('position_source') == 'next_recording':
-            style = "fill='none' stroke='var(--led)' stroke-dasharray='3 2'"
+            style, solid = "fill='none' stroke='var(--led)' stroke-dasharray='3 2'", False
+        elif e.get('listed') == 'unlisted':
+            style, solid = "fill='var(--led)' fill-opacity='0.4'", False
         else:
-            style = "fill='var(--led)'" + (" fill-opacity='0.4'" if e.get('listed') == 'unlisted' else '')
-        out.append(f"<rect x='{x:.1f}' y='{y}' width='{w:.1f}' height='9' {style}><title>{tip}</title></rect>")
+            style = "fill='var(--led)'"
+        out.append(f"<rect x='{x:.1f}' y='{y}' width='{w:.1f}' height='{bar_h}' {style}><title>{tip}</title></rect>")
+        label = _bar_label(e)
+        bars.append((y, x, w, solid, codes[e['event']].get(label) if label else None))
+
+    # Labels: inside the bar if it fits (white on solid bars), else into the free space up to the next bar of the
+    # same row (with a halo), else none (the name is in the tooltip)
+    for y, x, w, solid, code in bars:
+        if not code:
+            continue
+        text_w = len(code) * char_w + 2
+        if text_w <= w:
+            cls = 'bl' if solid else 'bl on'
+        else:
+            next_x = min([x2 for y2, x2, *_ in bars if y2 == y and x2 > x + 0.5] + [left + width + 10])
+            if text_w > next_x - x - 1:
+                continue
+            cls = 'bl out'
+        out.append(f"<text class='{cls}' x='{x + 2:.1f}' y='{y + bar_h - 3}'>{_e(code)}</text>")
     n_ticks = 6
     for k in range(n_ticks + 1):
         t = t_max * k / n_ticks

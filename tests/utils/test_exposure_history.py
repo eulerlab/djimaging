@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import date, datetime, timedelta
 
 import numpy as np
@@ -168,6 +169,60 @@ def test_unknown_clock_offset():
     assert e['t_start'] == T0 + timedelta(seconds=2)  # QDSpy clock unchanged
     gaps = eh.experiment_gaps(events, dict(has_stim_log=True, clock_offset_s=None))
     assert any('Clock offset' in g for g in gaps)
+
+
+def test_clock_alignment_in_report(events):
+    meta = dict(experiment='e', has_stim_log=True, clock_offset_s=-303.)
+    c = eh.clock_alignment(events, meta)
+    assert c['status'] == 'aligned' and c['n_logged'] == 3
+    assert c['n_in_recording'] == 2 and c['n_fully_in_recording'] == 2 and c['overrunning'] == []
+    assert (c['lag_s_min'], c['lag_s_max']) == pytest.approx((1., 2.))
+
+    page = eh.render_html(events, None, meta)
+    assert 'Clock alignment (assumed time shift)' in page
+    assert '-303.0 s (-5 min 3 s)' in page and '303.0 s (5 min 3 s) ahead of the recording PC clock' in page
+    assert 'estimated, not measured' in page
+    assert any('shifted by an estimated -303.0 s' in g for g in eh.experiment_gaps(events, meta))
+
+    # A stimulus that outlasts its recording is listed
+    stims = _stims()
+    stims.loc[1, 't_dur_s'] = 40.  # chirp recording: 30 s, the stimulus starts 2 s after it
+    c = eh.clock_alignment(eh.build_events(_recordings(), stims, clock_offset_s=60.), meta)
+    assert c['n_fully_in_recording'] == 1
+    assert [(r, s) for r, s, _ in c['overrunning']] == [('SMP_GCL0_chirp', 'RGC_Chirp')]
+    assert c['overrunning'][0][2] == pytest.approx(12.)
+
+    unaligned = eh.build_events(_recordings(), _stims(), clock_offset_s=None)
+    page = eh.render_html(unaligned, None, dict(experiment='e', has_stim_log=True, clock_offset_s=None))
+    assert 'NOT aligned' in page
+    page = eh.render_html(unaligned, None, dict(experiment='e', has_stim_log=False))
+    assert 'No time shift is applied' in page
+
+
+def test_timeline_abbreviations():
+    assert eh._abbreviations(['RGC_MovingBar', 'Chirp', 'Noise_RGC', 'DN', 'chirp1', 'noise_adapt']) == {
+        'RGC_MovingBar': 'MB', 'Chirp': 'Ch', 'Noise_RGC': 'No', 'DN': 'DN', 'chirp1': 'Ch1', 'noise_adapt': 'NA'}
+    # A name that is its own code keeps it; clashing names take their next candidate, then a number
+    assert eh._abbreviations(['MB', 'RGC_MovingBar']) == {'MB': 'MB', 'RGC_MovingBar': 'RMB'}
+    # Priority names (logged stimuli) first: a file-name token then gets a number
+    assert eh._abbreviations(['MB', 'RGC_MovingBar'], priority=['RGC_MovingBar']) == {
+        'RGC_MovingBar': 'MB', 'MB': 'MB~2'}
+    assert eh._abbreviations(['Chirp', 'chirp']) == {'Chirp': 'Ch', 'chirp': 'Chi'}
+    codes = eh._abbreviations(['Chirp', 'chirp', 'chirpy'])
+    assert len(set(codes.values())) == 3
+
+
+def test_timeline_labels_and_key(events):
+    page = eh.render_html(events, None, dict(experiment='e', has_stim_log=True, clock_offset_s=60.))
+    key = page[page.index("<div class='tkey'>"):]
+    key = key[:key.index('</div></div>')]
+    assert 'Recordings (stimulus part of the file name)' in key and 'Stimuli (QDSpy stimulus file)' in key
+    assert 'RGC_Chirp' in key and 'noise_adapt' in key  # explained abbreviations of the stimuli
+    labels = re.findall(r"<text class='bl[^']*'[^>]*>([^<]+)</text>", page)
+    rec_codes = eh._abbreviations(['chirp', 'wip'])  # recordings: stimulus part of the file name
+    stim_codes = eh._abbreviations(['noise_adapt', 'RGC_Chirp', 'wip_stim'])  # stimuli: QDSpy stimulus file
+    assert set(rec_codes.values()) <= set(labels)
+    assert {stim_codes['RGC_Chirp'], stim_codes['wip_stim']} <= set(labels)
 
 
 def test_no_stim_log():

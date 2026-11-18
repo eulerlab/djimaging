@@ -297,6 +297,65 @@ def test_match_stimuli_to_recordings_recovers_clock_offset():
     assert all(0 <= m[1] <= 6 + 1e-6 for m in matches[:3])
 
 
+# Real session (2022-02-15, xy-RGCs test data): per field the recordings MB, chirp, DN follow each other within ~15 s,
+# the stimuli MovingBar (~101 s), Chirp (165 s), Noise (302 s) are shown during them. The QDSpy clock is ~14-20 s ahead.
+_SESSION_RECS = [  # (recording, start in s of day (ScanM clock), scan duration in s)
+    ('OpticDisc', 43514., 2.56), ('GCL0_MB_C1', 44053., 129.664), ('GCL0_chirp_C1', 44200., 199.04),
+    ('GCL0_DN_C1', 44415., 327.936), ('GCL0_HR_C1', 44762., 10.015), ('GCL1_MB_C1', 44927., 152.704),
+    ('GCL1_chirp_C1', 45093., 194.56), ('GCL1_DN_C1', 45301., 336.), ('GCL1_HR_C1', 45659., 10.015),
+    ('GCL2_MB_C1', 45834., 127.744), ('GCL2_chirp_C1', 45975., 195.712), ('GCL2_DN_C1', 46190., 346.496),
+    ('GCL2_HR_C1', 46552., 10.015), ('GCL3_MB_C1', 46676., 140.8), ('GCL3_chirp_C1', 46830., 193.92),
+    ('GCL3_DN_C1', 47034., 336.768), ('GCL3_HR_C1', 47391., 10.015), ('GCL0_MB_C2', 47556., 129.92),
+    ('GCL0_chirp_C2', 47697., 195.968), ('GCL0_DN_C2', 47907., 347.264), ('GCL0_HR_C2', 48269., 10.015),
+    ('GCL1_MB_D', 49791., 0.), ('GCL1_chirp_D', 50055., 193.408), ('GCL1_DN_D', 50268., 339.712),
+    ('GCL1_MB1_D', 50620., 128.), ('GCL1_chirp1_D', 50759., 192.768), ('GCL1_HR_D', 50977., 10.015),
+    ('GCL2_MB_D', 51175., 153.344), ('GCL2_chirp_D', 51354., 190.72), ('GCL2_DN_D', 51558., 332.288),
+    ('GCL2_HR_D', 51906., 10.015), ('GCL3_MB_D', 52084., 124.928), ('GCL3_chirp_D', 52218., 205.056),
+    ('GCL3_DN_D', 52442., 337.024), ('GCL3_HR_D', 52794., 10.015),
+]
+_SESSION_STIMS = [  # (stimulus, start in s of day (QDSpy clock), duration in s); first 12: tests before recording
+    ('MovingBar', 43225., 7.), ('MovingBar', 43268., 11.), ('Noise', 43281., 32.), ('MovingBar', 43316., 10.),
+    ('MovingBar', 43353., 22.), ('MovingBar', 43401., 72.), ('MovingBar', 43554., 7.), ('MovingBar', 43673., 19.),
+    ('MovingBar', 43770., 36.), ('MovingBar', 43810., 6.), ('MovingBar', 43868., 7.), ('MovingBar', 43958., 7.),
+    ('MovingBar', 44073., 102.), ('Chirp', 44219., 165.), ('Noise', 44431., 302.),
+    ('MovingBar', 44944., 101.), ('Chirp', 45113., 165.), ('Noise', 45324., 302.),
+    ('MovingBar', 45852., 101.), ('Chirp', 45995., 165.), ('Noise', 46209., 302.),
+    ('MovingBar', 46694., 101.), ('Chirp', 46847., 165.), ('Noise', 47059., 303.),
+    ('MovingBar', 47574., 101.), ('Chirp', 47717., 165.), ('Noise', 47927., 303.),
+    ('MovingBar', 49814., 101.), ('Chirp', 50073., 165.), ('Noise', 50294., 302.),
+    ('MovingBar', 50637., 101.), ('Chirp', 50776., 165.), ('Noise', 51099., 6.),
+    ('MovingBar', 51191., 102.), ('Chirp', 51369., 165.), ('Noise', 51580., 302.),
+    ('MovingBar', 52098., 102.), ('Chirp', 52243., 165.), ('Noise', 52461., 302.),
+]
+
+
+def test_match_stimuli_to_recordings_uses_durations_for_back_to_back_recordings():
+    """Regression: with start times only, shifting all stimuli by one recording (+289 s) put more stimulus starts
+    into recordings than the true offset (~-14 s), but the stimuli then overran their recordings."""
+    rec_starts = [r[1] for r in _SESSION_RECS]
+    rec_ends = [r[1] + r[2] for r in _SESSION_RECS]
+    stim_starts = [s[1] for s in _SESSION_STIMS]
+    stim_durs = [s[2] for s in _SESSION_STIMS]
+
+    offset, matches = ehu.match_stimuli_to_recordings(rec_starts, rec_ends, stim_starts, stim_durs_s=stim_durs)
+    assert -20. <= offset <= -14.
+    expected_kind = {'MovingBar': '_MB', 'Chirp': '_chirp', 'Noise': '_DN'}
+    n_matched = 0
+    for (stim, _, _), (idx, lag) in zip(_SESSION_STIMS, matches):
+        if idx is None:
+            continue
+        n_matched += 1
+        assert expected_kind[stim] in _SESSION_RECS[idx][0]
+        assert 0. <= lag <= 20.
+    # Not matched: 12 tests before the first recording, MovingBar of GCL1_MB_D (no scan time), 6 s Noise (no recording)
+    assert n_matched == len(_SESSION_STIMS) - 14
+
+    # Durations given via assign_stimuli_to_experiments as well; unknown durations (None, NaN, < 0) are allowed
+    offset_a, _ = ehu.assign_stimuli_to_experiments(
+        {'A': (rec_starts, rec_ends)}, 'A', stim_starts, stim_durs_s=stim_durs[:-2] + [None, -1.])
+    assert -20. <= offset_a <= -14.
+
+
 def test_match_stimuli_to_recordings_without_match():
     assert ehu.match_stimuli_to_recordings([], [], [1., 2.]) == (None, [(None, None), (None, None)])
     assert ehu.match_stimuli_to_recordings([0.], [10.], []) == (None, [])

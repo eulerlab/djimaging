@@ -369,15 +369,24 @@ def seconds_of_day(value) -> float | None:
 
 def match_stimuli_to_recordings(
         rec_starts_s: Iterable[float], rec_ends_s: Iterable[float], stim_starts_s: Iterable[float],
-        max_offset_s: float = 900., tolerance_s: float = 2.) -> tuple[float | None, list]:
+        max_offset_s: float = 900., tolerance_s: float = 2.,
+        stim_durs_s: Iterable[float | None] | None = None) -> tuple[float | None, list]:
     """Find the recording during which each logged stimulus was shown.
 
-    QDSpy (stimulus PC) and ScanM (recording PC) have separate clocks. The clock offset is estimated as the shift of
-    the stimulus start times (within +-`max_offset_s`) that puts most stimulus starts into a recording
-    (from `tolerance_s` before its start until its end). Among equally good shifts, the one with most stimuli that
-    start after (not before) their recording start, and then with the smallest total time between recording start
-    and stimulus start is used. So it is a lower estimate of the true offset (stimuli usually start a few seconds
-    after the recording), off by at most the smallest of these lags.
+    QDSpy (stimulus PC) and ScanM (recording PC) have separate clocks. The clock offset (one constant per log, drift
+    is neglected) is estimated as the shift of the stimulus times (within +-`max_offset_s`) that best fits the
+    stimuli into the recordings. Candidate shifts are ranked by
+
+    1. the number of stimuli that lie fully inside a recording: start from `tolerance_s` before the recording start,
+       end at most `tolerance_s` after the recording end (stimuli without known duration: start inside),
+    2. the number of stimuli that start inside a recording (from `tolerance_s` before its start until its end),
+    3. the number of these that start after (not before) their recording start,
+    4. the smallest total time between recording start and stimulus start.
+
+    Rank 1 matters when recordings follow each other closely: shifting all stimuli by one recording then still puts
+    most stimulus starts into some recording, but the stimuli overrun the (shorter or longer) recordings.
+    Because of rank 4 the result is a lower estimate of the true offset (stimuli usually start a few seconds after
+    the recording), off by at most the smallest of these lags.
 
     Parameters
     ----------
@@ -385,6 +394,10 @@ def match_stimuli_to_recordings(
         Start and end of the recordings in seconds of the day (ScanM clock).
     stim_starts_s : Iterable[float]
         Start of the stimuli in seconds of the day (QDSpy clock).
+    max_offset_s, tolerance_s : float
+        Maximum absolute clock offset; tolerance at the recording start (and end, for the duration).
+    stim_durs_s : Iterable[float | None] | None
+        Duration of the stimuli in s. None, NaN or negative: unknown. None: all unknown (rank 1 = rank 2).
 
     Returns
     -------
@@ -402,7 +415,20 @@ def match_stimuli_to_recordings(
     if rec_starts.size == 0 or stim_starts.size == 0:
         return None, no_match
 
-    candidates = (rec_starts[:, None] - stim_starts[None, :]).ravel()
+    if stim_durs_s is None:
+        durs = np.full(stim_starts.size, np.nan)
+    else:
+        durs = np.array([np.nan if d is None else d for d in stim_durs_s], dtype=float)
+        if durs.size != stim_starts.size:
+            raise ValueError(f'{durs.size} stimulus durations for {stim_starts.size} stimuli')
+        durs[~(durs >= 0)] = np.nan
+    stim_ends = stim_starts + durs
+    has_dur = np.isfinite(stim_ends)
+
+    # Shifts that align a stimulus start with a recording start, or a stimulus end with a recording end
+    candidates = [(rec_starts[:, None] - stim_starts[None, :]).ravel(),
+                  (rec_ends[:, None] - stim_ends[None, has_dur]).ravel()]
+    candidates = np.concatenate(candidates)
     candidates = np.unique(np.round(candidates[np.abs(candidates) <= max_offset_s], 3))
     if candidates.size == 0:
         return None, no_match
@@ -414,11 +440,12 @@ def match_stimuli_to_recordings(
         n_matched = int(np.sum(np.any(inside, axis=1)))
         if n_matched == 0:
             continue
+        fits = ~has_dur[:, None] | ((stim_ends[:, None] + offset) <= rec_ends[None, :] + tolerance_s)
+        n_contained = int(np.sum(np.any(inside & fits, axis=1)))
         lags = np.where(inside, shifted[:, None] - rec_starts[None, :], np.inf)
         lags = lags[np.arange(lags.shape[0]), np.argmin(np.abs(lags), axis=1)]
         lags = lags[np.isfinite(lags)]
-        # Most matches, then most stimuli that start after (not before) the recording start, then smallest lags
-        score = (n_matched, int(np.sum(lags >= 0)), -float(np.sum(np.abs(lags))))
+        score = (n_contained, n_matched, int(np.sum(lags >= 0)), -float(np.sum(np.abs(lags))))
         if best is None or score > best[0]:
             best = (score, offset)
 
@@ -440,7 +467,8 @@ def match_stimuli_to_recordings(
 
 def assign_stimuli_to_experiments(
         recs_by_exp: dict, exp_id, stim_starts_s: Iterable[float],
-        max_offset_s: float = 900., tolerance_s: float = 2., pad_s: float = 600.) -> tuple[float | None, list]:
+        max_offset_s: float = 900., tolerance_s: float = 2., pad_s: float = 600.,
+        stim_durs_s: Iterable[float | None] | None = None) -> tuple[float | None, list]:
     """Assign the stimuli of a shared QDSpy log to one experiment, e.g. when two retinas were recorded in one session.
 
     The clock offset is estimated jointly from the recordings of all experiments that share the log
@@ -462,6 +490,8 @@ def assign_stimuli_to_experiments(
         Experiment for which to assign the stimuli.
     stim_starts_s : Iterable[float]
         Start of the stimuli in seconds of the day (QDSpy clock).
+    stim_durs_s : Iterable[float | None] | None
+        Duration of the stimuli in s (None, NaN or negative: unknown), see `match_stimuli_to_recordings`.
 
     Returns
     -------
@@ -484,7 +514,8 @@ def assign_stimuli_to_experiments(
             windows[eid] = (min(starts), max(ends))
 
     offset, matches = match_stimuli_to_recordings(
-        pool_starts, pool_ends, stim_starts, max_offset_s=max_offset_s, tolerance_s=tolerance_s)
+        pool_starts, pool_ends, stim_starts, max_offset_s=max_offset_s, tolerance_s=tolerance_s,
+        stim_durs_s=stim_durs_s)
 
     out = []
     for start, (idx, lag) in zip(stim_starts, matches):
