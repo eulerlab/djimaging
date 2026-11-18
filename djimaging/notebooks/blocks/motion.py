@@ -62,14 +62,14 @@ MotionParams().add(motion_params_id=1, skip_duplicates=True)
 MotionParams()
 
 # %%
-MotionReference().populate(display_progress=True)
+MotionReference().populate(display_progress=True, processes=5)
 MotionReference()
 
 # %%
 plot_if_data(MotionReference())
 
 # %%
-MotionDetection().populate(display_progress=True, processes=20)
+MotionDetection().populate(display_progress=True, processes=5)
 MotionDetection()
 
 # %%
