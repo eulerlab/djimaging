@@ -137,14 +137,14 @@ class HighResAlignmentTemplate(dj.Computed):
             stage_dz_um=_none_if_nan(hr[4] - pres[4]), hr_ch0=a['hr_ch0'].astype(np.float32),
             hr_ch1=None if a['hr_ch1'] is None else a['hr_ch1'].astype(np.float32)))
 
-    def plot1(self, key: dict | None = None, gamma: float = 0.7) -> None:
+    def plot1(self, key: dict | None = None, gamma: float = 0.5, hr_gamma: float = 0.4) -> None:
         """Mask presentation, aligned HR (both channels) with the ROI mask outlines, and an overlay
         (mask presentation green, aligned HR magenta).
 
         The HR images are shown **resampled to the pixel grid of the field** (in the frame of the ROI mask), so they
         can be compared pixel by pixel with the mask, which is why they look low resolution. The original
-        high resolution average (functional channel, from `HighRes.StackAverages`) is shown in its own panel, unaligned
-        and on its own pixel grid, so without mask outlines."""
+        high resolution average (functional channel, from `HighRes.StackAverages`) is shown in its own panel on its own
+        pixel grid, placed with the extent given by the alignment so the mask outlines match."""
         from matplotlib import pyplot as plt
         key = get_primary_key(self, key)
         row = (self & key).fetch1()
@@ -153,27 +153,42 @@ class HighResAlignmentTemplate(dj.Computed):
         roi_mask = load_array((self.roi_mask_table & key).fetch1('roi_mask'))
         ref0 = load_array((self.presentation_table.StackAverages & pres_key & dict(ch_name=func)).fetch1('ch_average'))
 
-        def norm(img):
+        def norm(img, gamma_=gamma):
             img = np.asarray(img, float)
             lo, hi = np.nanpercentile(img, [1, 99.5])
-            return np.nan_to_num(np.clip((img - lo) / max(hi - lo, 1e-12), 0, 1)) ** gamma
+            return np.nan_to_num(np.clip((img - lo) / max(hi - lo, 1e-12), 0, 1)) ** gamma_
 
         imgs = [(f'mask presentation ({func})', norm(ref0)), (f'HR resampled to field grid ({func})', norm(load_array(row['hr_ch0'])))]
         if row['hr_ch1'] is not None:
             imgs.append((f'HR resampled to field grid ({struct})', norm(load_array(row['hr_ch1']))))
         hr_orig = (self.highres_table.StackAverages & key & dict(ch_name=func)).to_arrays('ch_average')
-        hr_orig = norm(load_array(hr_orig[0])) if len(hr_orig) else None
+        hr_orig = norm(load_array(hr_orig[0]), hr_gamma) if len(hr_orig) else None
         n = len(imgs) + 1 + (hr_orig is not None)
         fig, axs = plt.subplots(1, n, figsize=(4 * n, 4.3))
+        def add_outline(ax):  # ROI mask outlines in field pixel coordinates (pixel centres at integer positions)
+            ax.contour((roi_mask < 0).T, levels=[0.5], colors='y', linewidths=0.6, origin='lower')
+
         for ax, (title, img) in zip(axs, imgs):
             ax.imshow(img.T, cmap='gray', origin='lower')
-            ax.contour((roi_mask < 0).T, levels=[0.5], colors='y', linewidths=0.6, origin='lower')
+            add_outline(ax)
             ax.set_title(title, fontsize=9)
-        if hr_orig is not None:  # own pixel grid and not shifted, so no mask outlines
-            axs[len(imgs)].imshow(hr_orig.T, cmap='gray', origin='lower')
-            axs[len(imgs)].set_title(f'HR original, unaligned ({func})', fontsize=9)
+        if hr_orig is not None:
+            # Own pixel grid, extent in field pixel coordinates: both FOVs are centred, HR pixel q is at field position
+            # (q - (n_hr - 1) / 2) / scale + (n_field - 1) / 2 - shift (inverse of `resample_to_field`).
+            scale = float(row['scale'])
+            sx, sy = float(row['shift_x']), float(row['shift_y'])
+
+            def edges(n_hr, n_field, shift):
+                return tuple((q - (n_hr - 1) / 2) / scale + (n_field - 1) / 2 - shift for q in (-0.5, n_hr - 0.5))
+
+            x0, x1 = edges(hr_orig.shape[0], roi_mask.shape[0], sx)
+            y0, y1 = edges(hr_orig.shape[1], roi_mask.shape[1], sy)
+            axs[len(imgs)].imshow(hr_orig.T, cmap='gray', origin='lower', extent=(x0, x1, y0, y1))
+            add_outline(axs[len(imgs)])
+            axs[len(imgs)].set_title(f'HR original, own pixel grid ({func})', fontsize=9)
         overlay = np.stack([imgs[1][1], imgs[0][1], imgs[1][1]], axis=-1)
         axs[-1].imshow(np.transpose(overlay, (1, 0, 2)), origin='lower')
+        add_outline(axs[-1])
         axs[-1].set_title('green: mask presentation, magenta: HR', fontsize=9)
         m0 = 'n/a' if row['match_ch0'] is None else f"{row['match_ch0']:.2f}"
         m1 = 'n/a' if row['match_ch1'] is None else f"{row['match_ch1']:.2f}"
