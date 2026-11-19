@@ -96,6 +96,11 @@ PACKAGE_PREFIX = 'dji_'
 NOTEBOOK_FORMATS = ('ipynb', 'py')
 DEFAULT_NOTEBOOK_FORMAT = 'ipynb'
 
+# Layout of the notebooks: 'blocks' (default): numbered notebooks, one per part of the schema (01_setup, ...),
+# 'single': all of them in one notebook named like the project.
+NOTEBOOK_LAYOUTS = ('blocks', 'single')
+DEFAULT_NOTEBOOK_LAYOUT = 'blocks'
+
 # First heading of the parts of the core notebook block that start the 02_roi_masks and 03_traces notebooks.
 NOTEBOOK_ROIS_SECTION = "# %% [markdown]\n# # Core: ROIs\n"
 
@@ -180,6 +185,10 @@ def parse_args(argv=None):
         help="File format of the notebooks: 'ipynb' (Jupyter notebooks) or 'py' (percent-format Python scripts, "
              "which can be opened as notebooks with jupytext). Default: 'ipynb'.")
     parser.add_argument(
+        '--notebook-layout', choices=list(NOTEBOOK_LAYOUTS), default=None,
+        help="'blocks': numbered notebooks following the block structure (01_setup, 02_roi_masks, ...), 'single': all "
+             "steps in one notebook. Default: ask interactively, or 'blocks'.")
+    parser.add_argument(
         '--legacy-userinfo-stacks', action='store_true',
         help='Use the old design without Channel table: the stacks are defined by data_stack_name and alt_stack_name '
              'in UserInfo (functional channel and alternative channel) and one trace per ROI is extracted.')
@@ -202,10 +211,13 @@ def main(argv=None):
 
     djimaging_dir = os.path.dirname(os.path.abspath(__file__))
     project_dir = os.path.abspath(args.target_dir) if args.target_dir else default_project_dir(djimaging_dir, project)
+    notebook_layout = select_notebook_layout(args)
+    print(f"Notebook layout: {notebook_layout}")
+
     command = make_command(project, blocks, channels, raw_params, target_dir=args.target_dir,
-                           notebook_format=args.notebook_format)
+                           notebook_format=args.notebook_format, notebook_layout=notebook_layout)
     create_project(djimaging_dir, project_dir, project, blocks, channels, raw_params, command=command,
-                   notebook_format=args.notebook_format)
+                   notebook_format=args.notebook_format, notebook_layout=notebook_layout)
 
 
 def validate_project_name(project):
@@ -282,6 +294,18 @@ def ask_choice(question, options, default):
         if answer in options:
             return answer
         print(f"Please answer one of: {', '.join(options)}")
+
+
+def select_notebook_layout(args):
+    """Get the notebook layout from the arguments or by asking the user (default: 'blocks')."""
+    layout = args.notebook_layout
+    if layout is None and sys.stdin.isatty():
+        print("Notebooks: 'blocks' = numbered notebooks following the block structure (01_setup, 02_roi_masks, ...), "
+              "'single' = all steps in one notebook.")
+        layout = ask_choice('Which notebook layout?', NOTEBOOK_LAYOUTS, DEFAULT_NOTEBOOK_LAYOUT)
+    layout = DEFAULT_NOTEBOOK_LAYOUT if layout is None else layout
+    assert layout in NOTEBOOK_LAYOUTS, f"notebook_layout must be one of {NOTEBOOK_LAYOUTS}"
+    return layout
 
 
 def select_raw_params(args):
@@ -615,13 +639,16 @@ def numbered_notebooks(parts):
 
 
 def build_notebooks(djimaging_dir, blocks, project, package=None, schema_module=None, channels=DEFAULT_CHANNELS,
-                    raw_params=None):
+                    raw_params=None, notebook_layout=DEFAULT_NOTEBOOK_LAYOUT):
     """Combine the notebook blocks to the notebooks of a project: {file name without extension: percent-format text}.
 
     The numbered notebooks (01_setup, 02_roi_masks, 03_traces, then one per further block, see `notebook_parts`) start
     with the same preamble (load config, import and activate the schema); only 01_setup creates the schema and shows
     the diagram. `drop_schema` (the clean-up section) is not numbered, so that it is never run by accident.
+
+    With notebook_layout='single', the numbered notebooks are combined to one notebook named like the project.
     """
+    assert notebook_layout in NOTEBOOK_LAYOUTS, f"notebook_layout must be one of {NOTEBOOK_LAYOUTS}"
     package = package_name(project) if package is None else package
     schema_module = f'{package}.schemas.{project}_schema' if schema_module is None else schema_module
     preamble = read_block(djimaging_dir, 'notebooks', 'preamble').strip("\n")
@@ -639,10 +666,19 @@ def build_notebooks(djimaging_dir, blocks, project, package=None, schema_module=
             .replace(CREATE_SCHEMA_PLACEHOLDER, repr(create_schema))
 
     notebooks = {}
-    for i, (stem, title, body) in enumerate(numbered):
-        first = i == 0
-        parts = [head(f"{stem[:2]}: {title}", stem, create_schema=first)] + ([overview] if first else []) + [body]
-        notebooks[stem] = "\n\n".join(parts) + "\n"
+    if notebook_layout == 'single':
+        sections = "\n".join(f"# {i}. {title}" for i, (_, title, _) in enumerate(numbered, 1))
+        intro = preamble.replace(NOTEBOOK_TITLE_PLACEHOLDER, 'All steps') \
+            .replace(NOTEBOOK_LIST_PLACEHOLDER, sections) \
+            .replace(CREATE_SCHEMA_PLACEHOLDER, repr(True)) \
+            .replace("Notebooks of the project", "Notebook of the project") \
+            .replace(", run them in this order:", ", with these steps (in this order):")
+        notebooks[project] = "\n\n".join([intro, overview] + [body for _, _, body in numbered]) + "\n"
+    else:
+        for i, (stem, title, body) in enumerate(numbered):
+            first = i == 0
+            parts = [head(f"{stem[:2]}: {title}", stem, create_schema=first)] + ([overview] if first else []) + [body]
+            notebooks[stem] = "\n\n".join(parts) + "\n"
     notebooks['drop_schema'] = "\n\n".join(
         [head('Drop schema', None, create_schema=False),
          read_block(djimaging_dir, 'notebooks', 'cleanup').strip("\n")]) + "\n"
@@ -680,7 +716,7 @@ def is_inside(path, folder):
 
 
 def make_command(project, blocks, channels=DEFAULT_CHANNELS, raw_params=None, target_dir=None,
-                 notebook_format=DEFAULT_NOTEBOOK_FORMAT):
+                 notebook_format=DEFAULT_NOTEBOOK_FORMAT, notebook_layout=DEFAULT_NOTEBOOK_LAYOUT):
     """The make_project command with every option given explicitly, so that it creates the same project again without
     asking (it is recorded in the README of the project)."""
     raw_params = validate_raw_params(dict(DEFAULT_RAW_PARAMS if raw_params is None else raw_params))
@@ -691,7 +727,8 @@ def make_command(project, blocks, channels=DEFAULT_CHANNELS, raw_params=None, ta
     else:
         argv += ['--n-functional', str(channels[0]), '--n-background', str(channels[1])]
     argv += ['--from-raw-data', 'yes' if raw_params['from_raw_data'] else 'no',
-             '--igor-roi-masks', raw_params['igor_roi_masks'], '--notebook-format', notebook_format]
+             '--igor-roi-masks', raw_params['igor_roi_masks'], '--notebook-format', notebook_format,
+             '--notebook-layout', notebook_layout]
     if target_dir is not None:
         argv += ['--target-dir', target_dir]
     return shlex.join(argv)
@@ -905,14 +942,23 @@ def next_steps(project, project_dir):
             f"4. Open the notebooks in {package_name(project)}/notebooks. They use the kernel '{project}'.\n")
 
 
-def build_readme(djimaging_dir, project_dir, project, blocks, notebook_titles, command):
+def build_readme(djimaging_dir, project_dir, project, blocks, notebook_titles, command, single_notebook=False):
     """README of the project. `notebook_titles`: [(file name without extension, title)] of the numbered notebooks."""
     package = package_name(project)
     djimaging_path = djimaging_source_path(djimaging_dir, project_dir)
     extras = djimaging_extras(blocks)
     pip_target = f'"{djimaging_path}[{",".join(extras)}]"' if extras else f'"{djimaging_path}"'
     block_rows = "\n".join(f"| `{name}` | {BLOCKS[name]['description']} |" for name in blocks)
-    notebook_rows = "\n".join(f"| `{stem}` | {title} |" for stem, title in notebook_titles)
+    if single_notebook:
+        notebooks_text = f"The notebook is in `{package}/notebooks/`. It has these sections, run them in this order:"
+        notebook_header = "| Section | Content |\n|---|---|"
+        notebook_rows = "\n".join(f"| {i} | {title} |" for i, (_, title) in enumerate(notebook_titles, 1))
+        drop_text = "`drop_schema` (a separate notebook) drops the schema with all its data."
+    else:
+        notebooks_text = f"The notebooks are in `{package}/notebooks/`. Run them in this order:"
+        notebook_header = "| Notebook | Content |\n|---|---|"
+        notebook_rows = "\n".join(f"| `{stem}` | {title} |" for stem, title in notebook_titles)
+        drop_text = "`drop_schema` drops the schema with all its data."
     return f"""# {project}
 
 TODO: describe the project.
@@ -963,13 +1009,12 @@ Own table templates go to `{package}/tables/` (see the example `my_table.py`) an
 
 ## Notebooks
 
-The notebooks are in `{package}/notebooks/`. Run them in this order:
+{notebooks_text}
 
-| Notebook | Content |
-|---|---|
+{notebook_header}
 {notebook_rows}
 
-`drop_schema` drops the schema with all its data.
+{drop_text}
 
 ## Tests
 
@@ -987,19 +1032,21 @@ def percent_to_ipynb(text, project):
 
 
 def build_project_files(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS, raw_params=None,
-                        command=None, notebook_format=DEFAULT_NOTEBOOK_FORMAT):
+                        command=None, notebook_format=DEFAULT_NOTEBOOK_FORMAT,
+                        notebook_layout=DEFAULT_NOTEBOOK_LAYOUT):
     """All files of a new project: {path relative to the project folder (with /): text}."""
     package = package_name(project)
     command = make_command(project, blocks, channels, raw_params) if command is None else command
     notebooks = build_notebooks(djimaging_dir, blocks, project, package=package, channels=channels,
-                                raw_params=raw_params)
+                                raw_params=raw_params, notebook_layout=notebook_layout)
     notebook_titles = [(stem, title) for stem, title, _ in numbered_notebooks(
         notebook_parts(djimaging_dir, blocks, channels, raw_params))]
     with open(os.path.join(djimaging_dir, 'djimaging', 'tables', '_new_table_example.py'), 'r', encoding='utf8') as f:
         example_table = f.read()
 
     files = {
-        'README.md': build_readme(djimaging_dir, project_dir, project, blocks, notebook_titles, command),
+        'README.md': build_readme(djimaging_dir, project_dir, project, blocks, notebook_titles, command,
+                                single_notebook=notebook_layout == 'single'),
         'pyproject.toml': build_pyproject(project, blocks, djimaging_source_path(djimaging_dir, project_dir)),
         '.gitignore': GITIGNORE,
         '.gitattributes': GITATTRIBUTES,
@@ -1023,13 +1070,13 @@ def build_project_files(djimaging_dir, project_dir, project, blocks, channels=DE
 
 
 def create_project(djimaging_dir, project_dir, project, blocks, channels=DEFAULT_CHANNELS, raw_params=None,
-                   command=None, notebook_format=DEFAULT_NOTEBOOK_FORMAT):
+                   command=None, notebook_format=DEFAULT_NOTEBOOK_FORMAT, notebook_layout=DEFAULT_NOTEBOOK_LAYOUT):
     """Write the files of a new project to `project_dir`. Existing files are never overwritten, they are skipped.
     Returns the created and the skipped files (relative paths)."""
     assert not is_inside(project_dir, djimaging_dir), \
         f"The project folder {project_dir} must be outside the djimaging repo {djimaging_dir}."
     files = build_project_files(djimaging_dir, project_dir, project, blocks, channels, raw_params, command,
-                           notebook_format)
+                                notebook_format, notebook_layout)
 
     created, skipped = [], []
     for relpath, text in files.items():

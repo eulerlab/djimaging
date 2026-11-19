@@ -13,4 +13,5 @@ RfRoiOffset().populate(display_progress=True, processes=20)
 RfRoiOffset()
 
 # %%
-plot_if_data(RfRoiOffset(), method='plot')
+plot_if_data(RfRoiOffset & (SplitRF() & "split_qidx>0.45").proj(), method='plot')
+#plot_if_data(RfRoiOffset(), method='plot')

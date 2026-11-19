@@ -486,6 +486,21 @@ def test_create_project_py_notebooks(tmp_path):
     assert make_project.parse_args(['x']).notebook_format == 'ipynb'
 
 
+def test_create_project_single_notebook(tmp_path):
+    project_dir = tmp_path / 'tester'
+    blocks = make_project.resolve_blocks(['basic'])
+    command = make_project.make_command('tester', blocks, notebook_layout='single')
+    assert '--notebook-layout single' in command
+    make_project.create_project(ROOT, str(project_dir), 'tester', blocks, command=command, notebook_format='py',
+                                notebook_layout='single')
+    names = sorted(p.name for p in (project_dir / 'dji_tester' / 'notebooks').iterdir())
+    assert names == ['drop_schema.py', 'tester.py']
+    text = (project_dir / 'dji_tester' / 'notebooks' / 'tester.py').read_text(encoding='utf8')
+    assert text.count('create_schema=True') == 1 and '# # Core: ROIs' in text and '# # Core: Traces' in text
+    ast.parse(text)
+    assert make_project.parse_args(['x']).notebook_layout is None
+
+
 def test_create_project_never_overwrites(tmp_path):
     project_dir = tmp_path / 'tester'
     (project_dir / 'dji_tester').mkdir(parents=True)
@@ -512,13 +527,13 @@ def test_main_creates_project(tmp_path, monkeypatch):
     assert (project_dir / 'dji_tester' / 'schemas' / 'tester_schema.py').is_file()
     readme = (project_dir / 'README.md').read_text(encoding='utf8')
     assert ' \\\n    --blocks location \\\n    --n-functional 1 \\\n    --n-background 1 \\\n    --from-raw-data no ' \
-           '\\\n    --igor-roi-masks yes \\\n    --notebook-format ipynb \\\n    --target-dir ' in readme
+           '\\\n    --igor-roi-masks yes \\\n    --notebook-format ipynb \\\n    --notebook-layout blocks \\\n    --target-dir ' in readme
 
 
 def test_format_command_is_the_same_shell_command():
     command = make_project.make_command('tester', ['core', 'basic'], target_dir='a b/--c')
     lines = make_project.format_command(command, prefix='#   ').splitlines()
-    assert all(line.startswith('#   ') for line in lines) and len(lines) == 8
+    assert all(line.startswith('#   ') for line in lines) and len(lines) == 9
     assert shlex.split(" ".join(line[4:].rstrip('\\') for line in lines)) == shlex.split(command)
 
 
