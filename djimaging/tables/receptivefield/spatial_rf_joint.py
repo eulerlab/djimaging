@@ -169,7 +169,7 @@ class FitSRFJointTemplate(dj.Computed):
         for row, srf, srf_fit, srf_center_fit, params in zip(rows, srfs, srf_fits, srf_center_fits, srf_params):
             area, diameter = compute_gauss_srf_area(params, pix_x_um, pix_y_um)
             entries.append(dict(
-                **key, **row,
+                **{**key, **row},  # row holds the full primary key of the split RF table (overlaps with key)
                 srf_fit=srf_fit.astype(np.float32),
                 srf_center_fit=srf_center_fit.astype(np.float32),
                 srf_params=params,
