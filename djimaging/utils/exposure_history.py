@@ -1019,7 +1019,8 @@ def _abbreviations(names: Iterable[str], priority: Iterable[str] = ()) -> dict[s
     """Unique short code for each name: names in `priority` first, then names that are their own code, each taking
     the first free candidate of `_abbreviation_candidates`, else the first candidate with a number ('MB~2')."""
     priority = set(priority)
-    names = sorted(set(names), key=lambda n: (n not in priority, _abbreviation_candidates(n)[0] != n, n.lower()))
+    # The name itself is the last sort key: `set` order of tied names (e.g. 'Chirp'/'chirp') is hash-seeded
+    names = sorted(set(names), key=lambda n: (n not in priority, _abbreviation_candidates(n)[0] != n, n.lower(), n))
     out, used = {}, set()
     for name in names:
         cands = _abbreviation_candidates(name)
