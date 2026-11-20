@@ -38,7 +38,6 @@ This estimate also assumes uniform pixel spacing over the full line, including t
 unverified.
 """
 
-import warnings
 from abc import abstractmethod
 
 import datajoint as dj
@@ -76,6 +75,7 @@ def fit_affine_roi_to_rf(roi_xy: np.ndarray, rf_xy: np.ndarray, groups: np.ndarr
     (or reflection) and `S` symmetric positive semi-definite.
 
     Expected for a correct geometry and unbiased RF centers: rotation 0, scales 1, shear 0, no reflection.
+    Not robust to outliers (e.g. failed RF fits at the stimulus border): restrict to good RFs first.
 
     Parameters
     ----------
