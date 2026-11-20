@@ -349,6 +349,9 @@ class ExpHistoryStimLogTemplate(dj.Computed):
     _max_clock_offset_s = 900.  # Maximum clock difference between the QDSpy and the ScanM computer
     _tolerance_s = 2.  # A stimulus may start this much before the recording and is still assigned to it
     _window_pad_s = 600.  # Stimuli without recording this close to the recordings of an experiment belong to it
+    # Optional: Stimulus table. If bound, its aliases and stimulus hashes / name lists are used (besides the file
+    # names) to tell whether a recording file name names a logged stimulus, see `make`.
+    stimulus_table = None
 
     @property
     def definition(self):
@@ -421,31 +424,47 @@ class ExpHistoryStimLogTemplate(dj.Computed):
 
         The offset is estimated jointly for all experiments that share the QDSpy log file (e.g. two retinas recorded
         in one session). Stimuli of the other experiments get status 'outside', see
-        `exp_history_utils.assign_stimuli_to_experiments`.
+        `exp_history_utils.assign_stimuli_to_experiments`. Recordings whose file name names a logged stimulus (stimulus
+        part of the file name vs. QDSpy stimulus file, and Stimulus table aliases if `stimulus_table` is bound) weigh
+        most in the fit, see `exp_history_utils.match_stimuli_to_recordings`.
         """
         pk = self.exp_history_table.primary_key
         exp_id = tuple(key[k] for k in pk)
+        aliases, stimuli = {}, []
+        if self.stimulus_table is not None:
+            stim_names, stim_aliases, stim_hashes, stim_dicts = self.stimulus_table().to_arrays(
+                'stim_name', 'alias', 'stim_hash', 'stim_dict')
+            aliases = dict(zip(stim_names, stim_aliases))
+            stimuli = list(zip(stim_names, stim_hashes, stim_dicts))
+
         recs_by_exp, own_recs = {}, []
         for sib in self._shared_log_experiments(key):
             sib_id = tuple(sib[k] for k in pk)
             recs = (self.exp_history_table.Recording & sib & 'rec_start IS NOT NULL').proj(
-                'rec_start', 'rec_dur_s').to_dicts(order_by='rec_start')
+                'rec_start', 'rec_dur_s', 'kind', 'stim_token').to_dicts(order_by='rec_start')
             starts = [exp_history_utils.seconds_of_day(r['rec_start']) for r in recs]
             ends = [s + (r['rec_dur_s'] or 0.) for s, r in zip(starts, recs)]
-            recs_by_exp[sib_id] = (starts, ends)
+            names = [exp_history_utils.recording_name_keys(r['stim_token'], listed_stimuli(r['stim_token'], aliases))
+                     if r['kind'] == 'response' else set() for r in recs]
+            recs_by_exp[sib_id] = (starts, ends, names)
             if sib_id == exp_id:
                 own_recs = recs
-        recs_by_exp.setdefault(exp_id, ([], []))
+        recs_by_exp.setdefault(exp_id, ([], [], []))
 
         stim_log_table = self.Stim.stim_log_table
-        has_dur = 't_dur_s' in stim_log_table.heading.names
-        stims = (stim_log_table & key).proj('t_start', *(['t_dur_s'] if has_dur else [])).to_dicts()
+        attrs = [a for a in ('t_dur_s', 'stim_file_name', 'stim_md5', 'aborted') if a in stim_log_table.heading.names]
+        stims = (stim_log_table & key).proj('t_start', *attrs).to_dicts()
         stim_starts = [exp_history_utils.seconds_of_day(s['t_start']) for s in stims]
-        stim_durs = [s['t_dur_s'] for s in stims] if has_dur else None  # negative: unknown
+        stim_durs = [s['t_dur_s'] for s in stims] if 't_dur_s' in attrs else None  # negative: unknown
+        stim_names = [exp_history_utils.stimulus_name_keys(
+            s.get('stim_file_name'), exp_history_utils.logged_stimulus_name(
+                s.get('stim_md5'), s.get('stim_file_name'), stimuli)) for s in stims]
+        stim_aborted = [s['aborted'] for s in stims] if 'aborted' in attrs else None
 
         offset, assigned = exp_history_utils.assign_stimuli_to_experiments(
             recs_by_exp, exp_id, stim_starts, max_offset_s=self._max_clock_offset_s,
-            tolerance_s=self._tolerance_s, pad_s=self._window_pad_s, stim_durs_s=stim_durs)
+            tolerance_s=self._tolerance_s, pad_s=self._window_pad_s, stim_durs_s=stim_durs,
+            stim_names=stim_names, stim_aborted=stim_aborted)
 
         self.insert1(dict(**key, clock_offset_s=offset, n_stims=len(stims),
                           n_matched=sum(a[0] == 'recording' for a in assigned),

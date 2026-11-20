@@ -34,13 +34,14 @@ import html
 import io
 import json
 import os
-import re
 import warnings
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta
 
 import numpy as np
 import pandas as pd
+
+from djimaging.utils.exp_history_utils import name_words
 
 UNKNOWN = 'unknown'
 NOT_APPLICABLE = 'n/a'
@@ -546,9 +547,11 @@ def _clock_section(events: pd.DataFrame, meta: Mapping) -> str:
              f"</b> (QDSpy time + shift = ScanM time): the stimulus PC clock is assumed to be "
              f"{_e(_fmt_shift(offset, signed=False))} {ahead} the recording PC clock.</p>",
              "<p>The two PCs have independent clocks. The shift is <b>estimated, not measured</b>: one constant for "
-             "the whole experiment (drift is neglected), chosen as the shift that fits most logged stimuli completely "
-             "into a recording, then the one with the shortest delays from recording start to stimulus start. "
-             "If that delay was never zero, the true shift is somewhat larger (by at most the smallest delay).</p>",
+             "the whole experiment (drift is neglected), fitted to all recordings at once. It is the shift that puts "
+             "a stimulus of the name in the file name into most recordings (aborted test runs do not count), then "
+             "fits most logged stimuli completely into a recording, then has the shortest delays from recording "
+             "start to stimulus start. If that delay was never zero, the true shift is somewhat larger (by at most "
+             "the smallest delay).</p>",
              "<table class='kv'>",
              f"<tr><th>stimuli starting during a recording</th><td>{c['n_in_recording']} of {c['n_logged']}</td></tr>",
              f"<tr><th>of these fully inside their recording</th><td>{c['n_fully_in_recording']}</td></tr>"]
@@ -991,19 +994,14 @@ def _timeline_note(meta: Mapping) -> str:
             f"<b>{_e(_fmt_shift(offset))}</b> (estimated, see Clock alignment).</p>")
 
 
-def _name_words(name: str) -> list[str]:
-    """'RGC_MovingBar2' -> ['RGC', 'Moving', 'Bar', '2']: split at non-alphanumerics, case changes and digits."""
-    return re.findall(r'[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+', name)
-
-
 def _abbreviation_candidates(name: str) -> list[str]:
     """Short codes for a stimulus or recording name, preferred first (the bars of the timeline are narrow).
 
-    Words are split by `_name_words`; numbers are kept. Several words: their initials, first without all-caps
+    Words are split by `name_words`; numbers are kept. Several words: their initials, first without all-caps
     words such as 'RGC' ('RGC_MovingBar' -> 'MB', then 'RMB'). One word: kept if at most 3 characters ('DN'), else
     its first 2, then 3 letters ('Chirp' -> 'Ch', 'Chi'; 'Noise_RGC' -> 'No').
     """
-    words = _name_words(name) or [name]
+    words = name_words(name) or [name]
     digits = ''.join(w for w in words if w.isdigit())
     letters = [w for w in words if not w.isdigit()] or [name]
     content = [w for w in letters if not (len(w) > 1 and w.isupper())] or letters

@@ -8,8 +8,10 @@ exported from it (`SMP_<name>.h5`). Both are linked by the recording name `<name
 from __future__ import annotations
 
 import os
+import re
 import warnings
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from datetime import datetime, timedelta, time
 from typing import Iterable, Optional
 
@@ -356,6 +358,14 @@ def match_field_recordings(name_infos: dict, field_key: dict, field_key_names: I
     return sorted(matches)
 
 
+def ref_path(value) -> str | None:
+    """Store-relative POSIX path of a fetched `<filepath>` attribute (ObjectRef or str); None if missing."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return None
+    path = getattr(value, 'path', value)
+    return PurePosixPath(str(path).replace('\\', '/')).as_posix()
+
+
 def seconds_of_day(value) -> float | None:
     """Seconds since midnight of a datetime, time or timedelta (MySQL TIME is fetched as timedelta)."""
     if value is None:
@@ -367,26 +377,117 @@ def seconds_of_day(value) -> float | None:
     raise TypeError(f"Unsupported time type {type(value)}")
 
 
+def name_words(name: str) -> list[str]:
+    """'RGC_MovingBar2' -> ['RGC', 'Moving', 'Bar', '2']: split at non-alphanumerics, case changes and digits."""
+    return re.findall(r'[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+', name)
+
+
+def recording_name_keys(stim_token: str | None, listed_stim_names: Iterable[str] = ()) -> set[str]:
+    """Names of the stimulus of a recording, to compare with `stimulus_name_keys` of a logged stimulus.
+
+    `stim_token` is the stimulus part of the file name, lower-cased, without non-alphanumerics and trailing digits
+    ('MB1' -> 'mb'; ignored if shorter than 2 characters). `listed_stim_names` are the Stimulus table names the
+    recording is listed for (`stimulus_listing.listed_stimuli`), added as 'stim:<name>'.
+    """
+    keys = {f'stim:{n}' for n in listed_stim_names or () if n}
+    if stim_token is not None:
+        token = re.sub(r'\d+$', '', re.sub(r'[^a-z0-9]', '', str(stim_token).lower()))
+        if len(token) >= 2:
+            keys.add(token)
+    return keys
+
+
+def stimulus_name_keys(stim_file_name: str | None, stim_name: str | None = None) -> set[str]:
+    """Names under which a logged QDSpy stimulus may appear in a recording file name, see `recording_name_keys`.
+
+    From the stimulus file name (extension and digits dropped, lower-cased): each word, all words joined, and the
+    initials if there are several words, each with and without all-caps words such as 'RGC'. E.g. 'RGC_MovingBar'
+    -> 'movingbar', 'mb', 'rmb', 'moving', ...; 'Contrast Saturation Local' -> 'csl', ...; 'Chirp' -> 'chirp'.
+    `stim_name` (Stimulus table name of the log entry, if known) is added as 'stim:<name>'.
+    """
+    keys = {f'stim:{stim_name}'} if stim_name else set()
+    if stim_file_name is None:
+        return keys
+    stem, ext = os.path.splitext(os.path.basename(str(stim_file_name)))
+    words = [w for w in name_words(stem if ext.lower() in ('.py', '.pickle', '.pkl') else stem + ext)
+             if not w.isdigit()]
+    content = [w for w in words if not (len(w) > 1 and w.isupper())] or words
+    keys |= {w.lower() for w in words}
+    for ws in (words, content):
+        if ws:
+            keys.add(''.join(ws).lower())
+        if len(ws) > 1:
+            keys.add(''.join(w[0] for w in ws).lower())
+    return keys
+
+
+def logged_stimulus_name(md5: str | None, file_name: str | None, stimuli: Iterable) -> str | None:
+    """Stimulus table name of a logged QDSpy stimulus, as PresentationLog matches them: md5 equal to `stim_hash` or
+    in `stim_hash_list`, else a file name that starts with a name of `stim_name_list` (only if unique).
+
+    `stimuli`: `(stim_name, stim_hash, stim_dict)` per Stimulus table entry. None if no (unique) match.
+    """
+    names = []
+    for stim_name, stim_hash, stim_dict in stimuli:
+        stim_dict = stim_dict or {}
+        hashes = ({stim_hash} | set(stim_dict.get('stim_hash_list', []))) - {'', None}
+        if md5 is not None and md5 in hashes:
+            return stim_name
+        if file_name is not None and any(str(file_name).lower().startswith(str(n).lower())
+                                         for n in stim_dict.get('stim_name_list', []) if n):
+            names.append(stim_name)
+    return names[0] if len(names) == 1 else None
+
+
+def _names_match(stim_names, rec_names, n_stims: int, n_recs: int) -> np.ndarray:
+    """(n_stims, n_recs) bool: the name sets of stimulus and recording share a name."""
+    out = np.zeros((n_stims, n_recs), dtype=bool)
+    if stim_names is None or rec_names is None:
+        return out
+    stim_names, rec_names = list(stim_names), list(rec_names)
+    if len(stim_names) != n_stims or len(rec_names) != n_recs:
+        raise ValueError(f'{len(stim_names)} stimulus and {len(rec_names)} recording names for {n_stims} stimuli and '
+                         f'{n_recs} recordings')
+    for j, rn in enumerate(rec_names):
+        if rn:
+            for i, sn in enumerate(stim_names):
+                out[i, j] = bool(sn) and not set(sn).isdisjoint(rn)
+    return out
+
+
 def match_stimuli_to_recordings(
         rec_starts_s: Iterable[float], rec_ends_s: Iterable[float], stim_starts_s: Iterable[float],
         max_offset_s: float = 900., tolerance_s: float = 2.,
-        stim_durs_s: Iterable[float | None] | None = None) -> tuple[float | None, list]:
+        stim_durs_s: Iterable[float | None] | None = None,
+        rec_names: Iterable[set | None] | None = None, stim_names: Iterable[set | None] | None = None,
+        stim_aborted: Iterable[bool] | None = None) -> tuple[float | None, list]:
     """Find the recording during which each logged stimulus was shown.
 
     QDSpy (stimulus PC) and ScanM (recording PC) have separate clocks. The clock offset (one constant per log, drift
     is neglected) is estimated as the shift of the stimulus times (within +-`max_offset_s`) that best fits the
-    stimuli into the recordings. Candidate shifts are ranked by
+    stimuli into the recordings. All recordings are fitted at once, so there is no anchor recording: test runs
+    before or between recordings (e.g. moving bars to probe a field) lie outside all recordings at the true shift and
+    do not pull the fit. Candidate shifts are ranked by
 
-    1. the number of stimuli that lie fully inside a recording: start from `tolerance_s` before the recording start,
-       end at most `tolerance_s` after the recording end (stimuli without known duration: start inside),
-    2. the number of stimuli that start inside a recording (from `tolerance_s` before its start until its end),
-    3. the number of these that start after (not before) their recording start,
-    4. the smallest total time between recording start and stimulus start.
+    1. the number of *named* recordings: recordings whose name matches a (not aborted) stimulus that starts inside
+       it (`rec_names`, `stim_names`). Recordings, not stimuli, are counted, so repeated runs do not count twice,
+       and a single mislabelled recording costs one point,
+    2. the number of (not aborted) stimuli of known duration that lie fully inside a recording: start from
+       `tolerance_s` before the recording start, end at most `tolerance_s` after the recording end,
+    3. the number of named recordings whose matching stimulus starts after (not before) the recording start,
+    4. the smallest total time between recording start and matching stimulus start of the named recordings,
+    5. the number of stimuli that start inside a recording (from `tolerance_s` before its start until its end),
+    6. the number of these that start after (not before) their recording start,
+    7. the smallest total time between recording start and stimulus start.
 
-    Rank 1 matters when recordings follow each other closely: shifting all stimuli by one recording then still puts
-    most stimulus starts into some recording, but the stimuli overrun the (shorter or longer) recordings.
-    Because of rank 4 the result is a lower estimate of the true offset (stimuli usually start a few seconds after
-    the recording), off by at most the smallest of these lags.
+    Ranks 1 and 2 matter when recordings follow each other closely: shifting all stimuli by one recording then still
+    puts most stimulus starts into some recording, but into recordings of other stimuli, which they also overrun.
+    Stimuli are usually shorter than their recordings, so a range of shifts keeps every stimulus in its named
+    recording; ranks 3 and 4 then put the stimuli right after the recording starts, before ranks 5-7 count stimuli
+    in recordings without matching name (e.g. a test run during an optic disc scan). Without names, ranks 1, 3 and 4
+    are equal for all shifts.
+    Because of the lag ranks the result is a lower estimate of the true offset (stimuli usually start a few seconds
+    after the recording), off by at most the smallest of these lags.
 
     Parameters
     ----------
@@ -397,7 +498,12 @@ def match_stimuli_to_recordings(
     max_offset_s, tolerance_s : float
         Maximum absolute clock offset; tolerance at the recording start (and end, for the duration).
     stim_durs_s : Iterable[float | None] | None
-        Duration of the stimuli in s. None, NaN or negative: unknown. None: all unknown (rank 1 = rank 2).
+        Duration of the stimuli in s. None, NaN or negative: unknown. None: all unknown (rank 2 is not used).
+    rec_names, stim_names : Iterable[set | None] | None
+        Per recording and per stimulus a set of names (`recording_name_keys`, `stimulus_name_keys`); they match if
+        the sets intersect. None (either): names unknown, rank 1 is not used.
+    stim_aborted : Iterable[bool] | None
+        Per stimulus: aborted in QDSpy (typically a test run). Aborted stimuli do not count for ranks 1 and 2.
 
     Returns
     -------
@@ -424,6 +530,15 @@ def match_stimuli_to_recordings(
         durs[~(durs >= 0)] = np.nan
     stim_ends = stim_starts + durs
     has_dur = np.isfinite(stim_ends)
+    named_pairs = _names_match(stim_names, rec_names, stim_starts.size, rec_starts.size)
+    if stim_aborted is not None:
+        aborted = np.array([bool(a) for a in stim_aborted], dtype=bool)
+        if aborted.size != stim_starts.size:
+            raise ValueError(f'{aborted.size} aborted flags for {stim_starts.size} stimuli')
+        named_pairs &= ~aborted[:, None]
+    else:
+        aborted = np.zeros(stim_starts.size, dtype=bool)
+    evidence = has_dur & ~aborted  # stimuli that count for rank 2
 
     # Shifts that align a stimulus start with a recording start, or a stimulus end with a recording end
     candidates = [(rec_starts[:, None] - stim_starts[None, :]).ravel(),
@@ -440,12 +555,18 @@ def match_stimuli_to_recordings(
         n_matched = int(np.sum(np.any(inside, axis=1)))
         if n_matched == 0:
             continue
-        fits = ~has_dur[:, None] | ((stim_ends[:, None] + offset) <= rec_ends[None, :] + tolerance_s)
+        fits = evidence[:, None] & ((stim_ends[:, None] + offset) <= rec_ends[None, :] + tolerance_s)
         n_contained = int(np.sum(np.any(inside & fits, axis=1)))
-        lags = np.where(inside, shifted[:, None] - rec_starts[None, :], np.inf)
-        lags = lags[np.arange(lags.shape[0]), np.argmin(np.abs(lags), axis=1)]
+        all_lags = np.where(inside, shifted[:, None] - rec_starts[None, :], np.inf)
+        # Named recordings: lag of the name-matching stimulus closest to the recording start
+        named_lags = np.where(inside & named_pairs, all_lags, np.inf)
+        named_lags = named_lags[np.argmin(np.abs(named_lags), axis=0), np.arange(named_lags.shape[1])]
+        named_lags = named_lags[np.isfinite(named_lags)]
+        # All stimuli: lag to the recording they start in
+        lags = all_lags[np.arange(all_lags.shape[0]), np.argmin(np.abs(all_lags), axis=1)]
         lags = lags[np.isfinite(lags)]
-        score = (n_contained, n_matched, int(np.sum(lags >= 0)), -float(np.sum(np.abs(lags))))
+        score = (named_lags.size, n_contained, int(np.sum(named_lags >= 0)), -float(np.sum(np.abs(named_lags))),
+                 n_matched, int(np.sum(lags >= 0)), -float(np.sum(np.abs(lags))))
         if best is None or score > best[0]:
             best = (score, offset)
 
@@ -468,7 +589,8 @@ def match_stimuli_to_recordings(
 def assign_stimuli_to_experiments(
         recs_by_exp: dict, exp_id, stim_starts_s: Iterable[float],
         max_offset_s: float = 900., tolerance_s: float = 2., pad_s: float = 600.,
-        stim_durs_s: Iterable[float | None] | None = None) -> tuple[float | None, list]:
+        stim_durs_s: Iterable[float | None] | None = None, stim_names: Iterable[set | None] | None = None,
+        stim_aborted: Iterable[bool] | None = None) -> tuple[float | None, list]:
     """Assign the stimuli of a shared QDSpy log to one experiment, e.g. when two retinas were recorded in one session.
 
     The clock offset is estimated jointly from the recordings of all experiments that share the log
@@ -484,14 +606,17 @@ def assign_stimuli_to_experiments(
     Parameters
     ----------
     recs_by_exp : dict
-        `exp_id -> (rec_starts_s, rec_ends_s)` in seconds of the day (ScanM clock), recordings in the order that the
-        returned indices should refer to. Must contain `exp_id`.
+        `exp_id -> (rec_starts_s, rec_ends_s)` or `(rec_starts_s, rec_ends_s, rec_names)` in seconds of the day
+        (ScanM clock), recordings in the order that the returned indices should refer to. Must contain `exp_id`.
+        `rec_names`: per recording a set of names (`recording_name_keys`), see `match_stimuli_to_recordings`.
     exp_id : hashable
         Experiment for which to assign the stimuli.
     stim_starts_s : Iterable[float]
         Start of the stimuli in seconds of the day (QDSpy clock).
     stim_durs_s : Iterable[float | None] | None
         Duration of the stimuli in s (None, NaN or negative: unknown), see `match_stimuli_to_recordings`.
+    stim_names, stim_aborted : Iterable | None
+        Per stimulus a set of names (`stimulus_name_keys`) and the aborted flag, see `match_stimuli_to_recordings`.
 
     Returns
     -------
@@ -501,13 +626,17 @@ def assign_stimuli_to_experiments(
         status is `'recording'`).
     """
     stim_starts = np.asarray(list(stim_starts_s), dtype=float)
-    pool_starts, pool_ends, pool_exp, pool_local = [], [], [], []
+    pool_starts, pool_ends, pool_names, pool_exp, pool_local = [], [], [], [], []
     windows = {}
-    for eid, (starts, ends) in recs_by_exp.items():
-        starts, ends = list(starts), list(ends)
-        for i, (s, e) in enumerate(zip(starts, ends)):
+    for eid, recs in recs_by_exp.items():
+        starts, ends = list(recs[0]), list(recs[1])
+        names = list(recs[2]) if len(recs) > 2 and recs[2] is not None else [None] * len(starts)
+        if len(names) != len(starts):
+            raise ValueError(f'{len(names)} recording names for {len(starts)} recordings of {eid}')
+        for i, (s, e, n) in enumerate(zip(starts, ends, names)):
             pool_starts.append(s)
             pool_ends.append(e)
+            pool_names.append(n)
             pool_exp.append(eid)
             pool_local.append(i)
         if len(starts) > 0:
@@ -515,7 +644,8 @@ def assign_stimuli_to_experiments(
 
     offset, matches = match_stimuli_to_recordings(
         pool_starts, pool_ends, stim_starts, max_offset_s=max_offset_s, tolerance_s=tolerance_s,
-        stim_durs_s=stim_durs_s)
+        stim_durs_s=stim_durs_s, rec_names=pool_names if stim_names is not None else None, stim_names=stim_names,
+        stim_aborted=stim_aborted)
 
     out = []
     for start, (idx, lag) in zip(stim_starts, matches):

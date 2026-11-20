@@ -356,6 +356,118 @@ def test_match_stimuli_to_recordings_uses_durations_for_back_to_back_recordings(
     assert -20. <= offset_a <= -14.
 
 
+def test_name_keys_match_recording_tokens_to_qdspy_file_names():
+    def match(token, file_name):
+        return not ehu.recording_name_keys(token).isdisjoint(ehu.stimulus_name_keys(file_name))
+
+    assert match('MB', 'RGC_MovingBar') and match('mb1', 'RGC_MovingBar') and match('movingbar', 'RGC_MovingBar')
+    assert match('chirp', 'Chirp') and match('chirp2', 'Chirp')
+    assert match('CSL', 'Contrast Saturation Local')
+    assert match('noise', 'Noise_RGC') and match('DN', 'DenseNoise')
+    assert not match('chirp', 'RGC_MovingBar') and not match('MB', 'Chirp') and not match('HR', 'Chirp')
+    assert not match('DN', 'Noise')  # needs the Stimulus table, see below
+    assert not match(None, 'Chirp') and not match('M', 'Moving') and not match('MB', None)
+    # Stimulus table: recording listed for stimulus 'noise' (alias 'dn'), log entry identified as 'noise'
+    assert not ehu.recording_name_keys('DN', ['noise']).isdisjoint(ehu.stimulus_name_keys('Noise', 'noise'))
+
+
+def test_logged_stimulus_name():
+    stimuli = [('chirp', 'h1', {'stim_name_list': ['Chirp']}), ('noise', 'h2', {'stim_hash_list': ['h3']}),
+               ('noise2', 'h4', None)]
+    assert ehu.logged_stimulus_name('h3', 'whatever', stimuli) == 'noise'
+    assert ehu.logged_stimulus_name('x', 'Chirp', stimuli) == 'chirp'
+    assert ehu.logged_stimulus_name('x', 'Other', stimuli) is None
+    assert ehu.logged_stimulus_name(None, None, []) is None
+
+
+# Real session (2022-01-25): per field the recordings MB, chirp, CSL and a 10 s HR scan follow each other within
+# ~10 s, the stimuli RGC_MovingBar (101 s), Chirp (165 s), Contrast Saturation Local (182 s) start right after the
+# recording start. Before the first field the moving bar was run 8 times as a test (aborted). The true clock offset
+# is ~+250 s; shifting by one recording (+484 s) puts the stimuli into the next recording (MB -> chirp -> CSL -> HR).
+_SESSION2_RECS = [  # (recording, start in s of day (ScanM clock), scan duration in s)
+    ('OpticDisc', 52916., 2.56), ('GCL0_MB_C1', 53527., 142.464), ('GCL0_chirp_C1', 53680., 195.456),
+    ('GCL0_CSL_C1', 53886., 215.168), ('GCL0_HR_C1', 54117., 10.0147), ('GCL1_MB_C1', 54208., 144.384),
+    ('GCL1_chirp_C1', 54364., 200.192), ('GCL1_CSL_C1', 54576., 212.352), ('GCL1_HR_C1', 54804., 10.0147),
+    ('GCL2_MB_C1', 54906., 135.04), ('GCL2_chirp_C1', 55056., 197.12), ('GCL2_CSL_C1', 55264., 219.52),
+    ('GCL2_HR_C1', 55499., 10.0147), ('GCL3_MB_C1', 55595., 130.56), ('GCL3_chirp_C1', 55735., 192.512),
+    ('GCL3_CSL_C1', 55941., 213.248), ('GCL3_HR_C1', 56173., 10.0147), ('GCL0_MB_C2', 56283., 136.832),
+    ('GCL0_chirp_C2', 56430., 200.448), ('GCL0_CSL_C2', 56644., 214.528), ('GCL0_HR_C2', 56875., 10.0147),
+    ('GCL1_MB_D', 58183., 131.584), ('GCL1_chirp_D', 58326., 201.728), ('GCL1_CSL_D', 58540., 220.416),
+    ('GCL1_HR_D', 58774., 10.0147), ('GCL2_MB_D', 59176., 135.04), ('GCL2_chirp_D', 59320., 207.104),
+    ('GCL2_CSL_D', 59543., 209.92), ('GCL2_HR_D', 59768., 10.0147), ('GCL3_MB_D', 59874., 160.768),
+    ('GCL3_chirp_D', 60048., 195.328), ('GCL3_CSL_D', 60257., 210.816), ('GCL3_HR_D', 60486., 10.0147),
+]
+_MB, _CH, _CSL = 'RGC_MovingBar', 'Chirp', 'Contrast Saturation Local'
+_SESSION2_STIMS = [  # (stimulus file, start in s of day (QDSpy clock), duration in s, aborted)
+    (_MB, 52512., 13., True), (_MB, 52541., 11., True), (_MB, 52577., 32., True), (_MB, 52765., 12., True),
+    (_MB, 52816., 11., True), (_MB, 52837., 11., True), (_MB, 52999., 20., True), (_MB, 53084., 10., True),
+    (_MB, 53280., 101., False), (_CH, 53431., 165., False), (_CSL, 53637., 182., False),
+    (_MB, 53959., 101., False), (_CH, 54116., 165., False), (_CSL, 54328., 182., False),
+    (_MB, 54655., 101., False), (_CH, 54806., 165., False), (_CSL, 55015., 182., False),
+    (_MB, 55347., 101., False), (_CH, 55484., 165., False), (_CSL, 55692., 182., False),
+    (_MB, 56031., 101., False), (_CH, 56186., 165., False), (_CSL, 56396., 183., False),
+    (_MB, 57934., 101., False), (_CH, 58078., 165., False), (_CSL, 58292., 182., False),
+    (_MB, 58923., 101., False), (_CH, 59070., 165., False), (_CSL, 59290., 182., False),
+    (_MB, 59625., 101., False), (_CH, 59799., 165., False), (_CSL, 60008., 182., False),
+]
+
+
+def _session2_inputs(tokens=None):
+    tokens = tokens or [(r[0].split('_') + [''])[1] for r in _SESSION2_RECS]
+    return dict(
+        rec_starts_s=[r[1] for r in _SESSION2_RECS], rec_ends_s=[r[1] + r[2] for r in _SESSION2_RECS],
+        stim_starts_s=[s[1] for s in _SESSION2_STIMS],
+        rec_names=[ehu.recording_name_keys(t) if t else set() for t in tokens],
+        stim_names=[ehu.stimulus_name_keys(s[0]) for s in _SESSION2_STIMS],
+        stim_aborted=[s[3] for s in _SESSION2_STIMS])
+
+
+def _assert_session2_fit(offset, matches):
+    assert 245. <= offset <= 255.
+    expected = {_MB: '_MB_', _CH: '_chirp_', _CSL: '_CSL_'}
+    matched = [(s, _SESSION2_RECS[idx][0]) for s, (idx, _) in zip(_SESSION2_STIMS, matches) if idx is not None]
+    assert len(matched) == 24  # all but the 8 test runs
+    assert all(expected[s[0]] in rec for s, rec in matched)
+
+
+def test_match_stimuli_to_recordings_uses_names():
+    inputs = _session2_inputs()
+    # Start times only: one recording too late (+484 s) puts more stimulus starts into recordings
+    names = {k: inputs.pop(k) for k in ('rec_names', 'stim_names', 'stim_aborted')}
+    offset, _ = ehu.match_stimuli_to_recordings(**inputs)
+    assert offset > 450.
+    # With the names the true shift wins, also without durations
+    _assert_session2_fit(*ehu.match_stimuli_to_recordings(**inputs, **names))
+    # ... and with durations
+    durs = [s[2] for s in _SESSION2_STIMS]
+    _assert_session2_fit(*ehu.match_stimuli_to_recordings(**inputs, **names, stim_durs_s=durs))
+
+
+def test_match_stimuli_to_recordings_tolerates_a_wrong_name():
+    tokens = [(r[0].split('_') + [''])[1] for r in _SESSION2_RECS]
+    tokens[2], tokens[7] = 'MB', 'chirp'  # GCL0_chirp_C1 named MB, GCL1_CSL_C1 named chirp
+    _assert_session2_fit(*ehu.match_stimuli_to_recordings(**_session2_inputs(tokens)))
+
+
+def test_match_stimuli_to_recordings_ignores_aborted_test_runs_for_names():
+    # One recording 'MB' at 1000-1100 s; a full moving bar at 500 s (QDSpy) and aborted test runs at 300 and 350 s.
+    # Only the full run may name the recording: shift +500 s, not +700 s or +650 s.
+    kw = dict(rec_names=[{'mb'}], stim_names=[ehu.stimulus_name_keys('RGC_MovingBar')] * 3)
+    offset, matches = ehu.match_stimuli_to_recordings(
+        [1000.], [1100.], [300., 350., 500.], stim_aborted=[True, True, False], stim_durs_s=[10., 10., 100.], **kw)
+    assert offset == 500. and matches[2] == (0, 0.) and matches[0] == (None, None)
+
+
+def test_assign_stimuli_to_experiments_uses_names():
+    inputs = _session2_inputs()
+    recs = {'A': (inputs['rec_starts_s'], inputs['rec_ends_s'], inputs['rec_names'])}
+    offset, assigned = ehu.assign_stimuli_to_experiments(
+        recs, 'A', inputs['stim_starts_s'], stim_names=inputs['stim_names'], stim_aborted=inputs['stim_aborted'])
+    _assert_session2_fit(offset, [(a[1], a[2]) for a in assigned])
+    with pytest.raises(ValueError):
+        ehu.assign_stimuli_to_experiments({'A': ([1.], [2.], [])}, 'A', [1.], stim_names=[set()])
+
+
 def test_match_stimuli_to_recordings_without_match():
     assert ehu.match_stimuli_to_recordings([], [], [1., 2.]) == (None, [(None, None), (None, None)])
     assert ehu.match_stimuli_to_recordings([0.], [10.], []) == (None, [])

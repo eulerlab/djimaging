@@ -40,6 +40,7 @@ class ExpHistoryField(history.ExpHistoryFieldTemplate):
 class ExpHistoryStimLog(history.ExpHistoryStimLogTemplate):
     exp_history_table = ExpHistory
     log_table = QdsPyLog
+    stimulus_table = Stimulus  # optional: aliases help to match recording names to logged stimuli
 
     class Stim(history.ExpHistoryStimLogTemplate.Stim):
         stim_log_table = QdsPyLog.StimLog
@@ -51,3 +52,4 @@ class PresentationLog(core.PresentationLogTemplate):
     stimulus_table = Stimulus
     exp_table = Experiment
     presentation_table = Presentation
+    exp_history_stim_log_table = ExpHistoryStimLog  # optional: log entry that started during the recording

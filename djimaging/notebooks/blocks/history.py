@@ -100,8 +100,11 @@ ExpHistoryStimLog()
 
 # %% [markdown]
 # `PresentationLog`: the QDSpy log entry of each `Presentation` (matched by the QDSpy md5 or file name in
-# `stim_dict['stim_hash_list']` / `stim_dict['stim_name_list']` of the stimulus). Used e.g. to identify moving bar and
-# mouse cam versions.
+# `stim_dict['stim_hash_list']` / `stim_dict['stim_name_list']` of the stimulus). If a stimulus was logged several
+# times, the entry that started during the recording (from `ExpHistoryStimLog`, with the estimated clock offset) is
+# used; `match_method` says how the entry was chosen. Used e.g. to identify moving bar and mouse cam versions.
+# If several entries match and `ExpHistoryStimLog` is not populated for the experiment, the entry fails (populate
+# `ExpHistoryStimLog` first); only pass `allow_missing_exp_history=True` in `make_kwargs` to accept the fallback.
 
 # %%
 PresentationLog().populate(make_kwargs=dict(verbose=0, skip_if_no_log=True), suppress_errors=True,

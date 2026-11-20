@@ -15,7 +15,8 @@ import numpy as np
 import pandas as pd
 
 from djimaging.utils import exposure_history as eh
-from djimaging.utils.exp_history_utils import FIELD_KEY_DEFAULTS
+from djimaging.utils.exp_history_utils import FIELD_KEY_DEFAULTS, logged_stimulus_name
+from djimaging.utils.exp_history_utils import ref_path as _ref_path
 
 _REC_ATTRS = ['kind', 'stim_token', 'rec_start', 'rec_dur_s', 'stopped_early', 'absx', 'absy', 'absz', 'zoom',
               'pixel_size_um', 'nxpix', 'nypix', 'nzpix', 'z_step_um', 'real_pix_dur_us', 'scan_type', 'setupid',
@@ -104,7 +105,9 @@ def fetch_exposure_history(
         stims = pd.DataFrame(((stim_log_table.Stim & exp_key) * stim_log_table.Stim.stim_log_table).proj(
             'rec_name', 'status', 'stim_file_name', 'stim_md5', 't_start', 't_end', 't_dur_s', 'aborted').to_dicts())
         if len(stims) > 0:
-            stims['stim_name'] = [_logged_stim_name(m, f, stimulus_table)
+            stimuli = [] if stimulus_table is None else list(zip(*stimulus_table().to_arrays(
+                'stim_name', 'stim_hash', 'stim_dict')))
+            stims['stim_name'] = [logged_stimulus_name(m, f, stimuli)
                                   for m, f in zip(stims['stim_md5'], stims['stim_file_name'])]
 
     meta.update(_stimulator_meta(exp_key, experiment_stimulator_table))
@@ -373,14 +376,6 @@ def _abs_path(value, store: str) -> str | None:
         return _ref_path(value)
 
 
-def _ref_path(value) -> str | None:
-    """Store-relative POSIX path of a fetched `<filepath>` (ObjectRef or str)."""
-    if value is None or (isinstance(value, float) and np.isnan(value)):
-        return None
-    path = getattr(value, 'path', value)
-    return PurePosixPath(str(path).replace('\\', '/')).as_posix()
-
-
 def _field_labels(exp_key: Mapping, recs: pd.DataFrame, exp_history_field_table) -> list:
     if exp_history_field_table is None or len(recs) == 0:
         return [None] * len(recs)
@@ -413,23 +408,6 @@ def _processing_status(exp_key, presentation_table, traces_table, motion_detecti
             row['motion_n_rois_flagged'] = int(np.sum(flagged)) if len(flagged) > 0 else None
         rows.append(row)
     return rows
-
-
-def _logged_stim_name(md5: str | None, file_name: str | None, stimulus_table) -> str | None:
-    """Stimulus name of a logged QDSpy stimulus: md5 in `stim_hash_list` or file name starting with a name of
-    `stim_name_list` of `stim_dict` (as PresentationLog). None if not in the Stimulus table."""
-    if stimulus_table is None:
-        return None
-    names = []
-    for stim_name, stim_hash, stim_dict in zip(*stimulus_table().to_arrays('stim_name', 'stim_hash', 'stim_dict')):
-        stim_dict = stim_dict or {}
-        hashes = ({stim_hash} | set(stim_dict.get('stim_hash_list', []))) - {''}
-        if md5 is not None and md5 in hashes:
-            return stim_name
-        if file_name is not None and any(str(file_name).lower().startswith(str(n).lower())
-                                         for n in stim_dict.get('stim_name_list', []) if n):
-            names.append(stim_name)
-    return names[0] if len(names) == 1 else None
 
 
 def _stimulator_meta(exp_key, experiment_stimulator_table) -> dict:
