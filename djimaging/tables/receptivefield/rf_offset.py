@@ -27,6 +27,15 @@ The geometry (how the stimulus array is oriented in the recording field) is take
 experiment (`experiment_stimulator_tab`, see djimaging.tables.stimulator) and from `stim_dict['array_to_screen']` of
 the noise stimulus (e.g. `NOISE_ARRAY_TO_SCREEN` in djimaging.utils.stimulator). Stimuli without `array_to_screen`
 raise an error.
+
+Known gap (not corrected): the stimulus center is assumed to coincide with the center of the cropped field (the ROI
+positions in `relx_wrt_field`/`rely_wrt_field`). If the stimulus is instead centered on the full scan line, the
+cropped field center is off along the fast-scan (x) axis, because the crop is asymmetric: it removes
+`XPixLineOffs` pixels at the start of each line and `PixRetraceLen` pixels at the end. The stimulus center would then
+lie at `(PixRetraceLen - XPixLineOffs) / 2` pixels toward the retrace side of the cropped field center, e.g.
+(10 - 6) / 2 = 2 px (~3 um at setup 3, zoom 0.76) for an 80x64 XYScan2 field. There is no y offset (no y retrace).
+This estimate also assumes uniform pixel spacing over the full line, including the retrace/flyback, which is
+unverified.
 """
 
 import warnings
