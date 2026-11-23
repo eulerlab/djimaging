@@ -85,7 +85,7 @@ def split_rf_svd(strf):
         srf = vt[0].reshape(*dims_s_rf)
         trf = u[:, 0]
 
-        explained_variance = s[0] ** 2 / np.sum(s ** 2)
+        explained_variance = s[0] ** 2 / np.sum(strf ** 2)
 
         srf, trf = rescale_trf_srf(srf, trf, strf)
 
@@ -96,7 +96,7 @@ def split_rf_svd(strf):
         srf = vt[0]
         trf = u[:, 0]
 
-        explained_variance = s[0] ** 2 / np.sum(s ** 2)
+        explained_variance = s[0] ** 2 / np.sum(strf ** 2)
 
         srf, trf = rescale_trf_srf(srf, trf, strf)
 
