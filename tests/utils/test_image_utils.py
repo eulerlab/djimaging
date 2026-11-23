@@ -117,7 +117,6 @@ def test_int_downscale_image_3d_block_mean():
         np.testing.assert_allclose(out[..., c], expected)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: int_downscale_image adds a trailing axis to 2-D images")
 def test_int_downscale_image_2d_keeps_ndim():
     img = np.arange(24, dtype=float).reshape(4, 6)
     out = iu.int_downscale_image(img, 2)
