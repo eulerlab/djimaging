@@ -89,8 +89,6 @@ def test_contour_two_blobs_and_plot():
     assert sizes[int(np.argmin(centers_x))] < sizes[int(np.argmax(centers_x))]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: compute_contour passes pixel-edge extent to ax.contour (point positions), "
-                                       "inflating coordinates by n/(n-1)")
 @pytest.mark.parametrize('shape', [(15, 15), (11, 31), (41, 61)])
 def test_contour_area_independent_of_array_size(shape):
     pixel_size_um = 10.
@@ -100,7 +98,6 @@ def test_contour_area_independent_of_array_size(shape):
     assert sizes[0] == pytest.approx(np.pi * (4 * pixel_size_um) ** 2, rel=0.02)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: compute_contour coordinates are scaled by n/(n-1) w.r.t. stimulus center")
 def test_contour_center_matches_gauss_fit_convention():
     # RfOffsetTemplate: offset = ((x_mean + 0.5) - nx / 2) * pix_size for Gaussian fits.
     # The contour-based offset must use the same convention.
