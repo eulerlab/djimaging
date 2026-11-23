@@ -120,6 +120,7 @@ class ClusteringTemplate(dj.Computed):
 
         if (kind == 'gmm' and decomp_kind == 'none') or (kind == 'hierarchical_ward' and not decomp_kind == 'none'):
             print(f'Skipping clustering with kind={kind} and decomp_kind={decomp_kind}. Not supported.')
+            return
 
         _, cluster_idxs = cluster_features(X=np.hstack(features), kind=kind, params_dict=params_dict)
         cluster_idxs = remove_clusters(cluster_idxs=cluster_idxs, min_count=min_count, invalid_value=-1)

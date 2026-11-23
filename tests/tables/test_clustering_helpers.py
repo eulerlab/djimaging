@@ -263,8 +263,6 @@ def test_clustering_make_ward():
     assert all(set(r) == {'features_id', 'clustering_id', 'roi_id', 'cluster_idx'} for r in roi_cluster.inserted)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: ClusteringTemplate.make prints 'Skipping clustering ... Not supported.' "
-                                       "but does not return, so it clusters and inserts anyway")
 def test_clustering_make_skips_unsupported_combination():
     X, _ = _blobs()
     table, _ = _clustering_table('hierarchical_ward', 'pca', [X], [X])
