@@ -220,9 +220,9 @@ def get_rel_roi_pos(
     if pixel_size_d2_um is None:
         pixel_size_d2_um = pixel_size_um
 
-    # Get offset to center in um
-    d1_um = float((pix_d1 - roi_mask.shape[0] / 2) * pixel_size_um)
-    d2_um = float((pix_d2 - roi_mask.shape[1] / 2) * pixel_size_d2_um)
+    # Get offset to center in um. pix_d1/2 are pixel indices (0..n-1), so the image centre is at (n-1)/2
+    d1_um = float((pix_d1 - (roi_mask.shape[0] - 1) / 2) * pixel_size_um)
+    d2_um = float((pix_d2 - (roi_mask.shape[1] - 1) / 2) * pixel_size_d2_um)
 
     # Rotate around center
     if ang_deg != 0.:

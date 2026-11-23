@@ -78,8 +78,6 @@ def test_get_rel_roi_pos_rotation():
     assert np.hypot(*roi_utils.get_rel_roi_pos(1, mask, 1., ang_deg=33.)) == pytest.approx(np.hypot(d1, d2))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: ROI centre is a pixel index (0..n-1) but the image centre is taken as "
-                                       "n/2 instead of (n-1)/2: positions are biased by half a pixel")
 def test_get_rel_roi_pos_centred_roi_is_zero():
     mask = np.ones((4, 6), dtype=int)
     mask[1:3, 2:4] = -1  # exactly in the centre of the field
@@ -93,8 +91,7 @@ def test_get_rel_roi_pos_symmetric_rois_are_symmetric():
     mask[3, 3] = -2
     p1 = np.array(roi_utils.get_rel_roi_pos(1, mask, pixel_size_um=1.))
     p2 = np.array(roi_utils.get_rel_roi_pos(2, mask, pixel_size_um=1.))
-    # Document the current (biased) values; see test_get_rel_roi_pos_centred_roi_is_zero
-    assert_allclose(p1 + p2, [-1., -1.])
+    assert_allclose(p1 + p2, [0., 0.])
 
 
 def test_fix_first_or_last_n_nan():
