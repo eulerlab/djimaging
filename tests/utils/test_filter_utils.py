@@ -95,8 +95,6 @@ def test_resample_trace_irregular_input_to_regular_grid():
     np.testing.assert_allclose(trace_new, 2 * t_new + 1)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: float rounding in np.arange drops the end point that the "
-                                       "np.nextafter() stop is meant to include")
 def test_resample_trace_same_dt_keeps_all_samples():
     tracetime = np.arange(481) * 0.002
     trace = np.arange(481, dtype=float)
