@@ -176,7 +176,6 @@ def test_split_strf_upsample_and_blur():
     assert np.max(np.abs(srf_blur)) < np.max(np.abs(srf_raw))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: split_strf blurs 4D (t, y, x, color) STRFs across the color axis")
 def test_split_strf_blur_does_not_mix_colors():
     strf = np.zeros((5, 9, 9, 2))
     strf[:, 4, 4, 0] = np.arange(5.)

@@ -35,7 +35,11 @@ def merge_strf(srf, trf):
 def split_strf(strf, method='SVD', blur_std: float = 0, blur_npix: int = 1, upsample_srf_scale: int = 0):
     """Split STRF into sRF and tRF"""
     if blur_std > 0:
-        strf = np.stack([smooth_rf(rf=srf_i, blur_std=blur_std, blur_npix=blur_npix) for srf_i in strf])
+        if strf.ndim == 4:  # (time, y, x, color): blur each color channel separately
+            strf = np.stack([np.stack([smooth_rf(rf=srf_i[..., c], blur_std=blur_std, blur_npix=blur_npix)
+                                       for c in range(strf.shape[-1])], axis=-1) for srf_i in strf])
+        else:
+            strf = np.stack([smooth_rf(rf=srf_i, blur_std=blur_std, blur_npix=blur_npix) for srf_i in strf])
 
     explained_variance = None
     if method.lower() == 'svd':
