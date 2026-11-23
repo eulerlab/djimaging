@@ -151,8 +151,8 @@ class FeaturesTemplate(dj.Computed):
 
         times = [
             truncated_vstack(
-                np.arange(tab.to_arrays(f'{stim_i}_avgs').shape[0]) * tab.fetch1(f'{stim_i}_dt')
-                + tab.fetch1(f'{stim_i}_t0'), rtol=rtol)
+                [np.arange(len(avg)) * dt + t0 for avg, dt, t0 in zip(*tab.to_arrays(
+                    f'{stim_i}_avgs', f'{stim_i}_dt', f'{stim_i}_t0'))], rtol=rtol)
             for stim_i in stim_names]
         traces = [
             truncated_vstack(tab.to_arrays(f'{stim_i}_avgs'), rtol=rtol)
