@@ -1385,6 +1385,10 @@ def compare_roi_masks(roi_mask: np.ndarray, ref_roi_mask: np.ndarray,
     for dx in range(-max_shift_x, max_shift_x + 1):
         for dy in range(-max_shift_y, max_shift_y + 1):
             shifted_roi_mask = shift_array(roi_mask, shift=(dx, dy), cval=bg_val)
+            # ROI pixels missing in the shifted mask are accepted (shifted out of the field or deleted ROIs), so a
+            # shift that leaves no ROI pixel would match any reference: it is no evidence for a shifted copy.
+            if not np.any(shifted_roi_mask != bg_val):
+                continue
             if np.all((shifted_roi_mask == ref_roi_mask) | ((shifted_roi_mask == bg_val) & (ref_roi_mask != bg_val))):
                 return 'shifted', (dx, dy)
 
