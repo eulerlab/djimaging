@@ -198,8 +198,6 @@ def test_retinal_field_location_cat_center_dist():
     assert entry['ntvd_side'] == 'nc'
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: for nt_side == 'c', n_tvd_side and nvd_t_side are set to 'c', which is "
-                                       "not a value of their enums ('cv','cc','cd'), so the insert fails")
 @pytest.mark.parametrize('vd', [-200., 0., 200.])
 def test_retinal_field_location_cat_center_nt_side_is_valid_enum(vd):
     entry = _cat(vd, 10., center_dist=50.)
