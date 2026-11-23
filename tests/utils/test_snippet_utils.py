@@ -366,8 +366,6 @@ def test_split_trace_by_group_reps_delay_shifts_window_without_shortening():
     np.testing.assert_array_equal(snips['b'][1][0][:, 0], np.arange(45, 65))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: group end index uses ntrigger_split instead of ntrigger, "
-                                       "so ntrigger_split < ntrigger crashes")
 def test_split_trace_by_group_reps_ntrigger_split():
     trace, times = _ramp(duration=10.)
     # Per rep: group 'a' with 2 triggers split into 2 snippets of 1 trigger, then group 'b' with 2 triggers

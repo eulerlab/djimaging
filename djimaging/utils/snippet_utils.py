@@ -289,8 +289,10 @@ def split_trace_by_group_reps(
                     raise IndexError('Data incomplete')
 
             try:
+                # The snippet window must span all ntrigger_i triggers of the group, because they are all split below.
                 idx_end = find_closest(
-                    target=triggertimes[trg_count + ntrigger_split_i] + delay, data=times, as_index=True)
+                    target=triggertimes[trg_count + max(ntrigger_i, ntrigger_split_i)] + delay, data=times,
+                    as_index=True)
             except IndexError:
                 idx_end = None  # last group: use the trace until its end
 
