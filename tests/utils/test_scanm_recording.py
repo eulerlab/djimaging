@@ -129,8 +129,6 @@ def test_recording_wparams_dicts(chirp):
     assert set(chirp.get_wparams_str_dict(lower_keys=True)) == {k.lower() for k in chirp.get_wparams_str_dict()}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: get_wparams_num_dict (used by to_h5) stores RealPixDur in seconds, "
-                                       "but wParamsNum RealPixDur is in microseconds")
 def test_recording_wparams_num_real_pix_dur_unit(chirp):
     assert chirp.get_wparams_num_dict()['RealPixDur'] == pytest.approx(PIXEL_DURATION_US)
 

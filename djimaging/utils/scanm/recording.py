@@ -586,7 +586,7 @@ class ScanMRecording:
         wparams_num['User_dzPix'] = self.pix_nz
         wparams_num['User_nPixRetrace'] = self.pix_n_retrace
         wparams_num['User_nXPixLineOffs'] = self.pix_n_line_offset
-        wparams_num['RealPixDur'] = self.real_pixel_duration
+        wparams_num['RealPixDur'] = self.real_pixel_duration * 1e6  # wParamsNum unit is us
         wparams_num['Zoom'] = self.obj_zoom
         wparams_num['Angle_deg'] = self.obj_angle_deg
         wparams_num['XCoord_um'] = self.pos_x_um
