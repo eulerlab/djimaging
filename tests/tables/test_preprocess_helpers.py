@@ -48,8 +48,6 @@ def test_drop_left_and_right_nmin_left():
     np.testing.assert_array_equal(out, [2., 2., 2., 3., 4., 5., 6., 7., 8., 9.])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: right drop_nmin fills with trace[-n] (a dropped sample) "
-                                       "instead of trace[-(n + 1)]")
 def test_drop_left_and_right_nmin_right():
     out = pp.drop_left_and_right(np.arange(10.), drop_nmin_lr=(0, 2), drop_nmax_lr=(0, 0))
     np.testing.assert_array_equal(out, [0., 1., 2., 3., 4., 5., 6., 7., 7., 7.])
