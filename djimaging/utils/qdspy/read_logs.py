@@ -54,7 +54,7 @@ def parse_stimulus_log(log_path: str, verbose: bool = True) -> Tuple[List[Dict],
             nLinesTotal += 1
             sDateTime = line[:15]
             sInfoType = line[15:23].strip().upper()
-            sMsg = line[23:len(line) - 1].strip()
+            sMsg = line[23:].strip()
 
             try:
                 dt = datetime.strptime(sDateTime, "%Y%m%d_%H%M%S")

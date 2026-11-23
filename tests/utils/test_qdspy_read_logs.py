@@ -184,8 +184,6 @@ def test_zero_frame_rate_does_not_crash(tmp_path):
     assert stims[0]['aborted'] is True
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: last character of every line is cut off, so a last line without "
-                                       "trailing newline cannot be parsed and the stimulus is lost")
 def test_last_line_without_newline(tmp_path):
     log = _write(tmp_path, [_start('20250506_100000', CHIRP), _end('20250506_100001', CHIRP).rstrip('\n')])
     stims, stats = parse_stimulus_log(log, verbose=False)
