@@ -490,7 +490,7 @@ def extract_baseline(
 
     baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
     baseline_start = np.nonzero(trace_times >= trace_times[baseline_end] - max_dt)[0][0]
-    baseline = trace[baseline_start:baseline_end]
+    baseline = trace[baseline_start:baseline_end + 1]  # baseline_end is the last pre-stimulus sample
     return baseline
 
 
