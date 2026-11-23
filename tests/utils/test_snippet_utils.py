@@ -400,7 +400,6 @@ def test_align_reps_drops_reps_with_less_than_two_frames():
     np.testing.assert_array_equal(out, [[1., 1.], [2., 2.]])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: reps[:-n_nan.max()] with n_nan.max()==0 returns an empty array")
 @pytest.mark.parametrize('reps', [
     # one all-NaN rep, others complete
     np.array([[1., 2., np.nan], [2., 3., np.nan], [3., 5., np.nan], [4., 4., np.nan]]),
