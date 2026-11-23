@@ -15,11 +15,6 @@ from tests.tables._fake_dj import FakeRel, make_fake  # noqa: E402
 
 RF_TIME = np.linspace(-0.6, 0., 61)
 
-XFAIL_HALF_AMP_WIDTH = pytest.mark.xfail(
-    strict=True, raises=TypeError,
-    reason="BUG: compute_half_amp_width calls float() on the 1-element OptimizeResult.x "
-           "(TypeError with numpy>=2.5): CenterSurround.make crashes")
-
 
 def _gauss(t_peak, sigma=0.03, amp=1.):
     return amp * np.exp(-(RF_TIME - t_peak) ** 2 / (2 * sigma ** 2))
@@ -39,7 +34,6 @@ def _make(table):
     return table.inserted[0]
 
 
-@XFAIL_HALF_AMP_WIDTH
 def test_center_surround_on_center_off_surround():
     sigma = 0.03
     center = _gauss(-0.1, sigma)
@@ -56,7 +50,6 @@ def test_center_surround_on_center_off_surround():
     assert entry['c_transience_idx'] == pytest.approx(0.)  # monophasic
 
 
-@XFAIL_HALF_AMP_WIDTH
 def test_center_surround_biphasic_transience():
     # Biphasic kernel: main On peak (closest to t=0) preceded by an Off lobe of half the amplitude
     kernel = _gauss(-0.1) - 0.5 * _gauss(-0.25)

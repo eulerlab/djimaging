@@ -143,7 +143,6 @@ def test_half_amp_width_no_peaks():
     assert compute_half_amp_width(RF_TIME, _bump(-0.3, 0.05), np.array([], dtype=int)) is None
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: float(OptimizeResult.x) on a 1-element array raises TypeError (numpy>=2.5)")
 @pytest.mark.parametrize('sign', [1, -1])
 def test_half_amp_width_is_fwhm_of_gaussian(sign):
     sigma = 0.05
