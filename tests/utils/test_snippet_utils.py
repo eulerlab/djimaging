@@ -219,8 +219,6 @@ def test_split_trace_by_reps_zero_length_reps_raises():
         snippet_utils.split_trace_by_reps(trace, times, np.array([1., 1., 1.]), ntrigger_rep=1)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: last rep with missing triggers is kept and its trigger times are "
-                                       "broadcast/duplicated (or crash) instead of being dropped")
 def test_split_trace_by_reps_last_rep_with_missing_triggers_is_dropped():
     # Stimulus cancelled after 5 of 6 triggers while recording continued
     trace, times = _ramp(duration=7.)
@@ -284,7 +282,7 @@ def test_split_trace_by_group_reps_nested_lists():
     np.testing.assert_array_equal(snips['b'][0][0][:, 0], np.arange(0, 20))
     np.testing.assert_array_equal(snips['a'][0][0][:, 0], np.arange(20, 40))
     np.testing.assert_array_equal(snips['b'][1][0][:, 0], np.arange(40, 60))
-    # Last group of last rep runs until the end of the trace (minus the last sample, see xfail below)
+    # Last group of last rep runs until the end of the trace
     assert snips['a'][1][0][0, 0] == 60.
     np.testing.assert_allclose(snips_t['a'][0][0][:, 0], times[20:40])
     np.testing.assert_array_equal(snips_tt['a'][1][0], [[6.]])
@@ -352,7 +350,6 @@ def test_split_trace_by_group_reps_int_names():
     np.testing.assert_array_equal(snips[180][0], [0., 40.])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: idx_end=-1 fallback drops the last trace sample of the final group")
 def test_split_trace_by_group_reps_final_group_includes_last_sample():
     trace, times = _ramp(duration=8.)  # 80 samples, last group [60, 80) ends exactly with the trace
     snips, _, _, _ = snippet_utils.split_trace_by_group_reps(
@@ -360,7 +357,6 @@ def test_split_trace_by_group_reps_final_group_includes_last_sample():
     np.testing.assert_array_equal(snips['a'][:, 1], np.arange(60, 80))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: group end index ignores `delay`, so snippets are shortened by delay")
 def test_split_trace_by_group_reps_delay_shifts_window_without_shortening():
     trace, times = _ramp(duration=10.)
     snips, _, _, _ = snippet_utils.split_trace_by_group_reps(
@@ -370,8 +366,6 @@ def test_split_trace_by_group_reps_delay_shifts_window_without_shortening():
     np.testing.assert_array_equal(snips['b'][1][0][:, 0], np.arange(45, 65))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: group end index uses ntrigger_split instead of ntrigger, "
-                                       "so ntrigger_split < ntrigger crashes")
 def test_split_trace_by_group_reps_ntrigger_split():
     trace, times = _ramp(duration=10.)
     # Per rep: group 'a' with 2 triggers split into 2 snippets of 1 trigger, then group 'b' with 2 triggers
@@ -406,7 +400,6 @@ def test_align_reps_drops_reps_with_less_than_two_frames():
     np.testing.assert_array_equal(out, [[1., 1.], [2., 2.]])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: reps[:-n_nan.max()] with n_nan.max()==0 returns an empty array")
 @pytest.mark.parametrize('reps', [
     # one all-NaN rep, others complete
     np.array([[1., 2., np.nan], [2., 3., np.nan], [3., 5., np.nan], [4., 4., np.nan]]),

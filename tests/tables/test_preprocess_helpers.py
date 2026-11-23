@@ -100,16 +100,12 @@ def test_extract_baseline_stim_before_trace_raises():
         pp.extract_baseline(np.arange(5.), np.arange(5.) + 10, stim_start=9.)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: baseline end index is used as exclusive slice end, "
-                                       "so the last pre-stimulus sample is dropped")
 def test_extract_baseline_contains_all_prestimulus_samples():
     times = np.arange(10.) + 10.
     baseline = pp.extract_baseline(np.arange(10.), times, stim_start=13.5)
     np.testing.assert_array_equal(baseline, [0., 1., 2., 3.])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: np.nonzero is applied to the time values instead of the mask, "
-                                       "so a single pre-stimulus sample at t=0 raises IndexError")
 def test_extract_baseline_single_prestimulus_sample_at_time_zero():
     # Valid input (process_trace only checks that some sample precedes stim_start)
     baseline = pp.extract_baseline(np.arange(10.) + 5., np.arange(10.), stim_start=0.5)
