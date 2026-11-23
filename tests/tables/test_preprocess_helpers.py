@@ -106,8 +106,6 @@ def test_extract_baseline_contains_all_prestimulus_samples():
     np.testing.assert_array_equal(baseline, [0., 1., 2., 3.])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: np.nonzero is applied to the time values instead of the mask, "
-                                       "so a single pre-stimulus sample at t=0 raises IndexError")
 def test_extract_baseline_single_prestimulus_sample_at_time_zero():
     # Valid input (process_trace only checks that some sample precedes stim_start)
     baseline = pp.extract_baseline(np.arange(10.) + 5., np.arange(10.), stim_start=0.5)
