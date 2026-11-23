@@ -1320,7 +1320,7 @@ def shift_array(img: np.ndarray, shift: tuple, inplace: bool = False,
     """
     if not inplace:
         img = img.copy()
-    img = np.asarray(img)
+    img = target = np.asarray(img)
 
     if callable(cval):
         _cval = cval(img)
@@ -1340,6 +1340,9 @@ def shift_array(img: np.ndarray, shift: tuple, inplace: bool = False,
         img[:, :shift_ax1] = _cval
     elif shift_ax1 < 0:
         img[:, shift_ax1:] = _cval
+    if inplace:
+        target[...] = img  # np.roll returns a new array
+        return target
     return img
 
 

@@ -418,7 +418,6 @@ def test_shift_array_light_artifact():
     np.testing.assert_array_equal(out, expected)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: shift_array(inplace=True) does not shift the input array in place")
 def test_shift_array_inplace():
     a = np.arange(20).reshape(4, 5)
     out = mu.shift_array(a, (1, 0), inplace=True, cval=-1)
