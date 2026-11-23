@@ -146,6 +146,12 @@ def test_fit_sigmoid_default_x_and_plot():
     plt.close(fig)
 
 
+def test_fit_sigmoid_flat_response_does_not_crash():
+    half_amp, half_amp_x, slope = fit_sigmoid(np.zeros_like(CONTRASTS), CONTRASTS)
+    assert half_amp == pytest.approx(0.)
+    assert slope == pytest.approx(0.)
+
+
 # ---------------------------------------------------------------- f1_amp_phase
 
 def test_f1_amp_phase_cosine_and_sine():
