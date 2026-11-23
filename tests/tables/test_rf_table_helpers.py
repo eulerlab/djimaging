@@ -109,8 +109,6 @@ def test_compute_contours_plot_smoke():
     assert len(contours[0.5]) == 1
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: _compute_contours divides pixel_size by upsample_srf_scale=0 "
-                                       "(0 means no upsampling, cf. SplitRFParams default)")
 def test_compute_contours_without_upsampling_scale_zero():
     srf = _cone((15, 15), 7, 7, 6.)
     _, areas0, _ = _compute_contours(srf, 10., 'amp_one', 0, 0, 0, [0.5])

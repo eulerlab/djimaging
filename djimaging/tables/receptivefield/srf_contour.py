@@ -193,6 +193,9 @@ def _compute_contours(srf, pixel_size, norm_kind, blur_std, blur_npix, upsample_
 
     if upsample_srf_scale > 1:
         srf = resize_srf(srf, scale=upsample_srf_scale)
+        srf_pixel_size = pixel_size / upsample_srf_scale
+    else:
+        srf_pixel_size = pixel_size
 
     if norm_kind != 'none':
         srf = normalize(srf, norm_kind=norm_kind)
@@ -208,11 +211,11 @@ def _compute_contours(srf, pixel_size, norm_kind, blur_std, blur_npix, upsample_
             set_long_title(fig=fig, title=title, y=1, va='bottom')
 
         plot_srf(srf_raw, ax=axs[0], pixelsize=pixel_size)
-        plot_srf(srf, ax=axs[1], pixelsize=pixel_size / upsample_srf_scale)
+        plot_srf(srf, ax=axs[1], pixelsize=srf_pixel_size)
 
     for i, level in enumerate(levels):
         cntrs, cntrs_size = compute_contour(
-            srf, level, pixel_size_um=pixel_size / upsample_srf_scale, plot=plot, ax=axs[i + 2] if plot else None)
+            srf, level, pixel_size_um=srf_pixel_size, plot=plot, ax=axs[i + 2] if plot else None)
 
         # Sort by size, largest first
         sort_index = np.argsort(cntrs_size)[::-1]
