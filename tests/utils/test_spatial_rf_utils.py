@@ -136,8 +136,6 @@ def test_fit_gauss_rejects_non_2d():
         fit_rf_model(np.zeros((2, 3, 4)))
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="BUG: fit_rf_model(polarity=None) crashes (AssertionError) if the sRF has no negative pixel")
 def test_fit_gauss_strictly_positive_srf():
     # Default of FitGauss2DRF (_polarity = None): both polarities are tried, but an sRF without any negative pixel
     # (e.g. a Gaussian on a small positive offset) raises in the polarity=-1 attempt.
