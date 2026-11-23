@@ -99,8 +99,6 @@ def test_recording_auto_threshold_midpoint(chirp):
     assert chirp.trigger_times.size == 10
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: set_auto_trigger_threshold adds uint16 min and max, which overflows "
-                                       "for vmin + vmax > 65535: threshold below baseline, no triggers found")
 def test_recording_auto_threshold_high_baseline(chirp):
     chirp.ch_stacks['wDataCh2'] = np.where(chirp.ch_stacks['wDataCh2'] > 30_000, 60_000, 30_000).astype(np.uint16)
     with warnings.catch_warnings():

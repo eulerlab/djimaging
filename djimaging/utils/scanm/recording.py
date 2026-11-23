@@ -422,8 +422,9 @@ class ScanMRecording:
         30 000; otherwise it is set to the midpoint between min and max.
         The result is stored in ``self.trigger_threshold``.
         """
-        vmin = self.ch_stacks[self.trigger_ch_name].min()
-        vmax = self.ch_stacks[self.trigger_ch_name].max()
+        # float: vmin + vmax must not overflow for integer (uint16) stacks
+        vmin = float(self.ch_stacks[self.trigger_ch_name].min())
+        vmax = float(self.ch_stacks[self.trigger_ch_name].max())
 
         if vmin < 25_000 and vmax > 35_000:
             self.trigger_threshold = 30_000
