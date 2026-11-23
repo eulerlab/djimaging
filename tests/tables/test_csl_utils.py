@@ -178,8 +178,6 @@ def test_f1_amp_phase_edge_cases():
     assert f1_amp_phase(np.ones(101), 0., 100.) == (0.0, 0.0)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: f1_amp_phase forces odd N, so bin N//2 is never Nyquist, "
-                                       "but it still skips the factor 2 for k == N//2")
 def test_f1_amp_phase_highest_bin_of_odd_length():
     n = 11
     x = np.cos(2 * np.pi * 5 * np.arange(n) / n)  # bin 5 == N//2 of an odd-length signal
