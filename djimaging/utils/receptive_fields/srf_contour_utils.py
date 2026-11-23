@@ -104,8 +104,9 @@ def get_center_mask(cntr, srf_shape, pixelsize, plot=False):
     from skimage import draw
 
     mask_center = np.zeros(srf_shape, dtype='bool')
-    mask_center[draw.polygon(cntr[:, 1] / pixelsize + srf_shape[0] / 2,
-                             cntr[:, 0] / pixelsize + srf_shape[1] / 2)] = 1
+    # Contour coordinates are relative to the sRF center, with pixel i centered at (i + 0.5 - n / 2) * pixelsize
+    mask_center[draw.polygon(cntr[:, 1] / pixelsize + srf_shape[0] / 2 - 0.5,
+                             cntr[:, 0] / pixelsize + srf_shape[1] / 2 - 0.5)] = 1
 
     if plot:
         extent = srf_extent(srf_shape=mask_center.shape, pixelsize=pixelsize)

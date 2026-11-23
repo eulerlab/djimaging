@@ -161,8 +161,6 @@ def test_center_and_surround_masks_are_disjoint():
     assert not np.any(mask_center & mask_full_surround)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: get_center_mask maps contour to pixels with +n/2 instead of +n/2-0.5 "
-                                       "(and compute_contour scales by n/(n-1)), shifting the mask")
 def test_center_mask_from_contour_is_centered_on_rf():
     shape, row0, col0, pixelsize = (15, 25), 4, 17, 10.
     srf = _cone(shape, row0, col0, 6.4)  # radius 3.2 px: no pixel center lies on the contour
@@ -174,7 +172,6 @@ def test_center_mask_from_contour_is_centered_on_rf():
     np.testing.assert_array_equal(mask, srf > 0.5)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: get_center_mask shifts the mask by half a pixel (+n/2 instead of +n/2-0.5)")
 def test_center_mask_of_centered_square():
     # Square of 3x3 pixels around the center pixel of a 9x9 sRF, in um relative to the sRF center.
     pixelsize = 10.
