@@ -187,9 +187,6 @@ def test_extract_triggers_converts_old_frame_based_triggers(tmp_path):
     assert_allclose(triggertimes, [7., 11.])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: load_roi2trace compares positive roi_ids with the negative ids of "
-                                       "extract_roi_ids (ValueError) and passes negative ids to get_roi2trace "
-                                       "(AssertionError): Traces with compute_from_stack=False always fails")
 def test_load_roi2trace(chirp_path):
     roi2trace, frame_dt = read_h5_utils.load_roi2trace(chirp_path, roi_ids=np.array([1, 2]))
     assert sorted(roi2trace) == [1, 2]
