@@ -358,7 +358,6 @@ def test_split_trace_by_group_reps_final_group_includes_last_sample():
     np.testing.assert_array_equal(snips['a'][:, 1], np.arange(60, 80))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: group end index ignores `delay`, so snippets are shortened by delay")
 def test_split_trace_by_group_reps_delay_shifts_window_without_shortening():
     trace, times = _ramp(duration=10.)
     snips, _, _, _ = snippet_utils.split_trace_by_group_reps(
