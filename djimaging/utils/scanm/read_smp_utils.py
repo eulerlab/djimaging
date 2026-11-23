@@ -61,6 +61,10 @@ def load_wparams(raw_file, return_file=True, lower_keys=True):
     wparams['User_nXPixLineOffs'] = raw_file.dxOffs_pix
     wparams['User_ScanType'] = raw_file.scanType
 
+    # The micro sign in this key is read with varying encodings (µ, �, ...), see read_header_utils._clean_key
+    for k in [k for k in wparams if k.startswith('RealPixelDuration_')]:
+        wparams['RealPixelDuration_µs'] = wparams.pop(k)
+
     # Handle different naming conventions
     renaming_dict = {
         "RealPixelDuration_µs": 'RealPixDur',
