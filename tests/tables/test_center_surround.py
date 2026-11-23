@@ -154,12 +154,9 @@ def _sr_stack_with_stimulus_window(nt=400, idx_a=200, idx_b=300):
     return stack, roi_mask
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: int(triggertimes[0] * fs) with fs from to_arrays (1-element array) raises "
-                                       "TypeError on numpy>=2.5; the bare except silently falls back to frames 0..100")
 def test_sr_index_make_uses_stimulus_window(monkeypatch):
     stack, roi_mask = _sr_stack_with_stimulus_window()
-    table = _sr_table(monkeypatch, stack, roi_mask, triggertimes=np.array([20., 30.]),
-                      scan_frequency=np.array([10.]))
+    table = _sr_table(monkeypatch, stack, roi_mask, triggertimes=np.array([20., 30.]), scan_frequency=10.)
     table.make(dict(field='f1', stim_name='gChirp'))
     np.testing.assert_allclose([r['sr_idx'] for r in table.inserted], [0.5, 0.25])
 
