@@ -80,7 +80,6 @@ def test_to_igor_format_float_mask():
     np.testing.assert_array_equal(out, [[1, -1], [-2, 1]])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: to_igor_format crashes on unsigned python masks (-1 out of bounds)")
 @pytest.mark.parametrize('dtype', [np.uint8, np.uint16])
 def test_to_igor_format_unsigned_mask(dtype):
     out = to_igor_format(_python_mask().astype(dtype))
