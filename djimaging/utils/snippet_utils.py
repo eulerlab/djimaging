@@ -370,6 +370,8 @@ def align_reps_with_trailing_nans(reps):
     if np.any(all_nan_reps):  # Remove reps if not at least 2 frames are present
         reps = reps[:, ~all_nan_reps]
         n_nan = n_nan[~all_nan_reps]
+        if reps.shape[1] == 0:  # nothing left to crop (max() of an empty array would raise)
+            return reps
 
     reps = reps[:reps.shape[0] - n_nan.max(), :]
     return reps
