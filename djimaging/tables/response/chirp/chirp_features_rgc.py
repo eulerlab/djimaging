@@ -247,12 +247,12 @@ def compute_transience_index(
         snip_times = resampled_snippets_times[:, i]
         snip = resampled_snippets[:, i]
         snip = snip - snip.min()
-        stim_start_idx = np.argmax(np.isclose(snip_times, stim_start, atol=1e-01))
-        stim_end_idx = np.argmax(np.isclose(snip_times, stim_end, atol=1e-01))
+        stim_start_idx = np.argmin(np.abs(snip_times - stim_start))
+        stim_end_idx = np.argmin(np.abs(snip_times - stim_end))
         trace = snip[stim_start_idx:stim_end_idx]
-        peak = np.argmax(trace)
-        peak_alpha = np.argmax(np.isclose(snip_times, snip_times[peak] + 0.4, atol=1e-01))
-        transience_indexes[i] = 1 - (snip[stim_start_idx + peak_alpha] / snip[stim_start_idx + peak])
+        peak = stim_start_idx + np.argmax(trace)
+        peak_alpha = np.argmin(np.abs(snip_times - (snip_times[peak] + 0.4)))
+        transience_indexes[i] = 1 - (snip[peak_alpha] / snip[peak])
 
     transience_index = np.mean(transience_indexes)
     return transience_index

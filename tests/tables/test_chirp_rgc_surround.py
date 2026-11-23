@@ -39,8 +39,6 @@ def test_rgc_transience_index_independent_of_trigger_offset(trigger_offset):
     assert obs == pytest.approx(ref, abs=1e-3)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: argmax(isclose(t, t_peak + 0.4, atol=0.1)) picks the first sample within "
-                                       "the tolerance, i.e. 0.3 s instead of 0.4 s after the peak")
 @pytest.mark.parametrize('fs', [500., 7.8125])
 def test_rgc_transience_index_uses_response_0p4s_after_peak(fs):
     snippets, times, triggers = _snippets(_gauss_bump, fs)
@@ -51,8 +49,8 @@ def test_rgc_transience_index_uses_response_0p4s_after_peak(fs):
 def test_chirp_features_rgc_make():
     fs = 7.8125
 
-    def on_cell(t):
-        return np.where((t >= 2.) & (t < 5.), 1., 0.) + 0.1
+    def on_cell(t):  # smooth edges: FFT resampling of a sharp step rings (Gibbs), which would dominate the index
+        return 1 / (1 + np.exp(-(t - 2.3) / 0.1)) / (1 + np.exp((t - 5.3) / 0.1)) + 0.1
 
     snippets, times, triggers = _snippets(on_cell, fs, t0=0., rep_len=40.)
     row = dict(snippets_t0=times[0], snippets_dt=1 / fs, snippets=snippets,
