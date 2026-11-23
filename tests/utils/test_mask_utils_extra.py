@@ -456,12 +456,10 @@ def test_compare_roi_masks_same_different_shifted():
         mu.compare_roi_masks(ref + 1, ref)  # not Igor format
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: compare_roi_masks calls an empty mask a 'shifted' copy (max shift)")
 def test_compare_roi_masks_empty_mask_is_different():
     assert mu.compare_roi_masks(np.ones((32, 24), dtype=int), _igor_ref()) == ('different', (0, 0))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: compare_roi_masks accepts shifts that move all ROIs out of the mask")
 def test_compare_roi_masks_rois_near_edge_true_shift():
     ref = np.ones((32, 24), dtype=int)
     ref[10:13, 0:3] = -1
