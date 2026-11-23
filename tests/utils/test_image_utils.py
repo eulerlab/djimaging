@@ -56,7 +56,6 @@ def test_rotate_image_float_does_not_modify_input():
     assert np.isnan(img[1, 1]) and img[0, 0] == 0.
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: rotate_image crashes on integer images (NaN assigned to int array)")
 def test_rotate_image_int_input():
     out = iu.rotate_image(np.arange(12).reshape(3, 4), angle=90, order=0)
     np.testing.assert_array_equal(out, np.rot90(np.arange(12).reshape(3, 4)))

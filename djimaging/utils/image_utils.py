@@ -70,7 +70,7 @@ def rotate_image(image: np.ndarray, angle: float, order: int = 1,
     from skimage.transform import rotate
 
     finite_mask = np.isfinite(image)
-    image = image.copy()
+    image = image.astype(float)  # copy; skimage would rescale int images to [0, 1] (order > 0)
 
     minv = np.nanmin(image)
     image[~finite_mask] = minv
