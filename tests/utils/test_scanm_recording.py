@@ -152,8 +152,6 @@ def test_recording_to_h5(chirp, tmp_path):
         assert set(f.keys()) == {'wDataCh0', 'wDataCh1', 'wDataCh2'}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: file type is dispatched on the case-sensitive extension; a .H5 file "
-                                       "(accepted by get_file_info_df) is read as .smp")
 def test_recording_upper_case_extension(chirp_path, tmp_path):
     path = tmp_path / 'SMP_M1_GCL0_chirp.H5'
     shutil.copy(chirp_path, path)
