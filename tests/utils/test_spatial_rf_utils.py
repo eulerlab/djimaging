@@ -78,7 +78,6 @@ def test_init_std_estimate_is_of_the_order_of_sigma():
     assert 4. <= std0 <= 8.
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: estimate_srf_center_model_init_params asserts pol == None for polarity=None")
 def test_gauss_model_without_polarity():
     srf = _gauss((15, 21), 13., 6., 2., 2., amp=-1.)
     model = srf_gauss_model(srf, polarity=None)

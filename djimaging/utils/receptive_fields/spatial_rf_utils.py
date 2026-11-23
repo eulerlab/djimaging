@@ -87,7 +87,7 @@ def estimate_srf_center_model_init_params(srf, polarity=None, amplimscale=2., pl
     y0 = int(y0)
 
     pol = np.sign(srf[y0, x0])
-    assert pol == polarity
+    assert polarity is None or pol == polarity
 
     srf_cut = np.clip(srf[y0] * pol, 0, None)
 
