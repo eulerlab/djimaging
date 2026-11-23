@@ -97,7 +97,6 @@ def test_sort_roi_mask_files_alias_and_control():
     assert list(mu.sort_roi_mask_files(files, mask_alias='mb')) == [files[1], files[0]]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: sort_roi_mask_files tie-break adds argsort, not alphabetical rank")
 def test_sort_roi_mask_files_ties_alphabetical():
     files = ['/x/c_control.h5', '/x/a_control.h5', '/x/b_control.h5']
     assert list(mu.sort_roi_mask_files(files)) == ['/x/a_control.h5', '/x/b_control.h5', '/x/c_control.h5']
