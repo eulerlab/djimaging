@@ -200,7 +200,6 @@ def test_smooth_rf_spreads_delta_within_npix():
     assert out.sum() == pytest.approx(1.)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: smooth_rf truncate=floor(npix/std) disables/shrinks blur if std > npix")
 def test_smooth_rf_kernel_radius_is_npix():
     delta = np.zeros((9, 9))
     delta[4, 4] = 1.
