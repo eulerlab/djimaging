@@ -1067,7 +1067,7 @@ def generate_roi_suggestions(mask_pred: np.ndarray, mask_true: np.ndarray, n_art
     iou_matrix = intersection_over_union(mask_true, mask_pred)[1:, 1:]  # `[1:,1:]` to exclude background
     pred_mask_ids = np.unique(mask_pred[mask_pred > 0])  # `mask_pred>0` to exclude background
     # find "false positive" ROI ids
-    is_fp = np.max(iou_matrix, axis=0) < threshold
+    is_fp = np.max(iou_matrix, axis=0, initial=0.) < threshold  # initial: no true ROIs means IoU 0
     # if not np.any(is_fp):
     #     return None
 
