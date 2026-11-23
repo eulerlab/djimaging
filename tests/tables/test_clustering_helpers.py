@@ -76,7 +76,6 @@ def test_sort_clusters_single_cluster_unchanged():
     assert sort_clusters(np.ones((3, 5)), cluster_idxs) is cluster_idxs
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: sort_clusters fills the output with a hard-coded -1 instead of invalid_value")
 def test_sort_clusters_respects_invalid_value():
     traces, cluster_idxs = _traces_for_sorting()
     cluster_idxs[0] = 0

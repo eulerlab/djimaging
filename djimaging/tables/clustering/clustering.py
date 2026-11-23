@@ -412,7 +412,7 @@ def sort_clusters(traces: np.ndarray, cluster_idxs: np.ndarray,
     ccs = np.corrcoef(X_means)[np.argmax(counts)]
     sorted_u_cidxs = u_cidxs[np.argsort(ccs)[::-1]]
 
-    sorted_cluster_idxs = np.full(cluster_idxs.size, -1)
+    sorted_cluster_idxs = np.full(cluster_idxs.size, invalid_value)
     for new_cidx, cidx in zip(sorted_u_cidxs, u_cidxs):
         sorted_cluster_idxs[cluster_idxs == new_cidx] = cidx
 
