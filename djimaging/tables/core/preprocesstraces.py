@@ -412,7 +412,7 @@ def drop_left_and_right(
     if drop_nmin_lr[0] > 0:
         trace[:drop_nmin_lr[0]] = trace[drop_nmin_lr[0]]
     if drop_nmin_lr[1] > 0:
-        trace[-drop_nmin_lr[1]:] = trace[-drop_nmin_lr[1]]
+        trace[-drop_nmin_lr[1]:] = trace[-(drop_nmin_lr[1] + 1)]
 
     return trace
 
