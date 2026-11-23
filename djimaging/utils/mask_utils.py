@@ -181,7 +181,7 @@ def extract_connected_mask(mask: np.ndarray, i: int, j: int) -> np.ndarray:
         for dx, dy in zip(dxs, dys):
             xx = u + dx
             yy = v + dy
-            if xx < nx and yy < ny and mask[xx][yy] == 1:
+            if 0 <= xx < nx and 0 <= yy < ny and mask[xx][yy] == 1:
                 mask[xx][yy] = 0
                 q.put((xx, yy))
 
