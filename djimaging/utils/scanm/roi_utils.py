@@ -50,10 +50,13 @@ def fix_first_or_last_n_nan(trace: np.ndarray, n: int) -> np.ndarray:
     """
     if n <= 0:
         return trace
+    # Fill only the NaNs, going outwards so that the nearest non-NaN value propagates to the edge
     if np.any(np.isnan(trace[:n])):
-        trace[:n] = trace[n]
+        for i in range(n - 1, -1, -1):
+            trace[i] = np.where(np.isnan(trace[i]), trace[i + 1], trace[i])
     if np.any(np.isnan(trace[-n:])):
-        trace[-n:] = trace[-n - 1]
+        for i in range(trace.shape[0] - n, trace.shape[0]):
+            trace[i] = np.where(np.isnan(trace[i]), trace[i - 1], trace[i])
     return trace
 
 
