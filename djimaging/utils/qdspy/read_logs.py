@@ -60,7 +60,7 @@ def parse_stimulus_log(log_path: str, verbose: bool = True) -> Tuple[List[Dict],
                 dt = datetime.strptime(sDateTime, "%Y%m%d_%H%M%S")
             except ValueError:
                 continue
-            if nLinesTotal == 1:
+            if dt_log_start is None:
                 dt_log_start = dt
                 dt_last_end = dt_log_start
 
