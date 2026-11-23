@@ -208,7 +208,7 @@ def int_downscale_image(data_img: np.ndarray, downscale: int) -> np.ndarray:
     data_img = np.mean(
         np.mean(
             data_img.reshape(
-                data_img.shape[0] // downscale, downscale, data_img.shape[1] // downscale, downscale, -1,
+                (data_img.shape[0] // downscale, downscale, data_img.shape[1] // downscale, downscale) + data_img.shape[2:]
             ),
             axis=1
         ),
