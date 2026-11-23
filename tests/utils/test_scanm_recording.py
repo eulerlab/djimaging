@@ -99,8 +99,6 @@ def test_recording_auto_threshold_midpoint(chirp):
     assert chirp.trigger_times.size == 10
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: set_auto_trigger_threshold adds uint16 min and max, which overflows "
-                                       "for vmin + vmax > 65535: threshold below baseline, no triggers found")
 def test_recording_auto_threshold_high_baseline(chirp):
     chirp.ch_stacks['wDataCh2'] = np.where(chirp.ch_stacks['wDataCh2'] > 30_000, 60_000, 30_000).astype(np.uint16)
     with warnings.catch_warnings():
@@ -131,8 +129,6 @@ def test_recording_wparams_dicts(chirp):
     assert set(chirp.get_wparams_str_dict(lower_keys=True)) == {k.lower() for k in chirp.get_wparams_str_dict()}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: get_wparams_num_dict (used by to_h5) stores RealPixDur in seconds, "
-                                       "but wParamsNum RealPixDur is in microseconds")
 def test_recording_wparams_num_real_pix_dur_unit(chirp):
     assert chirp.get_wparams_num_dict()['RealPixDur'] == pytest.approx(PIXEL_DURATION_US)
 
@@ -156,8 +152,6 @@ def test_recording_to_h5(chirp, tmp_path):
         assert set(f.keys()) == {'wDataCh0', 'wDataCh1', 'wDataCh2'}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: file type is dispatched on the case-sensitive extension; a .H5 file "
-                                       "(accepted by get_file_info_df) is read as .smp")
 def test_recording_upper_case_extension(chirp_path, tmp_path):
     path = tmp_path / 'SMP_M1_GCL0_chirp.H5'
     shutil.copy(chirp_path, path)
@@ -305,9 +299,6 @@ def test_recording_from_smp(monkeypatch):
     assert_allclose(rec.frame_dt_offset[:, 0], np.arange(1, 5) * 5e-6)  # one line offset pixel
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: load_wparams only renames the key 'RealPixelDuration_µs'; .smh keys with "
-                                       "another micro-sign encoding (see read_header_utils._clean_key) give no "
-                                       "'realpixdur' and frame times fail with KeyError")
 def test_load_wparams_micro_sign_variants():
     raw_file = FakeSMP()
     raw_file._kvPairDict['RealPixelDuration_�s'] = raw_file._kvPairDict.pop('RealPixelDuration_µs')

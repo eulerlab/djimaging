@@ -173,8 +173,6 @@ def test_crlf_line_endings(tmp_path):
     assert stats['nLinesErr'] == 0
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: nFrames / avgFreq_Hz raises ZeroDivisionError; QDSpy logs avgFreq_Hz=0 "
-                                       "when no frame was shown")
 def test_zero_frame_rate_does_not_crash(tmp_path):
     log = _write(tmp_path, [
         _start('20250506_100000', CHIRP),
@@ -186,8 +184,6 @@ def test_zero_frame_rate_does_not_crash(tmp_path):
     assert stims[0]['aborted'] is True
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: last character of every line is cut off, so a last line without "
-                                       "trailing newline cannot be parsed and the stimulus is lost")
 def test_last_line_without_newline(tmp_path):
     log = _write(tmp_path, [_start('20250506_100000', CHIRP), _end('20250506_100001', CHIRP).rstrip('\n')])
     stims, stats = parse_stimulus_log(log, verbose=False)
@@ -195,8 +191,6 @@ def test_last_line_without_newline(tmp_path):
     assert len(stims) == 1
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: log start time is only taken from line 1; if that line has no time "
-                                       "stamp, the first STARTED raises TypeError (datetime - None)")
 def test_first_line_without_time_stamp(tmp_path):
     log = _write(tmp_path, ['\n', _start('20250506_100000', CHIRP), _end('20250506_100001', CHIRP)])
     stims, _ = parse_stimulus_log(log, verbose=False)

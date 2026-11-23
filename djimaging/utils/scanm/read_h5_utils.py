@@ -167,7 +167,9 @@ def load_roi2trace(filepath: str, roi_ids: np.ndarray) -> Tuple[dict, float]:
     try:
         with h5py.File(filepath, "r", driver="stdio") as h5_file:
             traces, traces_times = extract_traces(h5_file)
-            roi_ids_traces = extract_roi_ids(extract_roi_mask(h5_file, ignore_not_found=False), npixartifact=0)
+            # The mask stores ROI i as -i; roi_ids and the columns of Traces0_raw use the positive ids
+            roi_ids_traces = np.abs(extract_roi_ids(extract_roi_mask(h5_file, ignore_not_found=False),
+                                                    npixartifact=0))
     except OSError as e:
         raise OSError(f"Error loading file {filepath}: {e}")
 

@@ -256,7 +256,7 @@ class ScanMRecording:
 
     def __load_from_file(self) -> None:
         """Dispatch loading to the appropriate reader based on file extension."""
-        if self.filetype == '.h5':
+        if self.filetype.lower() == '.h5':
             self.__load_from_h5_file()
         else:
             self.__load_from_smp_file()
@@ -422,8 +422,9 @@ class ScanMRecording:
         30 000; otherwise it is set to the midpoint between min and max.
         The result is stored in ``self.trigger_threshold``.
         """
-        vmin = self.ch_stacks[self.trigger_ch_name].min()
-        vmax = self.ch_stacks[self.trigger_ch_name].max()
+        # float: vmin + vmax must not overflow for integer (uint16) stacks
+        vmin = float(self.ch_stacks[self.trigger_ch_name].min())
+        vmax = float(self.ch_stacks[self.trigger_ch_name].max())
 
         if vmin < 25_000 and vmax > 35_000:
             self.trigger_threshold = 30_000
@@ -585,7 +586,7 @@ class ScanMRecording:
         wparams_num['User_dzPix'] = self.pix_nz
         wparams_num['User_nPixRetrace'] = self.pix_n_retrace
         wparams_num['User_nXPixLineOffs'] = self.pix_n_line_offset
-        wparams_num['RealPixDur'] = self.real_pixel_duration
+        wparams_num['RealPixDur'] = self.real_pixel_duration * 1e6  # wParamsNum unit is us
         wparams_num['Zoom'] = self.obj_zoom
         wparams_num['Angle_deg'] = self.obj_angle_deg
         wparams_num['XCoord_um'] = self.pos_x_um

@@ -167,8 +167,6 @@ def test_print_tree(tmp_path, capsys):
     assert 'Pre' not in out
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: print_tree takes the file type as f.split('.')[1]: IndexError for files "
-                                       "without extension (e.g. README) and wrong type for names with several dots")
 def test_print_tree_file_without_extension(tmp_path, capsys):
     _make_tree(tmp_path)
     (tmp_path / 'exp' / 'README').write_text('')

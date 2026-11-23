@@ -163,7 +163,7 @@ def print_tree(startpath: str, include_types: list | None = None,
         subindent = ' ' * 4 * (level + 1)
 
         for f in sorted(files):
-            f_type = f.split('.')[1].lower()
+            f_type = os.path.splitext(f)[1].lstrip('.').lower()
 
             if exclude_types is not None and f_type in exclude_types:
                 continue
