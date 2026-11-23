@@ -38,7 +38,6 @@ def test_naka_rushton_s50_zero_is_constant():
     np.testing.assert_allclose(out, 0.6)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: naka_rushton masks S == R_base (instead of S == 0) and returns 0 there")
 def test_naka_rushton_stimulus_equal_to_r_base():
     S = np.array([0., 0.1, 0.5, 1.])
     np.testing.assert_allclose(naka_rushton(S, 0.5, 1.0, 0.3, 2.), _nr_reference(S, 0.5, 1.0, 0.3, 2.))
