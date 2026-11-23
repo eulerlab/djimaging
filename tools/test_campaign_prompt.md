@@ -8,7 +8,7 @@ its own reviewable commit. Match the style of the previous campaign (PR 91, bran
 ## Step 0: orient (cheap, do not skip)
 1. Read `CLAUDE.md` and `tools/test_campaign.md` (ledger: which modules are done, in progress, or skipped,
    and known suspicions). Do not read anything else yet.
-2. Create a branch from the current campaign branch: `git switch -c test/<module-name>`.
+2. Do not create a branch yet; you create it in Step 1, after you have picked the module.
 3. Use the project venv: `.venv/Scripts/python.exe` (Windows). Never touch the `X:` drive; it is a shared server.
 
 ## Step 1: pick the module
@@ -19,7 +19,12 @@ its own reviewable commit. Match the style of the previous campaign (PR 91, bran
   functions they delegate to in `djimaging/utils/`), and skip the rest with a ledger note.
 - For a very large module (for example `roi_mask.py`), limit the session to its pure functions. Do not try
   to cover everything.
-- Set the module's ledger row to `wip` right away.
+- Prefer modules with numeric or array logic (filters, masks, geometry, fitting, parsing); that is where bugs
+  were found in the first campaign. Glue code that needs heavy mocking (loading, model wrappers, plotting)
+  finds almost nothing: test it only if nothing better is left, and say so in the ledger.
+- Write down the module's "before" figures from the table (missed statements, coverage %).
+- Now create the branch: `git switch -c test/<module-file-stem>` (for example `test/roi_mask`), and set the
+  module's ledger row to `wip`.
 - To see what is untested in that module: `python tools/coverage_gaps.py --module <path>` (prints missed line
   ranges, instant). Then read only those line ranges of the module, not the whole file.
 
@@ -65,7 +70,10 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
    Everything must pass; no XPASS (a fixed bug whose marker remains).
 2. Run flake8 on the files you changed with CI settings:
    `flake8 <files> --max-complexity=10 --max-line-length=127`.
-3. Run `python tools/coverage_gaps.py --module <path>` and record the new coverage.
+3. Measure the result: `python tools/coverage_gaps.py --module <path> --tests <your new test files>`. It runs
+   only your tests (seconds) and prints before, new-tests-alone and combined (the "after" figure). Record
+   the combined figure. NEVER run `coverage` or `pytest --cov` yourself: that overwrites the baseline
+   `.coverage` file that the script and the next session rely on.
 4. Update the ledger row to `done` (or `skip` with a reason): coverage before and after, number of bugs
    found and fixed. Commit the ledger as `tests: ledger <module>`.
 5. Do not push and do not open a PR. Do not commit `.coverage` files. Do not edit existing tests except

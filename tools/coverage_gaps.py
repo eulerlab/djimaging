@@ -5,6 +5,9 @@ Usage (from the repo root, with the project venv active):
     python tools/coverage_gaps.py --reuse      # skip the test run, reuse the last .coverage data
     python tools/coverage_gaps.py --module djimaging/utils/snippet_utils.py
                                                # missed line ranges of ONE module (reuses .coverage data)
+    python tools/coverage_gaps.py --module djimaging/utils/snippet_utils.py --tests tests/utils/test_snippet_utils.py
+                                               # seconds. Prints the module's coverage before (last full run), from the
+                                               # new tests alone, and combined (= the "after" figure). Never touches .coverage
     python tools/coverage_gaps.py --top 25 --all   # also list modules the ledger marks done/skip
 
 Output is intentionally short: one line per module, ranked by missed statements.
@@ -37,9 +40,24 @@ def run_tests():
         sys.exit("test run failed; fix the failure (or run with --reuse after a successful run)")
 
 
-def to_json():
-    subprocess.run([sys.executable, "-m", "coverage", "json", "-q", "-o", str(JSON_FILE)], cwd=ROOT, check=True)
+def to_json(data_file=DATA_FILE):
+    subprocess.run([sys.executable, "-m", "coverage", "json", "-q", f"--data-file={data_file}", "-o", str(JSON_FILE)],
+                   cwd=ROOT, check=True)
     return json.loads(JSON_FILE.read_text())["files"]
+
+
+def run_targeted(tests):
+    """Run only `tests` under coverage into a throw-away data file; return that file."""
+    data_file = Path(tempfile.gettempdir()) / "djimaging_cov_targeted"
+    data_file.unlink(missing_ok=True)
+    cmd = [sys.executable, "-m", "coverage", "run", f"--data-file={data_file}", "--source=djimaging",
+           "-m", "pytest", "-q", "-p", "no:cacheprovider", *tests]
+    res = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    print((res.stdout.strip().splitlines() or [""])[-1], file=sys.stderr)
+    if res.returncode != 0:
+        print(res.stdout[-3000:], file=sys.stderr)
+        sys.exit("targeted tests failed")
+    return data_file
 
 
 def ledger_status():
@@ -70,21 +88,50 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--reuse", action="store_true")
     ap.add_argument("--module")
+    ap.add_argument("--tests", nargs="+", help="with --module: measure coverage from only these test files")
     ap.add_argument("--top", type=int, default=15)
     ap.add_argument("--all", action="store_true")
     a = ap.parse_args()
 
-    if not a.reuse and not a.module:
-        run_tests()
-    elif not DATA_FILE.exists():
-        sys.exit("no .coverage data yet: run `python tools/coverage_gaps.py` once first")
-    files = {k.replace("\\", "/"): v for k, v in to_json().items()}
+    if a.tests and not a.module:
+        sys.exit("--tests needs --module")
+    before = None
+    if a.tests:
+        new_file = run_targeted(a.tests)
+        data_file = new_file
+        if DATA_FILE.exists():
+            before = {k.replace("\\", "/"): v for k, v in to_json(DATA_FILE).items()}
+            comb = Path(tempfile.gettempdir()) / "djimaging_cov_combined"
+            comb.unlink(missing_ok=True)
+            import shutil
+            base_copy = Path(tempfile.gettempdir()) / "djimaging_cov_baseline"
+            shutil.copyfile(DATA_FILE, base_copy)
+            subprocess.run([sys.executable, "-m", "coverage", "combine", "-q", "--keep", f"--data-file={comb}",
+                            str(base_copy), str(new_file)], cwd=ROOT, check=True)
+            data_file = comb
+    else:
+        data_file = DATA_FILE
+        if not a.reuse and not a.module:
+            run_tests()
+        elif not DATA_FILE.exists():
+            sys.exit("no .coverage data yet: run `python tools/coverage_gaps.py` once first")
+    files = {k.replace("\\", "/"): v for k, v in to_json(data_file).items()}
 
     if a.module:
         f = files.get(a.module.replace("\\", "/"))
         if not f:
             sys.exit(f"{a.module} not in coverage data")
         s = f["summary"]
+        if before is not None:
+            b = before.get(a.module.replace("\\", "/"), {}).get("summary")
+            if b:
+                print(f"before (last full run): {b['percent_covered']:.0f}% ({b['missing_lines']} missed)")
+            alone = json.loads(subprocess.run([sys.executable, "-m", "coverage", "json", "-q", f"--data-file={new_file}",
+                                               "-o", "-"], cwd=ROOT, capture_output=True, text=True).stdout)
+            af = {k.replace("\\", "/"): v for k, v in alone["files"].items()}.get(a.module.replace("\\", "/"))
+            if af:
+                print(f"new tests alone: {af['summary']['percent_covered']:.0f}%")
+            print("after (combined): ", end="")
         print(f"{a.module}: {s['percent_covered']:.0f}% ({s['missing_lines']} of {s['num_statements']} statements missed)")
         print("missed lines:", ranges(f["missing_lines"]))
         return
