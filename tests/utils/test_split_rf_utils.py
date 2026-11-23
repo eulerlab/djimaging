@@ -46,7 +46,7 @@ def test_merge_strf_rejects_wrong_dims():
     with pytest.raises(AssertionError):
         merge_strf(np.zeros((2, 3)), np.zeros((2, 2)))
     with pytest.raises(AssertionError):
-        merge_strf(np.zeros(3), np.zeros(2))
+        merge_strf(np.zeros((2, 2, 2)), np.zeros(2))
 
 
 def test_resize_srf():
@@ -94,8 +94,6 @@ def test_svd_trf_and_srf_proportional_to_ground_truth():
     assert abs(np.corrcoef(trf, trf_true)[0, 1]) == pytest.approx(1.)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: split_rf_svd 2D (t, x) branch crashes, "
-                                       "rescale_trf_srf -> merge_strf asserts srf.ndim == 2")
 def test_svd_2d_strf():
     srf_true = np.sin(np.linspace(0, np.pi, 15))
     strf = np.outer(_trf(), srf_true)
