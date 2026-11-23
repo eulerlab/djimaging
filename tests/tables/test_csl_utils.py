@@ -100,8 +100,6 @@ def test_fit_naka_rushton_plot():
     plt.close(fig)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: init_naka_rushton gives lower == upper bounds for flat data; curve_fit "
-                                       "raises ValueError, which is not caught (only RuntimeError)")
 def test_fit_naka_rushton_flat_response_does_not_crash():
     half_max, half_max_stim, slope = fit_naka_rushton(CONTRASTS, np.zeros_like(CONTRASTS))
     assert slope == pytest.approx(0.)
