@@ -180,8 +180,6 @@ def test_split_make_compute_other_methods_compute_qidx(method):
     assert np.isfinite(split_qidx)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: SplitRF split_qidx for 'sd'/'peak' compares unscaled sRF x tRF with the "
-                                       "STRF, so it depends on STRF amplitude and sign")
 @pytest.mark.parametrize('method', ['sd', 'peak'])
 @pytest.mark.parametrize('amp', [2., -1.])
 def test_split_qidx_of_separable_strf_is_one(method, amp):
