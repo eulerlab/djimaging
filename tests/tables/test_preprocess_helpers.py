@@ -100,8 +100,6 @@ def test_extract_baseline_stim_before_trace_raises():
         pp.extract_baseline(np.arange(5.), np.arange(5.) + 10, stim_start=9.)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: baseline end index is used as exclusive slice end, "
-                                       "so the last pre-stimulus sample is dropped")
 def test_extract_baseline_contains_all_prestimulus_samples():
     times = np.arange(10.) + 10.
     baseline = pp.extract_baseline(np.arange(10.), times, stim_start=13.5)
