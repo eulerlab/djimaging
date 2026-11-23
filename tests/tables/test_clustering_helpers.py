@@ -217,8 +217,6 @@ def _features_table(n_rois=4, n_t=30, dt=0.1, t0=1.0):
                      params_table=FakeRel(dict(norm_trace=0, stim_names='gChirp_lChirp')))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: FeaturesTemplate.fetch_traces builds times as arange(n_rois) * dt + t0 "
-                                       "(a 1d float array) and passes it to truncated_vstack, which raises TypeError")
 def test_features_fetch_traces_single_roi():
     table = _features_table(n_rois=1, n_t=30)
     traces, times, roi_keys, stim_names = table.fetch_traces(dict(features_id=1))
@@ -227,8 +225,6 @@ def test_features_fetch_traces_single_roi():
     assert traces[0].shape == (1, 30)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: FeaturesTemplate.fetch_traces calls tab.fetch1(...) on the multi-ROI join "
-                                       "(and builds times from the number of ROIs instead of the trace length)")
 def test_features_fetch_traces_multiple_rois():
     table = _features_table(n_rois=4, n_t=30, dt=0.1, t0=1.0)
     traces, times, roi_keys, stim_names = table.fetch_traces(dict(features_id=1))
