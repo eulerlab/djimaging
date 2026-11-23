@@ -136,8 +136,6 @@ def test_compute_triggers_trigger_on_at_start_is_extrapolated():
     assert_allclose(triggertimes[1:], [40e-3, 100e-3])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: trigger duration of the other triggers is underestimated by one sample "
-                                       "(argmax from idx+1), so a trigger on from sample 0 starts at sample 1")
 def test_compute_triggers_trigger_on_at_start_duration_off_by_one():
     nx, ny, nf = 4, 4, 10
     frame_times, offset, _ = _frame_timing(nx, ny, nf)
