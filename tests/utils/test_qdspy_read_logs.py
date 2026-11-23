@@ -173,8 +173,6 @@ def test_crlf_line_endings(tmp_path):
     assert stats['nLinesErr'] == 0
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: nFrames / avgFreq_Hz raises ZeroDivisionError; QDSpy logs avgFreq_Hz=0 "
-                                       "when no frame was shown")
 def test_zero_frame_rate_does_not_crash(tmp_path):
     log = _write(tmp_path, [
         _start('20250506_100000', CHIRP),
