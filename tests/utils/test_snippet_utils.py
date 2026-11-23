@@ -413,7 +413,6 @@ def test_align_reps_without_trailing_nans_keeps_all_frames(reps):
     assert out.shape[0] == reps.shape[0]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: all-NaN reps crash with max() of empty array instead of NaN result")
 def test_compute_repeat_correlation_all_nan_returns_nan():
     corrs = snippet_utils.compute_repeat_correlation(np.full((5, 3), np.nan))
     assert corrs.shape == (1,) and np.isnan(corrs[0])
