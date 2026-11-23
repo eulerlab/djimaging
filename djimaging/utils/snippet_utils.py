@@ -292,7 +292,7 @@ def split_trace_by_group_reps(
                 idx_end = find_closest(
                     target=triggertimes[trg_count + ntrigger_split_i] + delay, data=times, as_index=True)
             except IndexError:
-                idx_end = -1
+                idx_end = None  # last group: use the trace until its end
 
             snippets_i, snippets_t_i, snippets_tt_i, _ = split_trace_by_reps(
                 trace[idx_start:idx_end], times[idx_start:idx_end],
