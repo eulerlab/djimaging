@@ -43,7 +43,6 @@ def test_naka_rushton_stimulus_equal_to_r_base():
     np.testing.assert_allclose(naka_rushton(S, 0.5, 1.0, 0.3, 2.), _nr_reference(S, 0.5, 1.0, 0.3, 2.))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: naka_rushton allocates the output with zeros_like(S), truncating for int S")
 def test_naka_rushton_integer_stimulus():
     S = np.array([0, 1, 2])
     np.testing.assert_allclose(naka_rushton(S, 0., 1.0, 1.0, 1.), [0., 0.5, 2 / 3])

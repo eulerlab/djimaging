@@ -25,6 +25,7 @@ def naka_rushton(S: np.ndarray, R_base: float, R_max: float, S50: float, n: floa
     np.ndarray
         Response values with the same shape as S.
     """
+    S = np.asarray(S, dtype=float)
     if S50 == 0.0:
         return np.full_like(S, R_max * 0.5 + R_base)
     nr = np.full_like(S, R_base)  # S ** n / (S ** n + S50 ** n) is 0 at S == 0
