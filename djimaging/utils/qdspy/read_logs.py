@@ -136,10 +136,10 @@ def parse_stimulus_log(log_path: str, verbose: bool = True) -> Tuple[List[Dict],
             elif "nFrames" in data:
                 # Frame statistics arrive after FINISHED, so nStims-1 is correct here.
                 if nStims > 0:
-                    stims[nStims - 1].update({
-                        "t_dur_s_calc": data["nFrames"] / data["avgFreq_Hz"],
-                        "nDroppedFrames": data["nDroppedFrames"],
-                    })
+                    stims[nStims - 1]["nDroppedFrames"] = data["nDroppedFrames"]
+                    # QDSpy logs avgFreq_Hz=0 if no frame duration was measured: duration unknown
+                    if data["avgFreq_Hz"] > 0:
+                        stims[nStims - 1]["t_dur_s_calc"] = data["nFrames"] / data["avgFreq_Hz"]
 
             elif isStimStarted:
                 # Extra DATA lines emitted while a stimulus is running.
