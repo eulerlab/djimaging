@@ -120,7 +120,6 @@ def test_svd_wrong_dims():
         split_rf_svd(np.zeros(5))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: split_rf_svd explained variance only uses the top 3 singular values")
 def test_svd_explained_variance_of_noise():
     rng = np.random.default_rng(0)
     strf = rng.normal(size=(20, 15, 20))
