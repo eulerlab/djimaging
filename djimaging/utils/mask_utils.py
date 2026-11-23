@@ -1193,7 +1193,7 @@ def sort_roi_mask_files(files: list, mask_alias: str = '', highres_alias: str = 
                 if alias in file.split('_'):
                     penalties[i] = penalty
 
-    penalties += np.arange(len(files_base))[np.argsort(files_base)] * 0.01
+    penalties += np.argsort(np.argsort(files_base)) * 0.01  # alphabetical rank breaks ties
 
     # Penalize non control conditions
     for i, file in enumerate(files_base):
