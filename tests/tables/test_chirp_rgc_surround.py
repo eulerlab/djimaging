@@ -119,8 +119,6 @@ def test_chirp_surround_plot(monkeypatch):
     plt.close('all')
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: compute_entry(plot=True) indexes l/g snippets with rep_i < max(n_l, n_g) "
-                                       "unguarded and raises IndexError if lChirp and gChirp have different #reps")
 def test_chirp_surround_plot_different_number_of_repetitions(monkeypatch):
     monkeypatch.setattr(plt, 'show', lambda *a, **k: None)
     table = _surround_table(_step(1.0, 2, 5), _step(0.3, 2, 5), polarity_index=1., n_l=2, n_g=3)
