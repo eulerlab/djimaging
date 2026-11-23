@@ -114,7 +114,7 @@ def fit_naka_rushton_repeated(x_data: np.ndarray, y_data: np.ndarray, n: int = 3
             if mse < mse_best:
                 popt_best = popt
                 mse_best = mse
-        except RuntimeError:
+        except (RuntimeError, ValueError):  # ValueError: e.g. empty bounds for constant y_data
             pass
 
     return popt_best
@@ -140,7 +140,7 @@ def fit_naka_rushton(x_data: np.ndarray, y_data: np.ndarray, n: int = 3, ax=None
     np.random.seed(42)
 
     popt = fit_naka_rushton_repeated(x_data, y_data, n=n)
-    R0_fit, Rm_fit, S50_fit, n_fit = popt
+    R0_fit, Rm_fit, S50_fit, n_fit = np.asarray(popt, dtype=float)  # numpy floats: x / 0 gives inf, not an error
 
     # Compare MSE of linear fit
     linear_fit = np.polyfit(x_data, y_data, 1)
