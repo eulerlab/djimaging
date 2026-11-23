@@ -146,8 +146,6 @@ def test_compute_triggers_trigger_on_at_start_duration_off_by_one():
     assert_allclose(triggertimes, [0., 40e-3])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: if the trigger that is on at the start is shorter than the others, the "
-                                       "extrapolated start index is negative and wraps to the end of the recording")
 def test_compute_triggers_trigger_on_at_start_shorter_than_others():
     nx, ny, nf = 4, 4, 10
     frame_times, offset, _ = _frame_timing(nx, ny, nf)

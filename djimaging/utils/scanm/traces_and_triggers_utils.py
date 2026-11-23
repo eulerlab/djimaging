@@ -69,7 +69,8 @@ def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset
         # stack[trigger_idx] is the first high sample, so argmax(...) is the number of high samples
         mean_trigger_dur = int(np.median([np.argmax(stack[trigger_idx:] < threshold)
                                           for trigger_idx in trigger_idxs]))
-        first_trigger_start_idx = first_trigger_end_idx - mean_trigger_dur
+        # Onset before the recording started: the first sample is the earliest time there is
+        first_trigger_start_idx = max(first_trigger_end_idx - mean_trigger_dur, 0)
         trigger_idxs = np.append(first_trigger_start_idx, trigger_idxs)
 
     triggertimes = stack_times[trigger_idxs] + stimulator_delay
