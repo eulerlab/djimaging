@@ -12,7 +12,7 @@ def compute_explained_rf(rf, rf_fit):
 
 def smooth_rf(rf, blur_std, blur_npix):
     from scipy.ndimage import gaussian_filter
-    return gaussian_filter(rf, mode='nearest', sigma=blur_std, truncate=np.floor(blur_npix / blur_std), order=0)
+    return gaussian_filter(rf, mode='nearest', sigma=blur_std, truncate=blur_npix / blur_std, order=0)
 
 
 def resize_srf(srf, scale=None, output_shape=None):
