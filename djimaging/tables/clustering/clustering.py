@@ -120,6 +120,7 @@ class ClusteringTemplate(dj.Computed):
 
         if (kind == 'gmm' and decomp_kind == 'none') or (kind == 'hierarchical_ward' and not decomp_kind == 'none'):
             print(f'Skipping clustering with kind={kind} and decomp_kind={decomp_kind}. Not supported.')
+            return
 
         _, cluster_idxs = cluster_features(X=np.hstack(features), kind=kind, params_dict=params_dict)
         cluster_idxs = remove_clusters(cluster_idxs=cluster_idxs, min_count=min_count, invalid_value=-1)
@@ -381,7 +382,7 @@ def remove_clusters(cluster_idxs: np.ndarray, min_count: int,
 
     new_cluster = 1
     for cluster, count in zip(*np.unique(cluster_idxs, return_counts=True)):
-        if count > min_count:
+        if count >= min_count:
             new_cluster_idxs[cluster_idxs == cluster] = new_cluster
             new_cluster += 1
 
@@ -412,7 +413,7 @@ def sort_clusters(traces: np.ndarray, cluster_idxs: np.ndarray,
     ccs = np.corrcoef(X_means)[np.argmax(counts)]
     sorted_u_cidxs = u_cidxs[np.argsort(ccs)[::-1]]
 
-    sorted_cluster_idxs = np.full(cluster_idxs.size, -1)
+    sorted_cluster_idxs = np.full(cluster_idxs.size, invalid_value)
     for new_cidx, cidx in zip(sorted_u_cidxs, u_cidxs):
         sorted_cluster_idxs[cluster_idxs == new_cidx] = cidx
 

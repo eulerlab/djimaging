@@ -38,13 +38,11 @@ def test_naka_rushton_s50_zero_is_constant():
     np.testing.assert_allclose(out, 0.6)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: naka_rushton masks S == R_base (instead of S == 0) and returns 0 there")
 def test_naka_rushton_stimulus_equal_to_r_base():
     S = np.array([0., 0.1, 0.5, 1.])
     np.testing.assert_allclose(naka_rushton(S, 0.5, 1.0, 0.3, 2.), _nr_reference(S, 0.5, 1.0, 0.3, 2.))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: naka_rushton allocates the output with zeros_like(S), truncating for int S")
 def test_naka_rushton_integer_stimulus():
     S = np.array([0, 1, 2])
     np.testing.assert_allclose(naka_rushton(S, 0., 1.0, 1.0, 1.), [0., 0.5, 2 / 3])
@@ -102,8 +100,6 @@ def test_fit_naka_rushton_plot():
     plt.close(fig)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: init_naka_rushton gives lower == upper bounds for flat data; curve_fit "
-                                       "raises ValueError, which is not caught (only RuntimeError)")
 def test_fit_naka_rushton_flat_response_does_not_crash():
     half_max, half_max_stim, slope = fit_naka_rushton(CONTRASTS, np.zeros_like(CONTRASTS))
     assert slope == pytest.approx(0.)
@@ -150,6 +146,12 @@ def test_fit_sigmoid_default_x_and_plot():
     plt.close(fig)
 
 
+def test_fit_sigmoid_flat_response_does_not_crash():
+    half_amp, half_amp_x, slope = fit_sigmoid(np.zeros_like(CONTRASTS), CONTRASTS)
+    assert half_amp == pytest.approx(0.)
+    assert slope == pytest.approx(0.)
+
+
 # ---------------------------------------------------------------- f1_amp_phase
 
 def test_f1_amp_phase_cosine_and_sine():
@@ -176,8 +178,6 @@ def test_f1_amp_phase_edge_cases():
     assert f1_amp_phase(np.ones(101), 0., 100.) == (0.0, 0.0)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: f1_amp_phase forces odd N, so bin N//2 is never Nyquist, "
-                                       "but it still skips the factor 2 for k == N//2")
 def test_f1_amp_phase_highest_bin_of_odd_length():
     n = 11
     x = np.cos(2 * np.pi * 5 * np.arange(n) / n)  # bin 5 == N//2 of an odd-length signal

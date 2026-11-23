@@ -41,8 +41,6 @@ def test_remove_clusters_float_labels():
     np.testing.assert_array_equal(out, [2, 1, 2])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: remove_clusters keeps clusters with count > min_count, but min_count is "
-                                       "documented as the minimum number of samples a cluster must have to be retained")
 def test_remove_clusters_keeps_clusters_with_exactly_min_count():
     out = remove_clusters(np.array([0, 0, 1, 1, 1, 2]), min_count=2)
     np.testing.assert_array_equal(out, [1, 1, 2, 2, 2, -1])
@@ -78,7 +76,6 @@ def test_sort_clusters_single_cluster_unchanged():
     assert sort_clusters(np.ones((3, 5)), cluster_idxs) is cluster_idxs
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: sort_clusters fills the output with a hard-coded -1 instead of invalid_value")
 def test_sort_clusters_respects_invalid_value():
     traces, cluster_idxs = _traces_for_sorting()
     cluster_idxs[0] = 0
@@ -217,8 +214,6 @@ def _features_table(n_rois=4, n_t=30, dt=0.1, t0=1.0):
                      params_table=FakeRel(dict(norm_trace=0, stim_names='gChirp_lChirp')))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: FeaturesTemplate.fetch_traces builds times as arange(n_rois) * dt + t0 "
-                                       "(a 1d float array) and passes it to truncated_vstack, which raises TypeError")
 def test_features_fetch_traces_single_roi():
     table = _features_table(n_rois=1, n_t=30)
     traces, times, roi_keys, stim_names = table.fetch_traces(dict(features_id=1))
@@ -227,8 +222,6 @@ def test_features_fetch_traces_single_roi():
     assert traces[0].shape == (1, 30)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: FeaturesTemplate.fetch_traces calls tab.fetch1(...) on the multi-ROI join "
-                                       "(and builds times from the number of ROIs instead of the trace length)")
 def test_features_fetch_traces_multiple_rois():
     table = _features_table(n_rois=4, n_t=30, dt=0.1, t0=1.0)
     traces, times, roi_keys, stim_names = table.fetch_traces(dict(features_id=1))
@@ -270,8 +263,6 @@ def test_clustering_make_ward():
     assert all(set(r) == {'features_id', 'clustering_id', 'roi_id', 'cluster_idx'} for r in roi_cluster.inserted)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: ClusteringTemplate.make prints 'Skipping clustering ... Not supported.' "
-                                       "but does not return, so it clusters and inserts anyway")
 def test_clustering_make_skips_unsupported_combination():
     X, _ = _blobs()
     table, _ = _clustering_table('hierarchical_ward', 'pca', [X], [X])
