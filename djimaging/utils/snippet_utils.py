@@ -371,7 +371,7 @@ def align_reps_with_trailing_nans(reps):
         reps = reps[:, ~all_nan_reps]
         n_nan = n_nan[~all_nan_reps]
 
-    reps = reps[:-n_nan.max(), :]
+    reps = reps[:reps.shape[0] - n_nan.max(), :]
     return reps
 
 
