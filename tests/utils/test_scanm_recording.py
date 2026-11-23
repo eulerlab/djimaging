@@ -303,9 +303,6 @@ def test_recording_from_smp(monkeypatch):
     assert_allclose(rec.frame_dt_offset[:, 0], np.arange(1, 5) * 5e-6)  # one line offset pixel
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: load_wparams only renames the key 'RealPixelDuration_µs'; .smh keys with "
-                                       "another micro-sign encoding (see read_header_utils._clean_key) give no "
-                                       "'realpixdur' and frame times fail with KeyError")
 def test_load_wparams_micro_sign_variants():
     raw_file = FakeSMP()
     raw_file._kvPairDict['RealPixelDuration_�s'] = raw_file._kvPairDict.pop('RealPixelDuration_µs')
