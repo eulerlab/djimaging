@@ -274,8 +274,6 @@ def test_fetch_exposure_history_with_fake_tables():
     assert pd.isna(rec_events.loc['SMP_GCL1_noise', 'n_traces'])
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: empty-recordings DataFrame has duplicate rec_start/rec_dur_s columns, build_events crashes"))
 def test_fetch_exposure_history_without_recordings():
     t = _tables()
     t['exp_history_table'].Recording.rows = []

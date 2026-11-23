@@ -56,7 +56,7 @@ def fetch_exposure_history(
 
     recs = pd.DataFrame((exp_history_table.Recording & exp_key).proj(*_REC_ATTRS).to_dicts())
     if len(recs) == 0:
-        recs = pd.DataFrame(columns=['rec_name', 'rec_start', 'rec_dur_s'] + _REC_ATTRS)
+        recs = pd.DataFrame(columns=['rec_name'] + _REC_ATTRS)
     recs['field'] = _field_labels(exp_key, recs, exp_history_field_table)
 
     if stimulus_table is not None:
