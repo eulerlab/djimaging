@@ -78,7 +78,6 @@ def test_init_std_estimate_is_of_the_order_of_sigma():
     assert 4. <= std0 <= 8.
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: estimate_srf_center_model_init_params asserts pol == None for polarity=None")
 def test_gauss_model_without_polarity():
     srf = _gauss((15, 21), 13., 6., 2., 2., amp=-1.)
     model = srf_gauss_model(srf, polarity=None)
@@ -136,8 +135,6 @@ def test_fit_gauss_rejects_non_2d():
         fit_rf_model(np.zeros((2, 3, 4)))
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="BUG: fit_rf_model(polarity=None) crashes (AssertionError) if the sRF has no negative pixel")
 def test_fit_gauss_strictly_positive_srf():
     # Default of FitGauss2DRF (_polarity = None): both polarities are tried, but an sRF without any negative pixel
     # (e.g. a Gaussian on a small positive offset) raises in the polarity=-1 attempt.
@@ -183,7 +180,6 @@ def test_dog_model_from_params_reproduces_fit():
     np.testing.assert_allclose(model(xx, yy), srf_fit, atol=1e-3)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: srf_dog_model_from_params ignores theta_0/theta_1 of rotated fits")
 def test_dog_model_from_params_keeps_rotation():
     params = dict(amplitude_0=1., x_mean_0=12., y_mean_0=9., x_stddev_0=3., y_stddev_0=1., theta_0=0.6,
                   amplitude_1=0.2, x_mean_1=12., y_mean_1=9., x_stddev_1=9., y_stddev_1=3., theta_1=0.6)

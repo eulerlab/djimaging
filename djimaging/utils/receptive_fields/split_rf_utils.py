@@ -12,7 +12,7 @@ def compute_explained_rf(rf, rf_fit):
 
 def smooth_rf(rf, blur_std, blur_npix):
     from scipy.ndimage import gaussian_filter
-    return gaussian_filter(rf, mode='nearest', sigma=blur_std, truncate=np.floor(blur_npix / blur_std), order=0)
+    return gaussian_filter(rf, mode='nearest', sigma=blur_std, truncate=blur_npix / blur_std, order=0)
 
 
 def resize_srf(srf, scale=None, output_shape=None):
@@ -27,7 +27,7 @@ def resize_srf(srf, scale=None, output_shape=None):
 def merge_strf(srf, trf):
     """Reconstruct STRF from sRF and tRF"""
     assert trf.ndim == 1, trf.ndim
-    assert srf.ndim == 2, srf.ndim
+    assert srf.ndim in (1, 2), srf.ndim
     rf = np.kron(trf, srf.flat).reshape(trf.shape + srf.shape)
     return rf
 
@@ -35,7 +35,11 @@ def merge_strf(srf, trf):
 def split_strf(strf, method='SVD', blur_std: float = 0, blur_npix: int = 1, upsample_srf_scale: int = 0):
     """Split STRF into sRF and tRF"""
     if blur_std > 0:
-        strf = np.stack([smooth_rf(rf=srf_i, blur_std=blur_std, blur_npix=blur_npix) for srf_i in strf])
+        if strf.ndim == 4:  # (time, y, x, color): blur each color channel separately
+            strf = np.stack([np.stack([smooth_rf(rf=srf_i[..., c], blur_std=blur_std, blur_npix=blur_npix)
+                                       for c in range(strf.shape[-1])], axis=-1) for srf_i in strf])
+        else:
+            strf = np.stack([smooth_rf(rf=srf_i, blur_std=blur_std, blur_npix=blur_npix) for srf_i in strf])
 
     explained_variance = None
     if method.lower() == 'svd':
@@ -85,7 +89,7 @@ def split_rf_svd(strf):
         srf = vt[0].reshape(*dims_s_rf)
         trf = u[:, 0]
 
-        explained_variance = s[0] ** 2 / np.sum(s ** 2)
+        explained_variance = s[0] ** 2 / np.sum(strf ** 2)
 
         srf, trf = rescale_trf_srf(srf, trf, strf)
 
@@ -96,7 +100,7 @@ def split_rf_svd(strf):
         srf = vt[0]
         trf = u[:, 0]
 
-        explained_variance = s[0] ** 2 / np.sum(s ** 2)
+        explained_variance = s[0] ** 2 / np.sum(strf ** 2)
 
         srf, trf = rescale_trf_srf(srf, trf, strf)
 

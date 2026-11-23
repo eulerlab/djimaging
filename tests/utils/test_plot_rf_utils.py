@@ -19,8 +19,6 @@ def test_flatten_two_color_channels():
     np.testing.assert_array_equal(flat[..., 5:], 1.)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: flatten_color_channels uses shift=1 for all channels > 0, so channels 1 "
-                                       "and 2 are not separated by NaN and the last column stays NaN")
 def test_flatten_three_color_channels():
     rf = np.stack([np.full((2, 3, 4), float(i)) for i in range(3)], axis=-1)
     flat = flatten_color_channels(rf)

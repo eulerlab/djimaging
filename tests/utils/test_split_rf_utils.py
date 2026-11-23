@@ -46,7 +46,7 @@ def test_merge_strf_rejects_wrong_dims():
     with pytest.raises(AssertionError):
         merge_strf(np.zeros((2, 3)), np.zeros((2, 2)))
     with pytest.raises(AssertionError):
-        merge_strf(np.zeros(3), np.zeros(2))
+        merge_strf(np.zeros((2, 2, 2)), np.zeros(2))
 
 
 def test_resize_srf():
@@ -94,8 +94,6 @@ def test_svd_trf_and_srf_proportional_to_ground_truth():
     assert abs(np.corrcoef(trf, trf_true)[0, 1]) == pytest.approx(1.)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: split_rf_svd 2D (t, x) branch crashes, "
-                                       "rescale_trf_srf -> merge_strf asserts srf.ndim == 2")
 def test_svd_2d_strf():
     srf_true = np.sin(np.linspace(0, np.pi, 15))
     strf = np.outer(_trf(), srf_true)
@@ -120,7 +118,6 @@ def test_svd_wrong_dims():
         split_rf_svd(np.zeros(5))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: split_rf_svd explained variance only uses the top 3 singular values")
 def test_svd_explained_variance_of_noise():
     rng = np.random.default_rng(0)
     strf = rng.normal(size=(20, 15, 20))
@@ -179,7 +176,6 @@ def test_split_strf_upsample_and_blur():
     assert np.max(np.abs(srf_blur)) < np.max(np.abs(srf_raw))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: split_strf blurs 4D (t, y, x, color) STRFs across the color axis")
 def test_split_strf_blur_does_not_mix_colors():
     strf = np.zeros((5, 9, 9, 2))
     strf[:, 4, 4, 0] = np.arange(5.)
@@ -201,7 +197,6 @@ def test_smooth_rf_spreads_delta_within_npix():
     assert out.sum() == pytest.approx(1.)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: smooth_rf truncate=floor(npix/std) disables/shrinks blur if std > npix")
 def test_smooth_rf_kernel_radius_is_npix():
     delta = np.zeros((9, 9))
     delta[4, 4] = 1.

@@ -79,11 +79,11 @@ def compute_half_amp_width(rf_time, trf, trf_peak_idxs, plot=False, max_dt_futur
     for w in [0.5, 0.9, 0.99]:
         right_sol = minimize(min_fun, x0=w * t_main_peak + (1 - w) * post_root, bounds=[(t_main_peak, post_root)])
         if right_sol.success and right_sol.fun <= min_fun(t_right):
-            t_right = float(right_sol.x)
+            t_right = float(right_sol.x[0])
 
         left_sol = minimize(min_fun, x0=w * t_main_peak + (1 - w) * pre_root, bounds=[(pre_root, t_main_peak)])
         if left_sol.success and left_sol.fun <= min_fun(t_left):
-            t_left = float(left_sol.x)
+            t_left = float(left_sol.x[0])
 
     half_amp_width = float(np.abs(t_right - t_left))
 
@@ -117,7 +117,7 @@ def compute_main_peak_lag(rf_time, trf, trf_peak_idxs, plot=False, max_dt_future
     rf_time_int = np.linspace(peak_dt_approx - 0.1, peak_dt_approx + 0.1, 1001)
     trf_int = trf_fun(rf_time_int)
 
-    peak_dt = rf_time_int[np.argmax(trf_int)]
+    peak_dt = rf_time_int[np.argmax(np.sign(main_peak) * trf_int)]
 
     if plot:
         plt.figure()

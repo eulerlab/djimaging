@@ -89,8 +89,6 @@ def test_contour_two_blobs_and_plot():
     assert sizes[int(np.argmin(centers_x))] < sizes[int(np.argmax(centers_x))]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: compute_contour passes pixel-edge extent to ax.contour (point positions), "
-                                       "inflating coordinates by n/(n-1)")
 @pytest.mark.parametrize('shape', [(15, 15), (11, 31), (41, 61)])
 def test_contour_area_independent_of_array_size(shape):
     pixel_size_um = 10.
@@ -100,7 +98,6 @@ def test_contour_area_independent_of_array_size(shape):
     assert sizes[0] == pytest.approx(np.pi * (4 * pixel_size_um) ** 2, rel=0.02)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: compute_contour coordinates are scaled by n/(n-1) w.r.t. stimulus center")
 def test_contour_center_matches_gauss_fit_convention():
     # RfOffsetTemplate: offset = ((x_mean + 0.5) - nx / 2) * pix_size for Gaussian fits.
     # The contour-based offset must use the same convention.
@@ -164,8 +161,6 @@ def test_center_and_surround_masks_are_disjoint():
     assert not np.any(mask_center & mask_full_surround)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: get_center_mask maps contour to pixels with +n/2 instead of +n/2-0.5 "
-                                       "(and compute_contour scales by n/(n-1)), shifting the mask")
 def test_center_mask_from_contour_is_centered_on_rf():
     shape, row0, col0, pixelsize = (15, 25), 4, 17, 10.
     srf = _cone(shape, row0, col0, 6.4)  # radius 3.2 px: no pixel center lies on the contour
@@ -177,7 +172,6 @@ def test_center_mask_from_contour_is_centered_on_rf():
     np.testing.assert_array_equal(mask, srf > 0.5)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: get_center_mask shifts the mask by half a pixel (+n/2 instead of +n/2-0.5)")
 def test_center_mask_of_centered_square():
     # Square of 3x3 pixels around the center pixel of a 9x9 sRF, in um relative to the sRF center.
     pixelsize = 10.

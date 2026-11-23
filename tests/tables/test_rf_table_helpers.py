@@ -109,8 +109,6 @@ def test_compute_contours_plot_smoke():
     assert len(contours[0.5]) == 1
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: _compute_contours divides pixel_size by upsample_srf_scale=0 "
-                                       "(0 means no upsampling, cf. SplitRFParams default)")
 def test_compute_contours_without_upsampling_scale_zero():
     srf = _cone((15, 15), 7, 7, 6.)
     _, areas0, _ = _compute_contours(srf, 10., 'amp_one', 0, 0, 0, [0.5])
@@ -180,8 +178,6 @@ def test_split_make_compute_other_methods_compute_qidx(method):
     assert np.isfinite(split_qidx)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: SplitRF split_qidx for 'sd'/'peak' compares unscaled sRF x tRF with the "
-                                       "STRF, so it depends on STRF amplitude and sign")
 @pytest.mark.parametrize('method', ['sd', 'peak'])
 @pytest.mark.parametrize('amp', [2., -1.])
 def test_split_qidx_of_separable_strf_is_one(method, amp):
