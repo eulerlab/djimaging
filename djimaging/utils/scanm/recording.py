@@ -256,7 +256,7 @@ class ScanMRecording:
 
     def __load_from_file(self) -> None:
         """Dispatch loading to the appropriate reader based on file extension."""
-        if self.filetype == '.h5':
+        if self.filetype.lower() == '.h5':
             self.__load_from_h5_file()
         else:
             self.__load_from_smp_file()
