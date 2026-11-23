@@ -117,7 +117,7 @@ def compute_main_peak_lag(rf_time, trf, trf_peak_idxs, plot=False, max_dt_future
     rf_time_int = np.linspace(peak_dt_approx - 0.1, peak_dt_approx + 0.1, 1001)
     trf_int = trf_fun(rf_time_int)
 
-    peak_dt = rf_time_int[np.argmax(trf_int)]
+    peak_dt = rf_time_int[np.argmax(np.sign(main_peak) * trf_int)]
 
     if plot:
         plt.figure()

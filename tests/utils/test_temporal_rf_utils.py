@@ -128,7 +128,6 @@ def test_main_peak_lag_no_peaks():
     assert compute_main_peak_lag(RF_TIME, _bump(-0.3, 0.05), np.array([], dtype=int)) is None
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: compute_main_peak_lag uses argmax, wrong lag for negative main peaks")
 def test_main_peak_lag_negative_peak():
     # TempRFProperties passes trf unflipped for split methods 'sd' and 'peak' (only SVD tRFs are flipped)
     trf = _bump(-0.3, 0.05, -1.)
