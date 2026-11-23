@@ -56,7 +56,6 @@ def test_rotate_image_float_does_not_modify_input():
     assert np.isnan(img[1, 1]) and img[0, 0] == 0.
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: rotate_image crashes on integer images (NaN assigned to int array)")
 def test_rotate_image_int_input():
     out = iu.rotate_image(np.arange(12).reshape(3, 4), angle=90, order=0)
     np.testing.assert_array_equal(out, np.rot90(np.arange(12).reshape(3, 4)))
@@ -76,7 +75,6 @@ def test_rescale_image_3d_tuple():
     np.testing.assert_array_equal(out[..., 0], np.repeat(_img(), 2, axis=0))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: rescale_image crashes on 2-D images (scale padded to 3 axes)")
 @pytest.mark.parametrize('scale, shape', [(2, (6, 8)), ((2, 1), (6, 4))])
 def test_rescale_image_2d(scale, shape):
     assert iu.rescale_image(_img(), scale).shape == shape
@@ -119,7 +117,6 @@ def test_int_downscale_image_3d_block_mean():
         np.testing.assert_allclose(out[..., c], expected)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: int_downscale_image adds a trailing axis to 2-D images")
 def test_int_downscale_image_2d_keeps_ndim():
     img = np.arange(24, dtype=float).reshape(4, 6)
     out = iu.int_downscale_image(img, 2)

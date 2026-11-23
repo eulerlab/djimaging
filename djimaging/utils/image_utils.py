@@ -70,7 +70,7 @@ def rotate_image(image: np.ndarray, angle: float, order: int = 1,
     from skimage.transform import rotate
 
     finite_mask = np.isfinite(image)
-    image = image.copy()
+    image = image.astype(float)  # copy; skimage would rescale int images to [0, 1] (order > 0)
 
     minv = np.nanmin(image)
     image[~finite_mask] = minv
@@ -100,9 +100,9 @@ def rescale_image(image: np.ndarray, scale: float | tuple, order: int = 0) -> np
         Rescaled image array.
     """
     if not hasattr(scale, '__iter__'):
-        scale = (scale, scale, 1)
+        scale = (scale, scale) + (1,) * (image.ndim - 2)
     elif len(scale) == 2:
-        scale = (scale[0], scale[1], 1)
+        scale = (scale[0], scale[1]) + (1,) * (image.ndim - 2)
 
     output_shape = np.ceil(np.asarray(image.shape) * np.asarray(scale)).astype('int')
     resized_image = resize_image(image, output_shape=output_shape, order=order)
@@ -208,7 +208,7 @@ def int_downscale_image(data_img: np.ndarray, downscale: int) -> np.ndarray:
     data_img = np.mean(
         np.mean(
             data_img.reshape(
-                data_img.shape[0] // downscale, downscale, data_img.shape[1] // downscale, downscale, -1,
+                (data_img.shape[0] // downscale, downscale, data_img.shape[1] // downscale, downscale) + data_img.shape[2:]
             ),
             axis=1
         ),

@@ -97,7 +97,6 @@ def test_sort_roi_mask_files_alias_and_control():
     assert list(mu.sort_roi_mask_files(files, mask_alias='mb')) == [files[1], files[0]]
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: sort_roi_mask_files tie-break adds argsort, not alphabetical rank")
 def test_sort_roi_mask_files_ties_alphabetical():
     files = ['/x/c_control.h5', '/x/a_control.h5', '/x/b_control.h5']
     assert list(mu.sort_roi_mask_files(files)) == ['/x/a_control.h5', '/x/b_control.h5', '/x/c_control.h5']
@@ -135,7 +134,6 @@ def test_extract_connected_mask_four_connectivity():
     np.testing.assert_array_equal(np.argwhere(mu.extract_connected_mask(corner, 3, 4)), [[2, 4], [3, 4]])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: extract_connected_mask wraps around via negative indices")
 @pytest.mark.parametrize('pixels, seed', [
     (((0, 1), (3, 1)), (0, 1)),  # first and last row
     (((1, 0), (1, 4)), (1, 0)),  # first and last column
@@ -161,7 +159,6 @@ def test_get_mask_by_bg_non_square():
     assert mu.get_mask_by_bg(1, 2, data, ref_value=0.5, thresh=0.2).sum() == 0
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: get_mask_by_bg connects the first and last row (wrap-around)")
 def test_get_mask_by_bg_no_wrap_around():
     data = np.zeros((4, 6))
     data[0, 2] = data[3, 2] = 1.
@@ -375,7 +372,6 @@ def test_generate_roi_suggestions():
     assert not np.any(mu.generate_roi_suggestions(pred, true, n_artifact=1, threshold=0.))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: generate_roi_suggestions crashes when mask_true has no ROIs")
 def test_generate_roi_suggestions_empty_true_mask():
     pred = np.zeros((4, 5), dtype=int)
     pred[1:4, 1:4] = 1
@@ -422,7 +418,6 @@ def test_shift_array_light_artifact():
     np.testing.assert_array_equal(out, expected)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: shift_array(inplace=True) does not shift the input array in place")
 def test_shift_array_inplace():
     a = np.arange(20).reshape(4, 5)
     out = mu.shift_array(a, (1, 0), inplace=True, cval=-1)
@@ -458,12 +453,10 @@ def test_compare_roi_masks_same_different_shifted():
         mu.compare_roi_masks(ref + 1, ref)  # not Igor format
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: compare_roi_masks calls an empty mask a 'shifted' copy (max shift)")
 def test_compare_roi_masks_empty_mask_is_different():
     assert mu.compare_roi_masks(np.ones((32, 24), dtype=int), _igor_ref()) == ('different', (0, 0))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: compare_roi_masks accepts shifts that move all ROIs out of the mask")
 def test_compare_roi_masks_rois_near_edge_true_shift():
     ref = np.ones((32, 24), dtype=int)
     ref[10:13, 0:3] = -1
