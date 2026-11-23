@@ -100,9 +100,9 @@ def rescale_image(image: np.ndarray, scale: float | tuple, order: int = 0) -> np
         Rescaled image array.
     """
     if not hasattr(scale, '__iter__'):
-        scale = (scale, scale, 1)
+        scale = (scale, scale) + (1,) * (image.ndim - 2)
     elif len(scale) == 2:
-        scale = (scale[0], scale[1], 1)
+        scale = (scale[0], scale[1]) + (1,) * (image.ndim - 2)
 
     output_shape = np.ceil(np.asarray(image.shape) * np.asarray(scale)).astype('int')
     resized_image = resize_image(image, output_shape=output_shape, order=order)
