@@ -110,11 +110,9 @@ def test_fix_first_or_last_n_nan_2d():
     trace = np.arange(12.).reshape(6, 2)
     trace[0, 1] = np.nan
     fixed = roi_utils.fix_first_or_last_n_nan(trace.copy(), n=1)
-    assert_array_equal(fixed[0], trace[1])
+    assert_array_equal(fixed[0], [0., 3.])  # only the NaN is replaced by its neighbour
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: all first/last n samples are overwritten with trace[n] if any is NaN, "
-                                       "also valid samples; docstring promises NaNs replaced by nearest neighbour")
 def test_fix_first_or_last_n_nan_keeps_valid_samples():
     trace = np.array([np.nan, 1., 2., 3., 4., 5., 6.])
     fixed = roi_utils.fix_first_or_last_n_nan(trace.copy(), n=3)
