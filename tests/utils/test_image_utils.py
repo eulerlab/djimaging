@@ -75,7 +75,6 @@ def test_rescale_image_3d_tuple():
     np.testing.assert_array_equal(out[..., 0], np.repeat(_img(), 2, axis=0))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: rescale_image crashes on 2-D images (scale padded to 3 axes)")
 @pytest.mark.parametrize('scale, shape', [(2, (6, 8)), ((2, 1), (6, 4))])
 def test_rescale_image_2d(scale, shape):
     assert iu.rescale_image(_img(), scale).shape == shape
