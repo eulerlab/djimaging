@@ -180,7 +180,6 @@ def test_dog_model_from_params_reproduces_fit():
     np.testing.assert_allclose(model(xx, yy), srf_fit, atol=1e-3)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: srf_dog_model_from_params ignores theta_0/theta_1 of rotated fits")
 def test_dog_model_from_params_keeps_rotation():
     params = dict(amplitude_0=1., x_mean_0=12., y_mean_0=9., x_stddev_0=3., y_stddev_0=1., theta_0=0.6,
                   amplitude_1=0.2, x_mean_1=12., y_mean_1=9., x_stddev_1=9., y_stddev_1=3., theta_1=0.6)
