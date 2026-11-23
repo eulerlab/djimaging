@@ -46,8 +46,6 @@ def test_match_file(file, pattern, kwargs, expected):
     assert au.match_file(file, pattern, **kwargs) is expected
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: with case_sensitive=False the file name is lower-cased but ftype is not, "
-                                       "so an upper-case ftype is not stripped and the last token never matches")
 def test_match_file_case_insensitive_ftype():
     assert au.match_file('SMP_M1_GCL0_chirp.H5', 'chirp', ftype='H5')
 

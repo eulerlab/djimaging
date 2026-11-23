@@ -87,6 +87,7 @@ def match_file(file: str, pattern: str, pattern_loc: int | None = None, ftype: s
     if not case_sensitive:
         pattern = pattern.lower()
         file = file.lower()
+        ftype = ftype.lower() if ftype is not None else None
 
     if ftype is None:
         ftype = os.path.splitext(file)[1][1:]
