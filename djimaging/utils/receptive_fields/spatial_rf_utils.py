@@ -34,7 +34,10 @@ def fit_rf_model(srf, kind='gaussian', polarity=None, center=None):
 
     xx, yy = np.meshgrid(np.arange(0, srf.shape[1]), np.arange(0, srf.shape[0]))
 
-    polarities = (-1, 1) if polarity is None else (polarity,)
+    if polarity is None:
+        polarities = tuple(polarity_i for polarity_i in (-1, 1) if np.any(polarity_i * srf > 0))
+    else:
+        polarities = (polarity,)
 
     model, model_fit, model_params = None, None, None
     qi = -1.
