@@ -372,7 +372,6 @@ def test_generate_roi_suggestions():
     assert not np.any(mu.generate_roi_suggestions(pred, true, n_artifact=1, threshold=0.))
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: generate_roi_suggestions crashes when mask_true has no ROIs")
 def test_generate_roi_suggestions_empty_true_mask():
     pred = np.zeros((4, 5), dtype=int)
     pred[1:4, 1:4] = 1
