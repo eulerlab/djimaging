@@ -381,7 +381,7 @@ def remove_clusters(cluster_idxs: np.ndarray, min_count: int,
 
     new_cluster = 1
     for cluster, count in zip(*np.unique(cluster_idxs, return_counts=True)):
-        if count > min_count:
+        if count >= min_count:
             new_cluster_idxs[cluster_idxs == cluster] = new_cluster
             new_cluster += 1
 

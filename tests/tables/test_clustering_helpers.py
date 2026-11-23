@@ -41,8 +41,6 @@ def test_remove_clusters_float_labels():
     np.testing.assert_array_equal(out, [2, 1, 2])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: remove_clusters keeps clusters with count > min_count, but min_count is "
-                                       "documented as the minimum number of samples a cluster must have to be retained")
 def test_remove_clusters_keeps_clusters_with_exactly_min_count():
     out = remove_clusters(np.array([0, 0, 1, 1, 1, 2]), min_count=2)
     np.testing.assert_array_equal(out, [1, 1, 2, 2, 2, -1])
