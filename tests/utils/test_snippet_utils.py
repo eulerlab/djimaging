@@ -282,7 +282,7 @@ def test_split_trace_by_group_reps_nested_lists():
     np.testing.assert_array_equal(snips['b'][0][0][:, 0], np.arange(0, 20))
     np.testing.assert_array_equal(snips['a'][0][0][:, 0], np.arange(20, 40))
     np.testing.assert_array_equal(snips['b'][1][0][:, 0], np.arange(40, 60))
-    # Last group of last rep runs until the end of the trace (minus the last sample, see xfail below)
+    # Last group of last rep runs until the end of the trace
     assert snips['a'][1][0][0, 0] == 60.
     np.testing.assert_allclose(snips_t['a'][0][0][:, 0], times[20:40])
     np.testing.assert_array_equal(snips_tt['a'][1][0], [[6.]])
@@ -350,7 +350,6 @@ def test_split_trace_by_group_reps_int_names():
     np.testing.assert_array_equal(snips[180][0], [0., 40.])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: idx_end=-1 fallback drops the last trace sample of the final group")
 def test_split_trace_by_group_reps_final_group_includes_last_sample():
     trace, times = _ramp(duration=8.)  # 80 samples, last group [60, 80) ends exactly with the trace
     snips, _, _, _ = snippet_utils.split_trace_by_group_reps(
