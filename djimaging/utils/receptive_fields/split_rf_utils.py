@@ -27,7 +27,7 @@ def resize_srf(srf, scale=None, output_shape=None):
 def merge_strf(srf, trf):
     """Reconstruct STRF from sRF and tRF"""
     assert trf.ndim == 1, trf.ndim
-    assert srf.ndim == 2, srf.ndim
+    assert srf.ndim in (1, 2), srf.ndim
     rf = np.kron(trf, srf.flat).reshape(trf.shape + srf.shape)
     return rf
 
