@@ -219,8 +219,6 @@ def test_split_trace_by_reps_zero_length_reps_raises():
         snippet_utils.split_trace_by_reps(trace, times, np.array([1., 1., 1.]), ntrigger_rep=1)
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: last rep with missing triggers is kept and its trigger times are "
-                                       "broadcast/duplicated (or crash) instead of being dropped")
 def test_split_trace_by_reps_last_rep_with_missing_triggers_is_dropped():
     # Stimulus cancelled after 5 of 6 triggers while recording continued
     trace, times = _ramp(duration=7.)
