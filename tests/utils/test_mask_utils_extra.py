@@ -135,7 +135,6 @@ def test_extract_connected_mask_four_connectivity():
     np.testing.assert_array_equal(np.argwhere(mu.extract_connected_mask(corner, 3, 4)), [[2, 4], [3, 4]])
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: extract_connected_mask wraps around via negative indices")
 @pytest.mark.parametrize('pixels, seed', [
     (((0, 1), (3, 1)), (0, 1)),  # first and last row
     (((1, 0), (1, 4)), (1, 0)),  # first and last column
@@ -161,7 +160,6 @@ def test_get_mask_by_bg_non_square():
     assert mu.get_mask_by_bg(1, 2, data, ref_value=0.5, thresh=0.2).sum() == 0
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: get_mask_by_bg connects the first and last row (wrap-around)")
 def test_get_mask_by_bg_no_wrap_around():
     data = np.zeros((4, 6))
     data[0, 2] = data[3, 2] = 1.
