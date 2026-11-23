@@ -187,11 +187,11 @@ def srf_dog_model(srf, polarity=None, center=None):
 def srf_dog_model_from_params(params):
     f_c = Gaussian2D(
         amplitude=params['amplitude_0'], x_mean=params['x_mean_0'], y_mean=params['y_mean_0'],
-        x_stddev=params['x_stddev_0'], y_stddev=params['y_stddev_0'])
+        x_stddev=params['x_stddev_0'], y_stddev=params['y_stddev_0'], theta=params.get('theta_0', 0.))
 
     f_s = Gaussian2D(
         amplitude=params['amplitude_1'], x_mean=params['x_mean_1'], y_mean=params['y_mean_1'],
-        x_stddev=params['x_stddev_1'], y_stddev=params['y_stddev_1'])
+        x_stddev=params['x_stddev_1'], y_stddev=params['y_stddev_1'], theta=params.get('theta_1', 0.))
 
     model = f_c - f_s
 
