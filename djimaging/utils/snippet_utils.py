@@ -68,10 +68,12 @@ def compute_t_idxs(trace, times, triggertimes, ntrigger_rep, delay=0., atol=0.12
 
         assert trace.shape == times.shape, 'Shapes do not match'
 
-        if times[t_idxs[-1]:].size < n_frames_per_rep:
+        last_rep_triggers_incomplete = len(triggertimes) % ntrigger_rep != 0
+
+        if times[t_idxs[-1]:].size < n_frames_per_rep or last_rep_triggers_incomplete:
             if not allow_drop_last:
                 raise ValueError('Data incomplete, allow to drop last repetition or fix data')
-            # if there are not enough data points after the last trigger,
+            # if there are not enough data points or triggers for the last repetition,
             # remove the last trigger (e.g. if a chirp was cancelled)
             dropped_last_rep_flag = True
             t_idxs.pop(-1)
