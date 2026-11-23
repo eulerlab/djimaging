@@ -191,8 +191,6 @@ def test_last_line_without_newline(tmp_path):
     assert len(stims) == 1
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: log start time is only taken from line 1; if that line has no time "
-                                       "stamp, the first STARTED raises TypeError (datetime - None)")
 def test_first_line_without_time_stamp(tmp_path):
     log = _write(tmp_path, ['\n', _start('20250506_100000', CHIRP), _end('20250506_100001', CHIRP)])
     stims, _ = parse_stimulus_log(log, verbose=False)
