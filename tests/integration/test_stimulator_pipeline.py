@@ -63,6 +63,8 @@ def test_stimulator_pipeline(stimulator_schema, tutorial_data_dir):
         assert s.Presentation().recording_setup_kwargs(key)['stimulator_delay'] == delay_s
 
     s.MovingBarVersion().add_defaults()
+    s.RetinaOrientation().populate(display_progress=False)  # eye and orientation, part of the MbDirectionMap key
+    assert len(s.RetinaOrientation()) == len(s.Experiment())
     s.MbDirectionMap().populate(display_progress=False)
     rows = s.MbDirectionMap().to_dicts()
     assert len(rows) == len(s.Presentation() & dict(stim_name='movingbar'))
