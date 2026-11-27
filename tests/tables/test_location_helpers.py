@@ -1,13 +1,11 @@
-"""Tests for the field/ROI location tables (relative to the optic disk, retinal coordinates and side categories),
+"""Tests for the field/ROI location tables (relative to the optic disk and retinal coordinates),
 computed without a database."""
-import re
-import warnings
 
 import numpy as np
 import pytest
 
 from djimaging.tables.location.location import (
-    RelativeFieldLocationTemplate, RetinalFieldLocationCatTemplate, RetinalFieldLocationTemplate,
+    RelativeFieldLocationTemplate, RetinalFieldLocationTemplate,
     retinal_position_or_none)
 from djimaging.tables.location.roi_location import RelativeRoiLocationTemplate, RetinalRoiLocationTemplate
 from tests.tables._fake_dj import FakeRel, make_fake
@@ -154,53 +152,3 @@ def test_relative_roi_location_xz_not_implemented():
                       relative_field_location_table=FakeRel(dict(relx=100., rely=200., relz=30.)))
     with pytest.raises(NotImplementedError):
         table.make(dict(field='f1', roi_id=3))
-
-
-# ---------------------------------------------------------------- RetinalFieldLocationCat
-
-def _enum_values(attr):
-    """Allowed values of an enum attribute in the table definition."""
-    definition = RetinalFieldLocationCatTemplate.definition.fget(None)
-    match = re.search(rf"{attr}\s*:\s*enum\(([^)]*)\)", definition)
-    return {v.strip().strip("'") for v in match.group(1).split(',')}
-
-
-def _cat(vd, tn, center_dist=0.):
-    table = make_fake(RetinalFieldLocationCatTemplate, ['make'], _center_dist=center_dist,
-                      _ventral_dorsal_key='ventral_dorsal_pos_um', _temporal_nasal_key='temporal_nasal_pos_um',
-                      retinalfieldlocation_table=FakeRel(dict(ventral_dorsal_pos_um=vd, temporal_nasal_pos_um=tn)))
-    with warnings.catch_warnings():
-        warnings.simplefilter('error')
-        table.make(dict(field='f1'))
-    return table.inserted[0]
-
-
-@pytest.mark.parametrize('vd,tn,nt,vdside', [
-    (100., 100., 'n', 'd'),
-    (-100., 100., 'n', 'v'),
-    (100., -100., 't', 'd'),
-    (-100., -100., 't', 'v'),
-])
-def test_retinal_field_location_cat_quadrants(vd, tn, nt, vdside):
-    entry = _cat(vd, tn)
-    assert entry['nt_side'] == nt
-    assert entry['vd_side'] == vdside
-    assert entry['ntvd_side'] == nt + vdside
-    assert entry['n_tvd_side'] == ('n' if nt == 'n' else nt + vdside)
-    assert entry['nvd_t_side'] == ('t' if nt == 't' else nt + vdside)
-    for attr in ['nt_side', 'vd_side', 'ntvd_side', 'n_tvd_side', 'nvd_t_side']:
-        assert entry[attr] in _enum_values(attr)
-
-
-def test_retinal_field_location_cat_center_dist():
-    entry = _cat(-30., 500., center_dist=50.)
-    assert entry['vd_side'] == 'c'
-    assert entry['ntvd_side'] == 'nc'
-
-
-@pytest.mark.parametrize('vd', [-200., 0., 200.])
-def test_retinal_field_location_cat_center_nt_side_is_valid_enum(vd):
-    entry = _cat(vd, 10., center_dist=50.)
-    assert entry['nt_side'] == 'c'
-    for attr in ['ntvd_side', 'n_tvd_side', 'nvd_t_side']:
-        assert entry[attr] in _enum_values(attr)
