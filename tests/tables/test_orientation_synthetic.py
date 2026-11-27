@@ -41,6 +41,7 @@ def test_direction_selective_response():
             dir_order=direction_order,
             dt=DT,
             n_shuffles=256,
+            seed=42,
         )
     dsi, p_dsi, _, preferred_direction, osi, p_osi = result[:6]
 
@@ -61,6 +62,7 @@ def test_orientation_selective_non_directional_response():
             dir_order=direction_order,
             dt=DT,
             n_shuffles=256,
+            seed=42,
         )
     dsi, p_dsi, _, _, osi, p_osi, _, preferred_orientation = result[:8]
 

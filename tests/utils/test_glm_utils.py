@@ -149,3 +149,43 @@ def test_clipped_dfs_do_not_warn_again():
     with warnings.catch_warnings():
         warnings.simplefilter('error')
         ReceptiveFieldGLM(x_stimulus=x_stimulus, trace=np.zeros(100, dtype=np.float32), **glm_kwargs)
+
+
+@pytest.mark.parametrize('shape, kfold, init_method, betas', [
+    ((300, 2), 0, 'random', (0.01,)),
+    ((300, 6, 5, 2), 0, 'mle', (0.01,)),
+    ((300, 2), 1, 'random', (0.01, 0.1)),
+    ((300, 6, 5), 1, 'mle', (0.01,)),
+    ((300, 2), 2, 'random', (0.01, 0.1)),
+])
+def test_batched_fits_match_single_fits(shape, kfold, init_method, betas):
+    """Jointly fitting several traces must give the same GLMs as fitting them one by one."""
+    pytest.importorskip('rfest')
+    from djimaging.utils.receptive_fields.glm_utils import fit_receptive_field_glm, fit_receptive_field_glms
+
+    rng = np.random.default_rng(9)
+    stim = rng.choice([-1., 1.], size=shape).astype(np.float32)
+    x_stimulus, glm_kwargs = _fit_kwargs(stim)
+    glm_kwargs.update(kfold=kfold, init_method=init_method, betas=betas, frac_test=0.2 if kfold else 0.,
+                      df_ts=(3, 4) if kfold else (4,))
+    projections = ReceptiveFieldGLM(x_stimulus=x_stimulus, trace=None, **glm_kwargs).compute_basis_projections()
+
+    # Different noise levels, so that the fits stop at different iterations; one trace is shorter.
+    traces = [(x_stimulus @ rng.normal(size=x_stimulus.shape[1]) + s * rng.normal(size=shape[0])).astype(np.float32)
+              for s in (0.1, 1., 3., 10.)]
+    traces[2] = traces[2][:-7]
+
+    batched = fit_receptive_field_glms(traces, glm_kwargs=glm_kwargs, basis_projections=projections)
+    for trace, (rf_b, quality_b, model_b) in zip(traces, batched):
+        rf_s, quality_s, model_s = fit_receptive_field_glm(trace, glm_kwargs=glm_kwargs, basis_projections=projections)
+        np.testing.assert_allclose(rf_b, rf_s, rtol=1e-5, atol=1e-8)
+        for k in ('best_iteration', 'train_stop', 'beta', 'df'):
+            assert model_b[k] == model_s[k], k
+        np.testing.assert_allclose(model_b['cost_train'], model_s['cost_train'], rtol=1e-5)
+        np.testing.assert_allclose(model_b['metrics_dev_opt'], model_s['metrics_dev_opt'], rtol=1e-5)
+        assert quality_b.keys() == quality_s.keys()
+        for k, v in quality_s.items():
+            if isinstance(v, str):
+                assert quality_b[k] == v
+            else:
+                np.testing.assert_allclose(quality_b[k], v, rtol=1e-5, atol=1e-8)

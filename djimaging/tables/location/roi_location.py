@@ -23,18 +23,16 @@ class RelativeRoiLocation(location.RelativeRoiLocationTemplate):
 @schema
 class RetinalRoiLocation(location.RetinalRoiLocationTemplate):
     relative_roi_location_table = RelativeRoiLocation
-    expinfo_table = Experiment.ExpInfo
+    retina_orientation_table = RetinaOrientation
 """
 
-import warnings
 from abc import abstractmethod
 import datajoint as dj
 import numpy as np
 from matplotlib import pyplot as plt
 
-from djimaging.tables.location.location import plot_relxy_pos, plot_relyz_pos
+from djimaging.tables.location.location import plot_relxy_pos, plot_relyz_pos, retinal_position_or_none
 from djimaging.utils.dj_storage import load_array
-from djimaging.utils.scanm.setup_utils import get_retinal_position
 from djimaging.utils.scanm.roi_utils import get_rel_roi_pos
 
 
@@ -87,7 +85,7 @@ class RelativeRoiLocationWrtFieldTemplate(dj.Computed):
     def make(self, key):
         roi_id = (self.roi_table & key).fetch1('roi_id')
         roi_mask = load_array((self.roi_mask_table & key).fetch1('roi_mask'))
-        pixel_size_um, z_step_um, scan_type = (self.field_table & key).to_arrays('pixel_size_um', 'z_step_um', 'scan_type')
+        pixel_size_um, z_step_um, scan_type = (self.field_table & key).fetch1('pixel_size_um', 'z_step_um', 'scan_type')
 
         ang_deg_list = (self.presentation_table.ScanInfo() & (self.field_table & key)).to_arrays('angle_deg')
         assert np.unique(ang_deg_list).size == 1, f'Found different angles for different presentations: {ang_deg_list}'
@@ -179,7 +177,7 @@ class RelativeRoiLocationTemplate(dj.Computed):
         pass
 
     def make(self, key):
-        pixel_size_um, scan_type = (self.field_table & key).to_arrays('pixel_size_um', 'scan_type')
+        pixel_size_um, scan_type = (self.field_table & key).fetch1('pixel_size_um', 'scan_type')
         relx_wrt_field, rely_wrt_field = (self.relative_field_location_wrt_field_table & key).fetch1(
             'relx_wrt_field', 'rely_wrt_field')
 
@@ -227,16 +225,17 @@ class RetinalRoiLocationTemplate(dj.Computed):
     def definition(self):
         definition = """
         -> self.relative_roi_location_table
+        -> self.retina_orientation_table
         ---
-        ventral_dorsal_pos_um       :float32      # position on the ventral-dorsal axis, greater 0 means dorsal
-        temporal_nasal_pos_um       :float32      # position on the temporal-nasal axis, greater 0 means nasal
+        ventral_dorsal_pos_um = NULL :float32      # position on the ventral-dorsal axis, greater 0 means dorsal; NULL if unknown
+        temporal_nasal_pos_um = NULL :float32      # position on the temporal-nasal axis, greater 0 means nasal; NULL if unknown
         """
         return definition
 
     @property
     def key_source(self):
         try:
-            return self.relative_roi_location_table.proj()
+            return self.relative_roi_location_table.proj() * self.retina_orientation_table.proj()
         except (AttributeError, TypeError):
             pass
 
@@ -247,18 +246,13 @@ class RetinalRoiLocationTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def expinfo_table(self):
+    def retina_orientation_table(self):
         pass
 
     def make(self, key):
         relx, rely = (self.relative_roi_location_table() & key).fetch1('relx', 'rely')
-        eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
-
-        if prepwmorient == -1:
-            return
-
-        ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(
-            rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)
+        eye, orientation_deg = self.retina_orientation_table().get_eye_and_orientation(key)
+        ventral_dorsal_pos_um, temporal_nasal_pos_um = retinal_position_or_none(relx, rely, orientation_deg, eye)
 
         rfl_key = key.copy()
         rfl_key['ventral_dorsal_pos_um'] = ventral_dorsal_pos_um

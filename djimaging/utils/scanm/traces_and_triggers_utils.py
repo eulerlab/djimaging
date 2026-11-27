@@ -1,8 +1,7 @@
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 
-from djimaging.tables.motion_correction import motion_utils
 from djimaging.utils.mask_format_utils import assert_igor_format
 from djimaging.utils.scanm import roi_utils, wparams_utils, read_utils
 
@@ -53,7 +52,7 @@ def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset
     stack_times = stack_times.T.flatten()
 
     if np.any(np.diff(stack_times) < 0):
-        raise ValueError(f"Unexpected value in stack_times. This is probably a bug that needs to be fixed.")
+        raise ValueError("Unexpected value in stack_times. This is probably a bug that needs to be fixed.")
 
     min_diff_n_pixels = stack.shape[0] * 2  # Require at least 2 lines difference
     stack = stack.T.flatten()  # Order in time
@@ -67,9 +66,15 @@ def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset
     # In this case we have to derive the trigger-length from the other triggers.
     if stack[0] >= threshold and len(trigger_idxs) > 0:
         first_trigger_end_idx = np.argmax(stack < threshold)
-        mean_trigger_dur = int(np.median([np.argmax(stack[trigger_idx + 1:] < threshold)
-                                          for trigger_idx in trigger_idxs]))
-        first_trigger_start_idx = first_trigger_end_idx - mean_trigger_dur
+        # stack[trigger_idx] is the first high sample, so argmax(...) is the number of high samples.
+        # Pulses still high at the end of the recording have no measurable duration and are ignored.
+        trigger_durs = [np.argmax(stack[trigger_idx:] < threshold) for trigger_idx in trigger_idxs
+                        if np.any(stack[trigger_idx:] < threshold)]
+        if len(trigger_durs) > 0:
+            # Onset before the recording started: the first sample is the earliest time there is
+            first_trigger_start_idx = max(first_trigger_end_idx - int(np.median(trigger_durs)), 0)
+        else:
+            first_trigger_start_idx = 0  # no complete pulse to derive the duration from
         trigger_idxs = np.append(first_trigger_start_idx, trigger_idxs)
 
     triggertimes = stack_times[trigger_idxs] + stimulator_delay
@@ -213,9 +218,8 @@ def compute_traces(stack: np.ndarray, roi_mask: np.ndarray, wparams: dict, preci
 def roi2trace_from_stack(
         filepath: str, roi_ids: np.ndarray, roi_mask: np.ndarray,
         data_stack_name: str, precision: str, from_raw_data: bool = False,
-        shifts_x: Optional[np.ndarray] = None, shifts_y: Optional[np.ndarray] = None,
-        shift_kws: Optional[dict] = None, accept_missing_rois: bool = False) -> Tuple[dict, float]:
-    """Load a stack from disk and extract per-ROI traces, optionally after motion correction.
+        accept_missing_rois: bool = False) -> Tuple[dict, float]:
+    """Load a stack from disk and extract per-ROI traces.
 
     Parameters
     ----------
@@ -233,16 +237,6 @@ def roi2trace_from_stack(
     from_raw_data : bool, optional
         If True, load from a raw .smp file; otherwise load from an .h5 file.
         Default is False.
-    shifts_x : np.ndarray, optional
-        Per-frame shift values along x for motion correction. If None, no
-        motion correction is applied.
-    shifts_y : np.ndarray, optional
-        Per-frame shift values along y for motion correction. If None, no
-        motion correction is applied.
-    shift_kws : dict, optional
-        Additional keyword arguments passed to
-        :func:`motion_utils.correct_shifts_in_stack`. Ignored if both
-        ``shifts_x`` and ``shifts_y`` are None.
     accept_missing_rois : bool, optional
         If True, silently skip ROI IDs that are present in ``roi_ids`` but
         absent from the mask. Default is False.
@@ -264,12 +258,6 @@ def roi2trace_from_stack(
     ch_stacks, wparams = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_stack_name,))
     stack = ch_stacks[data_stack_name]
 
-    if (shifts_x is not None) or (shifts_y is not None):
-        if shift_kws is None:
-            shift_kws = dict()
-        stack = motion_utils.correct_shifts_in_stack(
-            stack=stack, shifts_x=shifts_x, shifts_y=shifts_y, cval=np.min, **shift_kws)
-
     roi_ids_from_mask, traces, traces_times, frame_dt = compute_traces(
         stack=stack, roi_mask=roi_mask, wparams=wparams, precision=precision)
 
@@ -282,6 +270,67 @@ def roi2trace_from_stack(
     roi2trace = roi_utils.get_roi2trace(traces=traces, traces_times=traces_times,
                                         roi_ids_traces=abs(roi_ids_from_mask), roi_ids_subset=abs(roi_ids))
 
+    return roi2trace, frame_dt
+
+
+def roi2trace_from_stack_motion(
+        filepath: str, roi_ids: np.ndarray, roi_weights: np.ndarray, weight_roi_ids: np.ndarray,
+        disp_frames: np.ndarray, data_stack_name: str, precision: str, from_raw_data: bool = False,
+) -> Tuple[dict, float]:
+    """Motion-corrected traces: the stack is registered with ``disp_frames`` (shifted by -disp, bilinear) and the
+    traces are weighted means with the presentation ROI weights (see ``djimaging.tables.motion_correction``).
+
+    Parameters
+    ----------
+    filepath : str
+        Path to the recording file (.h5 or .smp).
+    roi_ids : np.ndarray
+        Positive ROI IDs to extract traces for (subset of ``weight_roi_ids``).
+    roi_weights : np.ndarray
+        (n_rois, x, y) weights in the frame of the registered stack.
+    weight_roi_ids : np.ndarray
+        Positive ROI IDs of ``roi_weights``.
+    disp_frames : np.ndarray
+        (n_frames, 2) displacement of every frame relative to the reference [px].
+    data_stack_name, precision, from_raw_data :
+        See :func:`roi2trace_from_stack`.
+
+    Returns
+    -------
+    roi2trace : dict
+        As :func:`roi2trace_from_stack`. Pixels outside the FOV after registration are ignored.
+    frame_dt : float
+        Duration of one frame in seconds.
+    """
+    from djimaging.utils.motion import extract_traces_weighted, register_stack
+
+    ch_stacks, wparams = read_utils.load_stacks(filepath, from_raw_data, ch_names=(data_stack_name,))
+    stack = np.asarray(ch_stacks[data_stack_name], dtype=np.float32)
+    if stack.shape[2] != len(disp_frames):
+        raise ValueError(f"Stack has {stack.shape[2]} frames but motion has {len(disp_frames)}.")
+
+    frame_times, frame_dt_offset, frame_dt = wparams_utils.compute_frame_times(
+        wparams=wparams, n_frames=stack.shape[2], precision=precision)
+
+    weight_roi_ids = np.abs(np.asarray(weight_roi_ids, dtype=int))
+    missing = sorted(set(np.abs(roi_ids)) - set(weight_roi_ids))
+    if missing:
+        raise ValueError(f"No ROI weights for ROIs {missing}.")
+
+    traces, valid_frac = extract_traces_weighted(register_stack(stack, disp_frames), roi_weights,
+                                                 return_valid_frac=True)
+    t0s = np.array([np.median(frame_dt_offset[w > 0]) if np.any(w > 0) else np.median(frame_dt_offset)
+                    for w in roi_weights])
+    traces_times = frame_times[:, None] + t0s[None, :]
+
+    roi2trace = roi_utils.get_roi2trace(traces=traces, traces_times=traces_times,
+                                        roi_ids_traces=weight_roi_ids, roi_ids_subset=np.abs(roi_ids))
+    # ROIs without any pixel in the presentation mask (e.g. moved out of the FOV or into the light artifact), or with
+    # frames without any valid pixel, have no (complete) trace: NaN there, and trace_valid = 0, so that downstream
+    # tables (PreprocessTraces, ...) skip them.
+    for i, roi_id in enumerate(weight_roi_ids):
+        if int(roi_id) in roi2trace and np.any(valid_frac[:, i] <= 0):
+            roi2trace[int(roi_id)]['trace_valid'] = 0
     return roi2trace, frame_dt
 
 

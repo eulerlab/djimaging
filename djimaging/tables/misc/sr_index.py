@@ -100,13 +100,13 @@ class SrIndexTemplate(dj.Computed):
 
         try:
             triggertimes = load_array((self.presentation_table & key).fetch1('triggertimes'))
-            fs = (self.presentation_table.ScanInfo & key).to_arrays('scan_frequency')
+            fs = (self.presentation_table.ScanInfo & key).fetch1('scan_frequency')
             ntrigger_rep = (self.stimulus_table & key).fetch1('ntrigger_rep')
 
             # Find stim onset and offset for faster computations
             stim_onset_idx = int(triggertimes[0] * fs)
             stim_offset_idx = int(triggertimes[ntrigger_rep] * fs)
-        except:  # There might be cases without triggertimes
+        except (IndexError, TypeError, dj.DataJointError):  # There might be cases without triggertimes
             stim_onset_idx = 0
             stim_offset_idx = 100
 

@@ -13,9 +13,10 @@ from djimaging.utils.filesystem_utils import get_file_info_df
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.plot_utils import plot_field
 from djimaging.utils.scanm.recording import ScanMRecording
+from djimaging.tables.core.setup_params import RecordingSetupMixin
 
 
-class FieldTemplate(dj.Computed):
+class FieldTemplate(RecordingSetupMixin, dj.Computed):
     database = ""
     _filepath_store = "reference"
     incl_region = True  # Include region as primary key?
@@ -323,10 +324,11 @@ class FieldTemplate(dj.Computed):
         if verboselvl > 4:
             print('\t\tAdd field with files:', filepaths)
 
-        setupid = (self.experiment_table().ExpInfo & field_key).fetch1("setupid")
+        setup_kwargs = self.recording_setup_kwargs(field_key)
 
         rec = self._load_first_file_wo_error(
-            filepaths=filepaths, setupid=setupid, date=field_key['date'], allow_user_input=allow_user_input)
+            filepaths=filepaths, setupid=setup_kwargs.pop('setup_id'), date=setup_kwargs.pop('date'),
+            allow_user_input=allow_user_input, **setup_kwargs)
         field_entry, avg_entries = self.complete_keys(base_key=field_key, rec=rec)
 
         self.insert1(field_entry, allow_direct_insert=True)
@@ -339,6 +341,7 @@ class FieldTemplate(dj.Computed):
             setupid: str,
             date,
             allow_user_input: bool = False,
+            **setup_kwargs,
     ) -> ScanMRecording:
         """Load the first file from `filepaths` that can be read without error.
 
@@ -352,6 +355,8 @@ class FieldTemplate(dj.Computed):
             Recording date forwarded to `ScanMRecording`.
         allow_user_input : bool, optional
             If True, prompt user to continue after a load failure. Default is False.
+        **setup_kwargs
+            Further setup parameters for `ScanMRecording` (stimulator_delay, scan_width_um, npixartifact).
 
         Returns
         -------
@@ -365,7 +370,7 @@ class FieldTemplate(dj.Computed):
         """
         for i, filepath in enumerate(filepaths):
             try:
-                rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=date)
+                rec = ScanMRecording(filepath=filepath, setup_id=setupid, date=date, **setup_kwargs)
                 break
             except Exception as e:
                 error_msg = f"Failed to load file with error {e}:\n{filepath}"

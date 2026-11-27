@@ -1,5 +1,7 @@
 from typing import Callable
 
+import warnings
+
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -49,8 +51,13 @@ class CellposeWrapper:
         np.ndarray
             2-D image of shape (nx, ny).
         """
-        img = stack.mean(axis=2) if stack.ndim > 2 else stack.copy()
-        img[:n_artifact] = np.min(img)
+        if stack.ndim > 2:
+            with warnings.catch_warnings():  # NaN frames must not turn the whole image to NaN
+                warnings.simplefilter('ignore', RuntimeWarning)
+                img = np.nanmean(stack, axis=2)
+        else:
+            img = stack.copy()
+        img[:n_artifact] = np.nanmin(img)
         return img
 
     def create_mask_from_data(

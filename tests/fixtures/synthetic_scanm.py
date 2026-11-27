@@ -6,7 +6,7 @@ import numpy as np
 
 NX = 8
 NY = 8
-FRAME_DT = 0.1
+FRAME_DT = 0.128  # 64 lines at 2 ms: 7.8125 Hz, as the 64 x 64 scans of the lab (and the RGC classifier)
 PIXEL_DURATION_US = FRAME_DT / (NX * NY) * 1e6
 STIMULATOR_DELAY_MS = 2.0
 TRIGGER_X_INDEX = 1

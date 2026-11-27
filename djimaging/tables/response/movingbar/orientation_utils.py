@@ -106,7 +106,10 @@ def get_si(dir_component, dirs, per):
     """
     Computes direction/orientation selectivity index and preferred direction/orientation
     of a cell by projecting the tuning curve v on a
-    complex exponential of the according directions dirs (as in Baden et al. 2016)
+    complex exponential of the according directions dirs (as in Baden et al. 2016).
+    In circular statistics, the index is the mean resultant length R (= 1 - circular variance) of the directions
+    (per=1) or doubled directions (per=2) weighted by the tuning curve, corrected for the bin spacing (Zar 1999),
+    so it can slightly exceed 1. The preferred direction/orientation is the circular mean.
     Inputs:
     v:  array, dirs x 1, tuning curve as returned by SVD
     dirs:   array, dirs x 1, directions in radians
@@ -185,50 +188,47 @@ def get_time_dir_kernels(sorted_responses: np.ndarray, dt: float):
     return time_component, dir_component
 
 
-def compute_null_dist(dirs: np.ndarray, counts: np.ndarray, per: int, iters=1000):
+def compute_null_dist(dirs: np.ndarray, counts: np.ndarray, per: int, iters=1000, seed=None):
     """
-    Test significance of orientation tuning by permutation test.
+    Permutation test for direction (per=1) or orientation (per=2) tuning, as in Baden et al. 2016.
+
+    The test statistic is |K|, the length of the projection of the trial-averaged tuning curve on the complex
+    exponential exp(i * per * dir), i.e. the power of the first (DS) or second (OS) Fourier component.
+    The null distribution is obtained by shuffling the direction labels of all trials (repetitions x directions).
+    A Rayleigh test is not appropriate here: the directions are fixed design points, not samples of angles.
 
     Parameters:
         dirs (array): Vector of directions (#directions x 1) in radians.
-        counts (array): Matrix of responses (#reps x #directions).
+        counts (array): Matrix of responses (#reps x #directions), e.g. projections on the time component.
         per (int): Fourier component to test (1 = direction, 2 = orientation).
         iters (int): Number of permutations for the test.
+        seed (int, optional): Seed of the random generator, for reproducible p-values.
 
     Returns:
-        p (float): p-value for tuning.
-        q (float): Magnitude of the Fourier component.
-        qdistr (array): Sampling distribution of |q| under the null hypothesis.
+        p (float): p-value, fraction of the null distribution exceeding |K| (as in the original implementation,
+            i.e. without the +1 correction, so p can be 0).
+        q (float): |K| of the data.
+        qdistr (array): Null distribution of |K|.
     """
     rep_n, dir_n = counts.shape
     k = dirs.reshape(-1)
     v = np.exp(per * 1j * k) / np.sqrt(dir_n)
 
-    # Compute magnitude of Fourier component for original data
     q = np.abs(np.mean(counts, axis=0) @ v)
 
-    # Initialize null distribution
-    qdistr = np.zeros(iters)
-
-    # Flatten counts for permutation
+    rng = np.random.default_rng(seed)
     flattened_counts = counts.flatten()
+    perm_idxs = rng.permuted(np.tile(np.arange(rep_n * dir_n), (iters, 1)), axis=1)
+    shuffled_counts = flattened_counts[perm_idxs].reshape(iters, rep_n, dir_n)
+    qdistr = np.abs(np.mean(shuffled_counts, axis=1) @ v)
 
-    for i in range(iters):
-        # Shuffle counts
-        shuffled_indices = np.random.permutation(rep_n * dir_n)
-        shuffled_counts = flattened_counts[shuffled_indices]
-        shuffled_counts = shuffled_counts.reshape(rep_n, dir_n)
-
-        # Compute Fourier magnitude for shuffled data
-        qdistr[i] = np.abs(np.mean(shuffled_counts, axis=0) @ v)
-
-    # Compute p-value
     p = np.mean(qdistr > q)
 
     return p, q, qdistr
 
 
-def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n_shuffles: int = 1000):
+def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n_shuffles: int = 1000,
+                       seed: int | None = None):
     """
     Compute orientation selectivity (OS) and direction selectivity (DS) indices.
 
@@ -237,6 +237,7 @@ def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n
         dir_order (array): 1D array of direction order.
         dt (float): Time step.
         n_shuffles (int): Number of shuffles for null distribution.
+        seed (int, optional): Seed of the permutation test, for reproducible p-values.
 
     Returns:
         tuple: Contains various computed indices and components.
@@ -262,8 +263,8 @@ def compute_os_ds_idxs(snippets: np.ndarray, dir_order: np.ndarray, dt: float, n
     dsi_s, pref_dir_s = get_si(surrogate_v, sorted_directions, 1)
     # osi_s, pref_or_s = get_si(surrogate_v, sorted_directions, 2)  # Not used atm
 
-    p_dsi, _, null_dist_dsi = compute_null_dist(sorted_directions, projected.T, 1, iters=n_shuffles)
-    p_osi, _, null_dist_osi = compute_null_dist(sorted_directions, projected.T, 2, iters=n_shuffles)
+    p_dsi, _, null_dist_dsi = compute_null_dist(sorted_directions, projected.T, 1, iters=n_shuffles, seed=seed)
+    p_osi, _, null_dist_osi = compute_null_dist(sorted_directions, projected.T, 2, iters=n_shuffles, seed=seed)
 
     d_qi = quality_index_ds(sorted_responses)
     on_off = get_on_off_index(time_component, dt=dt)

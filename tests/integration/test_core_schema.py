@@ -40,7 +40,7 @@ def test_user_info_round_trip(tutorial_schema, tmp_path):
     assert row["data_dir"] == f"{tmp_path}/"
 
 
-def test_add_default_raw_data_params(tutorial_schema, tmp_path):
+def test_add_raw_data_params(tutorial_schema, tmp_path):
     tutorial_schema.UserInfo().upload_user(
         {
             "experimenter": "ci_params",
@@ -52,7 +52,7 @@ def test_add_default_raw_data_params(tutorial_schema, tmp_path):
     )
 
     raw_data_params = tutorial_schema.RawDataParams()
-    raw_data_params.add_default(experimenter_list=["ci_params"])
+    raw_data_params.add_params(from_raw_data=False, igor_roi_masks="yes", experimenter_list=["ci_params"])
 
     row = (raw_data_params & {"experimenter": "ci_params"}).fetch1()
     assert row["raw_id"] == 1

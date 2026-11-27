@@ -7,7 +7,7 @@ import pytest
 
 from djimaging.tables.response.movingbar.orientation_utils import compute_os_ds_idxs
 
-_TEST_DATA_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'test_data'))
+from tests.fixtures.data_paths import TEST_DATA_PATH as _TEST_DATA_PATH  # noqa: E402
 
 
 def load_test_data(cell_type, path=os.path.join(_TEST_DATA_PATH, 'test_mb.pkl')):
@@ -33,7 +33,7 @@ def test_ds(path=os.path.join(_TEST_DATA_PATH, 'test_mb.pkl')):
 
     snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op = load_test_data('ds', path=path)
     dsi, p_dsi, _, _, osi, p_osi, _, _, _, _, _, _, _, _, _ = \
-        compute_os_ds_idxs(snippets=snippets.T.reshape((-1, 32)).T, dir_order=dir_order, dt=0.128)
+        compute_os_ds_idxs(snippets=snippets.T.reshape((-1, 32)).T, dir_order=dir_order, dt=0.128, seed=42)
 
     assert np.isclose(dsi, gt_dsi, atol=0.01, rtol=0.01)
     assert np.isclose(p_dsi, gt_dp, atol=0.01, rtol=0.01)
@@ -48,7 +48,7 @@ def test_nonds(path=os.path.join(_TEST_DATA_PATH, 'test_mb.pkl')):
 
     snippets, dir_order, gt_dsi, gt_dp, gt_osi, gt_op = load_test_data('nds', path=path)
     dsi, p_dsi, _, _, osi, p_osi, _, _, _, _, _, _, _, _, _ = \
-        compute_os_ds_idxs(snippets=snippets.T.reshape((-1, 32)).T, dir_order=dir_order, dt=0.128)
+        compute_os_ds_idxs(snippets=snippets.T.reshape((-1, 32)).T, dir_order=dir_order, dt=0.128, seed=42)
 
     assert np.isclose(dsi, gt_dsi, atol=0.01, rtol=0.01)
     assert np.isclose(p_dsi, gt_dp, atol=0.01, rtol=0.01)

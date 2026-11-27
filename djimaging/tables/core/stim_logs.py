@@ -1,5 +1,6 @@
 import datajoint as dj
 
+from djimaging.utils.exp_history_utils import ref_path, seconds_of_day
 from djimaging.utils.qdspy.read_logs import parse_stimulus_log
 
 
@@ -183,8 +184,52 @@ class QdsPyLogTemplate(dj.Computed):
         self.StimLog().insert(stim_rows)
 
 
+def _exp_history_info(self, key: dict, exp_key: dict) -> dict | None:
+    """Recording of a presentation and clock offset from `self.exp_history_stim_log_table` of PresentationLog.
+
+    None if the table is not bound or not populated for the experiment.
+
+    Returns dict(clock_offset_s, rec_name, rec_start_s, in_recording), `in_recording` the `(log_idx, stim_idx)`
+    of the log entries that started during the recording.
+    """
+    table = getattr(self, 'exp_history_stim_log_table', None)
+    if table is None or len(table & exp_key) == 0:
+        return None
+    clock_offset_s = (table & exp_key).fetch1('clock_offset_s')
+    out = dict(clock_offset_s=clock_offset_s, rec_name=None, rec_start_s=None, in_recording=set())
+    pres_path = ref_path((self.presentation_table & key).fetch1('pres_data_file'))
+    recs = (table.exp_history_table.Recording & exp_key).proj('h5_file', 'smp_file', 'rec_start').to_dicts()
+    rec = next((r for r in recs if pres_path is not None
+                and pres_path in (ref_path(r['h5_file']), ref_path(r['smp_file']))), None)
+    if rec is None:
+        return out
+    out.update(rec_name=rec['rec_name'], rec_start_s=seconds_of_day(rec['rec_start']))
+    stims = (table.Stim & exp_key & dict(rec_name=rec['rec_name'], status='recording')).to_dicts()
+    out['in_recording'] = {(s['log_idx'], s['stim_idx']) for s in stims}
+    return out
+
+
 class PresentationLogTemplate(dj.Computed):
+    """The QDSpy log entry of each Presentation.
+
+    Log entries are filtered by stimulus (md5, else file name; aborted entries only if no other matches). If several
+    remain, the entry is selected by, in this order:
+
+    1. `+recording`: the entry that started during the recording of the presentation, from `ExpHistoryStimLog`
+       (if `exp_history_stim_log_table` is bound and populated), which estimated the clock offset between the QDSpy
+       and the ScanM computer from all recordings and stimuli of the experiment. Several: not aborted first, then
+       the last one (earlier ones are usually test runs).
+    2. `+time`: the entry that started closest to the recording start (from `scan_params_table`, else from
+       `ExpHistory.Recording`), after shifting the log times by the clock offset of `ExpHistoryStimLog`
+       (`+time+offset`; without it the clocks are assumed to agree).
+    3. ordinal: the n-th presentation of the stimulus (sorted by key) gets the n-th entry.
+
+    If `exp_history_stim_log_table` is bound but not populated for the experiment, `make` raises when several entries
+    match, unless `allow_missing_exp_history=True` is passed (then 2. and 3. apply without the clock offset).
+    """
     database = ""
+    # Optional: ExpHistoryStimLog (history block), see the class docstring. Populate it before this table.
+    exp_history_stim_log_table = None
 
     @property
     def definition(self):
@@ -230,7 +275,12 @@ class PresentationLogTemplate(dj.Computed):
         """
         return None
 
-    def make(self, key, verbose: int = 0, skip_if_no_log: bool = False):
+    def make(self, key, verbose: int = 0, skip_if_no_log: bool = False, allow_missing_exp_history: bool = False):
+        """
+        :param skip_if_no_log: Skip presentations without any matching log entry instead of raising.
+        :param allow_missing_exp_history: If `exp_history_stim_log_table` is bound but not populated for the
+            experiment, and several log entries match, raise unless True (then time or ordinal matching is used).
+        """
         if verbose >= 1:
             print(f"[PresentationLog] Processing key: {key}")
 
@@ -310,38 +360,54 @@ class PresentationLogTemplate(dj.Computed):
         if len(matches) == 1:
             matched = matches[0]
 
-        scan_params_table = self.scan_params_table
-        if matched is None and scan_params_table is not None:
-            try:
-                scan_params_dict = (scan_params_table & key).fetch1('scan_params_dict')
-                rec_time = _parse_scan_start_time(scan_params_dict)
-                if rec_time is not None:
-                    rec_s = (rec_time.hour * 3600 + rec_time.minute * 60
-                             + rec_time.second + rec_time.microsecond / 1e6)
+        hist = _exp_history_info(self, key, exp_key) if matched is None else None
+        if matched is None and hist is None and not allow_missing_exp_history                 and getattr(self, 'exp_history_stim_log_table', None) is not None:
+            raise ValueError(
+                f"{self.exp_history_stim_log_table.__class__.__name__} is not populated for {exp_key} but is needed "
+                f"to select among {len(matches)} matching log entries of {key}. Populate it first, or pass "
+                f"make_kwargs=dict(allow_missing_exp_history=True) to fall back to time/ordinal matching.")
+        if verbose >= 2 and hist is not None:
+            print(f"  ExpHistoryStimLog: recording={hist['rec_name']!r}, clock_offset_s={hist['clock_offset_s']}, "
+                  f"{len(hist['in_recording'])} log entr(ies) started during the recording")
 
-                    def _delta_s(row):
-                        # DataJoint returns MySQL TIME columns as timedelta
-                        t = row['t_start']
-                        log_s = t.total_seconds() if hasattr(t, 'total_seconds') else (
-                            t.hour * 3600 + t.minute * 60 + t.second)
-                        return abs(rec_s - log_s)
-                    matched = min(matches, key=_delta_s)
-                    method = method + '+time'
-                    if verbose >= 2:
-                        print(f"  time-matching: recording start={rec_time}, "
-                              f"best match t_start={matched['t_start']} "
-                              f"(delta={_delta_s(matched):.0f}s)")
-                    if verbose >= 3:
-                        for r in matches:
-                            marker = "  <-- selected" if r is matched else ""
-                            print(f"    stim_idx={r['stim_idx']} t_start={r['t_start']} "
-                                  f"delta={_delta_s(r):.0f}s{marker}")
-                else:
-                    if verbose >= 2:
+        if matched is None and hist is not None:
+            in_rec = [r for r in matches if (r['log_idx'], r['stim_idx']) in hist['in_recording']]
+            if in_rec:
+                # Not aborted first, then the last one (earlier ones are usually test runs)
+                matched = max(in_rec, key=lambda r: (not r['aborted'], seconds_of_day(r['t_start'])))
+                method = method + '+recording'
+
+        if matched is None:
+            rec_s = None
+            scan_params_table = self.scan_params_table
+            if scan_params_table is not None:
+                try:
+                    rec_time = _parse_scan_start_time((scan_params_table & key).fetch1('scan_params_dict'))
+                    rec_s = seconds_of_day(rec_time)
+                    if rec_s is None and verbose >= 2:
                         print("  time-matching: could not parse time from scan_params_dict")
-            except Exception as e:
+                except Exception as e:
+                    if verbose >= 2:
+                        print(f"  time-matching: no recording start from scan_params_table ({e})")
+            if rec_s is None and hist is not None:
+                rec_s = hist['rec_start_s']
+            if rec_s is not None:
+                offset = hist['clock_offset_s'] if hist is not None else None
+
+                def _delta_s(row):
+                    # QDSpy time + offset = ScanM time; MySQL TIME columns are fetched as timedelta
+                    return abs(rec_s - (seconds_of_day(row['t_start']) + (offset or 0.)))
+
+                matched = min(matches, key=_delta_s)
+                method = method + '+time' + ('+offset' if offset is not None else '')
                 if verbose >= 2:
-                    print(f"  time-matching failed ({e}) — falling back to ordinal matching")
+                    print(f"  time-matching: recording start={rec_s:.0f} s of day, clock offset={offset}, "
+                          f"best match t_start={matched['t_start']} (delta={_delta_s(matched):.0f}s)")
+                if verbose >= 3:
+                    for r in matches:
+                        marker = "  <-- selected" if r is matched else ""
+                        print(f"    stim_idx={r['stim_idx']} t_start={r['t_start']} "
+                              f"delta={_delta_s(r):.0f}s{marker}")
 
         if matched is None:
             stim_pk = self.stimulus_table.primary_key

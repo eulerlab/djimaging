@@ -34,7 +34,10 @@ def fit_rf_model(srf, kind='gaussian', polarity=None, center=None):
 
     xx, yy = np.meshgrid(np.arange(0, srf.shape[1]), np.arange(0, srf.shape[0]))
 
-    polarities = (-1, 1) if polarity is None else (polarity,)
+    if polarity is None:
+        polarities = tuple(polarity_i for polarity_i in (-1, 1) if np.any(polarity_i * srf > 0))
+    else:
+        polarities = (polarity,)
 
     model, model_fit, model_params = None, None, None
     qi = -1.
@@ -84,7 +87,7 @@ def estimate_srf_center_model_init_params(srf, polarity=None, amplimscale=2., pl
     y0 = int(y0)
 
     pol = np.sign(srf[y0, x0])
-    assert pol == polarity
+    assert polarity is None or pol == polarity
 
     srf_cut = np.clip(srf[y0] * pol, 0, None)
 
@@ -184,11 +187,11 @@ def srf_dog_model(srf, polarity=None, center=None):
 def srf_dog_model_from_params(params):
     f_c = Gaussian2D(
         amplitude=params['amplitude_0'], x_mean=params['x_mean_0'], y_mean=params['y_mean_0'],
-        x_stddev=params['x_stddev_0'], y_stddev=params['y_stddev_0'])
+        x_stddev=params['x_stddev_0'], y_stddev=params['y_stddev_0'], theta=params.get('theta_0', 0.))
 
     f_s = Gaussian2D(
         amplitude=params['amplitude_1'], x_mean=params['x_mean_1'], y_mean=params['y_mean_1'],
-        x_stddev=params['x_stddev_1'], y_stddev=params['y_stddev_1'])
+        x_stddev=params['x_stddev_1'], y_stddev=params['y_stddev_1'], theta=params.get('theta_1', 0.))
 
     model = f_c - f_s
 

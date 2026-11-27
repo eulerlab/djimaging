@@ -1,0 +1,152 @@
+# %% [markdown]
+# # Experiment history
+#
+# Registers **every** ScanM recording of every experiment, independent of stimuli and fields: also z-stacks, high
+# resolution and blood vessel recordings, test recordings, recordings that were stopped early and recordings of
+# stimuli that are not in the `Stimulus` table ("unlisted", e.g. not yet published stimuli).
+#
+# - `ExpHistory`: per experiment the scanned folders (`pre_data_dir` and `raw_data_dir` of `UserInfo`, plus
+#   `extra_data_dirs`), and per recording (`ExpHistory.Recording`) the files (`.smp` + `.smh` and/or `.h5`, and how
+#   they were linked), the parts of the file name and the scan parameters needed for the laser exposure history:
+#   start time, duration, zoom, pixel size, pixel dwell time, stage position, setup, number of triggers.
+#   Laser power and stimulus intensity are not stored digitally and are therefore not part of the history.
+# - `ExpHistoryField`: the recordings of each field.
+# - `ExpHistoryStimLog`: the QDSpy stimuli of an experiment and the recording during which each was shown (the clocks
+#   of the QDSpy and ScanM computers are not synchronized, the offset is estimated).
+#
+# **Listed / unlisted**: a recording is *listed* if the stimulus part of its file name is an alias of a stimulus in
+# `Stimulus`. Only listed recordings become `Presentation`s, so only they get traces, snippets and averages.
+
+# %%
+ExpHistory().populate(display_progress=True, processes=5)
+ExpHistory.Recording()
+
+# %%
+# Recordings of stimuli that are not in the Stimulus table: registered, but no traces
+df_listed = ExpHistory().listed(Stimulus)
+if len(df_listed) > 0:
+    print(df_listed.groupby(['kind', 'listed']).size())
+    print(df_listed[(df_listed.kind == 'response') & ~df_listed.listed].stim_token.value_counts())
+
+# %%
+# ScanM files that are not in the scanned folders. Add their folders to ExpHistory.extra_data_dirs to register them.
+for key, unscanned in zip(*ExpHistory().to_arrays('unscanned_files', include_key=True)):
+    if len(unscanned) > 0:
+        print(key, unscanned)
+
+# %%
+plot_if_data(ExpHistory())
+
+# %%
+ExpHistoryField().populate(display_progress=True, processes=5)
+ExpHistoryField.Recording()
+
+# %% [markdown]
+# ## Stimulus logs (QDSpy)
+#
+# The folders with the QDSpy log files of the setups (default: the setup log folders of the lab in the reference store;
+# setup 2 has none). Log files are matched to experiments by setup and by the date at the start of their file name
+# (`YYYYMMDD_...`).
+
+# %%
+qdspy_log_dirs = {setupid: reference_root / f'Resources/__Setup_{setupid}/log files' for setupid in [1, 3]}
+
+for setupid, log_dir in qdspy_log_dirs.items():
+    if not os.path.isdir(log_dir):
+        print(f"No QDSpy log folder for setup {setupid}: {log_dir}")
+        continue
+    log_files = sorted(f for f in os.listdir(log_dir) if f[:8].isdigit())
+    for exp_key in (Experiment.ExpInfo() & dict(setupid=str(setupid))).proj().to_dicts():
+        date_str = exp_key['date'].strftime('%Y%m%d')
+        for log_file in log_files:
+            log_path = str(Path(log_dir) / log_file)
+            if log_file.startswith(date_str) and log_path not in (QdsPyLogFile() & exp_key).to_arrays('log_path'):
+                QdsPyLogFile().add1(key=exp_key, log_path=log_path)
+
+QdsPyLog().populate(display_progress=True)
+
+# %% [markdown]
+# ### Logged QDSpy stimuli
+#
+# Every QDSpy script in the logs of your experiments: file name, md5 hash, how often it was shown, and the `Stimulus`
+# that claims it, by the same rule as `PresentationLog` (md5 in `stim_hash_list`, or the file name starts with an
+# entry of `stim_name_list` or with the `stim_name`). Scripts of stimuli you analyse but without a claiming `Stimulus`
+# need their hash added in the stimulus cell (core part); then populate `PresentationLog` (below) again.
+
+# %%
+stim_claims = []
+for stim_name, stim_dict in zip(*Stimulus().to_arrays('stim_name', 'stim_dict')):
+    if stim_dict is None:
+        continue
+    stim_claims.append((stim_name, set(stim_dict.get('stim_hash_list', [])),
+                        {n.lower() for n in list(stim_dict.get('stim_name_list', [])) + [stim_name]}))
+
+
+def claiming_stimuli(file_name, md5):
+    by_md5 = [s for s, hashes, _ in stim_claims if md5 in hashes]
+    by_name = [s for s, _, names in stim_claims if any(file_name.lower().startswith(n) for n in names)]
+    return ', '.join(by_md5) + (' (md5)' if by_md5 else '') or ', '.join(by_name) + (' (name)' if by_name else '')
+
+
+df_logged = QdsPyLog.StimLog().proj('stim_file_name', 'stim_md5').to_pandas().reset_index()
+if len(df_logged) > 0:
+    df_logged = df_logged.groupby(['stim_file_name', 'stim_md5']).size().rename('n_logged').reset_index()
+    df_logged['claimed_by'] = [claiming_stimuli(f, h) for f, h in zip(df_logged.stim_file_name, df_logged.stim_md5)]
+df_logged
+
+# %%
+ExpHistoryStimLog().populate(display_progress=True)
+ExpHistoryStimLog()
+
+# %% [markdown]
+# `PresentationLog`: the QDSpy log entry of each `Presentation` (matched by the QDSpy md5 or file name in
+# `stim_dict['stim_hash_list']` / `stim_dict['stim_name_list']` of the stimulus). If a stimulus was logged several
+# times, the entry that started during the recording (from `ExpHistoryStimLog`, with the estimated clock offset) is
+# used; `match_method` says how the entry was chosen. Used e.g. to identify moving bar and mouse cam versions.
+# If several entries match and `ExpHistoryStimLog` is not populated for the experiment, the entry fails (populate
+# `ExpHistoryStimLog` first); only pass `allow_missing_exp_history=True` in `make_kwargs` to accept the fallback.
+
+# %%
+PresentationLog().populate(make_kwargs=dict(verbose=0, skip_if_no_log=True), suppress_errors=True,
+                           display_progress=True)
+print(f"{len(PresentationLog())} of {len(Presentation())} presentations have a log entry")
+
+# %% [markdown]
+# ## Light exposure history report
+#
+# Per experiment, every laser scan and every stimulus in time order: where and how long the retina was exposed, which
+# stimulus (unlisted stimuli only by name, never with results), setup and stimulator, and the processing status.
+# Unknown values are written as `unknown`, gaps are listed at the top of the report. The field map shows the images of
+# all recorded fields at their stage positions (border: response or structure only; retinal position if known).
+# Writes CSV, JSON and HTML to one folder per experiment in `exposure_dir` and/or, with `report_next_to_ini`, to
+# `<experiment folder>/exposure_history/` next to the .ini file. Existing reports: `exists` = 'error', 'skip' or
+# 'overwrite'; only earlier reports are ever overwritten, never other files.
+# Run again with exists='overwrite' at the end of the pipeline to include traces and motion QC.
+
+# %%
+from djimaging.utils.exposure_history_dj import export_exposure_history
+
+exposure_dir = os.path.expanduser('~/exposure_history')  # One sub-folder per experiment; None: not written there
+report_next_to_ini = False  # Also write to <experiment folder>/exposure_history/
+exists = 'skip'  # Existing reports: 'error', 'skip' or 'overwrite' (replaces earlier reports only)
+
+exposure_tables = dict(
+    exp_history_table=ExpHistory, stimulus_table=Stimulus, exp_history_field_table=ExpHistoryField,
+    stim_log_table=ExpHistoryStimLog, presentation_table=Presentation, traces_table=Traces,
+    # Optional tables (None if the block is not part of the schema)
+    motion_detection_table=globals().get('MotionDetection'), motion_trust_table=globals().get('MotionTrust'),
+    experiment_stimulator_table=globals().get('ExperimentStimulator'),
+    experiment_imaging_setup_table=globals().get('ExperimentImagingSetup'),
+)
+field_map_kwargs = dict(
+    retinal_location_table=globals().get('RetinalFieldLocation'),
+    images_from_files=True,  # Images of fields that are not in Field (structure only) from their files (slower)
+)
+
+reports = export_exposure_history(
+    exposure_dir, ExpHistory().proj().to_dicts(), exists=exists, next_to_ini=report_next_to_ini,
+    field_map_kwargs=field_map_kwargs, **exposure_tables)
+for report in reports:
+    for files in report.values():
+        if files is not None:
+            print(files['html'])

@@ -6,6 +6,9 @@
 #
 # - `ClassifierV2`: The stored (pre-trained) classifier.
 # - `Baden16TracesV2`: Chirp and moving bar responses of each ROI, processed to match the format that the classifier expects.
+#   The moving bar features (time component, DS p-value) are read from `OsDsIndexes` (block `basic`), so populate it first.
+#   They match the training data only with the Baden et al. 2016 snippet baseline (`snippet_base_dt` of the moving bar,
+#   default of `Stimulus.add_movingbar`) and `OsDsIndexes._n_shuffles >= 1000`; `Baden16TracesV2` checks both.
 # - `CelltypeAssignmentV2`: Predicted cell type (cluster, group) and probability for each ROI.
 
 # %%

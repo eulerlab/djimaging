@@ -10,8 +10,14 @@ These were previously provided by a custom RFEst fork; they are implemented here
 
 For speed, the forward pass, cost and metrics are pure functions, and the optimizer runs several iterations per call
 of a compiled function (`_get_chunk_runner`) that is cached across models with the same configuration.
+
+Several models that share their design matrices (e.g. the GLMs of all ROIs of a presentation) can be fit jointly with
+`optimize_many`, `fit_many` and `fit_hps_many`: the optimizer is vectorized over the models (`jax.vmap`), so every step
+is a matrix-matrix product, which is much faster on a GPU. Every model keeps its own stopping criterion and model
+selection, so the results are the same as fitting the models one by one (up to floating point differences).
 """
 
+import contextlib
 import functools
 import itertools
 import time
@@ -35,12 +41,36 @@ try:
     from rfest import GLM as _RFEstGLM
     from rfest.loss import loss_mse, loss_neglogli, loss_penalty
     from rfest.splines import build_spline_matrix
-
-    jax.config.update('jax_platform_name', 'cpu')
 except ImportError:
     jax = None
     jnp = None
     _RFEstGLM = object
+
+
+def gpu_available() -> bool:
+    """Whether jax is installed and uses a GPU by default (requires a CUDA- or ROCm-enabled jaxlib)."""
+    if jax is None:
+        return False
+    try:
+        return jax.default_backend() in ('gpu', 'cuda', 'rocm')
+    except RuntimeError:
+        return False
+
+
+def cpu_device():
+    """Context manager placing jax computations on the CPU, also if a GPU is available."""
+    if jax is None:
+        return contextlib.nullcontext()
+    return jax.default_device(jax.devices('cpu')[0])
+
+
+def basis_projections_to_device(basis_projections: dict, dtype=np.float32) -> dict:
+    """Copy the basis projections (df -> channel -> array, see `ReceptiveFieldGLM.compute_basis_projections`) to the
+    default jax device (the GPU if available), so that they are transferred only once for all GLMs fit to them."""
+    if jax is None:
+        raise ImportError("rfest and jax are required for the GLM, install with `pip install djimaging[rf]`.")
+    return {df: {name: jnp.asarray(np.asarray(xs, dtype=dtype)) for name, xs in xs_df.items()}
+            for df, xs_df in basis_projections.items()}
 
 
 def apply_nonlinearity(x, kind):
@@ -148,6 +178,23 @@ def _get_chunk_runner(cfg, step_size, metric, has_dev, penalize, chunk_size):
     (no dev set, unsupported metric) are returned as zeros, because rfest enables `jax_debug_nans`.
     The function is compiled once per configuration and input shapes, and then reused across models.
     """
+    opt_init, run_chunk, get_params = _make_chunk_runner(cfg, step_size, metric, has_dev, penalize, chunk_size)
+    return opt_init, jit(run_chunk), get_params
+
+
+@functools.lru_cache(maxsize=None)
+def _get_batched_chunk_runner(cfg, step_size, metric, has_dev, penalize, chunk_size):
+    """Same as `_get_chunk_runner`, but vectorized over models that share their inputs (design matrices) and the
+    penalty. The optimizer state, responses and fixed parameters have a leading model axis, as do all outputs."""
+    opt_init, run_chunk, get_params = _make_chunk_runner(cfg, step_size, metric, has_dev, penalize, chunk_size)
+    data_axes = dict(inputs_train=None, y_train=0, fixed=0, beta=None)
+    if has_dev:
+        data_axes.update(inputs_dev=None, y_dev=0)
+    return jax.vmap(opt_init), jit(jax.vmap(run_chunk, in_axes=(0, None, data_axes))), get_params
+
+
+def _make_chunk_runner(cfg, step_size, metric, has_dev, penalize, chunk_size):
+    """Uncompiled (init, run_chunk, get_params), see `_get_chunk_runner`."""
     opt_init, opt_update, get_params = optimizers.adam(step_size=step_size)
     has_metric = metric in _SCORE_METRICS
 
@@ -171,11 +218,289 @@ def _get_chunk_runner(cfg, step_size, metric, has_dev, penalize, chunk_size):
 
         return opt_state, (cost_train, cost_dev, metric_train, metric_dev, p)
 
-    @jit
     def run_chunk(opt_state, i0, data):
         return lax.scan(functools.partial(body, data), opt_state, i0 + jnp.arange(chunk_size))
 
     return opt_init, run_chunk, get_params
+
+
+def _new_history(n: int) -> dict:
+    """Per-iteration train/dev costs and metrics of an optimization."""
+    return {k: np.full(n, np.nan) for k in ('cost_train', 'cost_dev', 'metric_train', 'metric_dev')}
+
+
+def _best_index(history: dict, i: int, stop: str, return_model: str, metric: str, tolerance: int) -> int:
+    """Iteration of the returned model, for an optimization stopped at iteration `i`."""
+    argbest = np.argmin if metric in ['mse', 'gcv'] else np.argmax
+    if return_model == 'best_dev_cost':
+        return int(np.argmin(history['cost_dev'][:i + 1]))
+    elif return_model == 'best_train_cost':
+        return int(np.argmin(history['cost_train'][:i + 1]))
+    elif return_model == 'best_dev_metric':
+        return int(argbest(history['metric_dev'][:i + 1]))
+    elif return_model == 'best_train_metric':
+        return int(argbest(history['metric_train'][:i + 1]))
+    else:
+        if return_model != 'last':
+            print('Provided `return_model` is not supported. Fallback to `last`')
+        return i - tolerance if stop == 'dev_stop' else i
+
+
+def _tree_stack(trees: list, dtype):
+    """Stack pytrees with the same structure along a new leading axis."""
+    return jax.tree_util.tree_map(lambda *xs: jnp.stack([jnp.asarray(x, dtype=dtype) for x in xs]), *trees)
+
+
+def _tree_take(tree, idx):
+    """Index the leading axis of all leaves of a pytree."""
+    return jax.tree_util.tree_map(lambda x: x[idx], tree)
+
+
+def optimize_many(models: list, p0s: list, num_iters, metric, step_size, tolerance, verbose, return_model,
+                  atol=1e-5, min_iters=300, early_stopping=True) -> list:
+    """Jointly optimize models sharing their inputs (design matrices), see `GLM.optimize` for the arguments.
+
+    The optimization of all models is vectorized, which is much faster on a GPU than optimizing them one by one.
+    Every model has its own stopping criterion and returned model, so the results are the same as optimizing the
+    models one by one with `GLM.optimize`. The optimization runs until all models stopped.
+    Unlike `GLM.optimize`, the parameters of all iterations are not stored (`all_params` is None).
+
+    Returns
+    -------
+    list
+        Parameters of the returned model of every model.
+    """
+    ref = models[0]
+    has_dev = 'dev' in ref.y
+    if return_model is None:
+        return_model = 'best_dev_cost' if has_dev else 'best_train_cost'
+    if return_model not in ('best_dev_cost', 'best_train_cost', 'best_dev_metric', 'best_train_metric'):
+        raise NotImplementedError(f'return_model={return_model!r} is not supported for jointly optimized models.')
+    assert has_dev or ('dev' not in return_model), 'Cannot use dev set if dev set is not given.'
+
+    cfg, penalize, inputs_train = ref._model_config(), ref._penalize(), ref._inputs('train')
+    inputs_dev = ref._inputs('dev') if has_dev else None
+    for model in models:
+        assert model._model_config() == cfg and model.beta == ref.beta and ('dev' in model.y) == has_dev
+        assert all(model._inputs('train')[name] is x for name, x in inputs_train.items()), \
+            'Jointly optimized models must share their design matrices, see `GLM.share_design_matrices`.'
+
+    opt_init, run_chunk, get_params = _get_batched_chunk_runner(
+        cfg, step_size, metric, has_dev, penalize, _CHUNK_SIZE)
+    opt_state = opt_init(_tree_stack(p0s, ref.dtype))
+
+    data = dict(inputs_train=inputs_train, y_train=_tree_stack([m.y['train'] for m in models], ref.dtype),
+                fixed=_tree_stack([m._fixed_params() for m in models], ref.dtype),
+                beta=0. if ref.beta is None else ref.beta)
+    if has_dev:
+        data.update(inputs_dev=inputs_dev, y_dev=_tree_stack([m.y['dev'] for m in models], ref.dtype))
+
+    n_models = len(models)
+    n_chunks = int(np.ceil(num_iters / _CHUNK_SIZE))
+    histories = [_new_history(n_chunks * _CHUNK_SIZE) for _ in range(n_models)]
+    stops = [None] * n_models  # (iteration, reason) once stopped
+    best = np.full(n_models, -1)
+
+    # Parameters at the iteration of the returned model and at the stopping iteration. Only these are kept, because
+    # storing the parameters of all iterations of all models can exceed the (GPU) memory.
+    params_best = params_stop = None
+
+    if verbose:
+        ref.print_progress_header(
+            c_train=True, c_dev=has_dev, m_train=metric is not None, m_dev=metric is not None and has_dev)
+
+    time_start = time.time()
+    time_elapsed = 0.
+    for i_chunk in range(n_chunks):
+        i0 = i_chunk * _CHUNK_SIZE
+        opt_state, (c_train, c_dev, m_train, m_dev, params) = run_chunk(opt_state, i0, data)
+        c_train, c_dev, m_train, m_dev = (np.asarray(v) for v in (c_train, c_dev, m_train, m_dev))
+        time_elapsed = time.time() - time_start
+        if params_best is None:
+            params_best = params_stop = _tree_take(params, (slice(None), 0))
+
+        is_last_chunk = i_chunk == n_chunks - 1
+        update_best = np.zeros(n_models, dtype=bool)
+        update_stop = np.zeros(n_models, dtype=bool)
+        idx_stop = np.zeros(n_models, dtype=int)
+        for k, model in enumerate(models):
+            if stops[k] is not None:
+                continue
+            history = histories[k]
+            idx = slice(i0, i0 + _CHUNK_SIZE)
+            history['cost_train'][idx] = c_train[k]
+            if has_dev:
+                history['cost_dev'][idx] = c_dev[k]
+            if metric in _SCORE_METRICS:
+                history['metric_train'][idx] = m_train[k]
+                if has_dev:
+                    history['metric_dev'][idx] = m_dev[k]
+
+            stop = model._check_stop(history, i0, num_iters, has_dev, tolerance, min_iters, atol, early_stopping,
+                                     verbose, time_elapsed)
+            if stop is None and is_last_chunk:
+                stop = (num_iters - 1, 'maxiter_stop')
+            i_end = stop[0] if stop is not None else i0 + _CHUNK_SIZE - 1
+
+            # Extending the history either keeps the best iteration or moves it into the current chunk.
+            best_k = _best_index(history, i_end, None, return_model, metric, tolerance)
+            if best_k >= i0 and best_k != best[k]:
+                best[k] = best_k
+                update_best[k] = True
+            if stop is not None:
+                stops[k] = stop
+                update_stop[k] = True
+                idx_stop[k] = stop[0] - i0
+
+        params_best = _update_params(params_best, params, update_best, np.clip(best - i0, 0, _CHUNK_SIZE - 1))
+        params_stop = _update_params(params_stop, params, update_stop, idx_stop)
+
+        if all(stop is not None for stop in stops):
+            break
+
+    total_time_elapsed = time.time() - time_start
+
+    params_opt = []
+    for k, model in enumerate(models):
+        i, stop = stops[k]
+        model._set_optimize_results(
+            histories[k], i=i, stop=stop, best=int(best[k]), params_i=_tree_take(params_stop, k),
+            return_model=return_model, has_dev=has_dev, num_iters=num_iters, verbose=verbose,
+            time_elapsed=time_elapsed, total_time_elapsed=total_time_elapsed, all_params=None)
+        params_opt.append(_tree_take(params_best, k))
+    return params_opt
+
+
+def _update_params(params_old, params_chunk, update: np.ndarray, idx: np.ndarray):
+    """Where `update`, replace the parameters of a model by those of iteration `idx` of the current chunk.
+
+    `params_old` leaves have shape (n_models, ...), `params_chunk` leaves (n_models, chunk_size, ...).
+    """
+    if not np.any(update):
+        return params_old
+    update = jnp.asarray(update)
+    rows, idx = jnp.arange(update.size), jnp.asarray(idx)
+
+    def _update(old, chunk):
+        mask = update.reshape((-1,) + (1,) * (old.ndim - 1))
+        return jnp.where(mask, chunk[rows, idx], old)
+
+    return jax.tree_util.tree_map(_update, params_old, params_chunk)
+
+
+def fit_many(models: list, ys: list, num_iters=3, alpha=1, beta=0.01, metric='corrcoef', step_size=1e-3,
+             tolerance=10, verbose=True, return_model=None, atol=1e-5, min_iters=300, early_stopping=False) -> None:
+    """Jointly fit models sharing their design matrices, see `GLM.fit` and `optimize_many`."""
+    _fit(models, ys, optimize_many, num_iters=num_iters, alpha=alpha, beta=beta, metric=metric,
+         step_size=step_size, tolerance=tolerance, verbose=verbose, return_model=return_model, atol=atol,
+         min_iters=min_iters, early_stopping=early_stopping)
+
+
+def fit_hps_many(models: list, ys: list, **kwargs) -> np.ndarray:
+    """Jointly fit models sharing their design matrices for all hyperparameters, see `GLM.fit_hps` and
+    `optimize_many`. Returns the dev metrics of shape (n_models, n_hp_sets)."""
+    return _fit_hps(models, ys, optimize_many, **kwargs)
+
+
+def _optimize_single(models, p0s, **kwargs):
+    """`optimize_many` signature for a single model optimized with `GLM.optimize`."""
+    assert len(models) == 1
+    return [models[0].optimize(p0s[0], **kwargs)]
+
+
+def _fit(models, ys, optimize, num_iters, alpha, beta, metric, step_size, tolerance, verbose, return_model, atol,
+         min_iters, early_stopping):
+    """`GLM.fit` for one or several models, with `optimize` being `optimize_many` or `_optimize_single`."""
+    for model, y in zip(models, ys):
+        model.alpha = alpha
+        model.beta = beta
+        model.metric = metric
+
+        if y is None:
+            if 'train' not in model.y:
+                raise ValueError('No `y` is provided.')
+        elif type(y) is dict:
+            model.y['train'] = y['train'][model.burn_in:].astype(model.dtype)
+            if 'dev' in y:
+                model.y['dev'] = y['dev'][model.burn_in:].astype(model.dtype)
+        else:
+            model.y['train'] = y[model.burn_in:].astype(model.dtype)
+
+        model.y_pred['opt'] = {}
+
+    params = optimize(
+        models, [model.p0 for model in models], num_iters=num_iters, metric=metric, step_size=step_size,
+        tolerance=tolerance, verbose=verbose, return_model=return_model, atol=atol, min_iters=min_iters,
+        early_stopping=early_stopping)
+
+    for model, p in zip(models, params):
+        model.p['opt'] = p
+        model._extract_opt_params(model.p['opt'])
+
+
+def _fit_hps(models, ys, optimize, num_iters=300, metric='corrcoef', step_size=1e-3, step_size_finetune=None,
+             tolerance=10, verbose=0, return_model='best_train_cost', atol=1e-5, min_iters=300, alphas=(1.,),
+             betas=(1.,), min_iters_other=None, early_stopping=False) -> np.ndarray:
+    """`GLM.fit_hps` for one or several models, see `_fit`. Returns the dev metrics (n_models, n_hp_sets)."""
+    hp_sets = list(itertools.product(alphas, betas))
+    for model, y in zip(models, ys):
+        if y is not None:
+            assert type(y) is dict and 'train' in y and 'dev' in y
+            model.y['train'] = y['train'][model.burn_in:].astype(model.dtype)
+            model.y['dev'] = y['dev'][model.burn_in:].astype(model.dtype)
+
+        assert 'train' in model.y and 'dev' in model.y
+
+        model.metric = metric
+        model.y_pred['opt'] = dict()
+        model.y_pred['hp_opt'] = dict()
+        model.p['hp_opt'] = dict(hp_sets=[{"alpha": alpha, "beta": beta} for alpha, beta in hp_sets])
+
+    if min_iters_other is None:
+        min_iters_other = min_iters
+
+    metric_dev_opt_hp_sets = np.full((len(models), len(hp_sets)), np.nan)
+
+    for i, (alpha, beta) in enumerate(hp_sets):
+        step_size_i = step_size if ((i == 0) or (step_size_finetune is None)) else step_size_finetune
+
+        p0s = []
+        for model in models:
+            model.alpha = alpha
+            model.beta = beta
+            p0 = model.p0 if i == 0 else model.p['hp_opt'][f'set_{i - 1}']
+            assert model.p0.keys() == p0.keys()
+            p0s.append(deepcopy(p0))
+
+        params = optimize(
+            models, p0s, num_iters=num_iters, metric=metric, step_size=step_size_i, tolerance=tolerance,
+            verbose=verbose, return_model=return_model, atol=atol,
+            min_iters=min_iters if i == 0 else min_iters_other, early_stopping=early_stopping)
+
+        for k, (model, p) in enumerate(zip(models, params)):
+            model.p['hp_opt'][f'set_{i}'] = p
+            model.y_pred['hp_opt'][f'set_{i}'] = deepcopy(model.y_pred['opt'])
+            metric_dev_opt_hp_sets[k, i] = model.metric_dev_opt
+
+        if verbose:
+            print(f"\talpha={alpha:.2g}, beta={beta:.2g}, step_size={step_size_i:.2g}")
+            print(f"--> {metric}={metric_dev_opt_hp_sets[:, i]}\n")
+
+    for k, model in enumerate(models):
+        if metric in ['mse', 'gcv']:
+            best_hp_set = np.argmin(metric_dev_opt_hp_sets[k])
+        else:
+            best_hp_set = np.argmax(metric_dev_opt_hp_sets[k])
+
+        model.alpha, model.beta = hp_sets[best_hp_set]
+        model.metric_dev_opt = metric_dev_opt_hp_sets[k, best_hp_set]
+
+        model.p['opt'] = model.p['hp_opt'][f'set_{best_hp_set}']
+        model.y_pred['opt'] = deepcopy(model.y_pred['hp_opt'][f'set_{best_hp_set}'])
+
+        model._extract_opt_params(model.p['opt'])
+
+    return metric_dev_opt_hp_sets
 
 
 class GLM(_RFEstGLM):
@@ -272,10 +597,43 @@ class GLM(_RFEstGLM):
             self.burn_in = dims[0] - 1 if burn_in is None else burn_in
 
         self.X[kind][name] = None
-        self.XS.setdefault(kind, {})[name] = jnp.asarray(np.asarray(XS[self.burn_in:]).astype(self.dtype))
+        if isinstance(XS, jax.Array):  # Already on the device, e.g. see `basis_projections_to_device`.
+            self.XS.setdefault(kind, {})[name] = XS[self.burn_in:].astype(self.dtype)
+        else:
+            self.XS.setdefault(kind, {})[name] = jnp.asarray(np.asarray(XS[self.burn_in:]).astype(self.dtype))
+
+    def share_design_matrices(self, other: 'GLM') -> None:
+        """Use the design matrices (and spline bases) of another model, without copying the arrays.
+
+        Models sharing their design matrices can be fit jointly, see `optimize_many`.
+        """
+        self.burn_in = other.burn_in
+        self.filter_names = list(other.filter_names)
+        for attr in ('filter_nonlinearity', 'dims', 'shift', 'df', 'S', 'n_features'):
+            setattr(self, attr, dict(getattr(other, attr)))
+        self.X = {kind: dict(xs) for kind, xs in other.X.items()}
+        self.XS = {kind: dict(xs) for kind, xs in other.XS.items()}
+
+    def compute_mle(self, y_train):
+        """Least-squares estimate of the intercepts and filters, see `_initialize_mle`.
+
+        y_train : array of shape (n_samples,) or (n_samples, n_responses), the latter for several models sharing
+            the design matrices, see `share_design_matrices`. Returns an array with the same number of dimensions.
+        """
+        n_samples = len(y_train) - self.burn_in
+        if n_samples <= 0:
+            raise ValueError('Training set is empty after burned in.')
+
+        X = jnp.hstack([jnp.hstack(
+            [jnp.ones(n_samples)[:, jnp.newaxis], self.XS['train'][name]]) if name in self.S else jnp.hstack(
+            [jnp.ones(n_samples)[:, jnp.newaxis], self.X['train'][name]]) for name in self.filter_names])
+        X = jnp.hstack([jnp.ones(n_samples)[:, jnp.newaxis], X])
+
+        return jnp.linalg.lstsq(X.T @ X, X.T @ jnp.asarray(y_train[self.burn_in:]), rcond=None)[0]
 
     def initialize(self, y=None, num_subunits=1, dt=1., method='random', compute_ci=True, random_seed=2046,
-                   verbose=0, add_noise_to_mle=False, fit_R=False, fit_intercept=True):
+                   verbose=0, add_noise_to_mle=False, fit_R=False, fit_intercept=True, mle=None):
+        """Initialize the parameters. `mle` optionally passes the precomputed result of `compute_mle(y)`."""
         self.dt = dt
         self.init_method = method
         self.num_subunits = num_subunits
@@ -286,7 +644,7 @@ class GLM(_RFEstGLM):
         if method == 'random':
             self._initialize_random(verbose=verbose, random_seed=random_seed)
         elif method == 'mle':
-            self._initialize_mle(y)
+            self._initialize_mle(y, mle=mle)
         else:
             raise ValueError(f'`{method}` is not supported.')
 
@@ -313,7 +671,7 @@ class GLM(_RFEstGLM):
                 self.w['random'][name] = random.normal(
                     key, shape=(self.X['train'][name].shape[1], 1)).astype(self.dtype)
 
-    def _initialize_mle(self, y, compute_ci=True):
+    def _initialize_mle(self, y, compute_ci=True, mle=None):
         if self.mle_computed:
             warnings.warn('MLE was already computed. Recomputing ...')
 
@@ -328,16 +686,8 @@ class GLM(_RFEstGLM):
             y_train = y['train']
             y_dev = None
 
-        n_samples = len(y_train) - self.burn_in
-        if n_samples <= 0:
-            raise ValueError('Training set is empty after burned in.')
-
-        X = jnp.hstack([jnp.hstack(
-            [jnp.ones(n_samples)[:, jnp.newaxis], self.XS['train'][name]]) if name in self.S else jnp.hstack(
-            [jnp.ones(n_samples)[:, jnp.newaxis], self.X['train'][name]]) for name in self.filter_names])
-        X = jnp.hstack([jnp.ones(n_samples)[:, jnp.newaxis], X])
-
-        mle = jnp.linalg.lstsq(X.T @ X, X.T @ y_train[self.burn_in:], rcond=None)[0]
+        if mle is None:
+            mle = self.compute_mle(y_train)
 
         self.R['mle'] = {'global': 1.}
         self.b['mle'] = {}
@@ -458,48 +808,32 @@ class GLM(_RFEstGLM):
             data.update(inputs_dev=self._inputs('dev'), y_dev=jnp.asarray(self.y['dev']))
 
         n_chunks = int(np.ceil(num_iters / _CHUNK_SIZE))
-        cost_train = np.full(n_chunks * _CHUNK_SIZE, np.nan)
-        cost_dev = np.full(n_chunks * _CHUNK_SIZE, np.nan)
-        metric_train = np.full(n_chunks * _CHUNK_SIZE, np.nan)
-        metric_dev = np.full(n_chunks * _CHUNK_SIZE, np.nan)
+        history = _new_history(n_chunks * _CHUNK_SIZE)
         params_chunks = []
 
         if verbose:
             self.print_progress_header(
                 c_train=True, c_dev=has_dev, m_train=metric is not None, m_dev=metric is not None and has_dev)
 
-        stop = None
         time_start = time.time()
         for i_chunk in range(n_chunks):
             i0 = i_chunk * _CHUNK_SIZE
             opt_state, (c_train, c_dev, m_train, m_dev, params) = run_chunk(opt_state, i0, data)
             params_chunks.append(params)
             idx = slice(i0, i0 + _CHUNK_SIZE)
-            cost_train[idx] = np.asarray(c_train)
+            history['cost_train'][idx] = np.asarray(c_train)
             if has_dev:
-                cost_dev[idx] = np.asarray(c_dev)
+                history['cost_dev'][idx] = np.asarray(c_dev)
             if metric in _SCORE_METRICS:
-                metric_train[idx] = np.asarray(m_train)
+                history['metric_train'][idx] = np.asarray(m_train)
                 if has_dev:
-                    metric_dev[idx] = np.asarray(m_dev)
+                    history['metric_dev'][idx] = np.asarray(m_dev)
             time_elapsed = time.time() - time_start
 
-            # Apply the stopping criteria in the same order as for a step-by-step optimization.
-            for i in range(i0, min(i0 + _CHUNK_SIZE, num_iters)):
-                if verbose and i % int(verbose) == 0:
-                    self.print_progress(
-                        i, time_elapsed, c_train=cost_train[i], c_dev=cost_dev[i],
-                        m_train=metric_train[i], m_dev=metric_dev[i])
-
-                if tolerance and i > min_iters:  # tolerance = 0: no early stop.
-                    if early_stopping and has_dev and np.all(np.diff(cost_dev[i - tolerance:i]) > 0):
-                        stop = 'dev_stop'
-                        break
-
-                    if np.all(-np.diff(cost_train[i - tolerance:i]) < atol):
-                        stop = 'train_stop'
-                        break
-            if stop is not None:
+            stopped = self._check_stop(history, i0, num_iters, has_dev, tolerance, min_iters, atol, early_stopping,
+                                       verbose, time_elapsed)
+            if stopped is not None:
+                i, stop = stopped
                 break
         else:
             i = num_iters - 1
@@ -510,74 +844,70 @@ class GLM(_RFEstGLM):
         def get_params_i(j):
             return jax.tree_util.tree_map(lambda x: x[j % _CHUNK_SIZE], params_chunks[j // _CHUNK_SIZE])
 
-        params = get_params_i(i)
-        y_pred_train = self.forwardpass(p=params, kind='train')
+        best = _best_index(history, i, stop, return_model, metric, tolerance)
+        self._set_optimize_results(
+            history, i=i, stop=stop, best=best, params_i=get_params_i(i), return_model=return_model, has_dev=has_dev,
+            num_iters=num_iters, verbose=verbose, time_elapsed=time_elapsed, total_time_elapsed=total_time_elapsed,
+            all_params=params_chunks)
+
+        return get_params_i(best)
+
+    @classmethod
+    def _check_stop(cls, history, i0, num_iters, has_dev, tolerance, min_iters, atol, early_stopping, verbose,
+                    time_elapsed):
+        """Apply the stopping criteria to the iterations of the chunk starting at `i0`, in the same order as for a
+        step-by-step optimization. Returns (iteration, reason) if the optimization stops, else None."""
+        for i in range(i0, min(i0 + _CHUNK_SIZE, num_iters)):
+            if verbose and i % int(verbose) == 0:
+                cls.print_progress(
+                    i, time_elapsed, c_train=history['cost_train'][i], c_dev=history['cost_dev'][i],
+                    m_train=history['metric_train'][i], m_dev=history['metric_dev'][i])
+
+            if tolerance and i > min_iters:  # tolerance = 0: no early stop.
+                if early_stopping and has_dev and np.all(np.diff(history['cost_dev'][i - tolerance:i]) > 0):
+                    return i, 'dev_stop'
+
+                if np.all(-np.diff(history['cost_train'][i - tolerance:i]) < atol):
+                    return i, 'train_stop'
+        return None
+
+    def _set_optimize_results(self, history, i, stop, best, params_i, return_model, has_dev, num_iters, verbose,
+                              time_elapsed, total_time_elapsed, all_params):
+        """Store the results of an optimization stopped at iteration `i`, returning the model of iteration `best`."""
+        y_pred_train = self.forwardpass(p=params_i, kind='train')
         if has_dev:
-            y_pred_dev = self.forwardpass(p=params, kind='dev')
+            y_pred_dev = self.forwardpass(p=params_i, kind='dev')
 
         if verbose:
             self.print_progress(
-                i, time_elapsed, c_train=cost_train[i], c_dev=cost_dev[i],
-                m_train=metric_train[i], m_dev=metric_dev[i])
+                i, time_elapsed, c_train=history['cost_train'][i], c_dev=history['cost_dev'][i],
+                m_train=history['metric_train'][i], m_dev=history['metric_dev'][i])
             print(f'Stop at {i + 1}/{num_iters} steps: {stop}')
             print(f'Total time elapsed: {total_time_elapsed:.3f}s.')
-
-        if return_model == 'best_dev_cost':
-            best = np.argmin(cost_dev[:i + 1])
-        elif return_model == 'best_train_cost':
-            best = np.argmin(cost_train[:i + 1])
-        elif return_model == 'best_dev_metric':
-            best = (np.argmin if metric in ['mse', 'gcv'] else np.argmax)(metric_dev[:i + 1])
-        elif return_model == 'best_train_metric':
-            best = (np.argmin if metric in ['mse', 'gcv'] else np.argmax)(metric_train[:i + 1])
-        else:
-            if return_model != 'last':
-                print('Provided `return_model` is not supported. Fallback to `last`')
-            best = i - tolerance if stop == 'dev_stop' else i
-
-        if verbose:
             print(f'Returning model: {return_model} at iteration {best + 1} of {i + 1} (Max: {num_iters}).\n')
 
         self.best_iteration = best
         self.return_model = return_model
         self.train_stop = stop
-        self.cost_train = cost_train[:i + 1]
-        self.cost_dev = cost_dev[:i + 1]
-        self.metric_train = metric_train[:i + 1]
-        self.metric_dev = metric_dev[:i + 1]
-        self.metric_dev_opt = metric_dev[best]
+        self.cost_train = history['cost_train'][:i + 1]
+        self.cost_dev = history['cost_dev'][:i + 1]
+        self.metric_train = history['metric_train'][:i + 1]
+        self.metric_dev = history['metric_dev'][:i + 1]
+        self.metric_dev_opt = history['metric_dev'][best]
         self.total_time_elapsed = total_time_elapsed
         # Parameters of all iterations, stacked per chunk of `_CHUNK_SIZE` iterations (may contain more than i + 1).
-        self.all_params = params_chunks
+        # None for jointly optimized models, see `optimize_many`.
+        self.all_params = all_params
 
         self.y_pred['opt'].update({'train': y_pred_train})
         if has_dev:
             self.y_pred['opt'].update({'dev': y_pred_dev})
 
-        return get_params_i(best)
-
     def fit(self, y=None, num_iters=3, alpha=1, beta=0.01, metric='corrcoef', step_size=1e-3,
             tolerance=10, verbose=True, return_model=None, atol=1e-5, min_iters=300, early_stopping=False):
-        self.alpha = alpha
-        self.beta = beta
-        self.metric = metric
-
-        if y is None:
-            if 'train' not in self.y:
-                raise ValueError('No `y` is provided.')
-        elif type(y) is dict:
-            self.y['train'] = y['train'][self.burn_in:].astype(self.dtype)
-            if 'dev' in y:
-                self.y['dev'] = y['dev'][self.burn_in:].astype(self.dtype)
-        else:
-            self.y['train'] = y[self.burn_in:].astype(self.dtype)
-
-        self.y_pred['opt'] = {}
-
-        self.p['opt'] = self.optimize(
-            self.p0, num_iters, metric, step_size, tolerance, verbose, return_model, atol, min_iters,
-            early_stopping=early_stopping)
-        self._extract_opt_params(self.p['opt'])
+        _fit([self], [y], _optimize_single, num_iters=num_iters, alpha=alpha, beta=beta, metric=metric,
+             step_size=step_size, tolerance=tolerance, verbose=verbose, return_model=return_model, atol=atol,
+             min_iters=min_iters, early_stopping=early_stopping)
 
     def fit_hps(self, y=None, num_iters=300, metric='corrcoef', step_size=1e-3, step_size_finetune=None,
                 tolerance=10, verbose=0, return_model='best_train_cost',
@@ -587,59 +917,11 @@ class GLM(_RFEstGLM):
 
         Returns the best dev-set metric for each (alpha, beta) combination. The best model is kept.
         """
-        if y is not None:
-            assert type(y) is dict and 'train' in y and 'dev' in y
-            self.y['train'] = y['train'][self.burn_in:].astype(self.dtype)
-            self.y['dev'] = y['dev'][self.burn_in:].astype(self.dtype)
-
-        assert 'train' in self.y and 'dev' in self.y
-
-        self.metric = metric
-        if min_iters_other is None:
-            min_iters_other = min_iters
-
-        hp_sets = list(itertools.product(alphas, betas))
-        metric_dev_opt_hp_sets = np.full(len(hp_sets), np.nan)
-
-        self.y_pred['opt'] = dict()
-        self.y_pred['hp_opt'] = dict()
-        self.p['hp_opt'] = dict(hp_sets=[{"alpha": alpha, "beta": beta} for alpha, beta in hp_sets])
-
-        for i, (alpha, beta) in enumerate(hp_sets):
-            step_size_i = step_size if ((i == 0) or (step_size_finetune is None)) else step_size_finetune
-
-            self.alpha = alpha
-            self.beta = beta
-
-            p0 = self.p0 if i == 0 else self.p['hp_opt'][f'set_{i - 1}']
-            assert self.p0.keys() == p0.keys()
-
-            self.p['hp_opt'][f'set_{i}'] = self.optimize(
-                p0=deepcopy(p0), num_iters=num_iters, metric=metric, step_size=step_size_i, tolerance=tolerance,
-                verbose=verbose, return_model=return_model, atol=atol,
-                min_iters=min_iters if i == 0 else min_iters_other, early_stopping=early_stopping)
-
-            self.y_pred['hp_opt'][f'set_{i}'] = deepcopy(self.y_pred['opt'])
-            metric_dev_opt_hp_sets[i] = self.metric_dev_opt
-
-            if verbose:
-                print(f"\talpha={alpha:.2g}, beta={beta:.2g}, step_size={step_size_i:.2g}")
-                print(f"--> {self.metric}={metric_dev_opt_hp_sets[i]:.2g}\n")
-
-        if metric in ['mse', 'gcv']:
-            best_hp_set = np.argmin(metric_dev_opt_hp_sets)
-        else:
-            best_hp_set = np.argmax(metric_dev_opt_hp_sets)
-
-        self.alpha, self.beta = hp_sets[best_hp_set]
-        self.metric_dev_opt = metric_dev_opt_hp_sets[best_hp_set]
-
-        self.p['opt'] = self.p['hp_opt'][f'set_{best_hp_set}']
-        self.y_pred['opt'] = deepcopy(self.y_pred['hp_opt'][f'set_{best_hp_set}'])
-
-        self._extract_opt_params(self.p['opt'])
-
-        return metric_dev_opt_hp_sets
+        return _fit_hps(
+            [self], [y], _optimize_single, num_iters=num_iters, metric=metric, step_size=step_size,
+            step_size_finetune=step_size_finetune, tolerance=tolerance, verbose=verbose, return_model=return_model,
+            atol=atol, min_iters=min_iters, alphas=alphas, betas=betas, min_iters_other=min_iters_other,
+            early_stopping=early_stopping)[0]
 
     def _extract_opt_params(self, p):
         self.b['opt'] = {}
@@ -662,6 +944,13 @@ class GLM(_RFEstGLM):
             self._get_response_variance(w_type='opt', kind='train')
             if 'dev' in self.y:
                 self._get_response_variance(w_type='opt', kind='dev')
+
+    def predict_projected(self, XS: dict, w_type='opt'):
+        """Predict the response for per-filter design matrices that are already projected onto the spline bases and
+        burned in. Same as `predict(..., is_projected=True)`, but the design matrices are neither copied nor stored,
+        so that they can be shared by several models."""
+        return _forwardpass(self.p[w_type], {name: XS[name] for name in self.filter_names}, self._fixed_params(),
+                            self._model_config())
 
     def predict(self, X, w_type='opt', is_design_matrix=True, is_projected=False):
         """Predict the response for the test set.

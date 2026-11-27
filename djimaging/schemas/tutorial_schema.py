@@ -18,7 +18,7 @@ class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
 @schema
 class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
     relativefieldlocation_table = RelativeFieldLocation
-    expinfo_table = Experiment.ExpInfo
+    retina_orientation_table = RetinaOrientation
 
 
 @schema
@@ -58,6 +58,7 @@ class Baden16TracesV2(classifier_v2.Baden16TracesV2Template):
     traces_table = Traces
     presentation_table = Presentation
     stimulus_table = Stimulus
+    osds_table = OsDsIndexes
 
 
 @schema

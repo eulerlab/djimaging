@@ -1,0 +1,665 @@
+"""Find, pair and describe all ScanM recordings of an experiment, and link them to fields and stimulus logs.
+
+Used by the ExpHistory tables. All functions are independent of DataJoint.
+
+A *recording* is one ScanM acquisition: the raw `.smp` (+ `.smh` header) file and/or the `.h5` file that Igor
+exported from it (`SMP_<name>.h5`). Both are linked by the recording name `<name>`.
+"""
+from __future__ import annotations
+
+import os
+import re
+import warnings
+from dataclasses import dataclass
+from pathlib import PurePosixPath
+from datetime import datetime, timedelta, time
+from typing import Iterable, Optional
+
+import numpy as np
+
+from djimaging.utils.filesystem_utils import get_file_info_row
+from djimaging.utils.scanm import read_header_utils as rhu
+
+H5_PREFIX = 'SMP_'
+FIELD_KEY_DEFAULTS = dict(region='N/A', cond1='control', cond2='control', cond3='control')
+
+
+LINK_METHODS = ('orig_file_name', 'file_name', 'time_stamp', 'none')
+
+
+@dataclass
+class ScanMFile:
+    """One .smp (with its .smh) or .h5 file and its header (None until `load_header` was called)."""
+    path: str
+    smh: Optional[str] = None  # .smh file of an .smp file
+    header: Optional[dict] = None  # normalize_header(...) of the .smh header or .h5 wParams
+    smh_raw: Optional[dict] = None  # .smh: all key-value pairs
+    h5_info: Optional[dict] = None  # .h5: read_header_utils.read_h5_header(...)
+    error: Optional[str] = None  # error while reading the header
+
+    @property
+    def is_smp(self) -> bool:
+        return self.path.lower().endswith('.smp')
+
+    @property
+    def filename(self) -> str:
+        return os.path.basename(self.path)
+
+    @property
+    def stem(self) -> str:
+        return recording_stem(self.path)
+
+    @property
+    def is_scanm(self) -> bool:
+        """False for .h5 files without wParams (e.g. morphology or Igor files)."""
+        return self.is_smp or self.h5_info is None or self.h5_info.get('is_scanm', True)
+
+    def load_header(self) -> None:
+        try:
+            if self.is_smp:
+                if self.smh is None:
+                    raise FileNotFoundError('no .smh header file')
+                self.smh_raw = {k: rhu.to_plain(v) for k, v in rhu.read_smh_raw(self.path).items()}
+                self.header = rhu.normalize_header(self.smh_raw, 'smh')
+            else:
+                self.h5_info = rhu.read_h5_header(self.path)
+                if self.h5_info['is_scanm']:
+                    self.header = self.h5_info['header']
+        except Exception as e:
+            self.error = f"{os.path.splitext(self.path)[1]}: {e}"
+
+
+@dataclass
+class RecordingFiles:
+    """Files of one recording, None if the file does not exist. `link_method`: how .smp and .h5 were linked."""
+    rec_name: str
+    smp: Optional[ScanMFile] = None
+    h5: Optional[ScanMFile] = None
+    link_method: str = 'none'
+
+    @property
+    def source(self) -> str:
+        if self.smp is not None and self.h5 is not None:
+            return 'smp+h5'
+        return 'smp' if self.smp is not None else 'h5'
+
+
+def recording_stem(filename: str) -> str:
+    """Recording name of a file: without extension and, for .h5 files, without the `SMP_` prefix."""
+    stem, ext = os.path.splitext(os.path.basename(filename))
+    if ext.lower() == '.h5' and stem.upper().startswith(H5_PREFIX):
+        stem = stem[len(H5_PREFIX):]
+    return stem
+
+
+def resolve_data_dirs(header_path: str, data_dirs: Iterable[str]) -> list[str]:
+    """Absolute, existing, unique folders to scan: `data_dirs` are relative to the experiment folder `header_path`.
+    Missing folders are skipped with a warning."""
+    folders = []
+    for data_dir in data_dirs:
+        if data_dir is None or data_dir == '':
+            continue
+        folder = os.path.normpath(os.path.join(header_path, data_dir))
+        if folder in folders:
+            continue
+        if not os.path.isdir(folder):
+            warnings.warn(f"Folder `{data_dir}` not found in {header_path}")
+            continue
+        folders.append(folder)
+    return folders
+
+
+def list_scanm_files(folders: Iterable[str]) -> tuple[list[ScanMFile], list[ScanMFile]]:
+    """All .smp files (with the .smh file of the same name in the same folder) and all .h5 files in `folders`.
+    Not recursive, hidden files (starting with '.') are ignored. Headers are not read."""
+    smps, h5s = [], []
+    for folder in folders:
+        filenames = sorted(f for f in os.listdir(folder)
+                           if not f.startswith('.') and os.path.isfile(os.path.join(folder, f)))
+        smhs = {os.path.splitext(f)[0].lower(): f for f in filenames if f.lower().endswith('.smh')}
+        for filename in filenames:
+            path = os.path.join(folder, filename)
+            if filename.lower().endswith('.smp'):
+                smh = smhs.get(os.path.splitext(filename)[0].lower())
+                smps.append(ScanMFile(path=path, smh=os.path.join(folder, smh) if smh else None))
+            elif filename.lower().endswith('.h5'):
+                h5s.append(ScanMFile(path=path))
+    return smps, h5s
+
+
+def _unique_index(items: list, key) -> dict:
+    """{key(item): item} for keys that occur exactly once and are not None."""
+    groups = dict()
+    for item in items:
+        k = key(item)
+        if k is not None:
+            groups.setdefault(k, []).append(item)
+    return {k: v[0] for k, v in groups.items() if len(v) == 1}
+
+
+def _orig_smp_name(h5: ScanMFile) -> str | None:
+    orig = (h5.header or {}).get('orig_file_name')
+    if not orig:
+        return None
+    return orig.replace('\\', '/').split('/')[-1].lower()
+
+
+def _time_stamp(f: ScanMFile) -> datetime | None:
+    return rhu.parse_scanm_datetime((f.header or {}).get('date_stamp'), (f.header or {}).get('time_stamp'))
+
+
+def link_smp_h5(smps: list[ScanMFile], h5s: list[ScanMFile]) -> list[RecordingFiles]:
+    """Link .smp and .h5 files of the same recording. Each file is used once. In this order:
+
+    1. 'orig_file_name': the .h5 wParam `OrigPixDataFileName` (path of the .smp at acquisition) ends with the name
+       of the .smp file. Works also if the files were renamed differently.
+    2. 'file_name': `SMP_<name>.h5` and `<name>.smp` (case-insensitive).
+    3. 'time_stamp': same ScanM date and time stamp (millisecond resolution).
+
+    A name or time stamp is only used if it is unique among the files not linked yet. .h5 files that are not ScanM
+    recordings (no wParams, `header` loaded and `is_scanm` False) are dropped. Unlinked files get `link_method='none'`.
+    The recording name is the .smp name (else the .h5 name without `SMP_`) without extension. If it is not unique,
+    the name of the folder is prepended (`<folder>/<name>`).
+    """
+    h5s = [h for h in h5s if h.is_scanm]
+    smps_left, h5s_left = list(smps), list(h5s)
+    pairs = []
+
+    for method, smp_key, h5_key in [
+        ('orig_file_name', lambda s: s.filename.lower(), _orig_smp_name),
+        ('file_name', lambda s: s.stem.lower(), lambda h: h.stem.lower()),
+        ('time_stamp', _time_stamp, _time_stamp),
+    ]:
+        smp_index = _unique_index(smps_left, smp_key)
+        h5_index = _unique_index(h5s_left, h5_key)
+        for k in sorted(set(smp_index) & set(h5_index), key=str):
+            smp, h5 = smp_index[k], h5_index[k]
+            pairs.append((smp, h5, method))
+            smps_left.remove(smp)
+            h5s_left.remove(h5)
+
+    pairs += [(s, None, 'none') for s in smps_left] + [(None, h, 'none') for h in h5s_left]
+
+    recordings = [RecordingFiles(rec_name=(smp or h5).stem, smp=smp, h5=h5, link_method=method)
+                  for smp, h5, method in pairs]
+    names = [r.rec_name for r in recordings]
+    for rec in recordings:
+        if names.count(rec.rec_name) > 1:
+            rec.rec_name = f"{os.path.basename(os.path.dirname((rec.smp or rec.h5).path))}/{rec.rec_name}"
+    names = [r.rec_name for r in recordings]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise ValueError(f"Recording names are not unique, even with folder names: {duplicates}")
+    return sorted(recordings, key=lambda r: r.rec_name)
+
+
+def find_recordings(folders: Iterable[str]) -> list[RecordingFiles]:
+    """All recordings in `folders`: list the files, read their headers and link .smp and .h5 files."""
+    smps, h5s = list_scanm_files(folders)
+    for f in smps + h5s:
+        f.load_header()
+    return link_smp_h5(smps, h5s)
+
+
+def find_unscanned_recording_files(header_path: str, folders: Iterable[str]) -> list[str]:
+    """ScanM files (.smp, `SMP_*.h5`) anywhere in the experiment folder, but not in the scanned `folders`."""
+    folders = {os.path.normpath(f) for f in folders}
+    unscanned = []
+    for folder, _, files in os.walk(header_path, followlinks=True):
+        if os.path.normpath(folder) in folders:
+            continue
+        for filename in files:
+            if filename.startswith('.'):
+                continue
+            if filename.lower().endswith('.smp') or (
+                    filename.lower().endswith('.h5') and filename.upper().startswith(H5_PREFIX)):
+                unscanned.append(os.path.join(folder, filename))
+    return sorted(unscanned)
+
+
+def parse_recording_name(filename: str, user_dict: dict) -> dict:
+    """Parts of a file name as in Field discovery (field, stimulus, region, cond1, ...), plus `kind`.
+
+    Uses the `*_loc` positions and aliases of `user_dict` (a UserInfo row). The positions refer to .h5 names
+    (`SMP_` prefix); for .smp names they are shifted by one, as in `get_file_info_df`.
+    `kind` is 'response', 'hr', 'od', 'outline', or 'unknown' if the name has no stimulus part. Never raises.
+    """
+    is_raw = filename.lower().endswith('.smp')
+    loc_mapper = {k[:-4]: v - int(is_raw) for k, v in user_dict.items() if k.endswith('_loc') and v is not None}
+    aliases = {k: (user_dict.get(f'{k}_alias') or '').lower().split('_')
+               for k in ('opticdisk', 'highres', 'outline', 'mask')}
+    try:
+        info = get_file_info_row('', os.path.basename(filename), loc_mapper, aliases['opticdisk'],
+                                 aliases['highres'], aliases['outline'], aliases['mask'])
+    except Exception:
+        from djimaging.utils.filesystem_utils import get_file_info_at_loc
+        parts = os.path.splitext(os.path.basename(filename))[0].split('_')
+        info = {name: get_file_info_at_loc(parts, loc) for name, loc in loc_mapper.items()}
+        info['kind'] = 'unknown'
+    return {k: v for k, v in info.items() if k not in ('filepath', 'mask_order')}
+
+
+def read_recording(rec: RecordingFiles, count_smp_triggers: bool = False, scan_width_um: float | None = None) -> dict:
+    """Describe one recording from its headers, without loading the stacks.
+
+    The .smh header is used if available (it knows how many frames were set and recorded), else the .h5 wParams.
+    Errors are not raised but collected in `header_issue`, so that every recording can be registered.
+
+    Parameters
+    ----------
+    rec : RecordingFiles
+        The recording.
+    count_smp_triggers : bool, optional
+        Count the triggers of .smp files without .h5 file (slow, loads the whole file).
+    scan_width_um : float | None, optional
+        Full-field scan width at zoom 1 for the pixel size, e.g. from `ExperimentImagingSetup`. If None, the setupid
+        constant of the recording header is used.
+
+    Returns
+    -------
+    dict
+        Values for the ExpHistory columns (without key, files and name parts), see `ExpHistoryTemplate`.
+    """
+    for f in (rec.smp, rec.h5):
+        if f is not None and f.header is None and f.error is None:
+            f.load_header()
+
+    errors = [f.error for f in (rec.smp, rec.h5) if f is not None and f.error is not None]
+    smh_header = rec.smp.header if rec.smp is not None else None
+    smh_raw = rec.smp.smh_raw if rec.smp is not None else None
+    h5_info = rec.h5.h5_info if (rec.h5 is not None and rec.h5.header is not None) else None
+
+    header = smh_header if smh_header is not None else (h5_info['header'] if h5_info is not None else None)
+    if header is None:
+        header = {k: None for k in rhu.HEADER_KEYS}
+
+    n_frames = rhu.n_frames_from_smh(smh_header) if smh_header is not None else None
+    n_frames_h5 = h5_info['n_frames'] if h5_info is not None else None
+    if n_frames is None:
+        n_frames = n_frames_h5
+    elif n_frames_h5 is not None and n_frames_h5 != n_frames:
+        errors.append(f'{n_frames} frames recorded according to .smh, but {n_frames_h5} frames in .h5')
+
+    n_triggers = h5_info['n_triggers'] if h5_info is not None else None
+    if n_triggers is None and count_smp_triggers and rec.smp is not None and smh_header is not None:
+        n_triggers = rhu.count_triggers_smp(rec.smp.path)
+
+    scan_type = rhu.scan_type_from_dims(header['nypix'], header['nzpix'])
+    frame_dt_s = rhu.frame_duration_s(header, scan_type)
+    nxpix = None
+    if header['nxpix_full'] is not None:
+        nxpix = max(0, header['nxpix_full'] - (header['nxpix_retrace'] or 0) - (header['nxpix_offset'] or 0))
+
+    n_set = header.get('n_frames_set')
+    entry = dict(
+        rec_start=rhu.parse_scanm_datetime(header['date_stamp'], header['time_stamp']),
+        n_frames=n_frames,
+        n_frames_set=n_set,
+        stopped_early=None if (n_set is None or n_frames is None) else bool(n_frames < n_set),
+        frame_dt_s=frame_dt_s,
+        rec_dur_s=None if (frame_dt_s is None or n_frames is None) else float(frame_dt_s * n_frames),
+        scan_type=scan_type,
+        scan_type_id=header['scan_type_id'],
+        nxpix=nxpix,
+        nypix=header['nypix'],
+        nzpix=header['nzpix'],
+        nxpix_full=header['nxpix_full'],
+        n_fr_per_step=header['n_fr_per_step'],
+        real_pix_dur_us=header['real_pix_dur_us'],
+        zoom=header['zoom'],
+        angle_deg=header['angle_deg'],
+        scan_width_um=scan_width_um if scan_width_um is not None else rhu.setup_scan_width_um(header['setupid']),
+        pixel_size_um=rhu.pixel_size_um(header, scan_width_um=scan_width_um),
+        absx=header['absx'],
+        absy=header['absy'],
+        absz=header['absz'],
+        z_step_um=header['z_step_um'],
+        setupid=header['setupid'],
+        laser_wavelength_nm=header['laser_wavelength_nm'],
+        objective=(header['objective'] or '')[:191],
+        user_comment=(header['user_comment'] or '')[:1000],
+        computer_name=(header['computer_name'] or '')[:191],
+        scanm_version=(header['scanm_version'] or '')[:191],
+        input_ch_mask=header['input_ch_mask'],
+        stim_ch_mask=header['stim_ch_mask'],
+        n_triggers=n_triggers,
+        header=dict(smh=smh_raw, h5=h5_info['raw'] if h5_info is not None else None,
+                    h5_ch_names=h5_info['ch_names'] if h5_info is not None else None),
+        header_issue='; '.join(errors)[:1000] if errors else None,
+    )
+    return entry
+
+
+def match_field_recordings(name_infos: dict, field_key: dict, field_key_names: Iterable[str]) -> list[str]:
+    """Recordings that belong to a field: all parts of the field key (field, region, cond1, ...) equal the parts of
+    the file name. Missing region / conditions get the same defaults as in Field ('N/A', 'control').
+
+    Parameters
+    ----------
+    name_infos : dict
+        `{rec_name: parse_recording_name(...)}`.
+    field_key : dict
+        Primary key of the field.
+    field_key_names : Iterable[str]
+        Primary key names added by the Field table, e.g. `Field().new_primary_keys`.
+    """
+    matches = []
+    for rec_name, info in name_infos.items():
+        if info is None or info.get('field') is None:
+            continue
+        for name in field_key_names:
+            value = info.get(name)
+            if value is None:
+                value = FIELD_KEY_DEFAULTS.get(name)
+            if value != field_key[name]:
+                break
+        else:
+            matches.append(rec_name)
+    return sorted(matches)
+
+
+def ref_path(value) -> str | None:
+    """Store-relative POSIX path of a fetched `<filepath>` attribute (ObjectRef or str); None if missing."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return None
+    path = getattr(value, 'path', value)
+    return PurePosixPath(str(path).replace('\\', '/')).as_posix()
+
+
+def seconds_of_day(value) -> float | None:
+    """Seconds since midnight of a datetime, time or timedelta (MySQL TIME is fetched as timedelta)."""
+    if value is None:
+        return None
+    if isinstance(value, timedelta):
+        return value.total_seconds()
+    if isinstance(value, (datetime, time)):
+        return value.hour * 3600 + value.minute * 60 + value.second + value.microsecond / 1e6
+    raise TypeError(f"Unsupported time type {type(value)}")
+
+
+def name_words(name: str) -> list[str]:
+    """'RGC_MovingBar2' -> ['RGC', 'Moving', 'Bar', '2']: split at non-alphanumerics, case changes and digits."""
+    return re.findall(r'[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+', name)
+
+
+def recording_name_keys(stim_token: str | None, listed_stim_names: Iterable[str] = ()) -> set[str]:
+    """Names of the stimulus of a recording, to compare with `stimulus_name_keys` of a logged stimulus.
+
+    `stim_token` is the stimulus part of the file name, lower-cased, without non-alphanumerics and trailing digits
+    ('MB1' -> 'mb'; ignored if shorter than 2 characters). `listed_stim_names` are the Stimulus table names the
+    recording is listed for (`stimulus_listing.listed_stimuli`), added as 'stim:<name>'.
+    """
+    keys = {f'stim:{n}' for n in listed_stim_names or () if n}
+    if stim_token is not None:
+        token = re.sub(r'\d+$', '', re.sub(r'[^a-z0-9]', '', str(stim_token).lower()))
+        if len(token) >= 2:
+            keys.add(token)
+    return keys
+
+
+def stimulus_name_keys(stim_file_name: str | None, stim_name: str | None = None) -> set[str]:
+    """Names under which a logged QDSpy stimulus may appear in a recording file name, see `recording_name_keys`.
+
+    From the stimulus file name (extension and digits dropped, lower-cased): each word, all words joined, and the
+    initials if there are several words, each with and without all-caps words such as 'RGC'. E.g. 'RGC_MovingBar'
+    -> 'movingbar', 'mb', 'rmb', 'moving', ...; 'Contrast Saturation Local' -> 'csl', ...; 'Chirp' -> 'chirp'.
+    `stim_name` (Stimulus table name of the log entry, if known) is added as 'stim:<name>'.
+    """
+    keys = {f'stim:{stim_name}'} if stim_name else set()
+    if stim_file_name is None:
+        return keys
+    stem, ext = os.path.splitext(os.path.basename(str(stim_file_name)))
+    words = [w for w in name_words(stem if ext.lower() in ('.py', '.pickle', '.pkl') else stem + ext)
+             if not w.isdigit()]
+    content = [w for w in words if not (len(w) > 1 and w.isupper())] or words
+    keys |= {w.lower() for w in words}
+    for ws in (words, content):
+        if ws:
+            keys.add(''.join(ws).lower())
+        if len(ws) > 1:
+            keys.add(''.join(w[0] for w in ws).lower())
+    return keys
+
+
+def logged_stimulus_name(md5: str | None, file_name: str | None, stimuli: Iterable) -> str | None:
+    """Stimulus table name of a logged QDSpy stimulus, as PresentationLog matches them: md5 equal to `stim_hash` or
+    in `stim_hash_list`, else a file name that starts with a name of `stim_name_list` (only if unique).
+
+    `stimuli`: `(stim_name, stim_hash, stim_dict)` per Stimulus table entry. None if no (unique) match.
+    """
+    names = []
+    for stim_name, stim_hash, stim_dict in stimuli:
+        stim_dict = stim_dict or {}
+        hashes = ({stim_hash} | set(stim_dict.get('stim_hash_list', []))) - {'', None}
+        if md5 is not None and md5 in hashes:
+            return stim_name
+        if file_name is not None and any(str(file_name).lower().startswith(str(n).lower())
+                                         for n in stim_dict.get('stim_name_list', []) if n):
+            names.append(stim_name)
+    return names[0] if len(names) == 1 else None
+
+
+def _names_match(stim_names, rec_names, n_stims: int, n_recs: int) -> np.ndarray:
+    """(n_stims, n_recs) bool: the name sets of stimulus and recording share a name."""
+    out = np.zeros((n_stims, n_recs), dtype=bool)
+    if stim_names is None or rec_names is None:
+        return out
+    stim_names, rec_names = list(stim_names), list(rec_names)
+    if len(stim_names) != n_stims or len(rec_names) != n_recs:
+        raise ValueError(f'{len(stim_names)} stimulus and {len(rec_names)} recording names for {n_stims} stimuli and '
+                         f'{n_recs} recordings')
+    for j, rn in enumerate(rec_names):
+        if rn:
+            for i, sn in enumerate(stim_names):
+                out[i, j] = bool(sn) and not set(sn).isdisjoint(rn)
+    return out
+
+
+def match_stimuli_to_recordings(
+        rec_starts_s: Iterable[float], rec_ends_s: Iterable[float], stim_starts_s: Iterable[float],
+        max_offset_s: float = 900., tolerance_s: float = 2.,
+        stim_durs_s: Iterable[float | None] | None = None,
+        rec_names: Iterable[set | None] | None = None, stim_names: Iterable[set | None] | None = None,
+        stim_aborted: Iterable[bool] | None = None) -> tuple[float | None, list]:
+    """Find the recording during which each logged stimulus was shown.
+
+    QDSpy (stimulus PC) and ScanM (recording PC) have separate clocks. The clock offset (one constant per log, drift
+    is neglected) is estimated as the shift of the stimulus times (within +-`max_offset_s`) that best fits the
+    stimuli into the recordings. All recordings are fitted at once, so there is no anchor recording: test runs
+    before or between recordings (e.g. moving bars to probe a field) lie outside all recordings at the true shift and
+    do not pull the fit. Candidate shifts are ranked by
+
+    1. the number of *named* recordings: recordings whose name matches a (not aborted) stimulus that starts inside
+       it (`rec_names`, `stim_names`). Recordings, not stimuli, are counted, so repeated runs do not count twice,
+       and a single mislabelled recording costs one point,
+    2. the number of (not aborted) stimuli of known duration that lie fully inside a recording: start from
+       `tolerance_s` before the recording start, end at most `tolerance_s` after the recording end,
+    3. the number of named recordings whose matching stimulus starts after (not before) the recording start,
+    4. the smallest total time between recording start and matching stimulus start of the named recordings,
+    5. the number of stimuli that start inside a recording (from `tolerance_s` before its start until its end),
+    6. the number of these that start after (not before) their recording start,
+    7. the smallest total time between recording start and stimulus start.
+
+    Ranks 1 and 2 matter when recordings follow each other closely: shifting all stimuli by one recording then still
+    puts most stimulus starts into some recording, but into recordings of other stimuli, which they also overrun.
+    Stimuli are usually shorter than their recordings, so a range of shifts keeps every stimulus in its named
+    recording; ranks 3 and 4 then put the stimuli right after the recording starts, before ranks 5-7 count stimuli
+    in recordings without matching name (e.g. a test run during an optic disc scan). Without names, ranks 1, 3 and 4
+    are equal for all shifts.
+    Because of the lag ranks the result is a lower estimate of the true offset (stimuli usually start a few seconds
+    after the recording), off by at most the smallest of these lags.
+
+    Parameters
+    ----------
+    rec_starts_s, rec_ends_s : Iterable[float]
+        Start and end of the recordings in seconds of the day (ScanM clock).
+    stim_starts_s : Iterable[float]
+        Start of the stimuli in seconds of the day (QDSpy clock).
+    max_offset_s, tolerance_s : float
+        Maximum absolute clock offset; tolerance at the recording start (and end, for the duration).
+    stim_durs_s : Iterable[float | None] | None
+        Duration of the stimuli in s. None, NaN or negative: unknown. None: all unknown (rank 2 is not used).
+    rec_names, stim_names : Iterable[set | None] | None
+        Per recording and per stimulus a set of names (`recording_name_keys`, `stimulus_name_keys`); they match if
+        the sets intersect. None (either): names unknown, rank 1 is not used.
+    stim_aborted : Iterable[bool] | None
+        Per stimulus: aborted in QDSpy (typically a test run). Aborted stimuli do not count for ranks 1 and 2.
+
+    Returns
+    -------
+    clock_offset_s : float | None
+        Add to QDSpy times to get ScanM times. None if no stimulus could be matched.
+    matches : list
+        Per stimulus: `(rec_idx, lag_s)`, the index of the recording and the time from recording start to stimulus
+        start (ScanM clock), or `(None, None)` if the stimulus was shown while no recording was running.
+    """
+    rec_starts = np.asarray(list(rec_starts_s), dtype=float)
+    rec_ends = np.asarray(list(rec_ends_s), dtype=float)
+    stim_starts = np.asarray(list(stim_starts_s), dtype=float)
+    no_match = [(None, None)] * stim_starts.size
+
+    if rec_starts.size == 0 or stim_starts.size == 0:
+        return None, no_match
+
+    if stim_durs_s is None:
+        durs = np.full(stim_starts.size, np.nan)
+    else:
+        durs = np.array([np.nan if d is None else d for d in stim_durs_s], dtype=float)
+        if durs.size != stim_starts.size:
+            raise ValueError(f'{durs.size} stimulus durations for {stim_starts.size} stimuli')
+        durs[~(durs >= 0)] = np.nan
+    stim_ends = stim_starts + durs
+    has_dur = np.isfinite(stim_ends)
+    named_pairs = _names_match(stim_names, rec_names, stim_starts.size, rec_starts.size)
+    if stim_aborted is not None:
+        aborted = np.array([bool(a) for a in stim_aborted], dtype=bool)
+        if aborted.size != stim_starts.size:
+            raise ValueError(f'{aborted.size} aborted flags for {stim_starts.size} stimuli')
+        named_pairs &= ~aborted[:, None]
+    else:
+        aborted = np.zeros(stim_starts.size, dtype=bool)
+    evidence = has_dur & ~aborted  # stimuli that count for rank 2
+
+    # Shifts that align a stimulus start with a recording start, or a stimulus end with a recording end
+    candidates = [(rec_starts[:, None] - stim_starts[None, :]).ravel(),
+                  (rec_ends[:, None] - stim_ends[None, has_dur]).ravel()]
+    candidates = np.concatenate(candidates)
+    candidates = np.unique(np.round(candidates[np.abs(candidates) <= max_offset_s], 3))
+    if candidates.size == 0:
+        return None, no_match
+
+    best = None
+    for offset in candidates:
+        shifted = stim_starts + offset
+        inside = (shifted[:, None] >= rec_starts[None, :] - tolerance_s) & (shifted[:, None] <= rec_ends[None, :])
+        n_matched = int(np.sum(np.any(inside, axis=1)))
+        if n_matched == 0:
+            continue
+        fits = evidence[:, None] & ((stim_ends[:, None] + offset) <= rec_ends[None, :] + tolerance_s)
+        n_contained = int(np.sum(np.any(inside & fits, axis=1)))
+        all_lags = np.where(inside, shifted[:, None] - rec_starts[None, :], np.inf)
+        # Named recordings: lag of the name-matching stimulus closest to the recording start
+        named_lags = np.where(inside & named_pairs, all_lags, np.inf)
+        named_lags = named_lags[np.argmin(np.abs(named_lags), axis=0), np.arange(named_lags.shape[1])]
+        named_lags = named_lags[np.isfinite(named_lags)]
+        # All stimuli: lag to the recording they start in
+        lags = all_lags[np.arange(all_lags.shape[0]), np.argmin(np.abs(all_lags), axis=1)]
+        lags = lags[np.isfinite(lags)]
+        score = (named_lags.size, n_contained, int(np.sum(named_lags >= 0)), -float(np.sum(np.abs(named_lags))),
+                 n_matched, int(np.sum(lags >= 0)), -float(np.sum(np.abs(lags))))
+        if best is None or score > best[0]:
+            best = (score, offset)
+
+    if best is None:
+        return None, no_match
+
+    offset = float(best[1])
+    matches = []
+    for start in stim_starts + offset:
+        inside = (start >= rec_starts - tolerance_s) & (start <= rec_ends)
+        if not np.any(inside):
+            matches.append((None, None))
+            continue
+        lags = np.where(inside, start - rec_starts, np.inf)
+        idx = int(np.argmin(np.abs(lags)))
+        matches.append((idx, float(lags[idx])))
+    return offset, matches
+
+
+def assign_stimuli_to_experiments(
+        recs_by_exp: dict, exp_id, stim_starts_s: Iterable[float],
+        max_offset_s: float = 900., tolerance_s: float = 2., pad_s: float = 600.,
+        stim_durs_s: Iterable[float | None] | None = None, stim_names: Iterable[set | None] | None = None,
+        stim_aborted: Iterable[bool] | None = None) -> tuple[float | None, list]:
+    """Assign the stimuli of a shared QDSpy log to one experiment, e.g. when two retinas were recorded in one session.
+
+    The clock offset is estimated jointly from the recordings of all experiments that share the log
+    (see `match_stimuli_to_recordings`). Then each stimulus gets a status for experiment `exp_id`:
+
+    - `'recording'`: started during a recording of `exp_id`.
+    - `'in_session'`: started while no recording was running, but belongs to `exp_id`: within `pad_s` of the time
+      window (first recording start to last recording end) of `exp_id`, and not closer to the window of another
+      experiment. E.g. focus scans or tests. Without a clock offset (no match at all) all stimuli are `'in_session'`.
+    - `'outside'`: during a recording of another experiment, or closer to the window of another experiment, or farther
+      than `pad_s` from all windows.
+
+    Parameters
+    ----------
+    recs_by_exp : dict
+        `exp_id -> (rec_starts_s, rec_ends_s)` or `(rec_starts_s, rec_ends_s, rec_names)` in seconds of the day
+        (ScanM clock), recordings in the order that the returned indices should refer to. Must contain `exp_id`.
+        `rec_names`: per recording a set of names (`recording_name_keys`), see `match_stimuli_to_recordings`.
+    exp_id : hashable
+        Experiment for which to assign the stimuli.
+    stim_starts_s : Iterable[float]
+        Start of the stimuli in seconds of the day (QDSpy clock).
+    stim_durs_s : Iterable[float | None] | None
+        Duration of the stimuli in s (None, NaN or negative: unknown), see `match_stimuli_to_recordings`.
+    stim_names, stim_aborted : Iterable | None
+        Per stimulus a set of names (`stimulus_name_keys`) and the aborted flag, see `match_stimuli_to_recordings`.
+
+    Returns
+    -------
+    clock_offset_s : float | None
+    assignments : list
+        Per stimulus `(status, rec_idx, lag_s)`; `rec_idx` indexes the recordings of `exp_id` (None unless
+        status is `'recording'`).
+    """
+    stim_starts = np.asarray(list(stim_starts_s), dtype=float)
+    pool_starts, pool_ends, pool_names, pool_exp, pool_local = [], [], [], [], []
+    windows = {}
+    for eid, recs in recs_by_exp.items():
+        starts, ends = list(recs[0]), list(recs[1])
+        names = list(recs[2]) if len(recs) > 2 and recs[2] is not None else [None] * len(starts)
+        if len(names) != len(starts):
+            raise ValueError(f'{len(names)} recording names for {len(starts)} recordings of {eid}')
+        for i, (s, e, n) in enumerate(zip(starts, ends, names)):
+            pool_starts.append(s)
+            pool_ends.append(e)
+            pool_names.append(n)
+            pool_exp.append(eid)
+            pool_local.append(i)
+        if len(starts) > 0:
+            windows[eid] = (min(starts), max(ends))
+
+    offset, matches = match_stimuli_to_recordings(
+        pool_starts, pool_ends, stim_starts, max_offset_s=max_offset_s, tolerance_s=tolerance_s,
+        stim_durs_s=stim_durs_s, rec_names=pool_names if stim_names is not None else None, stim_names=stim_names,
+        stim_aborted=stim_aborted)
+
+    out = []
+    for start, (idx, lag) in zip(stim_starts, matches):
+        if idx is not None:
+            if pool_exp[idx] == exp_id:
+                out.append(('recording', pool_local[idx], lag))
+            else:
+                out.append(('outside', None, None))
+        elif offset is None:
+            out.append(('in_session', None, None))
+        else:
+            t = start + offset
+            dists = {eid: max(w[0] - t, t - w[1], 0.) for eid, w in windows.items()}
+            nearest = min(dists, key=dists.get) if dists else None
+            ok = nearest == exp_id and dists[nearest] <= pad_s
+            out.append(('in_session' if ok else 'outside', None, None))
+    return offset, out

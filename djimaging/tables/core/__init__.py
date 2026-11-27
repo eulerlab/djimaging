@@ -7,6 +7,7 @@ from .userinfo import UserInfoTemplate
 from .raw_data import RawDataParamsTemplate
 from .presentation import PresentationTemplate
 from .field import FieldTemplate
+from .retina_orientation import RetinaOrientationTemplate
 from .roi_mask import RoiMaskTemplate
 from .roi import RoiTemplate
 from .channel import ChannelTemplate

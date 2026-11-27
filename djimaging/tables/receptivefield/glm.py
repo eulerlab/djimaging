@@ -5,8 +5,10 @@ The tables follow the logic of the fast STA tables (see `fast_sta.py`): The stim
 parameter table and built once per stimulus. All traces of a presentation are then aligned to the stimulus and fit
 without any intermediate table. The tables subclass the fast STA templates and only replace the fitting step.
 
-For speed, the projections of the design matrix onto the spline bases are computed once per `populate`, and the traces
-of a presentation are fit in parallel processes. Use `populate(n_jobs=...)` to set the number of CPU cores.
+For speed, the projections of the design matrix onto the spline bases are computed once per `populate`. If jax finds a
+GPU, they are copied to the GPU once, and all traces of a presentation are fit jointly on the GPU (in float32). Otherwise,
+the traces of a presentation are fit in parallel processes on the CPU (in float64); use `populate(n_jobs=...)` to set
+the number of CPU cores. Set `glm_device` of the table to 'gpu' or 'cpu' to choose the device explicitly.
 
 Example usage:
 
@@ -75,7 +77,7 @@ from djimaging.tables.receptivefield.fast_sta import FastStaParamsTemplate, Fast
 from djimaging.utils.dj_storage import load_array
 from djimaging.utils.dj_utils import get_primary_key
 from djimaging.utils.receptive_fields.glm_utils import ReceptiveFieldGLM, fit_receptive_field_glm, \
-    plot_rf_summary, quality_test
+    fit_receptive_field_glms, plot_rf_summary, quality_test
 
 
 def _rf_to_channels_first(rf: np.ndarray, model_dict: dict) -> np.ndarray:
@@ -136,7 +138,7 @@ class RfGlmParamsTemplate(FastStaParamsTemplate):
         """Return the default `other_params_dict`, updated with `other_params_dict`."""
         params = dict(
             min_iters=100, max_iters=2000, step_size=0.1, step_size_finetune=0.03, tolerance=5,
-            alphas=(1.,), verbose=100, n_perm=20, min_cc=0.2, seed=42,
+            alphas=(1.,), verbose=0, n_perm=20, min_cc=0.2, seed=42,
             fit_R=False, fit_intercept=True, init_method='random', atol=1e-5,
             distr='gaussian', frac_test=0,
         )
@@ -194,6 +196,13 @@ class RfGlmTemplate(FastStaTemplate):
     are shared. Only the fit of a single trace is replaced by the GLM fit.
     """
     database = ""
+
+    # Device of the GLM fits: 'auto' (the GPU if jax finds one, else the CPU), 'gpu' or 'cpu'. On the GPU, all traces
+    # of a presentation are fit jointly, sharing one copy of the design matrix on the GPU. On the CPU, the traces are
+    # fit one by one in parallel processes. Both give the same results up to the precision.
+    glm_device = 'auto'
+    # Precision of the GLMs on the GPU, float32 is much faster than float64 on most GPUs. The CPU uses float64.
+    glm_gpu_dtype = 'float32'
 
     @property
     def definition(self):
@@ -294,12 +303,20 @@ class RfGlmTemplate(FastStaTemplate):
         for i, trace in enumerate(traces):
             if np.all(np.isfinite(trace)):
                 idxs.append(i)
-            else:
+            elif glm_kwargs.get('verbose', 0) > 0:
                 print(f"Skipping trace with {np.sum(~np.isfinite(trace))} non-finite values after alignment.")
 
         n_jobs = max(1, min(n_jobs, len(idxs), os.cpu_count() or 1))
-        if n_jobs == 1:
+        if self._use_gpu() and len(idxs) > 0:
+            results = fit_receptive_field_glms(
+                [traces[i] for i in idxs], glm_kwargs=glm_kwargs,
+                basis_projections=self._get_device_basis_projections(sta_params), dtype=self.glm_gpu_dtype)
+        elif n_jobs == 1:
             results = (fit_receptive_field_glm(traces[i], **get_fit_kwargs(traces[i])) for i in idxs)
+            if self.glm_device == 'cpu':
+                from djimaging.utils.receptive_fields.rfest_glm import cpu_device
+                with cpu_device():
+                    results = list(results)
         else:
             results = Parallel(n_jobs=n_jobs, backend='loky', return_as='generator')(
                 delayed(fit_receptive_field_glm)(traces[i], single_threaded=True, **get_fit_kwargs(traces[i]))
@@ -309,6 +326,35 @@ class RfGlmTemplate(FastStaTemplate):
         for i, result in zip(idxs, tqdm(results, total=len(idxs), desc='GLM fits', leave=False)):
             entries[i] = self._to_entry(*result, sta_params=sta_params)
         return entries
+
+    def _use_gpu(self) -> bool:
+        """Whether to fit the GLMs on the GPU, see `glm_device`."""
+        if self.glm_device == 'cpu':
+            return False
+        if self.glm_device not in ('auto', 'gpu'):
+            raise ValueError(f"glm_device must be 'auto', 'gpu' or 'cpu', got {self.glm_device!r}")
+
+        from djimaging.utils.receptive_fields.rfest_glm import gpu_available
+        available = gpu_available()
+        if self.glm_device == 'gpu' and not available:
+            raise RuntimeError("glm_device='gpu', but jax finds no GPU. Install jax with GPU support, "
+                               "e.g. `pip install -U 'jax[cuda12]'`, or set glm_device to 'auto' or 'cpu'.")
+        return available
+
+    def _get_device_basis_projections(self, sta_params: dict) -> dict:
+        """Basis projections on the GPU, copied once and cached in `sta_params` for all presentations."""
+        from djimaging.utils.receptive_fields.rfest_glm import basis_projections_to_device
+
+        if sta_params.get('basis_projections') is None:
+            sta_params['basis_projections'] = ReceptiveFieldGLM(
+                x_stimulus=sta_params['x_stimulus'], trace=None,
+                **self._get_glm_kwargs(sta_params)).compute_basis_projections()
+
+        cache_key = f'_basis_projections_device_{np.dtype(self.glm_gpu_dtype).name}'
+        if sta_params.get(cache_key) is None:
+            sta_params[cache_key] = basis_projections_to_device(
+                sta_params['basis_projections'], dtype=self.glm_gpu_dtype)
+        return sta_params[cache_key]
 
     @staticmethod
     def _to_entry(rf: np.ndarray, quality_dict: dict, model_dict: dict, sta_params: dict) -> dict:

@@ -122,6 +122,8 @@ class SplitRFTemplate(dj.Computed):
 
         if split_qidx is None:
             strf_fit = merge_strf(srf=resize_srf(srf, output_shape=strf.shape[1:]), trf=trf)
+            # sRF and tRF of these methods are not jointly normalized: compare with the least-squares scaled product
+            strf_fit *= np.sum(strf_fit * strf) / np.sum(strf_fit ** 2)
             split_qidx = compute_explained_rf(strf, strf_fit)
 
         if (method.lower() in ['svd']) and (polarity == -1):

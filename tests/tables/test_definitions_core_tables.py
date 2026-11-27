@@ -35,6 +35,10 @@ def test_definition_field():
     _test_definition(core.FieldTemplate)
 
 
+def test_definition_retina_orientation():
+    _test_definition(core.RetinaOrientationTemplate)
+
+
 def test_definition_roi():
     _test_definition(core.RoiTemplate)
 

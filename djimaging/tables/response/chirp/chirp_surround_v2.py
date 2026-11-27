@@ -126,11 +126,12 @@ class ChirpSurroundTemplateV2(dj.Computed):
             axs[0, 1].set(title=self._g_name)
 
         for rep_i in range(n_reps):
-            if plot:
+            if plot and rep_i < l_n_reps:
                 ax = axs[rep_i, 0]
                 ax.plot(l_snippets_times[:, rep_i], l_snippets[:, rep_i], c='k', zorder=-10)
                 ax.set_xlim(l_snippets_times[0, rep_i] - 0.1, l_snippets_times[0, rep_i] + self._t_plot_max)
 
+            if plot and rep_i < g_n_reps:
                 ax = axs[rep_i, 1]
                 ax.plot(g_snippets_times[:, rep_i], g_snippets[:, rep_i], c='k', zorder=-10)
                 ax.set_xlim(g_snippets_times[0, rep_i] - 0.1, g_snippets_times[0, rep_i] + self._t_plot_max)

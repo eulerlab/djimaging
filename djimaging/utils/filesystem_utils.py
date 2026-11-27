@@ -163,7 +163,7 @@ def print_tree(startpath: str, include_types: list | None = None,
         subindent = ' ' * 4 * (level + 1)
 
         for f in sorted(files):
-            f_type = f.split('.')[1].lower()
+            f_type = os.path.splitext(f)[1].lstrip('.').lower()
 
             if exclude_types is not None and f_type in exclude_types:
                 continue
@@ -325,6 +325,7 @@ def as_pre_filepath(filepath: str, raw_data_dir: str = 'Raw', pre_data_dir: str 
         a pre-processed file is not located in `pre_data_dir`, or if a raw
         file is not located in `raw_data_dir`.
     """
+    filepath = str(filepath)  # may be a Path
     fpath, fname = os.path.split(filepath)
     froot, fdir = os.path.split(fpath)
 

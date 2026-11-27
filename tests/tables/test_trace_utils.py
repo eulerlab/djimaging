@@ -17,13 +17,32 @@ def generate_random_stimulus_and_time(shape=(100, 4, 3), tmin=0, tmax=12):
 
 
 def test_align_trace_to_stim():
-    stim, stimtime = generate_random_stimulus_and_time(shape=(100, 3, 4), tmin=2, tmax=8)
-    trace, tracetime = generate_random_trace_and_time(size=100, tmin=0, tmax=10)
+    # Stimulus frames (0.2 s) longer than the trace sampling interval (~0.1 s), within the trace
+    _, stimtime = generate_random_stimulus_and_time(shape=(30, 3, 4), tmin=2, tmax=7.8)
+    trace, tracetime = generate_random_trace_and_time(size=101, tmin=0, tmax=10)
     aligned_trace, dt, t0, dt_rel_error = trace_utils.align_trace_to_stim(
         stimtime=stimtime, trace=trace, tracetime=tracetime)
-    aligned_stim = stim
-    assert stim.shape == aligned_stim.shape
-    assert np.all(stim == aligned_stim)
+    assert aligned_trace.shape == stimtime.shape
+    assert np.all(np.isfinite(aligned_trace))
+    assert dt == pytest.approx(0.2)
+    assert t0 == 2.
+    expected = [np.mean(trace[(tracetime >= t_a) & (tracetime < t_a + dt)]) for t_a in stimtime]
+    np.testing.assert_allclose(aligned_trace, expected)
+
+
+def test_align_trace_to_stim_stim_faster_than_trace_raises():
+    _, stimtime = generate_random_stimulus_and_time(shape=(100, 3, 4), tmin=2, tmax=8)  # dt ~0.06 s
+    trace, tracetime = generate_random_trace_and_time(size=100, tmin=0, tmax=10)  # dt ~0.1 s
+    with pytest.raises(ValueError, match='no trace sample'):
+        trace_utils.align_trace_to_stim(stimtime=stimtime, trace=trace, tracetime=tracetime)
+
+
+def test_align_trace_to_stim_frames_outside_trace_are_nan():
+    stimtime = np.arange(-1., 4.)  # frames [-1, 0) and [3, 4) are not covered by the trace
+    tracetime = np.arange(0, 12) * 0.25  # 0 ... 2.75 s
+    trace = np.arange(12.)
+    aligned_trace, _, _, _ = trace_utils.align_trace_to_stim(stimtime, trace, tracetime)
+    np.testing.assert_allclose(aligned_trace, [np.nan, 1.5, 5.5, 9.5, np.nan])
 
 
 def test_find_closest():

@@ -81,13 +81,24 @@ def get_pixel_size_xy_um(setupid: int, npix: int, zoom: float) -> float:
     float
         Size of a single pixel in micrometres.
     """
+    return pixel_size_from_scan_width(scan_width_um=get_setup_xscale(setupid), npix=npix, zoom=zoom)
+
+
+def pixel_size_from_scan_width(scan_width_um: float, npix: int, zoom: float) -> float:
+    """Width / height of a pixel in micrometres from the full-field scan width at zoom 1.
+
+    Parameters
+    ----------
+    scan_width_um : float
+        Full-field scan width in micrometres at zoom 1 (e.g. `ImagingSetup.scan_width_um`).
+    npix : int
+        Number of pixels along one spatial axis.
+    zoom : float
+        Objective zoom factor (must be in [0.15, 4]).
+    """
     assert 0.15 <= zoom <= 4, zoom
     assert 1 <= npix < 5000, npix
-
-    standard_pixel_size = get_setup_xscale(setupid) / npix
-    pixel_size = standard_pixel_size / zoom
-
-    return pixel_size
+    return scan_width_um / npix / zoom
 
 
 def get_retinal_position(rel_xcoord_um: float, rel_ycoord_um: float, rotation: float, eye: str) -> Tuple[float, float]:

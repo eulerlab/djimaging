@@ -110,7 +110,7 @@ def to_igor_format(roi_mask: np.ndarray) -> np.ndarray:
     if not is_python_format(roi_mask):
         raise ValueError(f'ROI mask is not in python format; unique values in mask: {np.unique(roi_mask)}')
 
-    roi_mask = roi_mask.copy()
+    roi_mask = roi_mask.astype(np.result_type(roi_mask.dtype, np.int8))  # signed copy, e.g. uint16 -> int32
     roi_mask[roi_mask == 0] = -1
     roi_mask = -roi_mask
 

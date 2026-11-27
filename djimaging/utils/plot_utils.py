@@ -4,8 +4,37 @@ from matplotlib import pyplot as plt
 from djimaging.utils.math_utils import normalize_zero_one
 
 
+def field_extent_and_labels(shape, scan_type='xy'):
+    """Image extent and axis labels used to plot a scanning field (with ``origin='lower'`` and the image transposed).
+
+    Parameters
+    ----------
+    shape : tuple of int
+        Shape of the 2-D field image.
+    scan_type : {'xy', 'xz'}, optional
+        Orientation of the scan. Default is ``'xy'``.
+
+    Returns
+    -------
+    extent : tuple of float
+        Extent for :func:`matplotlib.pyplot.imshow`.
+    xlabel, ylabel : str
+        Axis labels.
+
+    Raises
+    ------
+    ValueError
+        If `scan_type` is not ``'xy'`` or ``'xz'``.
+    """
+    if scan_type == 'xy':
+        return (shape[0] / 2, -shape[0] / 2, shape[1] / 2, -shape[1] / 2), 'relY [pixel]', 'relX [pixel]'
+    elif scan_type == 'xz':
+        return (shape[0] / 2, -shape[0] / 2, -shape[1] / 2, shape[1] / 2), 'relY [pixel]', 'relZ [pixel]'
+    raise ValueError(f'Unknown scan_type: {scan_type}')
+
+
 def plot_field(main_ch_average, alt_ch_average, scan_type='xy', roi_mask=None, roi_ch_average=None, npixartifact=0,
-               title='', figsize=(18, 4), highlight_roi=None, fig=None, axs=None, gamma=1.):
+               title='', figsize=(18, 4), highlight_roi=None, fig=None, axs=None, gamma=1., cmap='gray'):
     """Plot scanning-field averages and, optionally, the ROI mask overlay.
 
     Parameters
@@ -44,6 +73,8 @@ def plot_field(main_ch_average, alt_ch_average, scan_type='xy', roi_mask=None, r
     gamma : float, optional
         Gamma correction exponent applied to each normalised image
         (``image ** gamma``). Default is 1.0 (no correction).
+    cmap : str, optional
+        Colormap of the channel averages. Default is ``'gray'``.
 
     Returns
     -------
@@ -78,27 +109,17 @@ def plot_field(main_ch_average, alt_ch_average, scan_type='xy', roi_mask=None, r
 
     fig.suptitle(title)
 
-    if scan_type == 'xy':
-        for ax in axs:
-            ax.set(xlabel='relY [pixel]')
-        axs[0].set(ylabel='relX [pixel]')
-        extent = (main_ch_average.shape[0] / 2, -main_ch_average.shape[0] / 2,
-                  main_ch_average.shape[1] / 2, -main_ch_average.shape[1] / 2)
-    elif scan_type == 'xz':
-        for ax in axs:
-            ax.set(xlabel='relY [pixel]')
-        axs[0].set(ylabel='relZ [pixel]')
-        extent = (main_ch_average.shape[0] / 2, -main_ch_average.shape[0] / 2,
-                  -main_ch_average.shape[1] / 2, main_ch_average.shape[1] / 2)
-    else:
-        raise ValueError(f'Unknown scan_type: {scan_type}')
+    extent, xlabel, ylabel = field_extent_and_labels(main_ch_average.shape, scan_type)
+    for ax in axs:
+        ax.set(xlabel=xlabel)
+    axs[0].set(ylabel=ylabel)
 
     ax = axs[0]
-    ax.imshow(main_ch_average.T, origin='lower', extent=extent)
+    ax.imshow(main_ch_average.T, cmap=cmap, origin='lower', extent=extent)
     ax.set(title='main average')
 
     ax = axs[1]
-    ax.imshow(alt_ch_average.T, origin='lower', extent=extent)
+    ax.imshow(alt_ch_average.T, cmap=cmap, origin='lower', extent=extent)
     ax.set(title='alt average')
 
     if roi_mask is not None:
@@ -115,7 +136,7 @@ def plot_field(main_ch_average, alt_ch_average, scan_type='xy', roi_mask=None, r
         _roi_ch_average = roi_ch_average.copy()
         _roi_ch_average[:npixartifact] = np.nan
 
-        ax.imshow(_roi_ch_average.T, cmap='viridis', origin='lower', extent=extent)
+        ax.imshow(_roi_ch_average.T, cmap=cmap, origin='lower', extent=extent)
 
         if max(rois.shape) < 100:
             fus = 5

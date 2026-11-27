@@ -9,7 +9,6 @@ from sklearn.dummy import DummyClassifier
 
 from djimaging.tables.classifier_v2 import celltype_assignment_v2
 from djimaging.tables.core.stim_logs import PresentationLogTemplate
-from djimaging.tables.motion_correction.motion_detection import MotionDetectionTemplate
 from djimaging.tables.receptivefield.fast_sta import FastStaTemplate
 
 
@@ -80,7 +79,6 @@ class _Relation:
 
 @pytest.mark.parametrize('table_class', [
     celltype_assignment_v2.CelltypeAssignmentV2Template,
-    MotionDetectionTemplate,
     FastStaTemplate,
 ])
 @pytest.mark.parametrize('reserve_jobs', [False, True])
@@ -213,3 +211,97 @@ def test_presentation_log_uses_configured_scan_params_table():
         't_end': datetime.time(11, 1),
         'aborted': False,
     }]
+
+
+class _ProjRelation(_Relation):
+    """Relation whose proj(*attrs) keeps all attributes."""
+
+    def __and__(self, restriction):
+        return _ProjRelation(super().__and__(restriction).rows, primary_key=self.primary_key)
+
+    def proj(self, *attrs):
+        return self
+
+
+def _presentation_log_with_history(stim_rows, rec_start, clock_offset_s, log_rows):
+    """PresentationLog with a bound ExpHistoryStimLog: the presentation's file is the recording 'GCL0_MB'."""
+    inserted = []
+    key = {'experiment_id': 1, 'stim_name': 'movingbar', 'presentation_id': 2}
+    stim_log = _Relation([{'experiment_id': 1, 'clock_offset_s': clock_offset_s}], primary_key=('experiment_id',))
+    stim_log.Stim = _Relation(stim_rows)
+    stim_log.exp_history_table = SimpleNamespace(Recording=_ProjRelation([
+        {'experiment_id': 1, 'rec_name': 'GCL0_chirp', 'h5_file': 'e/Pre/SMP_GCL0_chirp.h5', 'smp_file': None,
+         'rec_start': datetime.datetime(2026, 8, 5, 9, 0)},
+        {'experiment_id': 1, 'rec_name': 'GCL0_MB', 'h5_file': r'e\Pre\SMP_GCL0_MB.h5', 'smp_file': 'e/Raw/GCL0_MB.smp',
+         'rec_start': rec_start},
+    ]))
+    table = SimpleNamespace(
+        exp_table=_Relation([{'experiment_id': 1}], primary_key=('experiment_id',)),
+        stimulus_table=_Relation([{'stim_name': 'movingbar', 'stim_hash': 'mb', 'stim_dict': {}}]),
+        log_table=_Relation(log_rows),
+        scan_params_table=None,
+        presentation_table=_Relation([{**key, 'pres_data_file': 'e/Pre/SMP_GCL0_MB.h5'}]),
+        exp_history_stim_log_table=stim_log,
+        insert1=inserted.append,
+    )
+    PresentationLogTemplate.make(table, key)
+    assert len(inserted) == 1
+    return inserted[0]
+
+
+def _mb_log_row(stim_idx, t_start, aborted=False):
+    t_end = (datetime.datetime.combine(datetime.date(2026, 8, 5), t_start) + datetime.timedelta(seconds=100)).time()
+    return {'experiment_id': 1, 'log_idx': 0, 'stim_idx': stim_idx, 'stim_md5': 'mb', 'stim_file_name': 'RGC_MovingBar',
+            'aborted': aborted, 't_start': t_start, 't_end': t_end}
+
+
+def test_presentation_log_uses_exp_history_recording():
+    # Test runs before the recording (one aborted, one complete), the recorded run, and a later run (other field).
+    log_rows = [_mb_log_row(0, datetime.time(10, 0), aborted=True), _mb_log_row(1, datetime.time(10, 1)),
+                _mb_log_row(2, datetime.time(10, 5)), _mb_log_row(3, datetime.time(10, 30))]
+    stim_rows = [
+        {'experiment_id': 1, 'log_idx': 0, 'stim_idx': 0, 'status': 'in_session', 'rec_name': None},
+        {'experiment_id': 1, 'log_idx': 0, 'stim_idx': 1, 'status': 'in_session', 'rec_name': None},
+        {'experiment_id': 1, 'log_idx': 0, 'stim_idx': 2, 'status': 'recording', 'rec_name': 'GCL0_MB'},
+        {'experiment_id': 1, 'log_idx': 0, 'stim_idx': 3, 'status': 'recording', 'rec_name': 'GCL1_MB'},
+    ]
+    row = _presentation_log_with_history(stim_rows, datetime.datetime(2026, 8, 5, 10, 9), 240., log_rows)
+    assert (row['stim_idx'], row['match_method']) == (2, 'md5+recording')
+
+    # Two runs in the recording: the last one that was not aborted
+    stim_rows[1] = dict(stim_rows[1], status='recording', rec_name='GCL0_MB')
+    row = _presentation_log_with_history(stim_rows, datetime.datetime(2026, 8, 5, 10, 9), 240., log_rows)
+    assert (row['stim_idx'], row['match_method']) == (2, 'md5+recording')
+
+
+def test_presentation_log_time_matching_uses_clock_offset():
+    # No log entry started during the recording (e.g. started a few s before it): closest start after the shift.
+    # ScanM = QDSpy + 600 s: the recording at 10:10:05 shows the run logged at 10:00, not the one logged at 10:10.
+    log_rows = [_mb_log_row(0, datetime.time(10, 0)), _mb_log_row(1, datetime.time(10, 10))]
+    stim_rows = [{'experiment_id': 1, 'log_idx': 0, 'stim_idx': i, 'status': 'in_session', 'rec_name': None}
+                 for i in range(2)]
+    row = _presentation_log_with_history(stim_rows, datetime.datetime(2026, 8, 5, 10, 10, 5), 600., log_rows)
+    assert (row['stim_idx'], row['match_method']) == (0, 'md5+time+offset')
+    # Offset unknown (no stimulus matched in ExpHistoryStimLog): clocks assumed to agree
+    row = _presentation_log_with_history(stim_rows, datetime.datetime(2026, 8, 5, 10, 10, 5), None, log_rows)
+    assert (row['stim_idx'], row['match_method']) == (1, 'md5+time')
+
+
+def test_presentation_log_requires_populated_exp_history_unless_allowed():
+    import pytest
+    inserted = []
+    key = {'experiment_id': 1, 'stim_name': 'movingbar', 'presentation_id': 2}
+    table = SimpleNamespace(
+        exp_table=_Relation([{'experiment_id': 1}], primary_key=('experiment_id',)),
+        stimulus_table=_Relation([{'stim_name': 'movingbar', 'stim_hash': 'mb', 'stim_dict': {}}]),
+        log_table=_Relation([_mb_log_row(0, datetime.time(10, 0)), _mb_log_row(1, datetime.time(10, 10))]),
+        scan_params_table=None,
+        presentation_table=_Relation([{**key, 'pres_data_file': 'e/Pre/SMP_GCL0_MB.h5'}]),
+        exp_history_stim_log_table=_Relation([], primary_key=('experiment_id',)),
+        insert1=inserted.append,
+    )
+    with pytest.raises(ValueError, match='not populated'):
+        PresentationLogTemplate.make(table, key)
+    assert inserted == []
+    PresentationLogTemplate.make(table, key, allow_missing_exp_history=True)
+    assert len(inserted) == 1

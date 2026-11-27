@@ -9,6 +9,29 @@ import numpy as np
 
 from djimaging.utils.dj_storage import relative_store_path
 
+# Per-repetition snippet baseline (median of the first frames of each snippet) of Baden et al. 2016 / Franke et al. 2017:
+# 8 frames for the chirp and 5 frames for the moving bar at 7.8125 Hz (0.128 s per frame).
+CHIRP_SNIPPET_BASE_DT = 8 * 0.128
+MOVINGBAR_SNIPPET_BASE_DT = 5 * 0.128
+# Moving bar snippets of Baden et al. 2016 start 4 frames after the trigger. The RGC classifier was trained on the
+# moving bar time component (first 32 frames) of snippets cut this way.
+MOVINGBAR_TRIGGER_DELAY = 4 * 0.128
+
+
+def log_identifiers(stim_hash_list=None, stim_name_list=None) -> dict:
+    """`stim_dict` entries that identify a stimulus in the QDSpy logs (used by `PresentationLog`).
+
+    stim_hash_list: md5 hashes of the QDSpy stimulus scripts, stim_name_list: QDSpy stimulus file names (without
+    extension). Both as written in the QDSpy log files.
+    """
+    out = {}
+    for k, v in (('stim_hash_list', stim_hash_list), ('stim_name_list', stim_name_list)):
+        if v is not None:
+            if isinstance(v, str):
+                raise TypeError(f"{k} must be a list of strings, not a string.")
+            out[k] = [str(x) for x in v]
+    return out
+
 
 def check_trial_info(trial_info: list, ntrigger_rep: int) -> list:
     """Validate canonical trial dictionaries and their trigger counts.
@@ -175,6 +198,9 @@ class StimulusTemplate(dj.Manual):
             locations_cats: list = None,
             offset_x_um: float = None,
             offset_y_um: float = None,
+            array_to_screen: dict | None = None,
+            stim_hash_list: list[str] | None = None,
+            stim_name_list: list[str] | None = None,
             skip_duplicates: bool = False,
     ) -> None:
         """Add a dense noise stimulus entry to the table.
@@ -202,6 +228,13 @@ class StimulusTemplate(dj.Manual):
                 assumed and a warning is issued.
             offset_y_um: Stimulus offset in y (micrometers). If None, 0 is
                 assumed and a warning is issued.
+            array_to_screen: QDSpy screen axis of the stimulus array x (column) and y (row) axes, e.g.
+                {'x': '+y', 'y': '+x'} for the standard dense noise (`NOISE_ARRAY_TO_SCREEN` in
+                djimaging.utils.stimulator). Required to align RFs with ROIs (RfRoiOffset).
+            stim_hash_list: md5 hashes of the QDSpy stimulus scripts of this stimulus, as in the QDSpy logs.
+                Used by `PresentationLog` to match presentations with their log entries.
+            stim_name_list: QDSpy stimulus file names (without extension) of this stimulus, as in the QDSpy logs.
+                Fallback of `PresentationLog` if no hash matches.
             skip_duplicates: If True, silently skip duplicate entries.
                 Default is False.
         """
@@ -241,6 +274,13 @@ class StimulusTemplate(dj.Manual):
                 "This is incorrect for the standard dense noise stimulus.")
             stim_dict["offset_y_um"] = 0
 
+        if array_to_screen is not None:
+            from djimaging.utils.stimulator import axes_to_matrix
+            axes_to_matrix(array_to_screen['x'], array_to_screen['y'])  # validate
+            stim_dict["array_to_screen"] = dict(array_to_screen)
+
+        stim_dict.update(log_identifiers(stim_hash_list, stim_name_list))
+
         self.add_stimulus(
             stim_name=stim_name,
             stim_family=stim_family,
@@ -264,10 +304,12 @@ class StimulusTemplate(dj.Manual):
             framerate: float = 60.,
             ntrigger_rep: int = 2,
             isrepeated: bool = True,
-            snippet_base_dt: float = None,
+            snippet_base_dt: float | None = CHIRP_SNIPPET_BASE_DT,
             stim_trace: np.ndarray = None,
             stim_path: str | Path | None = None,
             alias: str = None,
+            stim_hash_list: list[str] | None = None,
+            stim_name_list: list[str] | None = None,
             skip_duplicates: bool = False,
     ) -> None:
         """Add a chirp stimulus entry to the table.
@@ -279,11 +321,16 @@ class StimulusTemplate(dj.Manual):
             framerate: Stimulus frame rate in Hz. Default is 60 [Hz].
             ntrigger_rep: Number of triggers per repetition. Default is 2.
             isrepeated: Whether the stimulus is repeated. Default is True.
-            snippet_base_dt: Baseline window duration for snippet correction.
+            snippet_base_dt: Baseline window (s) subtracted from each repetition (median), as in Baden et al. 2016.
+                Default is 8 frames at 7.8125 Hz. None disables it.
             stim_trace: Optional numerical stimulus trace array.
             stim_path: Optional source stimulus file in the configured reference store.
             alias: Custom alias string; defaults to a standard chirp alias if
                 None.
+            stim_hash_list: md5 hashes of the QDSpy stimulus scripts of this stimulus, as in the QDSpy logs.
+                Used by `PresentationLog` to match presentations with their log entries.
+            stim_name_list: QDSpy stimulus file names (without extension) of this stimulus, as in the QDSpy logs.
+                Fallback of `PresentationLog` if no hash matches.
             skip_duplicates: If True, silently skip duplicate entries.
                 Default is False.
         """
@@ -294,6 +341,8 @@ class StimulusTemplate(dj.Manual):
         stim_dict = {
             "spatialextent": spatialextent,
         }
+
+        stim_dict.update(log_identifiers(stim_hash_list, stim_name_list))
 
         self.add_stimulus(
             stim_name=stim_name,
@@ -318,7 +367,8 @@ class StimulusTemplate(dj.Manual):
             isrepeated: bool = True,
             trial_info: list = None,
             framerate: float = 60.,
-            snippet_base_dt: float = None,
+            snippet_base_dt: float | None = MOVINGBAR_SNIPPET_BASE_DT,
+            trigger_delay: float | None = MOVINGBAR_TRIGGER_DELAY,
             bardx: float = None,
             bardy: float = None,
             velumsec: float = None,
@@ -326,6 +376,8 @@ class StimulusTemplate(dj.Manual):
             stim_dict_other: dict = None,
             stim_path: str | Path | None = None,
             alias: str = None,
+            stim_hash_list: list[str] | None = None,
+            stim_name_list: list[str] | None = None,
             skip_duplicates: bool = False,
     ) -> None:
         """Add a moving bar stimulus entry to the table.
@@ -339,7 +391,13 @@ class StimulusTemplate(dj.Manual):
                 If None, defaults to the standard 8-direction protocol
                 [0, 180, 45, 225, 90, 270, 135, 315].
             framerate: Stimulus frame rate in Hz. Default is 60 Hz.
-            snippet_base_dt: Baseline window duration for snippet correction.
+            snippet_base_dt: Baseline window (s) subtracted from each trial (median), as in Baden et al. 2016.
+                Default is 5 frames at 7.8125 Hz. None disables it. Without it, slow drift shared by the
+                consecutive opposite directions biases OsDsIndexes towards orientation selectivity.
+            trigger_delay: Snippets start this long (s) after each trigger, stored as `stim_dict['trigger_delay']`.
+                Default is 4 frames at 7.8125 Hz as in Baden et al. 2016. The RGC classifier (Baden16TracesV2)
+                expects the moving bar time component to be aligned like this, so changing it misaligns the bar
+                response in the classifier. None: no delay (snippets start at the trigger).
             bardx: Bar width in micrometers.
             bardy: Bar height in micrometers.
             velumsec: Bar velocity in micrometers per second.
@@ -349,6 +407,10 @@ class StimulusTemplate(dj.Manual):
             stim_path: Optional source stimulus file in the configured reference store.
             alias: Custom alias string; defaults to a standard moving-bar alias
                 if None.
+            stim_hash_list: md5 hashes of the QDSpy stimulus scripts of this stimulus, as in the QDSpy logs.
+                Used by `PresentationLog` to match presentations with their log entries.
+            stim_name_list: QDSpy stimulus file names (without extension) of this stimulus, as in the QDSpy logs.
+                Fallback of `PresentationLog` if no hash matches.
             skip_duplicates: If True, silently skip duplicate entries.
                 Default is False.
         """
@@ -406,8 +468,12 @@ class StimulusTemplate(dj.Manual):
             "velumsec": velumsec,
             "tmovedurs": tmovedurs,
         }
+        if trigger_delay is not None:
+            stim_dict["trigger_delay"] = trigger_delay
         if stim_dict_other is not None:
             stim_dict.update(stim_dict_other)
+
+        stim_dict.update(log_identifiers(stim_hash_list, stim_name_list))
 
         self.add_stimulus(
             stim_name=stim_name,

@@ -28,6 +28,35 @@ def load_smp_file(raw_file_path):
     return raw_file
 
 
+# Plausible pixel durations in µs; values outside indicate a wrong unit or a corrupt header
+_REAL_PIX_DUR_RANGE_US = (0.01, 1000.)
+# Suffixes that clearly name a unit other than µs
+_NON_MICRO_SECOND_SUFFIXES = ('s', 'ms', 'ns', 'ps')
+
+
+def _normalize_real_pixel_duration_key(wparams: dict) -> None:
+    """Rename the RealPixelDuration key to 'RealPixelDuration_µs' in place.
+
+    The micro sign in this key is read with varying encodings (µ, �, ...), see read_header_utils._clean_key.
+    Any suffix that is not clearly another unit is therefore taken as µs, and the value is checked for a
+    plausible pixel duration.
+    """
+    keys = [k for k in wparams if k.startswith('RealPixelDuration_')]
+    if len(keys) == 0:
+        return
+    if len(keys) > 1:
+        raise ValueError(f"Multiple RealPixelDuration keys in header: {keys}")
+    key = keys[0]
+    suffix = key[len('RealPixelDuration_'):]
+    if suffix.lower() in _NON_MICRO_SECOND_SUFFIXES:
+        raise ValueError(f"Header key {key!r}: unit {suffix!r} is not µs, refusing to guess the conversion.")
+    value = wparams.pop(key)
+    vmin, vmax = _REAL_PIX_DUR_RANGE_US
+    if not (vmin <= float(value) <= vmax):
+        raise ValueError(f"Header key {key!r}: pixel duration {value} is outside [{vmin}, {vmax}] µs.")
+    wparams['RealPixelDuration_µs'] = value
+
+
 def load_wparams(raw_file, return_file=True, lower_keys=True):
     """Load wparams (scan parameters) from a raw SMP file.
 
@@ -60,6 +89,8 @@ def load_wparams(raw_file, return_file=True, lower_keys=True):
     wparams['User_nPixRetrace'] = raw_file.dxRetrace_pix
     wparams['User_nXPixLineOffs'] = raw_file.dxOffs_pix
     wparams['User_ScanType'] = raw_file.scanType
+
+    _normalize_real_pixel_duration_key(wparams)
 
     # Handle different naming conventions
     renaming_dict = {

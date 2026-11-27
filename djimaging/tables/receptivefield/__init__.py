@@ -2,6 +2,7 @@ from .glm import (RfGlmParamsTemplate, RfGlmTemplate, RfGlmQualityParamsTemplate
                   RfGlmQualityTemplate)
 from .noise_traces import DNoiseTraceParamsTemplate, DNoiseTraceTemplate
 from .spatial_rf import FitDoG2DRFTemplate, FitGauss2DRFTemplate
+from .spatial_rf_joint import FitSRFJointParamsTemplate, FitSRFJointTemplate
 from .split_strf import SplitRFParamsTemplate, SplitRFTemplate
 from .srf_contour import RfContoursParamsTemplate, RfContoursTemplate, RfContourMetricsTemplate
 from .fast_sta import FastStaParamsTemplate, FastStaTemplate, FastStaQualityTemplate

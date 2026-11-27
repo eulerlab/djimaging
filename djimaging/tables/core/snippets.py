@@ -71,6 +71,14 @@ class SnippetsTemplate(dj.Computed):
     database = ""
     _pad_trace = False  # If True, chose snippet times always contain the trigger times
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if '_dt_base_line_dict' in cls.__dict__:
+            # Removed in d308d21 and silently ignored afterwards, so snippets were computed without baseline.
+            raise TypeError(
+                f"{cls.__name__}._dt_base_line_dict is no longer supported. Set the per-repetition baseline in "
+                f"Stimulus.snippet_base_dt instead (add_chirp and add_movingbar default to Baden et al. 2016).")
+
     @property
     def definition(self):
         definition = """

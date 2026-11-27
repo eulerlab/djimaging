@@ -42,3 +42,15 @@ class FitGauss2DRF(receptivefield.FitGauss2DRFTemplate):
 class FitDoG2DRF(receptivefield.FitDoG2DRFTemplate):
     split_rf_table = SplitRF
     stimulus_table = Stimulus
+
+
+@schema
+class FitSRFJointParams(receptivefield.FitSRFJointParamsTemplate):
+    pass
+
+
+@schema
+class FitSRFJoint(receptivefield.FitSRFJointTemplate):
+    split_rf_table = SplitRF
+    stimulus_table = Stimulus
+    params_table = FitSRFJointParams

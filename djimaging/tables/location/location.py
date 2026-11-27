@@ -25,7 +25,7 @@ class RelativeFieldLocation(location.RelativeFieldLocationTemplate):
 @schema
 class RetinalFieldLocation(location.RetinalFieldLocationTemplate):
     relativefieldlocation_table = RelativeFieldLocation
-    expinfo_table = Experiment.ExpInfo
+    retina_orientation_table = RetinaOrientation
 """
 
 import warnings
@@ -33,8 +33,6 @@ from abc import abstractmethod
 
 import datajoint as dj
 import numpy as np
-import pandas as pd
-import seaborn as sns
 from matplotlib import pyplot as plt
 
 from djimaging.utils.scanm.setup_utils import get_retinal_position
@@ -141,16 +139,17 @@ class RetinalFieldLocationTemplate(dj.Computed):
         # YCoord_um is the relative position from left to right, i.e. larger YCoord_um means more right
 
         -> self.relativefieldlocation_table
+        -> self.retina_orientation_table
         ---
-        ventral_dorsal_pos_um       :float32      # position on the ventral-dorsal axis, greater 0 means dorsal
-        temporal_nasal_pos_um       :float32      # position on the temporal-nasal axis, greater 0 means nasal
+        ventral_dorsal_pos_um = NULL :float32      # position on the ventral-dorsal axis, greater 0 means dorsal; NULL if unknown
+        temporal_nasal_pos_um = NULL :float32      # position on the temporal-nasal axis, greater 0 means nasal; NULL if unknown
         """
         return definition
 
     @property
     def key_source(self):
         try:
-            return self.relativefieldlocation_table.proj()
+            return self.relativefieldlocation_table.proj() * self.retina_orientation_table.proj()
         except (AttributeError, TypeError):
             pass
 
@@ -161,7 +160,7 @@ class RetinalFieldLocationTemplate(dj.Computed):
 
     @property
     @abstractmethod
-    def expinfo_table(self):
+    def retina_orientation_table(self):
         pass
 
     def make(self, key: dict) -> None:
@@ -171,14 +170,8 @@ class RetinalFieldLocationTemplate(dj.Computed):
             key: DataJoint primary key dict identifying a unique relative field location entry.
         """
         relx, rely = (self.relativefieldlocation_table() & key).fetch1('relx', 'rely')
-        eye, prepwmorient = (self.expinfo_table() & key).fetch1('eye', 'prepwmorient')
-
-        if prepwmorient == -1:
-            warnings.warn(f'prepwmorient is -1 for {key}. skipping')
-            return
-
-        ventral_dorsal_pos_um, temporal_nasal_pos_um = get_retinal_position(
-            rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=prepwmorient, eye=eye)
+        eye, orientation_deg = self.retina_orientation_table().get_eye_and_orientation(key)
+        ventral_dorsal_pos_um, temporal_nasal_pos_um = retinal_position_or_none(relx, rely, orientation_deg, eye)
 
         rfl_key = key.copy()
         rfl_key['ventral_dorsal_pos_um'] = ventral_dorsal_pos_um
@@ -205,89 +198,18 @@ class RetinalFieldLocationTemplate(dj.Computed):
         plt.show()
 
 
-class RetinalFieldLocationCatTemplate(dj.Computed):
-    database = ""
+def retinal_position_or_none(relx: float, rely: float, orientation_deg: float | None, eye: str | None)         -> tuple[float | None, float | None]:
+    """(ventral_dorsal_pos_um, temporal_nasal_pos_um) from positions relative to the optic disk, None where unknown.
 
-    _ventral_dorsal_key = 'ventral_dorsal_pos_um'
-    _temporal_nasal_key = 'temporal_nasal_pos_um'
-    _center_dist = 0.
-
-    @property
-    def definition(self):
-        definition = """
-        -> self.retinalfieldlocation_table
-        ---
-        nt_side  : enum('n', 'c', 't')
-        vd_side  : enum('v', 'c', 'd')
-        ntvd_side : enum('nv', 'nc', 'nd', 'cv', 'cc', 'cd', 'tv', 'tc', 'td')
-        n_tvd_side  : enum('n', 'cv', 'cc', 'cd', 'tv', 'tc', 'td')
-        nvd_t_side  : enum('nv', 'nc', 'nd', 'cv', 'cc', 'cd', 't')
-        """
-        return definition
-
-    @property
-    def key_source(self):
-        try:
-            return self.retinalfieldlocation_table.proj()
-        except (AttributeError, TypeError):
-            pass
-
-    @property
-    @abstractmethod
-    def retinalfieldlocation_table(self):
-        pass
-
-    def make(self, key: dict) -> None:
-        """Categorise a field's retinal location into nasal/temporal and ventral/dorsal sides.
-
-        Args:
-            key: DataJoint primary key dict identifying a unique retinal field location entry.
-        """
-        ventral_dorsal, temporal_nasal = (self.retinalfieldlocation_table() & key).fetch1(
-            self._ventral_dorsal_key, self._temporal_nasal_key)
-
-        if temporal_nasal < -self._center_dist:
-            nt_side = 't'
-        elif temporal_nasal > self._center_dist:
-            nt_side = 'n'
-        else:
-            nt_side = 'c'
-
-        if ventral_dorsal < -self._center_dist:
-            vd_side = 'v'
-        elif ventral_dorsal > self._center_dist:
-            vd_side = 'd'
-        else:
-            vd_side = 'c'
-
-        rfl_key = key.copy()
-        rfl_key['nt_side'] = nt_side
-        rfl_key['vd_side'] = vd_side
-        rfl_key['ntvd_side'] = nt_side + vd_side
-        rfl_key['n_tvd_side'] = nt_side + vd_side if nt_side == 't' else nt_side
-        rfl_key['nvd_t_side'] = nt_side + vd_side if nt_side == 'n' else nt_side
-        self.insert1(rfl_key)
-
-    def plot(self, restriction: dict = None) -> None:
-        """Scatter-plot all fields colour-coded by their combined retinal quadrant label.
-
-        Args:
-            restriction: Optional DataJoint restriction dict applied before plotting.
-                Defaults to no restriction.
-        """
-        if restriction is None:
-            restriction = dict()
-
-        df_plot = pd.DataFrame((self * self.retinalfieldlocation_table()) & restriction)
-
-        fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-
-        sns.scatterplot(
-            ax=ax, data=df_plot, x=self._temporal_nasal_key, y=self._ventral_dorsal_key, hue='ntvd_side')
-
-        ax.set(xlabel="temporal_nasal", ylabel="ventral_dorsal")
-        ax.set_aspect(aspect="equal", adjustable="datalim")
-        plt.show()
+    Both are None if the orientation is unknown, temporal_nasal_pos_um is None if the eye is unknown.
+    NaN cannot be inserted by DataJoint (the column is omitted), so unknown values are None (NULL).
+    """
+    if orientation_deg is None:
+        return None, None
+    ventral_dorsal, temporal_nasal = get_retinal_position(
+        rel_xcoord_um=relx, rel_ycoord_um=rely, rotation=orientation_deg, eye=eye)
+    return (None if np.isnan(ventral_dorsal) else float(ventral_dorsal),
+            None if np.isnan(temporal_nasal) else float(temporal_nasal))
 
 
 def plot_relxy_pos(relx: np.ndarray, rely: np.ndarray, view: str = 'igor_local') -> None:

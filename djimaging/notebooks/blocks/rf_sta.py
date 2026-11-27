@@ -13,6 +13,9 @@
 # - `SplitRFParams` / `SplitRF`: Splits the spatio-temporal RF into a spatial and a temporal RF (SVD).
 # - `FitGauss2DRF`: Fits a 2D Gaussian to the spatial RF.
 # - `FitDoG2DRF`: Fits a 2D difference of Gaussians (center-surround) to the spatial RF.
+# - `FitSRFJointParams` / `FitSRFJoint`: Fits a 2D (difference of) Gaussian(s) to the spatial RFs of all colors of an RF
+#   jointly, with a soft prior on the RF position (centered on the recording field) and a weak coupling of the RF
+#   positions of the colors. More robust for weak or noisy (e.g. single color) sRFs.
 
 # %%
 FastStaParams().add_default(skip_duplicates=True)
@@ -57,3 +60,14 @@ FitDoG2DRF()
 
 # %%
 plot_if_data(FitDoG2DRF(), key=None)
+
+# %%
+FitSRFJointParams().add_default(skip_duplicates=True)
+FitSRFJointParams()
+
+# %%
+FitSRFJoint().populate(processes=20, display_progress=True)
+FitSRFJoint()
+
+# %%
+plot_if_data(FitSRFJoint(), key=None)

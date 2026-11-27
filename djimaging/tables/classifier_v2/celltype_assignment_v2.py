@@ -17,6 +17,7 @@ class CelltypeAssignmentV2Template(dj.Computed):
     _reference_store = "reference"
     _baden_data_file = 'Resources/Classifier/rgc_classifier_v2/RGCData_postprocessed.mat'
     __expected_classes = np.arange(1, 75 + 1)  # Expected classes for the classifier
+    _baden_trace_restriction = None  # Restriction of baden_trace_table, e.g. dict(preprocess_id=1) if there are several
 
     @property
     def definition(self) -> str:
@@ -188,10 +189,19 @@ class CelltypeAssignmentV2Template(dj.Computed):
         """
         if restriction is None:
             restriction = dict()
+        baden_trace_table = self.baden_trace_table & key & restriction
+        if self._baden_trace_restriction is not None:
+            baden_trace_table = baden_trace_table & self._baden_trace_restriction
 
         roi_keys, preproc_chirps, preproc_bars, bar_ds_pvalues, roi_size_um2s = (
-                (self.baden_trace_table & key & restriction) * self.roi_table).to_arrays(
+                baden_trace_table * self.roi_table).to_arrays(
             'preproc_chirp', 'preproc_bar', 'ds_pvalue', 'roi_size_um2', include_key=True)
+
+        roi_ids = [tuple(k[a] for a in self.roi_table.primary_key) for k in roi_keys]
+        if len(set(roi_ids)) < len(roi_ids):
+            raise ValueError(
+                "Some ROIs have several Baden16TracesV2 entries (e.g. several preprocess_id of the moving bar). "
+                "Set CelltypeAssignmentV2._baden_trace_restriction, e.g. to dict(preprocess_id=1).")
 
         if len(roi_keys) > 0:
             preproc_chirps = np.vstack(preproc_chirps)
