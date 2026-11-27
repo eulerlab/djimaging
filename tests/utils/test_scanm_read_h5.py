@@ -193,6 +193,21 @@ def test_load_roi2trace(chirp_path):
     assert frame_dt == pytest.approx(FRAME_DT)
 
 
+def test_load_roi2trace_igor_mask_with_background_11_and_gaps(tmp_path):
+    """Igor masks may use 11 instead of 1 as background and skip ROI numbers; ids are the positive ones."""
+    roi_mask = np.full((4, 4), 11)
+    roi_mask[0, :2] = 1
+    roi_mask[1, :] = -1
+    roi_mask[3, :] = -4
+    traces = np.arange(10.)[:, None] + np.array([[100., 400.]])
+    path = write_h5(tmp_path / 'igor_traces.h5', {}, ROIs=roi_mask, Traces0_raw=traces,
+                    Tracetimes0=np.tile(np.arange(10.)[:, None] * 0.1, (1, 2)))
+    roi2trace, frame_dt = read_h5_utils.load_roi2trace(path, roi_ids=np.array([4]))
+    assert sorted(roi2trace) == [4]
+    assert_allclose(roi2trace[4]['trace'], traces[:, 1])
+    assert frame_dt == pytest.approx(0.1)
+
+
 def test_load_roi2trace_rejects_unknown_rois(chirp_path):
     with pytest.raises(ValueError, match='do not match'):
         read_h5_utils.load_roi2trace(chirp_path, roi_ids=np.array([3]))

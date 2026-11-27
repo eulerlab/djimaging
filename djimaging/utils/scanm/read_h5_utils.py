@@ -6,7 +6,8 @@ import numpy as np
 
 # Module import (not `from ... import name`): wparams_utils indirectly imports this module, see test_scanm_import_order
 from djimaging.utils.scanm import wparams_utils
-from djimaging.utils.scanm.roi_utils import get_roi2trace, extract_roi_ids
+from djimaging.utils.mask_format_utils import as_python_format
+from djimaging.utils.scanm.roi_utils import get_roi2trace
 
 
 def load_stacks_and_wparams(filepath: str, ch_names: tuple = ('wDataCh0', 'wDataCh1')) -> Tuple[dict, dict]:
@@ -167,11 +168,14 @@ def load_roi2trace(filepath: str, roi_ids: np.ndarray) -> Tuple[dict, float]:
     try:
         with h5py.File(filepath, "r", driver="stdio") as h5_file:
             traces, traces_times = extract_traces(h5_file)
-            # The mask stores ROI i as -i; roi_ids and the columns of Traces0_raw use the positive ids
-            roi_ids_traces = np.abs(extract_roi_ids(extract_roi_mask(h5_file, ignore_not_found=False),
-                                                    npixartifact=0))
+            roi_mask = extract_roi_mask(h5_file, ignore_not_found=False)
     except OSError as e:
         raise OSError(f"Error loading file {filepath}: {e}")
+
+    # The Igor mask stores ROI i as -i; the database (Roi.roi_id) and the columns of Traces0_raw use the positive ids.
+    # Convert with the same function as everywhere else, which validates the mask format.
+    roi_mask = as_python_format(roi_mask)
+    roi_ids_traces = np.unique(roi_mask[roi_mask > 0]).astype(int)
 
     if not set(roi_ids).issubset(set(roi_ids_traces)):
         raise ValueError(f"roi_ids {roi_ids} do not match roi_ids in traces {roi_ids_traces}")
