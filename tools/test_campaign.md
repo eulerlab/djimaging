@@ -8,6 +8,8 @@ Row format (the coverage script parses `path | status`): `djimaging/<path>.py | 
 
 Snippet, filter, trace, preprocess, receptive-field, ScanM/QDSpy reader, filesystem, alias, mask, image,
 baden16, storage, exposure-history, response-feature, clustering, classifier and location helpers.
+The clustering tables (`djimaging/tables/clustering`) and `RetinalFieldLocationCatTemplate` were removed after
+PR 91 together with their tests; don't add rows for them.
 Rows below are added as modules are finished.
 
 ## Modules

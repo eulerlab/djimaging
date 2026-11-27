@@ -26,7 +26,6 @@ class RetinalRoiLocation(location.RetinalRoiLocationTemplate):
     retina_orientation_table = RetinaOrientation
 """
 
-import warnings
 from abc import abstractmethod
 import datajoint as dj
 import numpy as np
