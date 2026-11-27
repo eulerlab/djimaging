@@ -146,6 +146,23 @@ def test_compute_triggers_trigger_on_at_start_duration_off_by_one():
     assert_allclose(triggertimes, [0., 40e-3])
 
 
+@pytest.mark.parametrize('n_complete', [0, 1, 2])
+def test_compute_triggers_on_at_start_ignores_pulse_still_on_at_end(n_complete):
+    # Pulses of 10 samples, the first one already on at the start; the last pulse lasts until the end of the
+    # recording. Its duration is unknown and must not pull the median duration towards 0.
+    nx, ny, nf = 4, 4, 10
+    frame_times, offset, _ = _frame_timing(nx, ny, nf)
+    flat = np.zeros(nx * ny * nf)
+    flat[0:10] = 60_000
+    starts = [40 + 40 * i for i in range(n_complete)]
+    for start in starts:
+        flat[start:start + 10] = 60_000
+    last_start = 40 + 40 * n_complete
+    flat[last_start:] = 60_000
+    triggertimes, _ = ttu.compute_triggers(_stack_from_time_series(flat, nx, ny), frame_times, offset)
+    assert_allclose(triggertimes, np.array([0] + starts + [last_start]) * 1e-3)
+
+
 def test_compute_triggers_trigger_on_at_start_shorter_than_others():
     nx, ny, nf = 4, 4, 10
     frame_times, offset, _ = _frame_timing(nx, ny, nf)

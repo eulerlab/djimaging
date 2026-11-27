@@ -52,7 +52,7 @@ def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset
     stack_times = stack_times.T.flatten()
 
     if np.any(np.diff(stack_times) < 0):
-        raise ValueError(f"Unexpected value in stack_times. This is probably a bug that needs to be fixed.")
+        raise ValueError("Unexpected value in stack_times. This is probably a bug that needs to be fixed.")
 
     min_diff_n_pixels = stack.shape[0] * 2  # Require at least 2 lines difference
     stack = stack.T.flatten()  # Order in time
@@ -66,11 +66,15 @@ def compute_triggers(stack: np.ndarray, frame_times: np.ndarray, frame_dt_offset
     # In this case we have to derive the trigger-length from the other triggers.
     if stack[0] >= threshold and len(trigger_idxs) > 0:
         first_trigger_end_idx = np.argmax(stack < threshold)
-        # stack[trigger_idx] is the first high sample, so argmax(...) is the number of high samples
-        mean_trigger_dur = int(np.median([np.argmax(stack[trigger_idx:] < threshold)
-                                          for trigger_idx in trigger_idxs]))
-        # Onset before the recording started: the first sample is the earliest time there is
-        first_trigger_start_idx = max(first_trigger_end_idx - mean_trigger_dur, 0)
+        # stack[trigger_idx] is the first high sample, so argmax(...) is the number of high samples.
+        # Pulses still high at the end of the recording have no measurable duration and are ignored.
+        trigger_durs = [np.argmax(stack[trigger_idx:] < threshold) for trigger_idx in trigger_idxs
+                        if np.any(stack[trigger_idx:] < threshold)]
+        if len(trigger_durs) > 0:
+            # Onset before the recording started: the first sample is the earliest time there is
+            first_trigger_start_idx = max(first_trigger_end_idx - int(np.median(trigger_durs)), 0)
+        else:
+            first_trigger_start_idx = 0  # no complete pulse to derive the duration from
         trigger_idxs = np.append(first_trigger_start_idx, trigger_idxs)
 
     triggertimes = stack_times[trigger_idxs] + stimulator_delay
