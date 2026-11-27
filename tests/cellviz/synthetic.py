@@ -1,4 +1,4 @@
-"""SYNTHETIC test fixture for the recording inspector (not real data).
+"""SYNTHETIC test fixture for CellViz (not real data).
 
 Covers what the local recordings do not: non-consecutive ROI IDs, a mask that is shifted between two presentations of
 the same stimulus (two conditions), traces whose time origin differs from the movie, known triggers and known QI
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from djimaging.inspector.data import (
+from djimaging.cellviz.data import (
     HighResImage, PresentationData, PresentationInfo, QualityValues, RoiLabels, Signal, StimulusInfo, Trace)
 
 NY, NX = 16, 20          # display shape (rows = y, cols = x), deliberately not square

@@ -19,7 +19,7 @@ from typing import Iterable, Optional
 
 import numpy as np
 
-from djimaging.inspector.data import QualityValues
+from djimaging.cellviz.data import QualityValues
 
 QUALITY_METRICS = {
     'chirp': ('ChirpQI', 'qidx'),

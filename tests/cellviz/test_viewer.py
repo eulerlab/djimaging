@@ -7,16 +7,15 @@ import pytest
 
 pytest.importorskip('ipywidgets')
 
-from djimaging.inspector.export import read_video  # noqa: E402
-from djimaging.inspector.render import InspectorFigure  # noqa: E402
-from djimaging.inspector.viewer import RecordingInspector  # noqa: E402
-from tests.inspector.synthetic import FRAME_DT, HR_SHIFT, SyntheticFieldSource  # noqa: E402
+from djimaging.cellviz.export import read_video  # noqa: E402
+from djimaging.cellviz.render import CellVizFigure  # noqa: E402
+from djimaging.cellviz.viewer import CellViz  # noqa: E402
+from tests.cellviz.synthetic import FRAME_DT, HR_SHIFT, SyntheticFieldSource  # noqa: E402
 
 
 @pytest.fixture
 def viewer(tmp_path):
-    return RecordingInspector(SyntheticFieldSource(), presentation='chirp [control]', export_dir=tmp_path,
-                              backend='image')
+    return CellViz(SyntheticFieldSource(), presentation='chirp [control]', export_dir=tmp_path, backend='image')
 
 
 def click(v, ax, x, y):
@@ -106,12 +105,12 @@ def test_metric_change_resets_filter(viewer):
 
 
 def test_highres_registered_and_fallback(tmp_path):
-    v = RecordingInspector(SyntheticFieldSource(), presentation='chirp [control]', backend='image')
+    v = CellViz(SyntheticFieldSource(), presentation='chirp [control]', backend='image')
     v.set_view('highres')
     assert v.view == 'highres' and v.state.hr_rois is not None
     assert v.state.hr_rois.roi_ids.tolist() == v.pres.roi_ids.tolist()
     assert f"{HR_SHIFT[1] / 4:+.2f}" in v.w_notes.value and 'registered' in v.w_status.value  # diagnostics: Details
-    v2 = RecordingInspector(SyntheticFieldSource(with_highres=False), presentation='chirp [control]', backend='image')
+    v2 = CellViz(SyntheticFieldSource(with_highres=False), presentation='chirp [control]', backend='image')
     v2.set_view('highres')
     assert v2.view == 'native' and 'HighRes view unavailable' in v2.w_status.value
     v2.set_frame(10)
@@ -129,7 +128,7 @@ def test_export_replays_same_range_and_selection(viewer, tmp_path):
     assert json.loads((tmp_path / 'out.mp4.json').read_text())['n_frames'] == 20
     vmeta, frames = read_video(tmp_path / 'out.mp4')
     assert len(frames) == 20 and vmeta['fps'] == pytest.approx(10, rel=1e-3)
-    fig = InspectorFigure(figsize=(12.8, 7.36), dpi=100)
+    fig = CellVizFigure(figsize=(12.8, 7.36), dpi=100)
     fig.animated = True
     for k in (0, 19):
         fig.render(v.state.__class__(**{**v.state.__dict__, 'frame': 20 + k}))
@@ -143,7 +142,7 @@ def test_export_replays_same_range_and_selection(viewer, tmp_path):
 def test_export_refuses_data_folder(tmp_path):
     pytest.importorskip('imageio_ffmpeg')
     data = tmp_path / 'data'
-    v = RecordingInspector(SyntheticFieldSource(data_roots=(data,)), backend='image')
+    v = CellViz(SyntheticFieldSource(data_roots=(data,)), backend='image')
     with pytest.raises(ValueError, match='read-only'):
         v.export(data / 'sub' / 'x.mp4', t_start=0, t_stop=0.2)
 
@@ -194,7 +193,7 @@ def test_trial_panel_in_viewer_and_export(viewer, tmp_path):
     meta = v.export(tmp_path / 'trial.mp4', t_start=2.9, t_stop=3.3)
     _, frames = read_video(tmp_path / 'trial.mp4')
     assert len(frames) == meta['n_frames'] == len(range(meta['frame_start'], meta['frame_stop']))
-    fig = InspectorFigure(figsize=(12.8, 7.36), dpi=100)
+    fig = CellVizFigure(figsize=(12.8, 7.36), dpi=100)
     fig.animated = True
     fig.render(v.state.__class__(**{**v.state.__dict__, 'frame': meta['frame_stop'] - 1}))
     fig.draw()

@@ -1048,14 +1048,14 @@ autorois = [
     { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "torch", version = "2.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
-dev = [
-    { name = "jupytext" },
-    { name = "pytest" },
-]
-inspector = [
+cellviz = [
     { name = "imageio-ffmpeg" },
     { name = "ipympl" },
     { name = "ipywidgets" },
+]
+dev = [
+    { name = "jupytext" },
+    { name = "pytest" },
 ]
 notebooks = [
     { name = "jupytext" },
@@ -1070,13 +1070,13 @@ requires-dist = [
     { name = "astropy", specifier = ">=6.1.0" },
     { name = "datajoint", specifier = ">=2.3.1,<2.4" },
     { name = "h5py", specifier = ">=3.11.0" },
-    { name = "imageio-ffmpeg", marker = "extra == 'inspector'", specifier = ">=0.5.1" },
+    { name = "imageio-ffmpeg", marker = "extra == 'cellviz'", specifier = ">=0.5.1" },
     { name = "ipycanvas", marker = "extra == 'autorois'", specifier = ">=0.13.0" },
     { name = "ipykernel", specifier = ">=7.3.0" },
-    { name = "ipympl", marker = "extra == 'inspector'", specifier = ">=0.9.4" },
+    { name = "ipympl", marker = "extra == 'cellviz'", specifier = ">=0.9.4" },
     { name = "ipython", specifier = ">=8.12.3" },
     { name = "ipywidgets", marker = "extra == 'autorois'", specifier = ">=8.0.0" },
-    { name = "ipywidgets", marker = "extra == 'inspector'", specifier = ">=8.0.0" },
+    { name = "ipywidgets", marker = "extra == 'cellviz'", specifier = ">=8.0.0" },
     { name = "jupytext", specifier = ">=1.19.6" },
     { name = "jupytext", marker = "extra == 'dev'", specifier = ">=1.16.0" },
     { name = "jupytext", marker = "extra == 'notebooks'", specifier = ">=1.16.0" },
@@ -1095,7 +1095,7 @@ requires-dist = [
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "torch", marker = "extra == 'autorois'", specifier = ">=2.4.1" },
 ]
-provides-extras = ["autorois", "rf", "inspector", "notebooks", "dev"]
+provides-extras = ["autorois", "rf", "cellviz", "notebooks", "dev"]
 
 [[package]]
 name = "exceptiongroup"

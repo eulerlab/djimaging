@@ -1,4 +1,4 @@
-"""Matplotlib renderer of the recording inspector, shared by the notebook viewer and the video export.
+"""Matplotlib renderer of CellViz, shared by the notebook viewer and the video export.
 
 Layout (positions computed in pixels, so the field stays square at any figure size)::
 
@@ -26,12 +26,13 @@ import numpy as np
 from matplotlib.collections import LineCollection, PolyCollection
 from matplotlib.figure import Figure
 from matplotlib.offsetbox import AnnotationBbox, OffsetImage
-from matplotlib.patches import Rectangle
+from matplotlib.patches import PathPatch, Rectangle
+from matplotlib.path import Path as MplPath
 from matplotlib.transforms import blended_transform_factory
 
-from djimaging.inspector.data import HighResImage, PresentationData, RoiLabels
-from djimaging.inspector.timing import n_samples_before
-from djimaging.inspector.trials import TrialCache
+from djimaging.cellviz.data import HighResImage, PresentationData, RoiLabels
+from djimaging.cellviz.timing import n_samples_before
+from djimaging.cellviz.trials import TrialCache
 
 SELECTION_COLORS = [matplotlib.colormaps['tab10'](i) for i in range(10)]
 OUTLINE_COLOR = '#00d0ff'
@@ -39,6 +40,40 @@ POPULATION_COLOR = '0.15'
 HEATMAP_CMAP = 'RdBu_r'
 OVERLAY_CMAP = 'magma'
 MAX_TRIGGER_LABELS = 60
+
+# What is drawn on the field view (Recording and HighRes), besides the outlines of the selected ROIs, which are always
+# drawn: outlines of the eligible ROIs, the ROI mask (filled labels), the ROI activity (fill coloured by the trace at
+# the current time) or nothing.
+OVERLAYS = {'outlines': 'ROI outlines', 'mask': 'ROI mask', 'activity': 'ROI activity', 'none': 'none'}
+MASK_COLORS = [matplotlib.colormaps['tab20'](i) for i in range(20) if i not in (14, 15)]  # no greys (= excluded)
+MASK_ALPHA = 0.45                 # fill of eligible ROIs in the 'mask' overlay
+MASK_EXCLUDED = (0.6, 0.6, 0.6, 0.3)  # fill of ROIs excluded by the quality filter in the 'mask' overlay
+
+
+def mask_color(roi_id: int) -> tuple:
+    """Fill colour of a ROI in the 'mask' overlay: fixed per ROI ID, so it is the same in every view and export."""
+    return MASK_COLORS[(int(roi_id) * 7) % len(MASK_COLORS)]  # stride 7: consecutive IDs get distinct hues
+
+
+def _segments_patch(segments: np.ndarray, color, lw: float, zorder: float, alpha: float = 1.) -> PathPatch:
+    """All ``segments`` (n, 2, 2) as one compound path: one Agg draw call instead of one per segment (a
+    ``LineCollection`` of ~1600 pixel edges costs several ms per frame; this a fraction of that)."""
+    codes = np.tile(np.array([MplPath.MOVETO, MplPath.LINETO], dtype=MplPath.code_type), len(segments))
+    return PathPatch(MplPath(segments.reshape(-1, 2), codes), fill=False, edgecolor=color, lw=lw, alpha=alpha,
+                     zorder=zorder)
+
+
+def mask_rgba(labels: RoiLabels, eligible) -> np.ndarray:
+    """RGBA image ``[y, x, 4]`` of the ROI mask: eligible ROIs filled with ``mask_color``, the other ROIs grey."""
+    eligible = set(int(r) for r in eligible)
+    rgba = np.zeros(labels.shape + (4,))
+    for label, roi_id in labels.label_to_roi_id.items():
+        if roi_id in eligible:
+            rgba[labels.labels == label] = (*mask_color(roi_id)[:3], MASK_ALPHA)
+        else:
+            rgba[labels.labels == label] = MASK_EXCLUDED
+    return rgba
+
 
 FS_TITLE, FS_LABEL, FS_TICK, FS_SMALL = 10, 9, 8, 7.5  # points
 
@@ -64,7 +99,7 @@ class ViewState:
     view: str = 'native'            # 'native' or 'highres'
     highres: Optional[HighResImage] = None
     hr_rois: Optional[RoiLabels] = None  # ROI labels registered to the HighRes grid
-    overlay: bool = True            # trace overlay inside the ROIs in HighRes mode
+    overlay: str = 'outlines'       # key of OVERLAYS: 'outlines', 'mask', 'activity' or 'none' (both views)
     display: str = 'all'            # 'all' (eligible population) or 'selected'
     eligible: tuple = ()            # ROI IDs passing the quality filter
     selected: tuple = ()            # selected ROI IDs (in selection order; only eligible ones are drawn)
@@ -73,6 +108,10 @@ class ViewState:
     view_text: str = ''
     clim: Optional[tuple] = None    # fixed movie contrast; default: 1st / 99.5th percentile of the movie
     extra: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        if self.overlay not in OVERLAYS:
+            raise ValueError(f"overlay must be one of {list(OVERLAYS)}, got {self.overlay!r}")
 
     @property
     def shown_selected(self) -> tuple:
@@ -141,15 +180,16 @@ def default_clim(pres: PresentationData) -> tuple:
 _STAMP_CACHE: dict = {}
 
 
-def text_bitmap(text: str, fontsize: float, color, dpi: float) -> np.ndarray:
-    """RGBA bitmap of ``text`` (transparent background), rendered once per (text, size, colour, dpi) and cached."""
-    key = (text, fontsize, str(color), round(float(dpi), 3))
+def text_bitmap(text: str, fontsize: float, color, dpi: float, weight: str = 'normal') -> np.ndarray:
+    """RGBA bitmap of ``text`` (transparent background), rendered once per (text, size, colour, dpi, weight) and
+    cached."""
+    key = (text, fontsize, str(color), round(float(dpi), 3), weight)
     if key not in _STAMP_CACHE:
         from matplotlib.backends.backend_agg import FigureCanvasAgg
         f = Figure(figsize=(1, 1), dpi=dpi)
         FigureCanvasAgg(f)
         f.patch.set_alpha(0)
-        t = f.text(0, 0, text, fontsize=fontsize, color=color, ha='left', va='baseline')
+        t = f.text(0, 0, text, fontsize=fontsize, color=color, ha='left', va='baseline', weight=weight)
         bb = t.get_window_extent(f.canvas.get_renderer())
         w, h = int(np.ceil(bb.width)) + 2, int(np.ceil(bb.height)) + 2
         f.set_size_inches(w / dpi, h / dpi)
@@ -163,15 +203,18 @@ def text_bitmap(text: str, fontsize: float, color, dpi: float) -> np.ndarray:
 
 class TextStamp:
     """A per-frame label drawn as a cached bitmap: Agg text rendering costs several ms per string and frame, a
-    bitmap a fraction of that. Positioned in axes fraction (``box_alignment`` like ``ha`` / ``va``)."""
+    bitmap a fraction of that. Positioned in axes fraction (or ``xycoords``; ``box_alignment`` like ``ha`` / ``va``)."""
 
-    def __init__(self, ax, xy, box_alignment=(1, 1), fontsize=FS_SMALL, color='0.2', zorder=6):
-        self.ax, self.fontsize, self.color = ax, fontsize, color
+    def __init__(self, ax, xy, box_alignment=(1, 1), fontsize=FS_SMALL, color='0.2', zorder=6,
+                 xycoords='axes fraction', weight='normal', text=None):
+        self.ax, self.fontsize, self.color, self.weight = ax, fontsize, color, weight
         self.image = OffsetImage(np.zeros((1, 1, 4)), zoom=1, dpi_cor=True)
-        self.artist = AnnotationBbox(self.image, xy, xycoords='axes fraction', frameon=False,
+        self.artist = AnnotationBbox(self.image, xy, xycoords=xycoords, frameon=False, annotation_clip=False,
                                      box_alignment=box_alignment, pad=0, zorder=zorder)
         ax.add_artist(self.artist)
         self._text, self._dpi = None, None
+        if text is not None:
+            self.set_text(text)
 
     def set_text(self, text: str) -> None:
         dpi = self.ax.figure.dpi
@@ -180,7 +223,7 @@ class TextStamp:
         self._text, self._dpi = text, dpi
         self.artist.set_visible(bool(text))
         if text:
-            self.image.set_data(text_bitmap(text, self.fontsize, self.color, dpi))
+            self.image.set_data(text_bitmap(text, self.fontsize, self.color, dpi, self.weight))
             self.image.set_zoom(72. / dpi)  # dpi_cor scales by dpi/72: the bitmap keeps its pixel size
 
     def get_text(self) -> str:
@@ -195,7 +238,7 @@ class _TrialSeries:
     per_condition: list            # [(x, y, lo, hi, n) | None]
 
 
-class InspectorFigure:
+class CellVizFigure:
     """Draws a ``ViewState``. ``render(state)`` decides whether a full rebuild is needed or only the frame changed.
 
     ``header=True`` (default, used by the MP4 export) writes field, stimulus, channel, signal and the playback time
@@ -333,7 +376,8 @@ class InspectorFigure:
             self.fig.text(0.01, 0.99, f"{s.field_label}  ·  {stim}  ·  {pres.channel}", ha='left', va='top',
                           fontsize=FS_TITLE + 1, weight='bold')
             self.fig.text(0.01, 0.99 - 1.6 * (FS_TITLE + 1) / 72 / self.fig.get_size_inches()[1],
-                          f"{s.signal or 'no traces'} [{units}]  ·  {s.view_text or s.view}  ·  {s.quality_text}",
+                          f"{s.signal or 'no traces'} [{units}]  ·  {s.view_text or s.view}  ·  "
+                          f"overlay: {OVERLAYS[s.overlay]}  ·  {s.quality_text}",
                           ha='left', va='top', fontsize=FS_SMALL)
             self.time_text = self.fig.text(0.99, 0.99, '', ha='right', va='top', fontsize=FS_TITLE + 1)
 
@@ -407,34 +451,58 @@ class InspectorFigure:
         ax.set_yticks([])
 
         self.overlay_image = None
+        layers = []  # everything drawn above the field image: (zorder, artist)
         if labels is None:
-            ax.text(0.5, 0.04, 'no ROI mask', color='w', ha='center', transform=ax.transAxes, fontsize=FS_SMALL)
-            return
+            stamp = TextStamp(ax, (0.5, 0.04), box_alignment=(0.5, 0), color='w', zorder=5, text='no ROI mask')
+            layers.append(stamp.artist)
+        else:
+            layers += self._build_roi_layers(ax, labels)
+
+        if not hr_mode or self.overlay_image is not None:
+            # The field image (movie) or the activity fill changes every frame. With blitting, per-frame artists are
+            # drawn over the cached background, which would hide everything static above them; so the ROI layers
+            # are redrawn every frame as well, in zorder (= the order of a full draw).
+            self._frame_artists += sorted(layers, key=lambda a: a.get_zorder())
+
+    def _build_roi_layers(self, ax, labels: RoiLabels) -> list:
+        """ROI overlay of the field view (``state.overlay``) and the always shown selection; returns the artists."""
+        s = self.state
         key = id(labels)
         if self._outlines.get('key') != key:
             self._outlines = {'key': key, **{int(r): outline_segments(labels.pixels(r)) for r in labels.roi_ids}}
         sel = s.shown_selected
-        others = [self._outlines[r] for r in s.eligible if r in self._outlines and r not in sel]
-        if others:
-            faint = s.display == 'selected'
-            ax.add_collection(LineCollection(np.concatenate(others), colors=OUTLINE_COLOR,
-                                             linewidths=0.5 if faint else 0.8, alpha=0.3 if faint else 0.85))
-        for r in sel:
-            if r in self._outlines:
-                ax.add_collection(LineCollection(self._outlines[r], colors=[s.color_of(r)], linewidths=2.2))
-                yy, xx = np.nonzero(labels.pixels(r))
-                if xx.size:
-                    ax.text(xx.max() + 0.8 * (labels.shape[1] / 64), yy.mean(), str(r), color=s.color_of(r),
-                            fontsize=FS_TICK, weight='bold', va='center')
-
-        if hr_mode and s.overlay and s.signal is not None:
+        layers = []
+        if s.overlay == 'activity' and s.signal is not None:
             ids = [r for r in s.eligible if r in self._cache.rows and r in labels.label_to_roi_id.values()]
             index_img = np.full(labels.shape, -1, dtype=int)
             for k, r in enumerate(ids):
                 index_img[labels.pixels(r)] = k
             self._overlay_ids, self._overlay_index = ids, index_img
-            self.overlay_image = ax.imshow(np.zeros(labels.shape + (4,)), origin='lower', interpolation='nearest')
+            self.overlay_image = ax.imshow(np.zeros(labels.shape + (4,)), origin='lower', interpolation='nearest',
+                                           zorder=2)
             self._frame_artists.append(self.overlay_image)
+        if s.overlay == 'mask':
+            layers.append(ax.imshow(mask_rgba(labels, s.eligible), origin='lower', interpolation='nearest', zorder=2))
+        others = [r for r in s.eligible if r in self._outlines and r not in sel and len(self._outlines[r])]
+        if others and s.overlay == 'mask':  # thin light edges keep touching ROIs apart
+            layers.append(ax.add_patch(_segments_patch(
+                np.concatenate([self._outlines[r] for r in others]), 'w', lw=0.4, alpha=0.6, zorder=3)))
+        elif others and s.overlay in ('outlines', 'activity'):
+            faint = s.display == 'selected'
+            layers.append(ax.add_patch(_segments_patch(
+                np.concatenate([self._outlines[r] for r in others]), OUTLINE_COLOR, lw=0.5 if faint else 0.8,
+                alpha=0.3 if faint else 0.85, zorder=3)))
+        for r in sel:
+            if r in self._outlines:
+                layers.append(ax.add_collection(LineCollection(self._outlines[r], colors=[s.color_of(r)],
+                                                               linewidths=2.2, zorder=4)))
+                yy, xx = np.nonzero(labels.pixels(r))
+                if xx.size:
+                    stamp = TextStamp(ax, (xx.max() + 0.8 * (labels.shape[1] / 64), yy.mean()), xycoords='data',
+                                      box_alignment=(0, 0.5), fontsize=FS_TICK, color=s.color_of(r), weight='bold',
+                                      zorder=5, text=str(r))
+                    layers.append(stamp.artist)
+        return layers
 
     def _build_heatmap(self) -> None:
         s, ax = self.state, self.ax_heat

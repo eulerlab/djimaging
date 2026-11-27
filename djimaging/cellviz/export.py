@@ -1,6 +1,6 @@
-"""MP4 export of the recording inspector.
+"""MP4 export of CellViz.
 
-Every movie frame in the selected time range becomes one video frame, rendered by the same ``InspectorFigure`` as the
+Every movie frame in the selected time range becomes one video frame, rendered by the same ``CellVizFigure`` as the
 notebook view (field view with outlines and highlights, progressing traces, heatmap, trigger markers and elapsed
 time). The time range is mapped to frames with ``timing.frame_range``, the same mapping the viewer uses.
 
@@ -12,6 +12,12 @@ system install needed), otherwise ``ffmpeg`` on the ``PATH``. Invocation (via ``
 ``ffmpeg -f rawvideo -pix_fmt rgb24 -s WxH -r <fps> -i - -c:v libx264 -pix_fmt yuv420p -crf 18 out.mp4``.
 A JSON sidecar (``out.mp4.json``) records presentation, channel, signal, frame range, times, fps, selection and
 filter, so an export can be checked against the viewer.
+
+Where exports go: by default into ``<processed store>/cellviz/`` (``processed_export_dir``), i.e. the writable
+``processed`` store of the DataJoint config, next to (not inside) DataJoint's own ``_hash`` / ``_schema`` folders, which
+are the only folders its garbage collection walks. Without a local ``processed`` store (no config loaded, or a remote
+store) the fallback is ``~/cellviz_exports``. Exports are never written into the read-only data folders (``reference``
+store, experiment folder), see ``check_output_path``.
 """
 from __future__ import annotations
 
@@ -25,11 +31,42 @@ from typing import Iterable, Optional
 
 import numpy as np
 
-from djimaging.inspector.render import InspectorFigure, ViewState
-from djimaging.inspector.timing import frame_range
+from djimaging.cellviz.render import CellVizFigure, ViewState
+from djimaging.cellviz.timing import frame_range
 
-DEFAULT_EXPORT_DIR = Path.home() / 'djimaging_inspector_exports'
+PROCESSED_STORE = 'processed'
+EXPORT_SUBDIR = 'cellviz'
+FALLBACK_EXPORT_DIR = Path.home() / 'cellviz_exports'
 EXPORT_SIZE_PX = (1280, 736)  # divisible by 16 (H.264 macro blocks)
+
+
+def store_location(store: str) -> tuple[Optional[Path], str]:
+    """Local folder of a DataJoint file store, or (None, why not)."""
+    try:
+        import datajoint as dj
+        spec = dj.config.get_store_spec(store)
+    except Exception as e:  # noqa: BLE001 (no config loaded / store not configured)
+        return None, f"DataJoint store {store!r} not configured ({type(e).__name__}: {e})"
+    if spec.get('protocol') != 'file' or not spec.get('location'):
+        return None, f"DataJoint store {store!r} is not a local file store (protocol {spec.get('protocol')!r})"
+    return Path(spec['location']).expanduser().resolve(), f"DataJoint store {store!r}"
+
+
+def processed_export_dir(*parts: str, store: str = PROCESSED_STORE) -> tuple[Path, str]:
+    """Default export folder ``<processed store>/cellviz/<parts...>`` and where it comes from.
+
+    Falls back to ``~/cellviz_exports/<parts...>`` if there is no local ``processed`` store (e.g. offline use without
+    a DataJoint config).
+    """
+    parts = tuple(_safe_part(p) for p in parts if p)
+    location, how = store_location(store)
+    if location is None:
+        return FALLBACK_EXPORT_DIR.joinpath(*parts), f"{how}; using the fallback folder"
+    return location.joinpath(EXPORT_SUBDIR, *parts), how
+
+
+def _safe_part(text: str) -> str:
+    return ''.join(c if c.isalnum() or c in '-_.' else '_' for c in str(text)).strip('._') or 'unnamed'
 
 
 def find_ffmpeg() -> tuple[Optional[str], str]:
@@ -75,7 +112,7 @@ def export_mp4(state: ViewState, path: str | Path, t_start: Optional[float] = No
     fps = speed / pres.frame_dt
     width, height = EXPORT_SIZE_PX
     dpi = 100
-    fig = InspectorFigure(figsize=(width / dpi, height / dpi), dpi=dpi)
+    fig = CellVizFigure(figsize=(width / dpi, height / dpi), dpi=dpi)  # header: field, stimulus, overlay, time
     fig.animated = True
 
     if how == 'PATH':
@@ -103,7 +140,7 @@ def export_mp4(state: ViewState, path: str | Path, t_start: Optional[float] = No
         n_frames=len(frames), frame_start=frames.start, frame_stop=frames.stop,
         t_start=float(pres.frame_times[frames.start]), t_stop=float(pres.frame_times[frames.stop - 1] + pres.frame_dt),
         duration_s=len(frames) / fps, presentation=pres.info.name, key={k: str(v) for k, v in pres.info.key.items()},
-        channel=pres.channel, signal=state.signal, view=state.view, display=state.display,
+        channel=pres.channel, signal=state.signal, view=state.view, overlay=state.overlay, display=state.display,
         selected=[int(r) for r in state.shown_selected], eligible=[int(r) for r in state.eligible],
         quality=state.quality_text, view_text=state.view_text, source=pres.source,
         render_seconds=round(time.time() - t0, 1), size=[width, height])

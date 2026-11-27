@@ -6,9 +6,9 @@ The fake tables implement only the read API the adapter uses (``&``, ``keys``, `
 import numpy as np
 import pytest
 
-from djimaging.inspector.dj_adapter import DataJointFieldSource, InspectorTables
-from djimaging.inspector.quality import classify
-from tests.inspector.synthetic import FRAME_DT, LINE_OFFSETS, ROI_IDS, TRIGGERS, roi_labels_xy, make_presentation
+from djimaging.cellviz.dj_adapter import DataJointFieldSource, CellVizTables
+from djimaging.cellviz.quality import classify
+from tests.cellviz.synthetic import FRAME_DT, LINE_OFFSETS, ROI_IDS, TRIGGERS, roi_labels_xy, make_presentation
 
 FIELD = dict(experimenter='Syn', date='2099-01-01', exp_num=1, field='SYN')
 
@@ -42,6 +42,12 @@ class FakeTable:
     def keys(self):
         return [{k: r[k] for k in self.primary_key} for r in self._rows]
 
+    def proj(self, *attrs):
+        """Primary key + ``attrs`` (as DataJoint's ``proj``)."""
+        clone = self._restrict({})
+        clone._rows = [{k: v for k, v in r.items() if k in self.primary_key or k in attrs} for r in self._rows]
+        return clone
+
     def to_dicts(self):
         return [dict(r) for r in self._rows]
 
@@ -55,7 +61,7 @@ class FakeTable:
         return row[attrs[0]] if len(attrs) == 1 else tuple(row[a] for a in attrs)
 
     def _write(self, *args, **kwargs):
-        raise AssertionError("the inspector must not write to the database")
+        raise AssertionError("CellViz must not write to the database")
 
     insert = insert1 = delete = update1 = drop = _write
 
@@ -87,7 +93,7 @@ def build_tables(n_channels=2, preprocess_ids=(1, 2), qi_rows=True):
                         qi.append(dict(row, preprocess_id=pid, qidx=0.1 * k + pid + ch, min_qidx=0.2))
     ch_pk = ['ch_id'] if n_channels > 1 else []
     trace_pk = pres_pk + ['roi_id'] + ch_pk
-    tables = InspectorTables(
+    tables = CellVizTables(
         presentation=FakeTable(pres_rows, pres_pk, parts=dict(ScanInfo=FakeTable([], pres_pk)),
                                _filepath_store='reference'),
         roi_mask=FakeTable([dict(FIELD, raw_id=1)], list(FIELD) + ['raw_id'],
@@ -163,5 +169,5 @@ def test_unpopulated_qi_means_all_missing():
 def test_from_namespace_picks_schema_names():
     tables, _ = build_tables()
     ns = dict(Presentation=tables.presentation, RoiMask=tables.roi_mask, Traces=tables.traces, ChirpQI=tables.chirp_qi)
-    t = InspectorTables.from_namespace(ns)
+    t = CellVizTables.from_namespace(ns)
     assert t.presentation is tables.presentation and t.chirp_qi is tables.chirp_qi and t.os_ds_indexes is None

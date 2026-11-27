@@ -28,11 +28,13 @@ cd djimaging
 uv pip install -e .
 ```
 
-If you want to use autorois or receptive fields, install with the optional extras:
+If you want to use autorois, receptive fields or the CellViz viewer (see [CellViz](#cellviz-inspect-recordings)),
+install with the optional extras:
 ```bash
 uv pip install -e ".[autorois]"
 uv pip install -e ".[rf]"
-uv pip install -e ".[autorois,rf]"
+uv pip install -e ".[cellviz]"
+uv pip install -e ".[autorois,rf,cellviz]"
 ```
 
 ### AutoROIs models
@@ -188,8 +190,7 @@ Every block has two matching parts:
   <code>@schema</code> and binds their abstract table attributes. A block imports the block it builds on
   (e.g. <code>from djimaging.schemas.blocks.core import *</code>), so it is also a valid, importable schema on its own.
 - **Notebook part**: <code>djimaging/notebooks/blocks/&lt;name&gt;.py</code> is a percent-format
-  (<code># %%</code>) notebook section. <code>inspector.py</code> (opt-in recording inspector, see below) and
-  <code>cleanup.py</code> are always appended last; the placeholders
+  (<code># %%</code>) notebook section. <code>cleanup.py</code> is always appended last; the placeholders
   <code>__SCHEMA_MODULE__</code> and <code>__BLOCKS__</code> are filled in with your schema module and the selected blocks.
 
 To generate your files, <code>make_project.py</code>
@@ -215,25 +216,45 @@ re-exports the <code>core</code> block.
 3. Register the block in <code>BLOCKS</code> in <code>make_project.py</code> with a `description` and its `requires`.
    The order of that dict is the order in the generated files, so list a block after the blocks it requires.
 
-### Inspect recordings
+### CellViz: inspect recordings
 
-<code>djimaging.inspector</code> is a read-only notebook viewer for one field after ROI masks are loaded: choose a
+<code>djimaging.cellviz</code> is a read-only notebook viewer for one field of your populated schema: choose a
 presentation and channel, play back the functional movie with the ROIs of that presentation's mask (or the HighRes
-image with the ROIs registered onto it), select cells by clicking or from a list, and follow their traces (or an
-ROI x time heatmap of all eligible ROIs) in sync with the movie and the stimulus triggers, next to their trial mean ±
-SD (repeats cut like <code>Snippets</code>; for the moving bar per direction). A quality filter uses
-<code>ChirpQI.qidx</code> (chirp) and <code>OsDsIndexes.d_qi</code> (moving bar), and the current view can be exported
-as MP4. Nothing is written to the database and no table is added.
+image with the ROIs registered onto it), show the ROI outlines, the ROI mask or the ROI activity as overlay, select
+cells by clicking or from a list, and follow their traces (or an ROI x time heatmap of all eligible ROIs) in sync with
+the movie and the stimulus triggers, next to their trial mean ± SD (repeats cut like <code>Snippets</code>; for the
+moving bar per direction). A quality filter uses <code>ChirpQI.qidx</code> (chirp) and <code>OsDsIndexes.d_qi</code>
+(moving bar), and the current view can be exported as MP4, by default into <code>&lt;processed store&gt;/cellviz/</code>.
+Nothing is written to the database and no table is added.
 
 ```bash
-uv pip install -e ".[inspector]"   # ipywidgets, imageio-ffmpeg (MP4 export), ipympl (clickable figure)
+uv pip install -e ".[cellviz]"   # ipywidgets, imageio-ffmpeg (MP4 export), ipympl (clickable figure)
 ```
 
-- In the generated populate notebook: section *Inspect recordings*, set <code>INSPECT_RECORDINGS = True</code>
-  (uses <code>open_recording_inspector(globals(), field_key)</code>).
-- Without database, on local ScanM files and saved masks: <code>djimaging/notebooks/tutorial_recording_inspector.py</code>
-  (<code>RecordingInspector(LocalFieldSource(experiment_dir, field='GCL0'))</code>); traces, triggers and QIs are then
-  recomputed with djimaging's functions and default parameters and labelled as such.
+Once <code>RoiMask</code> and <code>Traces</code> (and optionally <code>PreprocessTraces</code>, the QI tables and
+<code>HighRes</code>) are populated, connect to your database and import and activate your schema as in your populate
+notebook (<code>dj.config.load(...)</code>, <code>from djimaging.user.&lt;project&gt;.schemas.&lt;project&gt;_schema
+import *</code>, <code>activate_schema(...)</code>), then:
+
+```python
+from djimaging.cellviz import CellViz
+
+fields = CellViz.list_fields(schema)  # fields with a ROI mask and traces
+cv = CellViz.from_schema(schema, field_key=dict(date='2026-09-16', field='GCL0'))  # a (partial) key of one field
+cv
+```
+
+Instead of <code>schema</code>, you can also pass your schema module or <code>globals()</code>. The field key may be
+partial as long as it matches exactly one field; <code>field_key=None</code> takes the first field.
+
+The tutorial <code>djimaging/notebooks/tutorial_cellviz.ipynb</code> (also copied into your project by
+<code>make_project.py</code>) walks through connecting, choosing a field, the overlays and the MP4 export; replace its
+placeholders (config file path, <code>YOUR_PROJECT</code>) first.
+
+CellViz also works without database, on the ScanM files and saved ROI masks of one experiment folder:
+<code>CellViz(LocalFieldSource(experiment_dir, field='GCL0', roi_mask_dir='AutoROIs'))</code> (both from
+<code>djimaging.cellviz</code>). Traces, triggers and QIs are then recomputed with djimaging's functions and default
+parameters and labelled as such.
 
 ### Clean up
 

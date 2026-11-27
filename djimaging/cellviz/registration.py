@@ -25,7 +25,7 @@ from typing import Mapping, Optional
 
 import numpy as np
 
-from djimaging.inspector.data import HighResImage, PresentationData, RoiLabels
+from djimaging.cellviz.data import HighResImage, PresentationData, RoiLabels
 
 FOV_RTOL = 0.01       # relative tolerance for equal field of view
 CENTER_ATOL_PX = 1.0  # tolerance for equal scan centre, in functional pixels

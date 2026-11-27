@@ -1,7 +1,7 @@
 """Offline loader on the SYNTHETIC ScanM dataset of ``tests/fixtures`` (h5 files) and, opt-in, on real local data.
 
-Real data: set ``DJIMAGING_INSPECTOR_DATA`` to an experiment folder with ``Raw/*.smp`` and ``AutoROIs/*_ROIs.pkl``
-(e.g. ``data/20260916/1``) and optionally ``DJIMAGING_INSPECTOR_FIELD`` (default ``GCL0``).
+Real data: set ``DJIMAGING_CELLVIZ_DATA`` to an experiment folder with ``Raw/*.smp`` and ``AutoROIs/*_ROIs.pkl``
+(e.g. ``data/20260916/1``) and optionally ``DJIMAGING_CELLVIZ_FIELD`` (default ``GCL0``).
 """
 import os
 import shutil
@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from djimaging.inspector.offline import LocalFieldSource
+from djimaging.cellviz.offline import LocalFieldSource
 from djimaging.utils.mask_format_utils import to_igor_format
 from tests.fixtures.synthetic_scanm import EXPERIMENT_DAY, EXPERIMENT_NUMBER, RECORDING_PREFIX, expected_trace_times
 
@@ -21,7 +21,7 @@ def no_database(monkeypatch):
     import datajoint as dj
 
     def refuse(*args, **kwargs):
-        raise AssertionError("the offline inspector must not connect to a database")
+        raise AssertionError("offline CellViz must not connect to a database")
 
     monkeypatch.setattr(dj, 'conn', refuse)
     monkeypatch.setattr(dj.connection, 'conn', refuse, raising=False)
@@ -88,12 +88,12 @@ def test_offline_does_not_write_into_data(experiment, no_database):
     assert before == after
 
 
-REAL = os.environ.get('DJIMAGING_INSPECTOR_DATA')
+REAL = os.environ.get('DJIMAGING_CELLVIZ_DATA')
 
 
-@pytest.mark.skipif(not REAL, reason='set DJIMAGING_INSPECTOR_DATA to a local experiment folder to run')
+@pytest.mark.skipif(not REAL, reason='set DJIMAGING_CELLVIZ_DATA to a local experiment folder to run')
 def test_offline_real_data(no_database):
-    field = os.environ.get('DJIMAGING_INSPECTOR_FIELD', 'GCL0')
+    field = os.environ.get('DJIMAGING_CELLVIZ_FIELD', 'GCL0')
     src = LocalFieldSource(REAL, field=field)
     infos = src.list_presentations()
     chirp = next(i for i in infos if i.stim_name == 'chirp')

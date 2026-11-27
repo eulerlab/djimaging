@@ -1,18 +1,27 @@
-"""Notebook recording inspector (read-only).
+"""CellViz notebook viewer (read-only).
 
 Select a presentation (and channel) of one field, play back the functional movie with the ROIs of that presentation's
 mask, and follow the traces of selected ROIs (or the eligible population) building up in sync with the movie, next to
 their trial mean ± SD.
 
+Usage (pipeline, after RoiMask / Traces (/ QI tables) are populated)::
+
+    from djimaging.cellviz import CellViz
+    CellViz.list_fields(my_schema)                                    # fields with traces
+    CellViz.from_schema(my_schema, field_key=dict(date='2026-09-16', field='GCL0'))
+
+``my_schema`` is your schema module, ``globals()`` after ``from my_schema import *``, or its ``schema`` object.
+
 Usage (offline, no database)::
 
-    from djimaging.inspector import LocalFieldSource, RecordingInspector
-    RecordingInspector(LocalFieldSource('/path/to/20260916/1', field='GCL0'))
+    from djimaging.cellviz import LocalFieldSource, CellViz
+    CellViz(LocalFieldSource('/path/to/20260916/1', field='GCL0'))
 
-Usage (pipeline, after RoiMask / Traces / QI tables are populated)::
+Field view overlays (``Overlay`` dropdown, ``set_overlay``), in the Recording and the HighRes view: ROI outlines of the
+eligible ROIs, the ROI mask (filled labels, ROIs excluded by the quality filter in grey), the ROI activity (each ROI
+filled by its trace value at the current time) or none. The selected ROIs are always outlined in their colour.
 
-    from djimaging.inspector import open_recording_inspector
-    open_recording_inspector(globals(), field_key)
+MP4 exports go to the folder in the export row, by default ``<processed store>/cellviz/<schema>`` (see ``export``).
 
 Display backends: with ``%matplotlib widget`` (needs the optional ``ipympl`` package) ROIs can be clicked in the field
 view or the heatmap and the trace panels can be clicked to seek. Without it, the figure is shown as an image that
@@ -39,31 +48,49 @@ from typing import Optional
 
 import numpy as np
 
-from djimaging.inspector.data import PresentationData
-from djimaging.inspector.export import DEFAULT_EXPORT_DIR, export_mp4, find_ffmpeg
-from djimaging.inspector.quality import classify
-from djimaging.inspector.registration import map_labels_to_highres, register_highres, rois_outside
-from djimaging.inspector.render import InspectorFigure, ViewState
-from djimaging.inspector.timing import frame_index_at
+from djimaging.cellviz.data import PresentationData
+from djimaging.cellviz.export import export_mp4, find_ffmpeg, processed_export_dir
+from djimaging.cellviz.quality import classify
+from djimaging.cellviz.registration import map_labels_to_highres, register_highres, rois_outside
+from djimaging.cellviz.render import OVERLAYS, CellVizFigure, ViewState
+from djimaging.cellviz.timing import frame_index_at
 
 SPEEDS = (0.25, 0.5, 1.0, 2.0)
 DEFAULT_THRESHOLDS = {'qidx': 0.35, 'd_qi': 0.6}  # common starting points; the filter itself starts off
 SIDEBAR_WIDTH = '230px'
 
 
-class RecordingInspector:
-    """Interactive inspector for a field source (``LocalFieldSource`` or ``DataJointFieldSource``).
+class CellViz:
+    """Interactive CellViz viewer for a field source (``LocalFieldSource`` or ``DataJointFieldSource``).
+
+    In the pipeline, open it with ``CellViz.from_schema(schema, field_key)``.
 
     The state can also be driven from code (``select_presentation``, ``set_channel``, ``select_rois``,
-    ``set_threshold``, ``set_view``, ``set_time``, ``export``), which is what the tests do.
+    ``set_threshold``, ``set_view``, ``set_overlay``, ``set_time``, ``export``), which is what the tests do.
 
     Parameters
     ----------
     width : figure width in CSS pixels (height follows at a fixed aspect ratio).
+    export_dir : folder for MP4 exports; default ``<processed store>/cellviz/<schema>`` (``~/cellviz_exports``
+        without a local ``processed`` store). Can be changed in the export row.
+    overlay : initial field overlay, one of ``OVERLAYS`` ('outlines', 'mask', 'activity', 'none').
     """
 
+    @classmethod
+    def from_schema(cls, schema, field_key=None, raw_id=None, preprocess_id=None, **kwargs) -> "CellViz":
+        """CellViz for one field of a populated, activated schema (read-only); see ``open_cellviz``."""
+        return open_cellviz(schema, field_key=field_key, raw_id=raw_id, preprocess_id=preprocess_id, **kwargs)
+
+    @staticmethod
+    def list_fields(schema):
+        """Fields of ``schema`` that CellViz can show (ROI mask + Traces), as a DataFrame of field keys."""
+        import pandas as pd
+        from djimaging.cellviz.dj_adapter import CellVizTables, list_fields
+        return pd.DataFrame(list_fields(CellVizTables.from_schema(schema)))
+
     def __init__(self, source, presentation: Optional[str] = None, channel: Optional[str] = None,
-                 backend: str = 'auto', width: int = 800, dpi: int = 100, export_dir=None, figsize=None):
+                 backend: str = 'auto', width: int = 800, dpi: int = 100, export_dir=None, figsize=None,
+                 overlay: str = 'outlines'):
         import ipywidgets as widgets
         self._w = widgets
         self.source = source
@@ -79,11 +106,19 @@ class RecordingInspector:
             import matplotlib.pyplot as plt
             with plt.ioff():
                 fig = plt.figure(figsize=figsize, dpi=dpi)
-            self.figure = InspectorFigure(fig, header=False)
+            self.figure = CellVizFigure(fig, header=False)
         else:
-            self.figure = InspectorFigure(figsize=figsize, dpi=dpi, header=False)
+            self.figure = CellVizFigure(figsize=figsize, dpi=dpi, header=False)
         self.figure.animated = True  # blitting in both backends (ipympl sends only the changed pixels)
-        self.export_dir = Path(export_dir) if export_dir is not None else DEFAULT_EXPORT_DIR
+        if export_dir is not None:
+            self._export_dir_source = 'given'
+        elif hasattr(source, 'default_export_dir'):
+            export_dir, self._export_dir_source = source.default_export_dir()
+        else:
+            export_dir, self._export_dir_source = processed_export_dir()
+        self._initial_export_dir = Path(export_dir).expanduser()
+        if overlay not in OVERLAYS:
+            raise ValueError(f"overlay must be one of {list(OVERLAYS)}, got {overlay!r}")
 
         self.infos = {i.name: i for i in source.list_presentations()}
         if not self.infos:
@@ -93,7 +128,7 @@ class RecordingInspector:
         self.threshold: Optional[float] = None
         self.view = 'native'
         self.display = 'all'
-        self.overlay = True
+        self.overlay = overlay
         self.signal: Optional[str] = None
         self.frame = 0
         self._highres = {}                 # channel -> (HighResImage | None, note)
@@ -129,6 +164,21 @@ class RecordingInspector:
 
     def set_display(self, display: str) -> None:
         self.w_display.value = display
+
+    def set_overlay(self, overlay: str) -> None:
+        """Field view overlay: 'outlines', 'mask' (ROI mask), 'activity' or 'none' (Recording and HighRes view)."""
+        if overlay not in OVERLAYS:
+            raise ValueError(f"overlay must be one of {list(OVERLAYS)}, got {overlay!r}")
+        self.w_overlay.value = overlay
+
+    @property
+    def export_dir(self) -> Path:
+        """Folder of the MP4 exports (the export row's folder field)."""
+        return Path(self.w_export_dir.value.strip()).expanduser()
+
+    @export_dir.setter
+    def export_dir(self, path) -> None:
+        self.w_export_dir.value = str(path)
 
     def set_threshold(self, threshold: Optional[float]) -> None:
         """``None`` turns the quality filter off; otherwise ROIs with QI >= threshold are eligible."""
@@ -196,18 +246,25 @@ class RecordingInspector:
 
     def export(self, path=None, t_start: Optional[float] = None, t_stop: Optional[float] = None,
                speed: float = 1.0) -> dict:
-        """Export the current view to MP4 (see ``export.export_mp4``); independent of the preview speed."""
-        if path is None:
+        """Export the current view to MP4 (see ``export.export_mp4``); independent of the preview speed.
+
+        ``path``: an ``.mp4`` file, or a folder (the file name is generated); default: ``export_dir``."""
+        if path is None or Path(path).suffix.lower() != '.mp4':
             stem = f"{self.pres.info.name.split()[0]}_{self.pres.channel}_{time.strftime('%Y%m%d-%H%M%S')}"
-            path = self.export_dir / f"{_safe(getattr(self.source, 'label', 'field'))}_{_safe(stem)}.mp4"
-        roots = list(getattr(self.source, 'data_roots', ())) + \
-            [p for p in [getattr(self.source, 'experiment_dir', None)] if p is not None]
-        meta = export_mp4(self.state, path, t_start=t_start, t_stop=t_stop, speed=speed, forbidden_roots=roots,
+            folder = self.export_dir if path is None else Path(path).expanduser()
+            path = folder / f"{_safe(getattr(self.source, 'label', 'field'))}_{_safe(stem)}.mp4"
+        meta = export_mp4(self.state, path, t_start=t_start, t_stop=t_stop, speed=speed,
+                          forbidden_roots=self._forbidden_roots(),
                           progress=lambda k, n: setattr(self.w_export_status, 'value', f'rendering {k}/{n}'))
         self.last_export = meta
         self.w_export_status.value = (f"wrote {html.escape(meta['file'])} ({meta['n_frames']} frames, "
                                       f"{meta['t_start']:.2f}-{meta['t_stop']:.2f} s, {meta['fps']:.2f} fps)")
         return meta
+
+    def _forbidden_roots(self) -> list:
+        """Read-only data folders of the source (reference store / experiment folder): never export into them."""
+        return list(getattr(self.source, 'data_roots', ())) + \
+            [p for p in [getattr(self.source, 'experiment_dir', None)] if p is not None]
 
     def playback_stats(self) -> dict:
         """Median per-frame times (ms) of the frame-only renders so far: preparing the artists, Matplotlib drawing,
@@ -245,8 +302,11 @@ class RecordingInspector:
                                       style=dict(button_width='88px'), tooltips=[
                                           'functional movie at recording resolution',
                                           'static HighRes image with the registered ROIs'])
-        self.w_overlay = w.Checkbox(value=True, description='trace overlay (HighRes)', indent=False,
-                                    layout=lay(width='auto'))
+        self.w_overlay = w.Dropdown(options=[(label, key) for key, label in OVERLAYS.items()], value=self.overlay,
+                                    description='Overlay', layout=lay(width='190px'),
+                                    style=dict(description_width='52px'),
+                                    tooltip='drawn on the field view (Recording and HighRes); selected ROIs are '
+                                            'always outlined')
         self.w_display = w.ToggleButtons(options=[('All eligible ROIs', 'all'), ('Selected ROIs', 'selected')],
                                          value='all', style=dict(button_width='118px'))
 
@@ -272,6 +332,9 @@ class RecordingInspector:
         self.w_export_speed = w.Dropdown(options=[(f'{s:g}x', s) for s in SPEEDS], value=1.0,
                                          description='export speed', layout=lay(width='160px'),
                                          style=dict(description_width='80px'))
+        self.w_export_dir = w.Text(value=str(self._initial_export_dir), description='folder',
+                                   layout=lay(width='auto', flex='1 1 320px'), style=dict(description_width='42px'),
+                                   tooltip=f'export folder (default from {self._export_dir_source})')
         self.w_export = w.Button(description='Export MP4', icon='film', layout=lay(width='120px'))
         ffmpeg, how = find_ffmpeg()
         self.w_export_status = w.HTML(value='' if ffmpeg else f'<span style="color:#a00">export unavailable: {how}</span>',
@@ -329,7 +392,8 @@ class RecordingInspector:
             row([self.w_view, self.w_display, self.w_overlay]),
             row([canvas_box, sidebar], align_items='flex-start'),
             row([self.w_play, self.w_frame, self.w_speed, self.w_time]),
-            row([self.w_t0, self.w_t1, self.w_export_speed, self.w_export, self.w_export_status]),
+            row([self.w_t0, self.w_t1, self.w_export_speed, self.w_export_dir, self.w_export]),
+            row([self.w_export_status]),
             self.w_status, self.w_details], layout=lay(width='100%', max_width='100%'))
 
     # =================================================================== loading
@@ -620,6 +684,9 @@ class RecordingInspector:
             section('Mask', [', '.join(f"{k}={v}" for k, v in p.mask_info.items())] +
                     [f"ROI {r}: {msg}" for r, msg in sorted(p.roi_notes.items())]),
             section('HighRes', [self._registration_note]),
+            section('Export', [f"default folder from {self._export_dir_source}: {self._initial_export_dir}",
+                               "data folders are never written to: " +
+                               (', '.join(map(str, self._forbidden_roots())) or '(none known)')]),
             section('Notes', list(getattr(self.source, 'notes', [])) + list(p.notes) + sel_notes +
                     (["image mode: select ROIs in the list (clicking needs %matplotlib widget / ipympl)"]
                      if self.backend == 'image' else [])),
@@ -723,15 +790,27 @@ def _safe(text: str) -> str:
     return ''.join(c if c.isalnum() or c in '-_' else '_' for c in str(text)).strip('_')
 
 
-def open_recording_inspector(namespace, field_key=None, raw_id=None, preprocess_id=None, **kwargs) -> RecordingInspector:
-    """Notebook hook: inspector for one field of an activated schema, from the tables in ``namespace`` (``globals()``).
+def open_cellviz(schema, field_key=None, raw_id=None, preprocess_id=None, **kwargs) -> CellViz:
+    """CellViz for one field of a populated, activated schema (read-only); display the result in a notebook cell.
 
-    Read-only; returns the inspector (display it as the last expression of a cell).
+    Parameters
+    ----------
+    schema : your schema module, ``globals()`` after ``from my_schema import *``, the module's ``schema`` object, or a
+        ``CellVizTables``. Tables are found by their example-schema names (``Presentation``, ``RoiMask``, ``Traces``,
+        and if present ``PreprocessTraces``, ``ChirpQI``, ``OsDsIndexes``, ``HighRes``, ...).
+    field_key : the field to show; may be partial (e.g. ``dict(date='2026-09-16', field='GCL0')``) as long as it
+        matches one field with traces (``CellViz.list_fields(schema)``), or a longer key, e.g. of a presentation.
+        ``None``: the first field with traces.
+    raw_id, preprocess_id : pin these if the schema has several parameter sets.
+    kwargs : passed to ``CellViz`` (``presentation``, ``channel``, ``overlay``, ``export_dir``, ``width``, ...).
     """
-    from djimaging.inspector.dj_adapter import DataJointFieldSource, InspectorTables
-    tables = InspectorTables.from_namespace(namespace)
-    if field_key is None:
-        field_key = list((tables.roi_mask.proj() & tables.traces.proj()).keys())[0]
-    field_key = {k: v for k, v in dict(field_key).items() if k in tables.roi_mask.primary_key and k != 'raw_id'}
+    from djimaging.cellviz.dj_adapter import CellVizTables, DataJointFieldSource, resolve_field_key
+    tables = CellVizTables.from_schema(schema)
+    if raw_id is None and field_key is not None:
+        raw_id = dict(field_key).get('raw_id')
+    if raw_id is not None:
+        field_key = dict(field_key or {}, raw_id=raw_id)
+    field_key, notes = resolve_field_key(tables, field_key)
     source = DataJointFieldSource(tables, field_key, raw_id=raw_id, preprocess_id=preprocess_id)
-    return RecordingInspector(source, **kwargs)
+    source.notes = notes + source.notes
+    return CellViz(source, **kwargs)

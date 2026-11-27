@@ -1,4 +1,4 @@
-"""Source-independent data model of the recording inspector.
+"""Source-independent data model of CellViz.
 
 Loaders (``offline.LocalFieldSource`` for local ScanM files, ``dj_adapter.DataJointFieldSource`` for pipeline results)
 convert what they read into these objects; the renderer and the viewer only see these objects.
@@ -21,7 +21,7 @@ from typing import Mapping, Optional, Sequence
 
 import numpy as np
 
-from djimaging.inspector.timing import check_increasing, samples_in_interval
+from djimaging.cellviz.timing import check_increasing, samples_in_interval
 from djimaging.utils.mask_format_utils import is_igor_format, to_igor_format
 
 
@@ -189,7 +189,7 @@ class PresentationInfo:
 
 @dataclass(frozen=True)
 class PresentationData:
-    """Everything the inspector shows for one presentation and one channel."""
+    """Everything CellViz shows for one presentation and one channel."""
     info: PresentationInfo
     channel: str
     frames: np.ndarray            # (n_frames, y, x)

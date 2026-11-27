@@ -1,17 +1,17 @@
-"""Data model, timing, quality filter, registration and renderer of the recording inspector (SYNTHETIC data)."""
+"""Data model, timing, quality filter, registration and renderer of CellViz (SYNTHETIC data)."""
 from dataclasses import replace
 
 import numpy as np
 import pytest
 
-from djimaging.inspector.data import PresentationData, RoiLabels, Signal, Trace, to_display
-from djimaging.inspector.quality import classify, quality_family, unsupported_reason
-from djimaging.inspector.registration import (
+from djimaging.cellviz.data import PresentationData, RoiLabels, Signal, Trace, to_display
+from djimaging.cellviz.quality import classify, quality_family, unsupported_reason
+from djimaging.cellviz.registration import (
     Registration, check_metadata, estimate_shift, map_labels_to_highres, register_highres, rois_outside)
-from djimaging.inspector.render import InspectorFigure, ViewState, outline_segments
-from djimaging.inspector.timing import frame_index_at, frame_range, n_samples_before
+from djimaging.cellviz.render import CellVizFigure, ViewState, outline_segments
+from djimaging.cellviz.timing import frame_index_at, frame_range, n_samples_before
 from djimaging.utils.mask_format_utils import to_python_format
-from tests.inspector.synthetic import (
+from tests.cellviz.synthetic import (
     FRAME_DT, HR_SCALE, HR_SHIFT, LINE_OFFSETS, NX, NY, ROI_IDS, SyntheticFieldSource, make_highres, roi_labels_xy)
 
 
@@ -141,7 +141,7 @@ def _state(pres, **kw):
 
 def test_frame_trace_and_heatmap_share_the_clock(source):
     pres = source.load_presentation('chirp [drug]')  # offset 10000, ROI 11 starts at frame 10
-    fig = InspectorFigure()
+    fig = CellVizFigure()
     for i in (0, 5, 37, len(pres.frame_times) - 1):
         fig.render(_state(pres, frame=i, selected=(2, 11)))
         t0, t1 = pres.frame_interval(i)
@@ -162,7 +162,7 @@ def test_frame_trace_and_heatmap_share_the_clock(source):
 
 def test_selected_outline_matches_mask_and_click(source):
     pres = source.load_presentation('chirp [drug]')  # shifted mask
-    fig = InspectorFigure()
+    fig = CellVizFigure()
     fig.render(_state(pres, selected=(5,)))
     seg = [c for c in fig.ax_field.collections if len(c.get_segments()) == len(outline_segments(pres.rois.pixels(5)))]
     assert any(np.allclose(np.array(c.get_segments()), outline_segments(pres.rois.pixels(5))) for c in seg)
@@ -177,8 +177,8 @@ def test_highres_view_click_maps_to_same_roi(source):
     hr = make_highres(pres)
     reg = register_highres(pres, hr)
     hr_rois = map_labels_to_highres(pres.rois, reg, hr.image.shape)
-    fig = InspectorFigure()
-    fig.render(_state(pres, view='highres', highres=hr, hr_rois=hr_rois, selected=(11,), frame=30))
+    fig = CellVizFigure()
+    fig.render(_state(pres, view='highres', highres=hr, hr_rois=hr_rois, selected=(11,), frame=30, overlay='activity'))
     ys, xs = np.nonzero(hr_rois.pixels(11))
     assert fig.roi_at(fig.ax_field, float(xs[0]), float(ys[0])) == 11
     assert fig.overlay_image is not None and fig.overlay_image.get_array().shape == hr.image.shape + (4,)
@@ -186,7 +186,7 @@ def test_highres_view_click_maps_to_same_roi(source):
 
 def test_frame_only_update_does_not_rebuild(source):
     pres = source.load_presentation('chirp [control]')
-    fig = InspectorFigure()
+    fig = CellVizFigure()
     fig.render(_state(pres, frame=1))
     ax, image = fig.ax_field, fig.movie_image
     fig.render(_state(pres, frame=2))

@@ -37,11 +37,11 @@ from typing import Mapping, Optional
 
 import numpy as np
 
-from djimaging.inspector.data import (
+from djimaging.cellviz.data import (
     HighResImage, PresentationData, PresentationInfo, QualityValues, RoiLabels, Signal, StimulusInfo, Trace,
     to_display)
-from djimaging.inspector.quality import quality_family, unsupported_reason
-from djimaging.inspector.timing import sample_times
+from djimaging.cellviz.quality import quality_family, unsupported_reason
+from djimaging.cellviz.timing import sample_times
 
 # Defaults of UserInfoTemplate and of the userinfo in the notebook blocks (raw files have no datatype prefix).
 DEFAULT_USERINFO = dict(
@@ -89,7 +89,7 @@ def trigger_labels_for(triggers: np.ndarray, stim: Optional[Mapping]) -> Optiona
     """Short labels of the triggers: ``'rep k'`` at repetition starts, or the condition of every trigger for
     one-trigger trials (moving bar: the direction, ``'45°'``; ``trial_info`` order). Repeat boundaries of one-trigger
     trials are marked by the renderer, not in the label, so that labels stay short."""
-    from djimaging.inspector.trials import condition_label
+    from djimaging.cellviz.trials import condition_label
     n = len(triggers)
     if stim is None or n == 0 or not stim.get('isrepeated'):
         return None
@@ -424,7 +424,7 @@ class LocalFieldSource:
         elif not do_quality:
             unavailable = "no triggers or stimulus is not repeated: QI cannot be computed"
         else:
-            from djimaging.inspector.quality import QUALITY_METRICS
+            from djimaging.cellviz.quality import QUALITY_METRICS
             table, metric = QUALITY_METRICS[family]
             quality = QualityValues(
                 table=table, metric=metric, values=qvals, reference=qref,

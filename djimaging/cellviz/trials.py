@@ -1,4 +1,4 @@
-"""Trial-aligned summaries for the "Trial mean ± SD" panel of the recording inspector.
+"""Trial-aligned summaries for the "Trial mean ± SD" panel of CellViz.
 
 Alignment is the pipeline's: every ROI trace is cut with ``split_trace_by_reps`` exactly like ``SnippetsTemplate.make``
 (``ntrigger_rep``, ``delay = stim_dict['trigger_delay']``, ``allow_drop_last=True``, ``pad_trace = Snippets._pad_trace``;
@@ -23,7 +23,7 @@ from typing import Iterable, Optional
 
 import numpy as np
 
-from djimaging.inspector.data import PresentationData, StimulusInfo, Trace
+from djimaging.cellviz.data import PresentationData, StimulusInfo, Trace
 
 
 def condition_label(name) -> str:

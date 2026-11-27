@@ -1,4 +1,4 @@
-"""Trial mean ± SD panel, blitting and layout of the recording inspector (SYNTHETIC data).
+"""Trial mean ± SD panel, blitting and layout of CellViz (SYNTHETIC data).
 
 Synthetic encoding (see ``synthetic.py``): sample ``j`` of ROI ``k`` in presentation offset ``P`` is ``P + 100 k + j``
 at ``t = j * 0.05 + line offset``. Triggers 1.0, 1.5, 3.0, 3.5 s. With ``pad_trace=True`` the pipeline starts each
@@ -10,10 +10,10 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from djimaging.inspector.data import StimulusInfo
-from djimaging.inspector.render import InspectorFigure, ViewState
-from djimaging.inspector.trials import TrialCache, summarize, trial_layout
-from tests.inspector.synthetic import FRAME_DT, TRIGGERS, SyntheticFieldSource
+from djimaging.cellviz.data import StimulusInfo
+from djimaging.cellviz.render import CellVizFigure, ViewState
+from djimaging.cellviz.trials import TrialCache, summarize, trial_layout
+from tests.cellviz.synthetic import FRAME_DT, TRIGGERS, SyntheticFieldSource
 
 
 @pytest.fixture
@@ -74,7 +74,7 @@ def test_single_repeat_has_no_sd_and_invalid_repeats_are_skipped(source):
 
 def test_no_repeat_structure_disables_panel(source):
     pres = replace(source.load_presentation('chirp [control]'), stimulus=None)
-    fig = InspectorFigure()
+    fig = CellVizFigure()
     fig.render(_state(pres, frame=50))
     assert not fig._trial_series and fig._trials.unavailable_reason() == 'stimulus unknown: no repeat structure'
 
@@ -86,7 +86,7 @@ def _trial_xy(fig, k=0):
 
 def test_trial_panel_reveals_progressively_forward_and_backward(source):
     pres = source.load_presentation('chirp [control]')
-    fig = InspectorFigure()
+    fig = CellVizFigure()
     for i in (5, 30, 45, 70, 30, 10, 70):  # includes backward jumps and a jump into the second repeat
         fig.render(_state(pres, frame=i, display='selected', selected=(2,)))
         t0, t1 = pres.frame_interval(i)
@@ -109,7 +109,7 @@ def test_trial_panel_reveals_progressively_forward_and_backward(source):
 
 def test_trial_panel_follows_current_direction(source):
     pres = source.load_presentation('movingbar')
-    fig = InspectorFigure()
+    fig = CellVizFigure()
     for i, cond in ((35, '180°'), (65, '0°'), (78, '180°')):  # t1 = 1.8 s (trial 1), 3.3 s (trial 2), 3.95 s (trial 3)
         fig.render(_state(pres, frame=i, display='selected', selected=(2,)))
         x, y = _trial_xy(fig)
@@ -120,7 +120,7 @@ def test_trial_panel_follows_current_direction(source):
 
 def test_selected_colours_match_between_panels_and_population_mode(source):
     pres = source.load_presentation('chirp [control]')
-    fig = InspectorFigure()
+    fig = CellVizFigure()
     fig.render(_state(pres, frame=60, display='selected', selected=(5, 2)))
     trace_colours = [line.get_color() for line, _, _ in fig._trace_lines]
     trial_colours = [s.line.get_color() for s in fig._trial_series]
@@ -133,7 +133,7 @@ def test_selected_colours_match_between_panels_and_population_mode(source):
 
 def test_click_on_trial_panel_seeks_within_current_trial(source):
     pres = source.load_presentation('chirp [control]')
-    fig = InspectorFigure()
+    fig = CellVizFigure()
     fig.render(_state(pres, frame=70))
     assert fig.time_at(fig.ax_trial, 0.5) == pytest.approx(3.5)
 
@@ -142,12 +142,12 @@ def test_click_on_trial_panel_seeks_within_current_trial(source):
 @pytest.mark.parametrize('display', ['all', 'selected'])
 def test_blitted_frames_leave_no_stale_pixels(source, display):
     pres = source.load_presentation('movingbar')
-    blit = InspectorFigure()
+    blit = CellVizFigure()
     blit.animated = True
     for i in (10, 40, 75, 25):  # several frames, incl. a direction change and a backward jump
         blit.render(_state(pres, frame=i, display=display, selected=(2, 11)))
         blit.draw()
-    ref = InspectorFigure()  # fresh figure, first draw of frame 25 (full draw + per-frame artists on top)
+    ref = CellVizFigure()  # fresh figure, first draw of frame 25 (full draw + per-frame artists on top)
     ref.animated = True
     ref.render(_state(pres, frame=25, display=display, selected=(2, 11)))
     ref.draw()
@@ -159,7 +159,7 @@ def test_blitted_frames_leave_no_stale_pixels(source, display):
 def test_field_axes_square_and_bottom_row_split(source):
     pres = source.load_presentation('chirp [control]')
     for size in ((9.0, 6.2), (12.8, 7.36), (6.0, 5.0)):
-        fig = InspectorFigure(figsize=size)
+        fig = CellVizFigure(figsize=size)
         fig.render(_state(pres))
         w, h = fig.fig.get_size_inches() * fig.fig.dpi
         box = fig.ax_field.get_position(original=True)  # allotted box; a non-square frame letterboxes inside
@@ -171,7 +171,7 @@ def test_field_axes_square_and_bottom_row_split(source):
 
 def test_trigger_labels_stay_in_the_label_band(source):
     pres = source.load_presentation('movingbar')
-    fig = InspectorFigure()
+    fig = CellVizFigure()
     fig.render(_state(pres))
     fig.fig.canvas.draw()
     renderer = fig.fig.canvas.get_renderer()
@@ -188,7 +188,7 @@ def test_trigger_labels_stay_in_the_label_band(source):
 def test_rebuilds_on_reused_axes_leave_no_residue(source):
     pres = source.load_presentation('chirp [control]')
     mb = source.load_presentation('movingbar')
-    fig = InspectorFigure()
+    fig = CellVizFigure()
     fig.animated = True
     for st in (_state(pres, frame=30, display='selected', selected=(2, 5)),
                replace(_state(mb, frame=50, display='all'), eligible=(2,)),
@@ -196,7 +196,7 @@ def test_rebuilds_on_reused_axes_leave_no_residue(source):
                _state(pres, frame=70, display='selected', selected=(5,))):
         fig.render(st)
         fig.draw()
-    ref = InspectorFigure()
+    ref = CellVizFigure()
     ref.animated = True
     ref.render(_state(pres, frame=70, display='selected', selected=(5,)))
     ref.draw()
