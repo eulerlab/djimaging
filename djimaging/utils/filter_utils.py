@@ -134,7 +134,10 @@ def resample_trace(tracetime: np.ndarray, trace: np.ndarray, dt: float) -> tuple
         ``(tracetime_resampled, trace_resampled)`` – uniformly spaced time
         array and the corresponding interpolated signal values.
     """
-    tracetime_resampled = np.arange(tracetime[0], np.nextafter(tracetime[-1], tracetime[-1] + dt), dt)
+    # Count grid points with a small tolerance: the end point must be included even if float rounding puts
+    # (tracetime[-1] - tracetime[0]) / dt slightly below an integer.
+    n_samples = int(np.floor((tracetime[-1] - tracetime[0]) / dt + 1e-6)) + 1
+    tracetime_resampled = tracetime[0] + np.arange(n_samples) * dt
     trace_resampled = np.interp(x=tracetime_resampled, xp=tracetime, fp=trace)
     return tracetime_resampled, trace_resampled
 

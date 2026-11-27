@@ -262,8 +262,8 @@ class RetinalFieldLocationCatTemplate(dj.Computed):
         rfl_key['nt_side'] = nt_side
         rfl_key['vd_side'] = vd_side
         rfl_key['ntvd_side'] = nt_side + vd_side
-        rfl_key['n_tvd_side'] = nt_side + vd_side if nt_side == 't' else nt_side
-        rfl_key['nvd_t_side'] = nt_side + vd_side if nt_side == 'n' else nt_side
+        rfl_key['n_tvd_side'] = 'n' if nt_side == 'n' else nt_side + vd_side
+        rfl_key['nvd_t_side'] = 't' if nt_side == 't' else nt_side + vd_side
         self.insert1(rfl_key)
 
     def plot(self, restriction: dict = None) -> None:

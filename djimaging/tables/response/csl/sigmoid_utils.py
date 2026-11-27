@@ -23,7 +23,7 @@ def fit_sigmoid_with_retry(x_data, y_data, max_tries=3):
             p0 = p00 if i == 0 else [np.random.uniform(a, np.minimum(b, 100)) for a, b in np.array(bounds).T]
             popt = curve_fit(sigmoid, x_data, y_data, p0=p0, bounds=bounds)[0]
             return popt
-        except RuntimeError:
+        except (RuntimeError, ValueError):  # ValueError: e.g. empty bounds for constant y_data
             pass
     return p00
 
@@ -47,7 +47,7 @@ def fit_sigmoid(y_data, x_data=None, sign=1, n: int = 3, ax=None):
     # Calculate half amplitude x value
     half_amplitude = a_fit / 2
     half_amplitude_x = x0_fit
-    slope_at_half_amplitude = k_fit * half_amplitude * (1 - half_amplitude / a_fit)
+    slope_at_half_amplitude = k_fit * a_fit / 4  # derivative of a / (1 + exp(-k (x - x0))) at x0, also for a = 0
 
     half_amplitude *= sign
     slope_at_half_amplitude *= sign

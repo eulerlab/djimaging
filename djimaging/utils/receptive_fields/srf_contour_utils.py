@@ -21,8 +21,12 @@ def compute_contour(srf, level, pixel_size_um, plot=False, ax=None):
     extent = srf_extent(srf_shape=srf.shape, pixelsize=pixel_size_um)
 
     if np.any(srf > level) and np.any(srf < level):
+        # For contour, extent gives the positions of the pixel centers Z[0, 0] and Z[-1, -1], whereas srf_extent
+        # (as used by imshow) gives the outer pixel edges. Shrink by half a pixel so that pixel (i, j) lies at
+        # ((j + 0.5 - nx / 2) * pixel_size_um, (i + 0.5 - ny / 2) * pixel_size_um), as for the Gaussian fits.
+        cntr_extent = extent + np.array([0.5, -0.5, 0.5, -0.5]) * pixel_size_um
         contour_plot = ax.contour(
-            srf, levels=[level], colors=['k'], linestyles=['-'], linewidths=3, alpha=0.5, extent=extent)
+            srf, levels=[level], colors=['k'], linestyles=['-'], linewidths=3, alpha=0.5, extent=cntr_extent)
 
         cntrs, cntrs_size = compute_closed_cntrs_and_sizes(cntrs=contour_plot.allsegs[0])
     else:
@@ -100,8 +104,9 @@ def get_center_mask(cntr, srf_shape, pixelsize, plot=False):
     from skimage import draw
 
     mask_center = np.zeros(srf_shape, dtype='bool')
-    mask_center[draw.polygon(cntr[:, 1] / pixelsize + srf_shape[0] / 2,
-                             cntr[:, 0] / pixelsize + srf_shape[1] / 2)] = 1
+    # Contour coordinates are relative to the sRF center, with pixel i centered at (i + 0.5 - n / 2) * pixelsize
+    mask_center[draw.polygon(cntr[:, 1] / pixelsize + srf_shape[0] / 2 - 0.5,
+                             cntr[:, 0] / pixelsize + srf_shape[1] / 2 - 0.5)] = 1
 
     if plot:
         extent = srf_extent(srf_shape=mask_center.shape, pixelsize=pixelsize)

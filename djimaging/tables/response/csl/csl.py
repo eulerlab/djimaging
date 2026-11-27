@@ -585,11 +585,8 @@ def f1_amp_phase(seg: np.ndarray, stim_frequency: float, trace_frequency: float)
         return 0.0, 0.0
 
     # Single-sided amplitude scaling: DC=|X0|/N; k>0: 2*|Xk|/N
-    # At Nyquist (k == kmax), no 2x factor needed
-    if k == kmax:
-        amp = np.abs(X[k]) / N
-    else:
-        amp = (2.0 * np.abs(X[k])) / N
+    # N is odd here, so no bin (not even kmax = N // 2) is at Nyquist and all k > 0 need the 2x factor
+    amp = (2.0 * np.abs(X[k])) / N
 
     phase_deg = float(np.degrees(np.angle(X[k])))
     return float(amp), phase_deg

@@ -181,7 +181,7 @@ def extract_connected_mask(mask: np.ndarray, i: int, j: int) -> np.ndarray:
         for dx, dy in zip(dxs, dys):
             xx = u + dx
             yy = v + dy
-            if xx < nx and yy < ny and mask[xx][yy] == 1:
+            if 0 <= xx < nx and 0 <= yy < ny and mask[xx][yy] == 1:
                 mask[xx][yy] = 0
                 q.put((xx, yy))
 
@@ -1067,7 +1067,7 @@ def generate_roi_suggestions(mask_pred: np.ndarray, mask_true: np.ndarray, n_art
     iou_matrix = intersection_over_union(mask_true, mask_pred)[1:, 1:]  # `[1:,1:]` to exclude background
     pred_mask_ids = np.unique(mask_pred[mask_pred > 0])  # `mask_pred>0` to exclude background
     # find "false positive" ROI ids
-    is_fp = np.max(iou_matrix, axis=0) < threshold
+    is_fp = np.max(iou_matrix, axis=0, initial=0.) < threshold  # initial: no true ROIs means IoU 0
     # if not np.any(is_fp):
     #     return None
 
@@ -1193,7 +1193,7 @@ def sort_roi_mask_files(files: list, mask_alias: str = '', highres_alias: str = 
                 if alias in file.split('_'):
                     penalties[i] = penalty
 
-    penalties += np.arange(len(files_base))[np.argsort(files_base)] * 0.01
+    penalties += np.argsort(np.argsort(files_base)) * 0.01  # alphabetical rank breaks ties
 
     # Penalize non control conditions
     for i, file in enumerate(files_base):
@@ -1320,7 +1320,7 @@ def shift_array(img: np.ndarray, shift: tuple, inplace: bool = False,
     """
     if not inplace:
         img = img.copy()
-    img = np.asarray(img)
+    img = target = np.asarray(img)
 
     if callable(cval):
         _cval = cval(img)
@@ -1340,6 +1340,9 @@ def shift_array(img: np.ndarray, shift: tuple, inplace: bool = False,
         img[:, :shift_ax1] = _cval
     elif shift_ax1 < 0:
         img[:, shift_ax1:] = _cval
+    if inplace:
+        target[...] = img  # np.roll returns a new array
+        return target
     return img
 
 
@@ -1385,6 +1388,10 @@ def compare_roi_masks(roi_mask: np.ndarray, ref_roi_mask: np.ndarray,
     for dx in range(-max_shift_x, max_shift_x + 1):
         for dy in range(-max_shift_y, max_shift_y + 1):
             shifted_roi_mask = shift_array(roi_mask, shift=(dx, dy), cval=bg_val)
+            # ROI pixels missing in the shifted mask are accepted (shifted out of the field or deleted ROIs), so a
+            # shift that leaves no ROI pixel would match any reference: it is no evidence for a shifted copy.
+            if not np.any(shifted_roi_mask != bg_val):
+                continue
             if np.all((shifted_roi_mask == ref_roi_mask) | ((shifted_roi_mask == bg_val) & (ref_roi_mask != bg_val))):
                 return 'shifted', (dx, dy)
 

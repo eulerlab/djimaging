@@ -412,7 +412,7 @@ def drop_left_and_right(
     if drop_nmin_lr[0] > 0:
         trace[:drop_nmin_lr[0]] = trace[drop_nmin_lr[0]]
     if drop_nmin_lr[1] > 0:
-        trace[-drop_nmin_lr[1]:] = trace[-drop_nmin_lr[1]]
+        trace[-drop_nmin_lr[1]:] = trace[-(drop_nmin_lr[1] + 1)]
 
     return trace
 
@@ -488,9 +488,9 @@ def extract_baseline(
     if not np.any(trace_times < stim_start):
         raise ValueError(f"stim_start={stim_start:.1g}, trace_start={trace_times.min():.1g}")
 
-    baseline_end = np.nonzero(trace_times[trace_times < stim_start])[0][-1]
+    baseline_end = np.nonzero(trace_times < stim_start)[0][-1]
     baseline_start = np.nonzero(trace_times >= trace_times[baseline_end] - max_dt)[0][0]
-    baseline = trace[baseline_start:baseline_end]
+    baseline = trace[baseline_start:baseline_end + 1]  # baseline_end is the last pre-stimulus sample
     return baseline
 
 

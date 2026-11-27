@@ -19,7 +19,7 @@ def flatten_color_channels(rf: np.ndarray) -> np.ndarray:
     """
     rf_flat = np.full((rf.shape[0], rf.shape[1], rf.shape[2] * rf.shape[3] + (rf.shape[3] - 1)), np.nan)
     for color_idx in range(rf.shape[3]):
-        shift = 0 if color_idx == 0 else 1
+        shift = color_idx
         rf_flat[:, :, rf.shape[2] * color_idx + shift:rf.shape[2] * (color_idx + 1) + shift] = (
             rf[:, :, :, color_idx])
     return rf_flat
