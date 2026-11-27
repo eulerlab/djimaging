@@ -306,6 +306,31 @@ def test_load_wparams_micro_sign_variants():
     assert wparams['realpixdur'] == 5.
 
 
+@pytest.mark.parametrize('suffix', ['s', 'ms', 'ns'])
+def test_load_wparams_rejects_non_micro_second_units(suffix):
+    raw_file = FakeSMP()
+    raw_file._kvPairDict[f'RealPixelDuration_{suffix}'] = raw_file._kvPairDict.pop('RealPixelDuration_µs')
+    with pytest.raises(ValueError, match='not µs'):
+        read_smp_utils.load_wparams(raw_file, return_file=False)
+
+
+@pytest.mark.parametrize('value', [0., 1e-3, 5e3])
+def test_load_wparams_rejects_implausible_pixel_duration(value):
+    raw_file = FakeSMP()
+    entry = list(raw_file._kvPairDict.pop('RealPixelDuration_µs'))
+    entry[2] = value
+    raw_file._kvPairDict['RealPixelDuration_�s'] = entry
+    with pytest.raises(ValueError, match='outside'):
+        read_smp_utils.load_wparams(raw_file, return_file=False)
+
+
+def test_load_wparams_rejects_multiple_pixel_duration_keys():
+    raw_file = FakeSMP()
+    raw_file._kvPairDict['RealPixelDuration_us'] = raw_file._kvPairDict['RealPixelDuration_µs']
+    with pytest.raises(ValueError, match='Multiple'):
+        read_smp_utils.load_wparams(raw_file, return_file=False)
+
+
 def test_recording_xyz_repr(tmp_path):
     path = write_h5(tmp_path / 'xyz.h5', {'wDataCh0': np.zeros((4, 4, 2))}, wparams_num(nx=4, ny=4, nz=3))
     rec = ScanMRecording(path)
