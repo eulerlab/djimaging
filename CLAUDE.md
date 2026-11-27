@@ -25,6 +25,16 @@ python3 make_project.py <project> [--blocks basic,rf_sta | --all]   # scaffold g
 - **`djimaging/schemas/`** — *example* schemas that wire templates together by subclassing them under `@schema` and binding the abstract table attributes (`core_schema`, `full_rgc_schema`, `rf_glm_schema`, `tutorial_schema`). Users copy these into their own project, or generate a custom schema with `make_project.py` from the table blocks in `djimaging/schemas/blocks/` (`core`, `basic`, `location`, `classifier`, `rf_sta`, `rf_glm`; `core_schema` re-exports `blocks/core`). Each schema block has a matching percent-format notebook part in `djimaging/notebooks/blocks/` (plus `cleanup`), so the generated notebook only contains cells for tables in the schema. Register new blocks in `BLOCKS` in `make_project.py`; schemas are created with `dj.Schema()` and activated later through `djimaging.utils.dj_utils.activate_schema`. The core chain is UserInfo → RawDataParams → Experiment → Field → Stimulus/Presentation → ROI/Traces → Snippets/Averages → analyses.
 - **`djimaging/utils/`** — computation and IO helpers kept separate from tables (trace/snippet/filter/mask utils, `scanm/` and `qdspy/` file readers, `receptive_fields/`, `dj_storage.py` for object/array references, `dj_utils.py`).
 - **`djimaging/autorois/`** — optional ROI detection (U-Net, finetuned Cellpose3, MEDIAR, correlation maps, autoshift); needs the `autorois` extra; the Cellpose3 and MEDIAR models additionally need `cellpose` / `mediar`, which are deliberately not dependencies (numpy conflicts, see README). The default model set is only the latest UNet (+ CorrRoiMask); others must be requested via `load_default_autorois_models(models=[...])`. Training code lives in the separate `autorois` repo; here is inference only. Model weights (`Resources/AutoROIs/models/{UNET,CELLPOSE3,MEDIAR}_v0.2.0`) are in the `reference` store.
+- **`djimaging/inspector/`** — opt-in, read-only recording inspector (notebook viewer + MP4 export). Data loading
+  (`offline.LocalFieldSource` for local ScanM files, `dj_adapter.DataJointFieldSource` for stored results) is separate
+  from rendering (`render.InspectorFigure`, shared by `viewer.RecordingInspector` and `export.export_mp4`). Arrays are
+  kept in display orientation `[y, x]` / `(t, y, x)`; ROI IDs come only from the mask labels; all sync is by timestamp.
+  HighRes is registered to the functional field by image correlation (`registration.py`), because the scans are not
+  always centred alike. The trial mean ± SD panel (`trials.py`) cuts repeats with the pipeline's
+  `split_trace_by_reps` (same `ntrigger_rep`, trigger delay, `Snippets._pad_trace`) and never pools moving-bar
+  directions. Per-frame drawing is blitted (`render.InspectorFigure`); avoid per-frame Matplotlib text (slow in Agg),
+  use `TextStamp`. Notebook part `djimaging/notebooks/blocks/inspector.py` is appended to every generated
+  notebook; optional deps in the `inspector` extra.
 - **`djimaging/user/`** — personal project folders, not under version control.
 
 ## DataJoint 2 storage conventions

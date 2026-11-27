@@ -66,6 +66,16 @@ def test_notebook_contains_only_selected_tables():
     assert text.rstrip().endswith('Set DROP_SCHEMA = True to drop it.")')
 
 
+@pytest.mark.parametrize('blocks', [['core'], OPTIONAL_BLOCKS])
+def test_notebook_has_opt_in_read_only_inspector_before_cleanup(blocks):
+    text = make_project.build_notebook_text(
+        ROOT, make_project.resolve_blocks(blocks), schema_module='my.schema', project='tester')
+    assert 'INSPECT_RECORDINGS = False' in text and 'open_recording_inspector(globals()' in text
+    assert text.index('Traces().populate') < text.index('# Inspect recordings') < text.index('# Clean up')
+    if 'basic' in blocks:
+        assert text.index('OsDsIndexes().populate') < text.index('# Inspect recordings')
+
+
 def test_notebook_only_uses_tables_of_schema():
     """Run-all safety: every table that is called in the notebook must exist in the schema of the same blocks."""
     for blocks in (['core'], make_project.resolve_blocks(OPTIONAL_BLOCKS)):

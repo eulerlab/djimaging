@@ -40,6 +40,12 @@ autorois = [
 rf = [
     "rfest>=2.1.2",
 ]
+# Recording inspector (djimaging.inspector): widgets, MP4 export (bundled ffmpeg), clickable figures (%matplotlib widget)
+inspector = [
+    "ipywidgets>=8.0.0",
+    "imageio-ffmpeg>=0.5.1",
+    "ipympl>=0.9.4",
+]
 notebooks = [
     "jupytext>=1.16.0",
 ]

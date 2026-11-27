@@ -312,8 +312,10 @@ def build_schema_text(djimaging_dir, blocks, channels=DEFAULT_CHANNELS):
 
 
 def build_notebook_text(djimaging_dir, blocks, schema_module, project, channels=DEFAULT_CHANNELS):
-    """Combine the notebook blocks in the order of the blocks, followed by the clean-up section."""
+    """Combine the notebook blocks in the order of the blocks, followed by the (opt-in) recording inspector, which
+    uses the quality tables of the selected blocks, and the clean-up section."""
     parts = [read_block(djimaging_dir, 'notebooks', name).strip("\n") for name in blocks]
+    parts.append(read_block(djimaging_dir, 'notebooks', 'inspector').strip("\n"))
     parts.append(read_block(djimaging_dir, 'notebooks', 'cleanup').strip("\n"))
     text = add_channels_to_notebook("\n\n".join(parts) + "\n", channels)
     return text.replace(SCHEMA_MODULE_PLACEHOLDER, schema_module).replace(BLOCKS_PLACEHOLDER, ", ".join(blocks))         .replace(PROJECT_PLACEHOLDER, project)

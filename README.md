@@ -188,7 +188,8 @@ Every block has two matching parts:
   <code>@schema</code> and binds their abstract table attributes. A block imports the block it builds on
   (e.g. <code>from djimaging.schemas.blocks.core import *</code>), so it is also a valid, importable schema on its own.
 - **Notebook part**: <code>djimaging/notebooks/blocks/&lt;name&gt;.py</code> is a percent-format
-  (<code># %%</code>) notebook section. <code>cleanup.py</code> is always appended last; the placeholders
+  (<code># %%</code>) notebook section. <code>inspector.py</code> (opt-in recording inspector, see below) and
+  <code>cleanup.py</code> are always appended last; the placeholders
   <code>__SCHEMA_MODULE__</code> and <code>__BLOCKS__</code> are filled in with your schema module and the selected blocks.
 
 To generate your files, <code>make_project.py</code>
@@ -213,6 +214,26 @@ re-exports the <code>core</code> block.
    inspect your tables.
 3. Register the block in <code>BLOCKS</code> in <code>make_project.py</code> with a `description` and its `requires`.
    The order of that dict is the order in the generated files, so list a block after the blocks it requires.
+
+### Inspect recordings
+
+<code>djimaging.inspector</code> is a read-only notebook viewer for one field after ROI masks are loaded: choose a
+presentation and channel, play back the functional movie with the ROIs of that presentation's mask (or the HighRes
+image with the ROIs registered onto it), select cells by clicking or from a list, and follow their traces (or an
+ROI x time heatmap of all eligible ROIs) in sync with the movie and the stimulus triggers, next to their trial mean ±
+SD (repeats cut like <code>Snippets</code>; for the moving bar per direction). A quality filter uses
+<code>ChirpQI.qidx</code> (chirp) and <code>OsDsIndexes.d_qi</code> (moving bar), and the current view can be exported
+as MP4. Nothing is written to the database and no table is added.
+
+```bash
+uv pip install -e ".[inspector]"   # ipywidgets, imageio-ffmpeg (MP4 export), ipympl (clickable figure)
+```
+
+- In the generated populate notebook: section *Inspect recordings*, set <code>INSPECT_RECORDINGS = True</code>
+  (uses <code>open_recording_inspector(globals(), field_key)</code>).
+- Without database, on local ScanM files and saved masks: <code>djimaging/notebooks/tutorial_recording_inspector.py</code>
+  (<code>RecordingInspector(LocalFieldSource(experiment_dir, field='GCL0'))</code>); traces, triggers and QIs are then
+  recomputed with djimaging's functions and default parameters and labelled as such.
 
 ### Clean up
 
