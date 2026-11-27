@@ -19,6 +19,7 @@ djimaging/utils/receptive_fields/spatial_rf_utils.py | done | PR 91
 djimaging/utils/receptive_fields/srf_contour_utils.py | done | PR 91
 djimaging/utils/receptive_fields/split_rf_utils.py | done | PR 91
 djimaging/tables/core/preprocesstraces.py | done | PR 91
+djimaging/tables/core/roi_mask.py | done | before 30%; only module-level pure helpers tested (_roi_mask_source_from_path, _get_autorois_model, _predict_roi_mask, _remove_vessel_rois, load_stack_data, load_default_autorois_models); 0 bugs found; rest lives in table methods needing MySQL (after-coverage not re-measured, .coverage is stale)
 
 ## Known suspicions not yet tested
 
