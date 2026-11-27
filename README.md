@@ -270,8 +270,7 @@ all channels.
 `TracesTemplate._use_channels` are `False`, so the stacks are defined by `data_stack_name` (functional channel) and
 `alt_stack_name` in `UserInfo`. To generate a new schema like this, use `--legacy-userinfo-stacks`.
 To use the `Channel` table in a hand-written schema, define `class Channel(core.ChannelTemplate)` and set
-`_use_channels = True` and `channel_table = Channel` on `UserInfo` (and on `Traces` for several functional channels,
-and `FeaturesTemplate` for clustering features per channel). The `Channel` table and `UserInfo` must be created
+`_use_channels = True` and `channel_table = Channel` on `UserInfo` (and on `Traces` for several functional channels). The `Channel` table and `UserInfo` must be created
 together, so this requires a new schema.
 
 Notes:

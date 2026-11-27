@@ -131,15 +131,6 @@ def test_channel_definitions_use_v2_types():
     assert '-> self.channel_table' in table.definition
 
 
-def test_features_channels_off_by_default_and_per_channel_when_on():
-    from djimaging.tables.clustering.decomposition import FeaturesTemplate
-    assert FeaturesTemplate._use_channels is False
-    table = type('F', (FeaturesTemplate,), {})()
-    assert 'channel_table' not in table.definition
-    table = type('F', (FeaturesTemplate,), {'_use_channels': True})()
-    assert '-> self.channel_table' in table.definition
-
-
 class FakeTable:
     """Minimal stand-in for a table with a restrictable list of rows."""
 
