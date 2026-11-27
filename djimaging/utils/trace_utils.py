@@ -163,14 +163,43 @@ def align_trace_to_stim(stimtime, trace, tracetime):
     dt_rel_error : float
         Relative deviation of the most extreme stimulus time-step from
         the mean (see :func:`get_mean_dt`).
+
+    Raises
+    ------
+    ValueError
+        If a stimulus frame lies completely within the time range of the
+        trace but contains no trace sample, i.e. the stimulus frames are
+        shorter than the trace sampling interval. Upsample the trace first.
+
+    Notes
+    -----
+    Stimulus frames that are not completely covered by the trace (before
+    its first or after its last sample) and contain no trace sample are
+    NaN in `aligned_trace`.
     """
     dt, dt_rel_error = get_mean_dt(stimtime, rtol_error=np.inf, rtol_warning=0.5)
     t0 = stimtime[0]
 
-    aligned_trace = np.zeros(stimtime.size)
-    for i, (t_a, t_b) in enumerate(zip(stimtime, np.append(stimtime[1:], stimtime[-1] + dt))):
-        # Take mean to not put more weight on lagged frames
-        aligned_trace[i] = np.mean(trace[(tracetime >= t_a) & (tracetime < t_b)])
+    t_starts = stimtime
+    t_ends = np.append(stimtime[1:], stimtime[-1] + dt)
+
+    aligned_trace = np.full(stimtime.size, np.nan)
+    empty_inside = []
+    for i, (t_a, t_b) in enumerate(zip(t_starts, t_ends)):
+        in_bin = (tracetime >= t_a) & (tracetime < t_b)
+        if np.any(in_bin):
+            # Take mean to not put more weight on lagged frames
+            aligned_trace[i] = np.mean(trace[in_bin])
+        elif t_a >= tracetime[0] and t_b <= tracetime[-1]:
+            empty_inside.append(i)
+
+    if len(empty_inside) > 0:
+        trace_dt = np.median(np.diff(tracetime))
+        raise ValueError(
+            f"{len(empty_inside)} of {stimtime.size} stimulus frames within the trace contain no trace sample "
+            f"(first at t={t_starts[empty_inside[0]]:.4g} s): stimulus dt={dt:.4g} s is shorter than "
+            f"trace dt={trace_dt:.4g} s. Upsample the trace (e.g. fupsample_trace) or align the stimulus to "
+            f"the trace instead.")
 
     return aligned_trace, dt, t0, dt_rel_error
 
